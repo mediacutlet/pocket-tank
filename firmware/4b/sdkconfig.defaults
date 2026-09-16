@@ -1,0 +1,47 @@
+# pocket-tank — Waveshare ESP32-P4-WIFI6-Touch-LCD-4B (4-inch 720x720)
+# Applied only for the esp32p4 target: firmware/CMakeLists.txt registers this
+# file in SDKCONFIG_DEFAULTS conditionally (IDF_TARGET == esp32p4), so the S3
+# build never sees these symbols. WiFi / the ESP32-C6 / esp-hosted /
+# esp_wifi_remote are INTENTIONALLY OFF: the tank is offline and the LLM
+# runs on-device from flash.
+
+CONFIG_IDF_TARGET="esp32p4"
+
+# 16 MB flash, DIO mode (the shared defaults' QIO/SPIRAM octal are S3-specific;
+# the 4B's flash + hex PSRAM run DIO at 80 MHz, mirroring the ai-display build)
+CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+CONFIG_ESPTOOLPY_FLASHMODE_DIO=y
+CONFIG_ESPTOOLPY_FLASHFREQ_80M=y
+
+# 32 MB hex (X16) PSRAM at 80 MHz, XIP: app instructions/data live in PSRAM
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_HEX=y
+CONFIG_SPIRAM_SPEED_80M=y
+CONFIG_SPIRAM_XIP_FROM_PSRAM=y
+CONFIG_SPIRAM_FETCH_INSTRUCTIONS=y
+CONFIG_SPIRAM_RODATA=y
+CONFIG_SPIRAM_FLASH_LOAD_TO_PSRAM=y
+
+# the 4B board (selects the 4B port sources in main/CMakeLists.txt)
+CONFIG_POCKET_TANK_BOARD_4B=y
+
+# RGB565 720x720 ST7703 MIPI-DSI panel (the 4B BSP's DPI path; values mirrored
+# from the ai-display skeleton's sdkconfig)
+CONFIG_BSP_LCD_TYPE_720_720_4_INCH=y
+CONFIG_BSP_LCD_COLOR_FORMAT_RGB565=y
+CONFIG_BSP_LCD_DPI_BUFFER_NUMS=3
+
+# the P4 is RISC-V with no PIE SIMD: scalar LLM kernel (q4_model.c already
+# selects scalar when !CONFIG_IDF_TARGET_ESP32S3; belt-and-suspenders)
+CONFIG_POCKET_TANK_NO_PIE=y
+
+# NOTE: the shared sdkconfig.defaults sets S3-only symbols (ESP_DEFAULT_CPU_FREQ_MHZ_240,
+# SPIRAM_MODE_OCT, ESP32S3_DATA_CACHE_64KB/LINE_64B) that don't exist on the P4. kconfig
+# logs "unknown kconfig symbol" for them but ignores them; the P4-correct values above
+# (SPIRAM_MODE_HEX, FLASHMODE_DIO, CPU freq left to the P4 default) win because this file
+# is merged after the shared one. The shared file is out of scope (S3 target), so this is
+# expected and harmless.
+
+# the 4B's 16 MB custom partition table (8 MB raw model partition stays)
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="4b/partitions.csv"

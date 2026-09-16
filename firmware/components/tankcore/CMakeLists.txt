@@ -3,10 +3,19 @@
 # progression ports (NVS + wall clock). The ports live here, not in main, so
 # the static-archive link order resolves (tankcore -> nvs_flash).
 set(COMMON ${CMAKE_CURRENT_LIST_DIR}/../../../common)
-idf_component_register(
-    SRCS "${COMMON}/tank.c" "${COMMON}/advisor.c" "${COMMON}/render.c" "${COMMON}/icons.c" "${COMMON}/progression.c" "${COMMON}/setup.c"
+set(TC_SRCS "${COMMON}/tank.c" "${COMMON}/advisor.c" "${COMMON}/render.c" "${COMMON}/icons.c" "${COMMON}/progression.c" "${COMMON}/setup.c"
          "${COMMON}/audio.c" "${COMMON}/notice.c" "${COMMON}/sounds.c"
-         "persist_port_esp.c" "rtc_port_pcf85063.c"
+         "persist_port_esp.c")
+# The 4B has no external RTC: main/p4/rtc_port_chip.c defines rtc_port_init()
+# and clock_port_now_unix() (chip time) there, so the PCF85063 port is left
+# out of the 4B build to keep the symbols from duplicating at link.
+if(CONFIG_POCKET_TANK_BOARD_4B)
+    message(STATUS "tankcore: 4B board - excluding rtc_port_pcf85063.c (chip clock in main)")
+else()
+    list(APPEND TC_SRCS "rtc_port_pcf85063.c")
+endif()
+idf_component_register(
+    SRCS ${TC_SRCS}
     INCLUDE_DIRS "${COMMON}" "."
     PRIV_REQUIRES nvs_flash esp_driver_i2c
 )

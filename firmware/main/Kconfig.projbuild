@@ -1,4 +1,16 @@
 menu "pocket-tank"
+    config POCKET_TANK_BOARD_4B
+        bool "Build for the Waveshare ESP32-P4-WIFI6-Touch-LCD-4B"
+        default n
+        help
+            Build for the Waveshare ESP32-P4-WIFI6-Touch-LCD-4B: 720x720 ST7703
+            MIPI-DSI panel, GT911 touch, ES8311 codec on an ESP32-P4 with 32 MB
+            hex PSRAM and 16 MB flash (target esp32p4). The 448x368 tank scene
+            is letterboxed at the center of the square panel. The board is
+            USB-C powered: no battery/PMIC (no power-off, no PWR key), no IMU
+            (the screen is never auto-flipped) and no external RTC (the chip
+            clock is used; no wall-clock continuity across power-off).
+            WiFi/C6 is intentionally NOT wired up (the tank is offline).
     config POCKET_TANK_DISPLAY_SH8601
         bool "Drive the Waveshare 1.8in AMOLED (SH8601 / CO5300 over QSPI)"
         default n

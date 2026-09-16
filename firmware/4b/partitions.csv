@@ -1,0 +1,12 @@
+# pocket-tank 4B partition table (ESP32-P4, 16 MB flash)
+# Mirrors partitions.csv (S3) with a larger app: the 4B BSP (ST7703 MIPI-DSI +
+# GT911 + LVGL + codec) grows the binary past 2.5 MB. The 8 MB raw model
+# partition (type data, subtype 0x40, label "model") is kept so the on-device
+# LLM still mmaps it (main.c: esp_partition_find_first(DATA, 0x40, "model")).
+# Name,     Type, SubType, Offset,   Size,
+# (sums to 0x1000000 = 16 MB; factory 4 MB app, model 8 MB, storage ~4 MB)
+nvs,        data, nvs,     0x9000,   0x6000,
+phy_init,   data, phy,     0xf000,   0x1000,
+factory,    app,  factory, 0x10000,  0x400000,
+model,      data, 0x40,    0x410000, 0x800000,
+storage,    data, spiffs,  0xC10000, 0x3F0000,

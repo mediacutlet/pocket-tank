@@ -71,7 +71,7 @@ one trait unit per ~6 h of pressure. Trust (touch) also persists.*
 ## Touch interactions (trust)
 
 *Implemented 2026-08-21 in `common/tank.c` (tank_touch_hold/tap); sim mouse
-and device FT3168 (`firmware/main/touch_port_ft3168.c`) feed the same state
+and device FT3168 (`firmware/main/s3/touch_port_ft3168.c`) feed the same state
 machine.*
 
 - **Tap-and-hold** (settled, ~3 s of contact — 2026-08-30): fish swim toward

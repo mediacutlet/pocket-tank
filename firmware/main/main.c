@@ -51,7 +51,7 @@
  * be the one key the keeper ever presses - press to sleep, press to wake. */
 #define BTN_SLEEP GPIO_NUM_0
 static bool s_pmic;                        /* an AXP2101 answered: the PWR key exists, power-off is real */
-#ifdef CONFIG_POCKET_TANK_DISPLAY_SH8601
+#if CONFIG_POCKET_TANK_DISPLAY_SH8601 || CONFIG_POCKET_TANK_BOARD_4B
 extern i2c_master_bus_handle_t board_i2c_bus(void);
 #else
 static i2c_master_bus_handle_t board_i2c_bus(void) { return NULL; }
@@ -226,12 +226,21 @@ static void enter_sleep(void) { enter_sleep_for(0); }
    board around the chip drew ~15 mA all night (2026-09-15/16). */
 static void deep_sleep_now(int wake_after_s) {
     ESP_LOGI(TAG, "deep sleep (BOOT wakes%s)", wake_after_s > 0 ? ", or the timer" : "");
+#if CONFIG_IDF_TARGET_ESP32S3
     rtc_gpio_pullup_en(BTN_SLEEP); rtc_gpio_pulldown_dis(BTN_SLEEP);
     esp_sleep_enable_ext0_wakeup(BTN_SLEEP, 0);
     if (wake_after_s > 0) esp_sleep_enable_timer_wakeup((int64_t)wake_after_s * 1000000);
     audio_port_deep_sleep_pins();
     gpio_deep_sleep_hold_en();
     ESP_LOGI(TAG, "digital pads held + isolated");
+#else
+    /* P4: no ext0 and no digital-pad deep-sleep hold (the P4 cannot hold IO
+     * states across deep sleep); BOOT (GPIO0, in the 0..15 wake range) wakes
+     * the chip over ext1. A wake is a full boot either way. */
+    esp_sleep_enable_ext1_wakeup_io(1ULL << BTN_SLEEP, ESP_EXT1_WAKEUP_ALL_LOW);
+    if (wake_after_s > 0) esp_sleep_enable_timer_wakeup((int64_t)wake_after_s * 1000000);
+    audio_port_deep_sleep_pins();
+#endif
     esp_deep_sleep_start();
 }
 void device_sleep(int wake_after_s) { enter_sleep_for(wake_after_s); }   /* director `deepsleep N` */
@@ -507,7 +516,9 @@ void app_main(void) {
     gpio_config_t btn = { .pin_bit_mask = 1ULL << BTN_SLEEP, .mode = GPIO_MODE_INPUT,
                           .pull_up_en = GPIO_PULLUP_ENABLE };
     gpio_config(&btn);
+#if CONFIG_IDF_TARGET_ESP32S3
     gpio_deep_sleep_hold_dis();              /* a deep-sleep wake is a boot: the night's pad holds end here */
+#endif
     if (nvs_flash_init() != ESP_OK) { nvs_flash_erase(); nvs_flash_init(); }
     { int carried = batlog_init();       /* the battery log survives every reset but a power-on */
       if (carried) ESP_LOGI(TAG, "batlog: %d samples carried through the reset (director `batlog` reads them)", carried); }
@@ -560,7 +571,11 @@ void app_main(void) {
     director_init();                  /* serial scenario console (filming / bench) */
     /* scene-prefetch DMA: installed only AFTER the display grabbed its SPI DMA
        channel — installed earlier, async memcpy steals SPI2's GDMA trigger
-       slot and the panel silently loses its pixel path (black screen). */
+       slot and the panel silently loses its pixel path (black screen).
+       S3-only: the P4's AHB GDMA cannot address PSRAM (both buffers are
+       SPIRAM), so every prefetch would fail + log "AHB GDMA can only access
+       SRAM" per frame; the P4 runs the CPU scene restore instead. */
+#if CONFIG_IDF_TARGET_ESP32S3
     if (scene && fb[0] && fb[1] != fb[0]) {
         async_memcpy_config_t amc_cfg = ASYNC_MEMCPY_DEFAULT_CONFIG();
         amc_cfg.backlog = 4; amc_cfg.sram_trans_align = 4; amc_cfg.psram_trans_align = 64;
@@ -569,10 +584,15 @@ void app_main(void) {
             s_amc = NULL; ESP_LOGW(TAG, "async memcpy unavailable: CPU scene restore");
         }
     }
+#endif
     rtc_port_init(board_i2c_bus());   /* wall clock for the ravenous rule */
     tank_init(&tank, (uint32_t)esp_timer_get_time() ^ 0xC0FFEEu);
     esp_sleep_wakeup_cause_t cause = esp_sleep_get_wakeup_cause();
+#if CONFIG_IDF_TARGET_ESP32S3
     bool from_sleep = cause == ESP_SLEEP_WAKEUP_EXT0 || cause == ESP_SLEEP_WAKEUP_TIMER;
+#else
+    bool from_sleep = cause == ESP_SLEEP_WAKEUP_GPIO || cause == ESP_SLEEP_WAKEUP_TIMER;   /* P4: ext1 GPIO wake */
+#endif
     if (from_sleep) {                        /* the night, lived through in one step */
         float h = progression_wake(&tank, clock_port_now_unix());
         ESP_LOGI(TAG, "wake from deep sleep (%s): %s%.1f h simulated | hunger[0] %.1f | battery %d%% %d mV",

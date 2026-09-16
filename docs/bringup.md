@@ -16,7 +16,7 @@ Work top to bottom; each step has a pass signal.
    ```
    Pass: log shows `PSRAM plan OK`, `model partition 8192 KB mmap'd, advisor LLM`,
    `sh8601: panel up`, `touch: FT3168 ready`, fish on the glass.
-4. **Pins to verify on the bench** (`firmware/main/board_pins.h`): I2C SDA/SCL —
+4. **Pins to verify on the bench** (`firmware/main/s3/board_pins.h`): I2C SDA/SCL —
    Waveshare's code says 15/14, the Arduino variant says 14/15. If the expander,
    touch, or RTC fail to probe, swap them. QSPI CS12 CLK11 D0–3 = 4/5/6/7 agree
    across sources.
@@ -27,7 +27,7 @@ Work top to bottom; each step has a pass signal.
 6. **Orientation:** the tank is rendered landscape 448×368 and rotated 90° in
    software in `display_port_flush`. If the image is mirrored/upside down, flip
    the mapping there (two lines), not the renderer.
-7. **Touch mapping:** same rotation in `touch_port_ft3168.c`; tap a corner and
+7. **Touch mapping:** same rotation in `firmware/main/s3/touch_port_ft3168.c`; tap a corner and
    watch the log, adjust if mirrored.
 8. **RTC:** first boot seeds the PCF85063 from build time; later boots read it.
    Power off ≥1 h, power on → fish ravenous until fed (the progression rule).

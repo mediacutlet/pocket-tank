@@ -5,6 +5,7 @@
 #include "nvs_flash.h"
 #include "nvs.h"
 #include "esp_log.h"
+#include "sdkconfig.h"
 #include <time.h>
 
 static const char *TAG = "persist";
@@ -35,6 +36,11 @@ bool persist_port_erase(void) {
     else ESP_LOGI(TAG, "every saved tank erased");
     return e == ESP_OK;
 }
+/* On the 4B (POCKET_TANK_BOARD_4B) the clock comes from the chip, not a
+ * PCF85063: main/p4/rtc_port_chip.c defines clock_port_now_unix() there and
+ * this copy is excluded so the two don't collide at link. */
+#if !CONFIG_POCKET_TANK_BOARD_4B
 int64_t clock_port_now_unix(void) {
     time_t now = time(NULL); return now > 1700000000 ? (int64_t)now : 0;   /* 0 until the RTC sets it */
 }
+#endif

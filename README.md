@@ -391,8 +391,9 @@ brew install sdl2        # macOS; apt install libsdl2-dev on Linux
 cd sim && make && ./fishsim
 ```
 
-The Makefile targets x86_64 by default to match an Intel Homebrew SDL2; use
-`make ARCH=` for a native build. The trained model
+The Makefile builds for the host architecture by default. On Apple Silicon,
+if `sdl2-config` points to an Intel Homebrew installation, use
+`make ARCH="-arch x86_64"` to build under Rosetta. The trained model
 (`model/out/model_q4.bin` + `tokenizer.bin`) ships in the repo, so the LLM
 brain works out of the box.
 
@@ -426,6 +427,7 @@ the deep-sleep wake, and ravenous begging), `--selftest-hunger` (the hunger econ
 `--selftest-tend` (grass, algae, trust holds), `--selftest-shop` (sand
 dollars, the shop, the plant, the snail), `--selftest-battery` (the battery
 page's numbers, and the bolt only on the cable), and `--bench` (render cost).
+Run the complete test set with `make check` from `sim/`.
 
 ## Try it: firmware in QEMU
 

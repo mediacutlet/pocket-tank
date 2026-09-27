@@ -740,7 +740,7 @@ void progression_tick(tank_t *t, float dt) {
         progression_save(t);
 }
 
-void progression_save(tank_t *t) {
+bool progression_save(tank_t *t) {
     save_t sv; memset(&sv, 0, sizeof sv);
     sv.magic = SAVE_MAGIC; sv.saved_unix = clock_port_now_unix(); sv.clock = t->clock;
     /* light_override / light_on stay zero in the save (2026-09-15) */
@@ -785,8 +785,13 @@ void progression_save(tank_t *t) {
         sv.ms_seen[i] = f->ms_seen;
         sv.drift_acc[i] = f->drift_acc;
     }
-    persist_port_save(&sv, sizeof sv);
+    if (!persist_port_save(&sv, sizeof sv)) {
+        if (!s_dirty) { s_dirty = true; s_dirty_since = 0; }
+        s_since_save = 0;                         /* retry after SAVE_MIN_GAP_S */
+        return false;
+    }
     s_since_save = 0; s_dirty = false; s_dirty_since = 0;
+    return true;
 }
 
 void progression_ack_milestones(tank_t *t) {

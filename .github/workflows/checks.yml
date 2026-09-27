@@ -1,0 +1,37 @@
+name: checks
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  host-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install simulator dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libsdl2-dev
+          git clone --depth 1 --branch v9.2.2 https://github.com/lvgl/lvgl.git sim/lvgl
+      - name: Build and test the simulator
+        run: make -C sim -j"$(nproc)" check
+      - name: Test the audio mixer
+        working-directory: firmware/host_test
+        run: |
+          cc -O2 -std=c11 -Wall -Wextra -Werror -I../../common \
+            -o audio_host audio_host.c ../../common/audio.c ../../common/sounds.c
+          ./audio_host
+      - name: Compare batched and sequential inference
+        working-directory: firmware/host_test
+        run: |
+          cc -O2 -std=c11 -Wall -Wextra -Werror -I../../common/llm \
+            -o q4_host q4_host.c ../../common/llm/q4_model.c ../../common/llm/word_tok.c -lm
+          ./q4_host ../../model/out/model_q4.bin ../../model/out/tokenizer.bin \
+            "zone 2 hunger 7 energy 5 stress 2 curiosity 8 bold 4 social 6 stage adult trust 6 bored 3 food near 12 friend mid 3 bubble mid 10 reef far 7 wall clear last explore time day ->"
+      - name: Check Python syntax
+        run: python3 -m compileall -q tools model

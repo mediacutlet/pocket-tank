@@ -5,6 +5,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <stdint.h>
+#include <limits.h>
 
 /* On the ESP32-S3 the group dot product runs on the PIE 128-bit unit
  * (16 int8 MACs per ee.vmulas.s8.accx); everywhere else a scalar loop.
@@ -311,6 +312,62 @@ static void map_q4(q4w_t *t, const uint8_t **p, int n, int numel, int gs) {
     }
 }
 
+static bool size_mul(size_t a, size_t b, size_t *out) {
+    if (a && b > SIZE_MAX / a) return false;
+    *out = a * b; return true;
+}
+
+static bool size_add(size_t *total, size_t add) {
+    if (add > SIZE_MAX - *total) return false;
+    *total += add; return true;
+}
+
+static bool add_f32(size_t *total, size_t count) {
+    size_t bytes;
+    return size_mul(count, sizeof(float), &bytes) && size_add(total, bytes);
+}
+
+static bool add_q4(size_t *total, size_t tensors, size_t numel, size_t gs) {
+    if (!gs || numel % 2 || numel % gs) return false;
+    size_t one, all;
+    if (!size_mul(numel / gs, sizeof(uint16_t), &one) ||
+        !size_add(&one, numel / 2) ||
+        !size_mul(tensors, one, &all)) return false;
+    return size_add(total, all);
+}
+
+static bool model_layout_valid(const q4_config_t *c, int gs, bool shared, size_t len) {
+    if (gs != 64 || c->dim <= 0 || c->hidden_dim <= 0 || c->n_layers <= 0 ||
+        c->n_heads <= 0 || c->n_kv_heads <= 0 || c->vocab_size < 3 || c->seq_len < 2)
+        return false;
+    if (c->n_kv_heads > c->n_heads || c->n_heads % c->n_kv_heads ||
+        c->dim % c->n_heads || (c->dim / c->n_heads) % 2 ||
+        c->dim % gs || c->hidden_dim % gs)
+        return false;
+    if (c->dim > INT_MAX / c->dim || c->dim > INT_MAX / c->hidden_dim ||
+        c->vocab_size > INT_MAX / c->dim)
+        return false;
+    int kv_dim = (c->dim / c->n_heads) * c->n_kv_heads;
+    if ((size_t)c->n_layers * c->seq_len * kv_dim > INT_MAX ||
+        (size_t)c->n_heads * c->seq_len > INT_MAX)
+        return false;
+
+    size_t need = 256;
+    return add_f32(&need, (size_t)c->n_layers * c->dim) &&
+           add_f32(&need, (size_t)c->n_layers * c->dim) &&
+           add_f32(&need, c->dim) &&
+           add_q4(&need, 1, (size_t)c->vocab_size * c->dim, gs) &&
+           add_q4(&need, c->n_layers, (size_t)c->dim * c->dim, gs) &&
+           add_q4(&need, c->n_layers, (size_t)c->dim * kv_dim, gs) &&
+           add_q4(&need, c->n_layers, (size_t)c->dim * kv_dim, gs) &&
+           add_q4(&need, c->n_layers, (size_t)c->dim * c->dim, gs) &&
+           add_q4(&need, c->n_layers, (size_t)c->dim * c->hidden_dim, gs) &&
+           add_q4(&need, c->n_layers, (size_t)c->hidden_dim * c->dim, gs) &&
+           add_q4(&need, c->n_layers, (size_t)c->dim * c->hidden_dim, gs) &&
+           (shared || add_q4(&need, 1, (size_t)c->dim * c->vocab_size, gs)) &&
+           need <= len;
+}
+
 /* boot self-check: the (possibly SIMD) dot kernels must agree with plain C */
 static bool dot_selfcheck(void) {
     int8_t a[64] __attribute__((aligned(16))), b[64] __attribute__((aligned(16)));
@@ -337,37 +394,44 @@ static bool dot_selfcheck(void) {
 }
 
 q4_model_t *q4_model_open(const uint8_t *bin, size_t len, void *(*alloc)(size_t)) {
-    if (len < 256 || !dot_selfcheck()) return NULL;
+    if (!bin || !alloc || len < 256 || !dot_selfcheck()) return NULL;
     uint32_t magic; memcpy(&magic, bin, 4);
     int version; memcpy(&version, bin + 4, 4);
     if (magic != 0x616b3432 || version != 3) return NULL;
-    q4_model_t *m = alloc(sizeof *m); if (!m) return NULL; memset(m, 0, sizeof *m);
-    m->alloc = alloc;
-    memcpy(&m->c, bin + 8, sizeof m->c);
+    q4_config_t cfg; memcpy(&cfg, bin + 8, sizeof cfg);
     uint8_t shared = bin[8 + 28];
-    memcpy(&m->gs, bin + 8 + 28 + 1, 4);
-    if (m->gs != 64) return NULL;                 /* dot kernel is fixed at gs 64 */
+    int gs; memcpy(&gs, bin + 8 + 28 + 1, 4);
+    if (shared > 1 || !model_layout_valid(&cfg, gs, shared != 0, len)) return NULL;
+    q4_model_t *m = alloc(sizeof *m); if (!m) return NULL; memset(m, 0, sizeof *m);
+    m->alloc = alloc; m->c = cfg; m->gs = gs;
     const q4_config_t *c = &m->c;
     const uint8_t *p = bin + 256;
-    m->rms_att = (const float *)p; p += c->n_layers * c->dim * 4;
-    m->rms_ffn = (const float *)p; p += c->n_layers * c->dim * 4;
-    m->rms_final = (const float *)p; p += c->dim * 4;
-    int kv_dim = c->dim * c->n_kv_heads / c->n_heads;
+    m->rms_att = (const float *)p; p += (size_t)c->n_layers * c->dim * 4;
+    m->rms_ffn = (const float *)p; p += (size_t)c->n_layers * c->dim * 4;
+    m->rms_final = (const float *)p; p += (size_t)c->dim * 4;
+    int kv_dim = (c->dim / c->n_heads) * c->n_kv_heads;
     map_q4(&m->emb, &p, 1, c->vocab_size * c->dim, m->gs);
-    m->wq = alloc(c->n_layers * sizeof(q4w_t)); map_q4(m->wq, &p, c->n_layers, c->dim * c->dim, m->gs);
-    m->wk = alloc(c->n_layers * sizeof(q4w_t)); map_q4(m->wk, &p, c->n_layers, c->dim * kv_dim, m->gs);
-    m->wv = alloc(c->n_layers * sizeof(q4w_t)); map_q4(m->wv, &p, c->n_layers, c->dim * kv_dim, m->gs);
-    m->wo = alloc(c->n_layers * sizeof(q4w_t)); map_q4(m->wo, &p, c->n_layers, c->dim * c->dim, m->gs);
-    m->w1 = alloc(c->n_layers * sizeof(q4w_t)); map_q4(m->w1, &p, c->n_layers, c->dim * c->hidden_dim, m->gs);
-    m->w2 = alloc(c->n_layers * sizeof(q4w_t)); map_q4(m->w2, &p, c->n_layers, c->hidden_dim * c->dim, m->gs);
-    m->w3 = alloc(c->n_layers * sizeof(q4w_t)); map_q4(m->w3, &p, c->n_layers, c->dim * c->hidden_dim, m->gs);
+    m->wq = alloc((size_t)c->n_layers * sizeof(q4w_t));
+    m->wk = alloc((size_t)c->n_layers * sizeof(q4w_t));
+    m->wv = alloc((size_t)c->n_layers * sizeof(q4w_t));
+    m->wo = alloc((size_t)c->n_layers * sizeof(q4w_t));
+    m->w1 = alloc((size_t)c->n_layers * sizeof(q4w_t));
+    m->w2 = alloc((size_t)c->n_layers * sizeof(q4w_t));
+    m->w3 = alloc((size_t)c->n_layers * sizeof(q4w_t));
+    if (!m->wq || !m->wk || !m->wv || !m->wo || !m->w1 || !m->w2 || !m->w3) return NULL;
+    map_q4(m->wq, &p, c->n_layers, c->dim * c->dim, m->gs);
+    map_q4(m->wk, &p, c->n_layers, c->dim * kv_dim, m->gs);
+    map_q4(m->wv, &p, c->n_layers, c->dim * kv_dim, m->gs);
+    map_q4(m->wo, &p, c->n_layers, c->dim * c->dim, m->gs);
+    map_q4(m->w1, &p, c->n_layers, c->dim * c->hidden_dim, m->gs);
+    map_q4(m->w2, &p, c->n_layers, c->hidden_dim * c->dim, m->gs);
+    map_q4(m->w3, &p, c->n_layers, c->dim * c->hidden_dim, m->gs);
     if (shared) m->wcls = m->emb; else map_q4(&m->wcls, &p, 1, c->dim * c->vocab_size, m->gs);
-    if ((size_t)(p - bin) > len) return NULL;
     /* run state */
-    m->x = alloc(c->dim * 4); m->xb = alloc(c->dim * 4); m->xb2 = alloc(c->dim * 4);
-    m->hb = alloc(c->hidden_dim * 4); m->hb2 = alloc(c->hidden_dim * 4);
-    m->q = alloc(c->dim * 4); m->att = alloc(c->n_heads * c->seq_len * 4);
-    m->logits = alloc(c->vocab_size * 4);
+    m->x = alloc((size_t)c->dim * 4); m->xb = alloc((size_t)c->dim * 4); m->xb2 = alloc((size_t)c->dim * 4);
+    m->hb = alloc((size_t)c->hidden_dim * 4); m->hb2 = alloc((size_t)c->hidden_dim * 4);
+    m->q = alloc((size_t)c->dim * 4); m->att = alloc((size_t)c->n_heads * c->seq_len * 4);
+    m->logits = alloc((size_t)c->vocab_size * 4);
     m->key_cache = alloc((size_t)c->n_layers * c->seq_len * kv_dim * 4);
     m->value_cache = alloc((size_t)c->n_layers * c->seq_len * kv_dim * 4);
     m->xq.q = alloc16_fast(m, c->dim); m->xq.s = alloc16_fast(m, c->dim / m->gs * 4);
@@ -444,9 +508,10 @@ static void matmul(float *xout, const qact_t *x, const q4w_t *w, int n, int d, i
 }
 
 float *q4_model_forward(q4_model_t *m, int token, int pos) {
+    if (!m || token < 0 || token >= m->c.vocab_size || pos < 0 || pos >= m->c.seq_len) return NULL;
     int64_t f0 = QPROF_MARK();
     const q4_config_t *c = &m->c; int gs = m->gs;
-    int dim = c->dim, kv_dim = dim * c->n_kv_heads / c->n_heads, kv_mul = c->n_heads / c->n_kv_heads;
+    int dim = c->dim, kv_dim = (dim / c->n_heads) * c->n_kv_heads, kv_mul = c->n_heads / c->n_kv_heads;
     int hidden = c->hidden_dim, head_size = dim / c->n_heads;
     float *x = m->x;
     /* embedding row (dequantize) */
@@ -575,10 +640,12 @@ static bool ensure_batch(q4_model_t *m, int n) {
 }
 
 float *q4_model_prefill(q4_model_t *m, const int *toks, int n) {
+    if (!m || !toks) return NULL;
     const q4_config_t *c = &m->c; int gs = m->gs;
-    int dim = c->dim, kv_dim = dim * c->n_kv_heads / c->n_heads, kv_mul = c->n_heads / c->n_kv_heads;
+    int dim = c->dim, kv_dim = (dim / c->n_heads) * c->n_kv_heads, kv_mul = c->n_heads / c->n_kv_heads;
     int hidden = c->hidden_dim, head_size = dim / c->n_heads;
     if (n <= 0 || n > c->seq_len - 1 || !ensure_batch(m, n)) return NULL;
+    for (int t = 0; t < n; t++) if (toks[t] < 0 || toks[t] >= c->vocab_size) return NULL;
     /* embeddings */
     for (int t = 0; t < n; t++)
         for (int i = 0; i < dim; i++) {
@@ -701,11 +768,21 @@ int64_t q4_model_bench(q4_model_t *m, int which, int n_tok, int64_t (*clock_us)(
 
 static int argmax(const float *l, int v) { int b = 0; for (int i = 1; i < v; i++) if (l[i] > l[b]) b = i; return b; }
 
+static bool token_ids_valid(const q4_model_t *m, const int *ids, int n) {
+    if (!m || !ids || n <= 0) return false;
+    for (int i = 0; i < n; i++) if (ids[i] < 0 || ids[i] >= m->c.vocab_size) return false;
+    return true;
+}
+
 int q4_model_generate(q4_model_t *m, const int *prompt, int n_prompt, int *out, int max_out) {
+    if (!out || max_out < 0 || !token_ids_valid(m, prompt, n_prompt)) return 0;
     int n = 0;
     float *logits = q4_model_prefill(m, prompt, n_prompt);      /* one pass over the weights */
     if (!logits) {                                                /* fallback: token by token */
-        for (int p = 0; p < n_prompt; p++) logits = q4_model_forward(m, prompt[p], p);
+        for (int p = 0; p < n_prompt; p++) {
+            logits = q4_model_forward(m, prompt[p], p);
+            if (!logits) return 0;
+        }
     }
     int pos = n_prompt - 1, token = argmax(logits, m->c.vocab_size);
     while (token != 1 && n < max_out) {                           /* BOS = stop */
@@ -721,9 +798,14 @@ int q4_model_generate(q4_model_t *m, const int *prompt, int n_prompt, int *out, 
 int q4_model_decide(q4_model_t *m, const int *prompt, int n_prompt,
                     const int *cand, int n_cand, float temp, uint32_t *rng,
                     float *probs_out, int *out, int max_out) {
+    if (!out || max_out < 0 || !token_ids_valid(m, prompt, n_prompt) ||
+        !token_ids_valid(m, cand, n_cand)) return 0;
     int n = 0;
     float *logits = q4_model_prefill(m, prompt, n_prompt);
-    if (!logits) for (int p = 0; p < n_prompt; p++) logits = q4_model_forward(m, prompt[p], p);
+    if (!logits) for (int p = 0; p < n_prompt; p++) {
+        logits = q4_model_forward(m, prompt[p], p);
+        if (!logits) return 0;
+    }
     /* softmax over the candidates only (the closed goal set) */
     float p[16]; if (n_cand > 16) n_cand = 16;
     float inv = temp > 0 ? 1.0f / temp : 1.0f, mx = -1e30f;
@@ -750,9 +832,11 @@ int q4_model_decide(q4_model_t *m, const int *prompt, int n_prompt,
 
 /* reference path (no batching) for verification */
 int q4_model_generate_seq(q4_model_t *m, const int *prompt, int n_prompt, int *out, int max_out) {
+    if (!out || max_out < 0 || !token_ids_valid(m, prompt, n_prompt)) return 0;
     int pos = 0, token = prompt[0], n = 0;
     while (pos < m->c.seq_len - 1) {
         float *logits = q4_model_forward(m, token, pos);
+        if (!logits) return 0;
         int next;
         if (pos < n_prompt - 1) next = prompt[pos + 1];
         else next = argmax(logits, m->c.vocab_size);

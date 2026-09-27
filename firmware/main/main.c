@@ -34,7 +34,6 @@
 #include "notice.h"
 #include "tank_events.h"
 #include "setup.h"
-#include "setup.h"
 #include "nvs_flash.h"
 #include "esp_app_desc.h"
 #include "rtc_port.h"
@@ -175,7 +174,10 @@ static void enter_sleep_for(int wake_after_s) {
              (int)(grace_us / 1000000),
              wake_after_s > 0 ? "deep sleep with the timer" : s_pmic ? "PMIC power-off (the PWR key boots it)" : "deep sleep (BOOT wakes)", pct0, mv0);
     touch_port_confirm_answer(-1);              /* an open reset prompt is a NO */
-    progression_save(&tank);
+    if (!progression_save(&tank)) {
+        ESP_LOGE(TAG, "sleep cancelled: tank save failed");
+        return;
+    }
     bat_hist_save();                            /* the screen-on time so far */
     snapshot_fish();
     audio_port_sleep();        /* amp low, codec down, rail off - before the rails cycle */
@@ -254,7 +256,10 @@ void device_sleep(int wake_after_s) { enter_sleep_for(wake_after_s); }   /* dire
 static void enter_poweroff(void) {
     ESP_LOGI(TAG, "power-off now: saving tank, PMIC soft cut (the PWR key boots)");
     touch_port_confirm_answer(-1);
-    progression_save(&tank);
+    if (!progression_save(&tank)) {
+        ESP_LOGE(TAG, "power-off cancelled: tank save failed");
+        return;
+    }
     bat_hist_save();
     audio_port_sleep();
     batlog_add(battery_pct(), battery_port_vbat_mv(), display_port_brightness(), true, "off");   /* to NVS too: the shelf time is measurable at the next boot */

@@ -211,8 +211,11 @@ static int selftest_spawn(void) {
 
 /* population + progression + persistence, headless and fast */
 static int selftest_pop(void) {
-    setenv("POCKET_TANK_SAVE", "/tmp/pocket-tank-selftest.sav", 1);   /* never touch the real save */
-    char cmd[600]; snprintf(cmd, sizeof cmd, "rm -f /tmp/pocket-tank-selftest.sav"); (void)system(cmd);
+    setenv("POCKET_TANK_SAVE", "/dev/null/pocket-tank-selftest.sav", 1);
+    tank_init(&tank, 98);
+    if (progression_save(&tank)) { printf("FAIL: an unwritable save reported success\n"); return 1; }
+    setenv("POCKET_TANK_SAVE", "/tmp/pocket-tank-selftest/nested/tank.sav", 1);   /* also checks parent creation */
+    char cmd[600]; snprintf(cmd, sizeof cmd, "rm -f /tmp/pocket-tank-selftest/nested/tank.sav"); (void)system(cmd);
     tank_init(&tank, 99);
     progression_boot(&tank);                      /* no save -> new random pair */
     print_roster(&tank);

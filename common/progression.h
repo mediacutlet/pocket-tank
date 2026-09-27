@@ -67,7 +67,9 @@ void progression_settings_changed(void);
 /* call every frame after tank_tick */
 void progression_tick(tank_t *t, float dt);
 /* call on light-off / shutdown (autosaves on events + heartbeat anyway) */
-void progression_save(tank_t *t);
+/* Save the current tank. False means the port rejected the write; the state
+ * remains dirty so the periodic saver will retry. */
+bool progression_save(tank_t *t);
 
 /* sim/debug: multiply time (aging, drift) - `./fishsim --fast 60` */
 extern float progression_time_scale;

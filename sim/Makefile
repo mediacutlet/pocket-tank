@@ -1,11 +1,11 @@
 # pocket-tank PC simulator (LVGL v9 + SDL2)
 #
-# NOTE: built as x86_64 because the installed Homebrew SDL2 is the Intel build
-# (/usr/local); the sim runs fine under Rosetta. Drop ARCH for a native build
-# against an arm64 SDL2.
+# ARCH is empty by default so the simulator follows the host compiler. An
+# Apple Silicon machine using an Intel Homebrew SDL2 can still build under
+# Rosetta with `make ARCH="-arch x86_64"`.
 
 CC      := cc
-ARCH    := -arch x86_64
+ARCH    ?=
 SDL_CFLAGS := $(shell sdl2-config --cflags)
 SDL_LIBS   := $(shell sdl2-config --libs)
 
@@ -20,6 +20,12 @@ OBJS      := $(patsubst %.c,build/%.o,$(filter-out ../common/%,$(APP_SRCS)) $(LV
 
 fishsim: $(OBJS)
 	$(CC) -o $@ $(OBJS) $(LDFLAGS)
+
+SELFTESTS := --selftest --selftest-hunger --selftest-shop --selftest-battery \
+             --selftest-pop --selftest-sleep --selftest-tend --selftest-llm
+
+check: fishsim
+	@set -e; for test in $(SELFTESTS); do echo "RUN $$test"; ./fishsim "$$test"; done
 
 build/common/llm/%.o: ../common/llm/%.c
 	@mkdir -p $(dir $@)
@@ -38,4 +44,4 @@ clean:
 
 -include $(OBJS:.o=.d)
 
-.PHONY: clean
+.PHONY: check clean

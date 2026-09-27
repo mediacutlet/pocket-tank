@@ -1,4 +1,4 @@
-#!/Users/strato/.espressif/python_env/idf5.4_py3.13_env/bin/python
+#!/usr/bin/env python3
 """preflight.py - archive what the tank knows BEFORE anything resets it.
 
 Run before every flash (tools/flash.sh does), and any morning after a night
@@ -20,12 +20,6 @@ quiet = "--quiet" in sys.argv
 port = next(iter(sorted(glob.glob("/dev/cu.usbmodem*"))), None)
 if not port:
     sys.exit("preflight: no /dev/cu.usbmodem* - wake the tank (BOOT) and plug it in; refusing to continue")
-here = os.path.dirname(os.path.abspath(__file__))
-out_dir = os.path.join(here, "..", "docs", "batlog")
-os.makedirs(out_dir, exist_ok=True)
-stamp = datetime.datetime.now().strftime("%Y-%m-%d_%H%M")
-path = os.path.join(out_dir, f"{stamp}.txt")
-
 s = serial.Serial(); s.port, s.baudrate, s.timeout = port, 115200, 0.1
 s.open(); s.reset_input_buffer()          # a plain open: DTR/RTS untouched, the tank keeps running
 lines = []
@@ -38,6 +32,14 @@ for cmd, secs in (("batlog", 4), ("state", 3)):
             lines.append(raw.decode("utf-8", "replace").rstrip())
 s.close()
 keep = [l for l in lines if "batlog:" in l or "director:" in l]
+if not any("batlog:" in l for l in keep) or not any("director:" in l for l in keep):
+    sys.exit("preflight: tank did not answer both 'batlog' and 'state'; refusing to continue")
+
+here = os.path.dirname(os.path.abspath(__file__))
+out_dir = os.path.join(here, "..", "docs", "batlog")
+os.makedirs(out_dir, exist_ok=True)
+stamp = datetime.datetime.now().strftime("%Y-%m-%d_%H%M")
+path = os.path.join(out_dir, f"{stamp}.txt")
 with open(path, "w") as f:
     f.write(f"# pocket-tank preflight {stamp} on {port}\n")
     f.write("\n".join(keep) + "\n")

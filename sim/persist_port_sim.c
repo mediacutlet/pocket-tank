@@ -6,6 +6,7 @@
 #include <string.h>
 #include <time.h>
 #include <errno.h>
+#include <sys/stat.h>
 
 /* POCKET_TANK_SAVE overrides the save path (selftests use a scratch file) */
 static const char *path(void) {
@@ -20,10 +21,27 @@ bool persist_port_load(void *buf, size_t max, size_t *got) {
     if (longer || n == 0) return false;          /* a newer build's save, or empty */
     *got = n; return true;
 }
+
+static bool ensure_parent_dir(const char *file) {
+    char dir[512]; size_t n = strlen(file);
+    if (n >= sizeof dir) return false;
+    memcpy(dir, file, n + 1);
+    char *slash = strrchr(dir, '/');
+    if (!slash || slash == dir) return true;
+    *slash = 0;
+    for (char *p = dir + 1; *p; p++) {
+        if (*p != '/') continue;
+        *p = 0;
+        if (mkdir(dir, 0700) != 0 && errno != EEXIST) return false;
+        *p = '/';
+    }
+    return mkdir(dir, 0700) == 0 || errno == EEXIST;
+}
+
 bool persist_port_save(const void *buf, size_t len) {
-    char dir[512]; snprintf(dir, sizeof dir, "%s/.cache/pocket-tank", getenv("HOME") ? getenv("HOME") : ".");
-    char cmd[600]; snprintf(cmd, sizeof cmd, "mkdir -p '%s'", dir); (void)system(cmd);
-    FILE *f = fopen(path(), "wb"); if (!f) return false;
+    const char *save = path();
+    if (!ensure_parent_dir(save)) return false;
+    FILE *f = fopen(save, "wb"); if (!f) return false;
     size_t n = fwrite(buf, 1, len, f); fclose(f); return n == len;
 }
 bool persist_port_erase(void) { return remove(path()) == 0 || errno == ENOENT; }

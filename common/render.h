@@ -6,6 +6,7 @@
 
 #include <stddef.h>
 #include "tank.h"
+#include "ui.h"
 #include "battery.h"
 
 /* fb is TANK_W x TANK_H, RGB565, stride in PIXELS (usually TANK_W). */
@@ -60,15 +61,30 @@ void render_stats_card(const tank_t *t, int fish_idx, uint16_t *fb, int stride);
 /* Optional card cache (RENDER_CARD_W x RENDER_CARD_H uint16): with the scene
  * cache live, the card is redrawn at most 4x/s and blitted otherwise (~7 ms
  * -> ~1 ms per frame on the device). NULL = draw every frame. */
+/* Its pixel-art icons (24 px needs, 16 px trait poles) cannot shrink, so a
+ * short tank (the 2.8" CYD's 240) gets the card in two columns instead of
+ * one: the needs down the left, the traits and MORE down the right. */
+#define RENDER_CARD_COMPACT UI_COMPACT
+#if RENDER_CARD_COMPACT
+#define RENDER_CARD_X 6
+#define RENDER_CARD_Y 6
+#define RENDER_CARD_W 224
+#define RENDER_CARD_H 144
+#else
 #define RENDER_CARD_X 14
 #define RENDER_CARD_Y 8
 #define RENDER_CARD_W 124
 #define RENDER_CARD_H 258       /* 228 + the MORE button strip (2026-09-16) */
+#endif
+/* The card is copied into the frame row by row with no clipping: it has to
+ * lie inside the tank, or it writes past the end of the framebuffer. */
+_Static_assert(RENDER_CARD_Y + RENDER_CARD_H <= TANK_H && RENDER_CARD_X + RENDER_CARD_W <= TANK_W,
+               "the stats card must fit inside the tank");
 /* the card's tap hit box (touch ports): the card itself plus slop, most of
  * it BELOW the MORE button - fingers aiming at a button by the foot land
  * low and wide (Strato, 2026-09-16: "I'm not tapping it reliably"), and the
  * water under the card is nothing a tap needs. RENDER_CARD_HIT(x, y) is the test. */
-#define RENDER_CARD_HIT_BELOW 56
+#define RENDER_CARD_HIT_BELOW (RENDER_CARD_COMPACT ? 30 : 56)
 #define RENDER_CARD_HIT_SIDE  12
 #define RENDER_CARD_HIT(x, y) ((x) >= RENDER_CARD_X - RENDER_CARD_HIT_SIDE && (x) < RENDER_CARD_X + RENDER_CARD_W + RENDER_CARD_HIT_SIDE && \
                                (y) >= RENDER_CARD_Y && (y) < RENDER_CARD_Y + RENDER_CARD_H + RENDER_CARD_HIT_BELOW)
@@ -173,15 +189,15 @@ void render_sd_toast(const tank_t *t, uint16_t *fb, int stride);
  * render_confirm_hit maps a tap in tank coordinates to a button (+1 YES,
  * -1 NO, 0 neither) so the device's touch port and the sim's mouse share
  * the geometry. */
-#define RENDER_CONFIRM_X     56
-#define RENDER_CONFIRM_Y     76
-#define RENDER_CONFIRM_W     336
-#define RENDER_CONFIRM_H     216
-#define RENDER_CONFIRM_BTN_W 132
-#define RENDER_CONFIRM_BTN_H 56
-#define RENDER_CONFIRM_BTN_Y (RENDER_CONFIRM_Y + 112)
-#define RENDER_CONFIRM_NO_X  (RENDER_CONFIRM_X + 24)
-#define RENDER_CONFIRM_YES_X (RENDER_CONFIRM_X + RENDER_CONFIRM_W - 24 - RENDER_CONFIRM_BTN_W)
+#define RENDER_CONFIRM_X     UI(56)
+#define RENDER_CONFIRM_Y     UI(76)
+#define RENDER_CONFIRM_W     UI(336)
+#define RENDER_CONFIRM_H     UI(216)
+#define RENDER_CONFIRM_BTN_W UI(132)
+#define RENDER_CONFIRM_BTN_H UI(56)
+#define RENDER_CONFIRM_BTN_Y (RENDER_CONFIRM_Y + UI(112))
+#define RENDER_CONFIRM_NO_X  (RENDER_CONFIRM_X + UI(24))
+#define RENDER_CONFIRM_YES_X (RENDER_CONFIRM_X + RENDER_CONFIRM_W - UI(24) - RENDER_CONFIRM_BTN_W)
 void render_confirm_reset(uint16_t *fb, int stride, float frac);
 int  render_confirm_hit(float x, float y);
 
@@ -201,7 +217,13 @@ int  render_confirm_hit(float x, float y);
  * SET_TAP_LIGHT (*value 1 = AUTO, the idle rule; 0 = MANUAL, the double-tap),
  * SET_TAP_IDLE (*value = the seconds now set), SET_TAP_CLOSE, or nothing.
  * render_settings_tap is the bare hit test (tests). */
-enum { SET_TAP_NONE = 0, SET_TAP_CLOSE = 1, SET_TAP_BRIGHT = 2, SET_TAP_VOLUME = 3, SET_TAP_LIGHT = 4, SET_TAP_IDLE = 5 };
+enum { SET_TAP_NONE = 0, SET_TAP_CLOSE = 1, SET_TAP_BRIGHT = 2, SET_TAP_VOLUME = 3, SET_TAP_LIGHT = 4, SET_TAP_IDLE = 5,
+       SET_TAP_FLIP = 6 };
+/* The SCREEN row (UPRIGHT / FLIPPED), on a board with no IMU to turn the
+ * picture itself - the CYD. SET_TAP_FLIP carries *value 1 = FLIPPED; the
+ * platform turns the display and touch, keeps the choice, and says what it
+ * is here so the row shows it. */
+void render_settings_set_flip(bool flipped);
 void render_settings(const tank_t *t, uint16_t *fb, int stride, int bright_pct, int volume);
 int  render_settings_tap(float x, float y, int *value);
 int  render_settings_touch(tank_t *t, float x, float y, bool down, int *value);

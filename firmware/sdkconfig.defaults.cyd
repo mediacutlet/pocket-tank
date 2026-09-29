@@ -1,0 +1,8 @@
+# The 2.8" ESP32-S3 CYD (ES3C28P): layered over sdkconfig.defaults by
+# tools/build_cyd.sh. 16 MB flash and 8 MB octal PSRAM, as the AMOLED board.
+CONFIG_POCKET_TANK_BOARD_CYD28=y
+CONFIG_POCKET_TANK_DISPLAY_SH8601=n
+CONFIG_POCKET_TANK_DISPLAY_ILI9341=y
+CONFIG_POCKET_TANK_TOUCH_FT3168=y
+# The same ES8311 as the AMOLED board, on the CYD's own pins (board_pins.h).
+CONFIG_POCKET_TANK_AUDIO_ES8311=y

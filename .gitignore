@@ -6,6 +6,8 @@ __pycache__/
 sim/lvgl/
 sim/build/
 sim/fishsim
+sim/build-cyd/
+sim/fishsim-cyd
 model/runw
 firmware/ref/
 model/runq4
@@ -17,6 +19,7 @@ firmware/sdkconfig.old
 firmware/dependencies.lock
 firmware/managed_components/
 firmware/build_qemu/
+firmware/build_cyd/
 
 # browser installer output (tools/make_installer.py) - upload this folder
 installer/dist/

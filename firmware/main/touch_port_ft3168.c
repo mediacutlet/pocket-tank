@@ -53,7 +53,13 @@ static bool s_inverted;                           /* screen 180-flipped: mirror 
  * same reason; Strato saw it on the swatch rows, 2026-09-13). Reported
  * points move UP by this many px in displayed space; director `touch bias
  * <px>` tunes it live. */
+#if CONFIG_POCKET_TANK_BOARD_CYD28
+/* None on the CYD (2026-09-26): with the AMOLED's 10 px every missed button
+ * in the first setup walk-through read ABOVE the button, never below it. */
+static int s_bias_y = 0;
+#else
 static int s_bias_y = 10;
+#endif
 void touch_port_set_bias(int px) { s_bias_y = px; }
 int  touch_port_bias(void) { return s_bias_y; }
 
@@ -61,6 +67,30 @@ void touch_port_set_inverted(bool inverted) { s_inverted = inverted; }
 extern i2c_master_bus_handle_t board_i2c_bus(void);
 extern bool board_is_v2(void);
 
+#if CONFIG_POCKET_TANK_BOARD_CYD28
+/* The CYD's FT6336G (the same FT5x06 register family) on the shared bus, with
+ * its reset on GPIO18. The driver's swap_xy turns its portrait report
+ * landscape; what is left for touch_port_poll is a 180-degree turn, found on
+ * the bench (2026-09-26): a drag to the right moved the bubble column left,
+ * and the welcome page's NEXT, at the foot, answered a tap at the top. The
+ * display was turned 180 degrees the same day, and touch has to follow it. */
+#define TOUCH_SWAP_XY  1
+#define TOUCH_MIRROR_X 0
+#define TOUCH_MIRROR_Y 1
+
+bool touch_port_init(void) {
+    esp_lcd_panel_io_handle_t io;
+    esp_lcd_panel_io_i2c_config_t io_cfg = ESP_LCD_TOUCH_IO_I2C_FT5x06_CONFIG();
+    io_cfg.dev_addr = I2C_ADDR_FT6336; io_cfg.scl_speed_hz = 400000;
+    if (esp_lcd_new_panel_io_i2c(board_i2c_bus(), &io_cfg, &io) != ESP_OK) { ESP_LOGW(TAG, "no touch io"); return false; }
+    esp_lcd_touch_config_t tp_cfg = { .x_max = PANEL_W, .y_max = PANEL_H, .rst_gpio_num = PIN_TP_RST, .int_gpio_num = -1,
+        .levels = { .reset = 0, .interrupt = 0 },
+        .flags = { .swap_xy = TOUCH_SWAP_XY, .mirror_x = TOUCH_MIRROR_X, .mirror_y = TOUCH_MIRROR_Y } };
+    if (esp_lcd_touch_new_i2c_ft5x06(io, &tp_cfg, &s_tp) != ESP_OK) { ESP_LOGW(TAG, "no FT6336"); return false; }
+    ESP_LOGI(TAG, "FT6336 ready");
+    return true;
+}
+#else
 bool touch_port_init(void) {
     esp_lcd_panel_io_handle_t io;
     bool v2 = board_is_v2();
@@ -76,6 +106,7 @@ bool touch_port_init(void) {
     ESP_LOGI(TAG, "%s ready", v2 ? "CST816" : "FT3168");
     return true;
 }
+#endif
 
 /* call every frame from the tank task */
 void touch_port_poll(tank_t *t) {
@@ -85,12 +116,20 @@ void touch_port_poll(tank_t *t) {
     uint16_t x[1], y[1], st[1]; uint8_t n = 0;
     esp_lcd_touch_read_data(s_tp);
     bool touched = esp_lcd_touch_get_coordinates(s_tp, x, y, st, &n, 1) && n > 0;
+#if CONFIG_POCKET_TANK_BOARD_CYD28
+    /* landscape from the driver, turned 180 degrees (see touch_port_init); a
+       flipped screen undoes the turn */
+    float tx = touched ? (s_inverted ? (float)x[0] : (float)(TANK_W - 1 - x[0])) : s_lx;
+    float ty = touched ? (s_inverted ? (float)y[0] : (float)(TANK_H - 1 - y[0])) - s_bias_y : s_ly;
+#else
     /* portrait panel (px,py) -> landscape tank (tx,ty): tx = TANK_W-1-py, ty = px;
      * flipped screen: mirror both, so downstream gestures live in displayed space */
     float tx = touched ? (s_inverted ? (float)y[0] : (float)(TANK_W - 1 - y[0])) : s_lx;
     float ty = touched ? (s_inverted ? (float)(TANK_H - 1 - x[0]) : (float)x[0]) - s_bias_y : s_ly;
+#endif
     if (touched && ty < 0) ty = 0;
     if (touched && !s_down) {
+        ESP_LOGI(TAG, "press at %.0f,%.0f (raw %u,%u)", tx, ty, x[0], y[0]);   /* where the finger lands, for mapping checks */
         audio_port_prewarm();                   /* the release's cue plays warm */
         s_press_us = now; s_px = tx; s_py = ty;
         /* snapshot the school: the user aims at where a fish WAS - by release
@@ -101,9 +140,9 @@ void touch_port_poll(tank_t *t) {
     if (s_set && !s_cf && !su) {                             /* the settings page owns the glass: segments, the seconds wheel, CLOSE */
         int v = 0, r = render_settings_touch(t, tx, ty, touched, &v);
         if (r) ESP_LOGI(TAG, "settings: %s %d", r == SET_TAP_CLOSE ? "CLOSE" : r == SET_TAP_BRIGHT ? "brightness" : r == SET_TAP_VOLUME ? "volume"
-                                                  : r == SET_TAP_LIGHT ? "lights out" : "idle seconds", v);
+                                                  : r == SET_TAP_LIGHT ? "lights out" : r == SET_TAP_FLIP ? "screen" : "idle seconds", v);
         if (r == SET_TAP_CLOSE) { s_set = false; s_ms = true; s_back = true; }   /* back to the milestones page (2026-09-16); the release is spent */
-        else if (r == SET_TAP_BRIGHT || r == SET_TAP_VOLUME || r == SET_TAP_LIGHT || r == SET_TAP_IDLE) { s_set_what = r; s_set_val = v; }
+        else if (r == SET_TAP_BRIGHT || r == SET_TAP_VOLUME || r == SET_TAP_LIGHT || r == SET_TAP_IDLE || r == SET_TAP_FLIP) { s_set_what = r; s_set_val = v; }
     }
     if (su && !s_cf) {
         bool birth = setup_is_birth(); int who = setup_fish(), place = setup_item();

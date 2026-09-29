@@ -20,8 +20,23 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+/* The tank's size in pixels, landscape. The Waveshare AMOLED's 448 x 368 unless
+ * the board says otherwise: the 2.8" CYD (ES3C28P, CONFIG_POCKET_TANK_BOARD_CYD28)
+ * is 320 x 240, and the sim takes -DTANK_W / -DTANK_H to preview it.
+ * Everything in common/ is laid out against these two. */
+#ifdef ESP_PLATFORM
+#include "sdkconfig.h"
+#if CONFIG_POCKET_TANK_BOARD_CYD28
+#define TANK_W 320
+#define TANK_H 240
+#endif
+#endif
+#ifndef TANK_W
 #define TANK_W 448
+#endif
+#ifndef TANK_H
 #define TANK_H 368
+#endif
 
 #define N_FISH_MAX 6            /* array bound; the live count is tank_t.n_fish */
 #define N_FISH_START 2          /* a new tank: two contrasting adults */

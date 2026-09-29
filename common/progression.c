@@ -123,10 +123,16 @@ typedef struct {
  * tank kept since the first install updates clean (its badges stay seen and
  * the bubble column stays put). Never add a field mid-struct again. */
 #define SAVE_PRE_BUBBLE_SIZE 1432
+/* Only the AMOLED's 448 x 368 tank ever wrote that layout: the save carries the
+ * algae grid, whose size follows the tank, so a CYD save (320 x 240) is shaped
+ * differently from the first byte of the grid on and was never 1432 bytes. */
+#define SAVE_HAS_PRE_BUBBLE (TANK_W == 448 && TANK_H == 368)
+#if SAVE_HAS_PRE_BUBBLE
 _Static_assert(offsetof(save_t, ms_seen) == offsetof(save_t, bubble_x) + sizeof(float),
                "the pre-bubble migration expects the seen masks right after bubble_x");
 _Static_assert(offsetof(save_t, bubble_x) + sizeof(((save_t *)0)->ms_seen) + sizeof(uint32_t) == SAVE_PRE_BUBBLE_SIZE,
                "the pre-bubble migration expects the 1432-byte layout's masks to end at 1432");
+#endif
 
 float progression_time_scale = 1.0f;
 
@@ -513,7 +519,7 @@ static bool load_save(tank_t *t, int64_t *saved_unix) {
     size_t got = 0;
     bool loaded = persist_port_load(&sv, sizeof sv, &got) && got >= SAVE_CORE_SIZE && got <= sizeof sv;
     if (!loaded || sv.magic != SAVE_MAGIC || sv.n_fish < 2 || sv.n_fish > N_FISH_MAX) return false;
-    if (got == SAVE_PRE_BUBBLE_SIZE) {         /* the first public installer's layout: see SAVE_PRE_BUBBLE_SIZE */
+    if (SAVE_HAS_PRE_BUBBLE && got == SAVE_PRE_BUBBLE_SIZE) {   /* the first public installer's layout: see SAVE_PRE_BUBBLE_SIZE */
         memmove(&sv.ms_seen, &sv.bubble_x, sizeof sv.ms_seen + sizeof sv.tank_ms_seen);
         sv.bubble_x = 0;                       /* = the default column */
     }

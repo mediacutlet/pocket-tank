@@ -1,4 +1,19 @@
 menu "pocket-tank"
+    choice POCKET_TANK_BOARD
+        prompt "Board"
+        default POCKET_TANK_BOARD_AMOLED18
+        help
+            Which board the firmware is built for. Selects the pins, the tank
+            size (common/tank.h) and which display / touch ports can be used.
+        config POCKET_TANK_BOARD_AMOLED18
+            bool "Waveshare ESP32-S3-Touch-AMOLED-1.8 (448x368)"
+        config POCKET_TANK_BOARD_CYD28
+            bool "2.8in ESP32-S3 CYD, ES3C28P: ILI9341 + FT6336 (320x240)"
+    endchoice
+    config POCKET_TANK_DISPLAY_ILI9341
+        bool "Drive the CYD's ILI9341 over SPI, backlight PWM on GPIO45"
+        depends on POCKET_TANK_BOARD_CYD28
+        default n
     config POCKET_TANK_DISPLAY_SH8601
         bool "Drive the Waveshare 1.8in AMOLED (SH8601 / CO5300 over QSPI)"
         default n

@@ -26,6 +26,7 @@
 #include "imu_port.h"
 #include "director.h"
 #include "brightness.h"
+#include "orientation.h"
 #include "batlog.h"
 #include "codec_port.h"
 #include "progression.h"
@@ -53,7 +54,7 @@
  * be the one key the keeper ever presses - press to sleep, press to wake. */
 #define BTN_SLEEP GPIO_NUM_0
 static bool s_pmic;                        /* an AXP2101 answered: the PWR key exists, power-off is real */
-#ifdef CONFIG_POCKET_TANK_DISPLAY_SH8601
+#if defined(CONFIG_POCKET_TANK_DISPLAY_SH8601) || defined(CONFIG_POCKET_TANK_DISPLAY_ILI9341)
 extern i2c_master_bus_handle_t board_i2c_bus(void);
 #else
 static i2c_master_bus_handle_t board_i2c_bus(void) { return NULL; }
@@ -408,6 +409,7 @@ static void reset_tank(void) {
     progression_reset(&tank, (uint32_t)esp_timer_get_time() ^ 0xC0FFEEu);
     notice_sync(&tank);                         /* a fresh tank has nothing to announce */
     brightness_save();                          /* the erase took the setting with it */
+    orientation_save();                         /* ... and this one */
     ESP_LOGI(TAG, "fresh tank: %s + %s, both fry", tank.fish[0].name, tank.fish[1].name);
     setup_begin(&tank);                         /* welcome, names, colours - as on a fresh install */
 }
@@ -425,7 +427,7 @@ static void tank_task(void *arg) {
         imu_port_poll(now);
         if (imu_port_moving()) audio_port_prewarm();   /* in a hand: the codec stays warm (docs/AUDIO.md) */
         if (imu_port_handled()) tank_handled(&tank);   /* ... and the light stays on (two polls of motion: a bump on the desk is not a pick-up) */
-        bool inv = imu_port_inverted();
+        bool inv = imu_port_inverted() != orientation_flipped();   /* the IMU's flip, turned again by the keeper's SCREEN choice */
         display_port_set_inverted(inv);   /* per-frame, so a flip lands between flushes */
         touch_port_set_inverted(inv);
         touch_port_poll(&tank);
@@ -437,7 +439,8 @@ static void tank_task(void *arg) {
           if (w == SET_TAP_BRIGHT) brightness_set_level(v);
           else if (w == SET_TAP_VOLUME) { audio_port_set_volume(v); if (v) audio_port_play(SND_CONFIRM, AUDIO_PITCH_ONE); }
           else if (w == SET_TAP_LIGHT) ESP_LOGI(TAG, "settings: lights out %s", v ? "AUTO (the idle rule)" : "MANUAL (double-tap the glass)");
-          else if (w == SET_TAP_IDLE) ESP_LOGI(TAG, "settings: lights out after %d s still", v); }
+          else if (w == SET_TAP_IDLE) ESP_LOGI(TAG, "settings: lights out after %d s still", v);
+          else if (w == SET_TAP_FLIP) orientation_set(v != 0); }
         { int r = touch_port_take_shop();                               /* the shop's UNLOCK / MOVE / SELL */
           if (r >= SHOP_TAP_SELL) {                                     /* sold back: the refund, the piece gone, the row for sale again */
               int item = r - SHOP_TAP_SELL;
@@ -496,6 +499,7 @@ static void tank_task(void *arg) {
                 render_milestones(&tank, fb[cur], TANK_W);
                 sel = -1;
             } else if (touch_port_settings()) {  /* settings page: brightness + volume */
+                render_settings_set_flip(orientation_flipped());
                 render_settings(&tank, fb[cur], TANK_W, brightness_level(), audio_port_volume());
                 sel = -1;
             } else if (touch_port_shop()) {      /* the shop: sand dollars and what they buy */
@@ -592,6 +596,7 @@ void app_main(void) {
     { int carried = batlog_init();       /* the battery log survives every reset but a power-on */
       if (carried) ESP_LOGI(TAG, "batlog: %d samples carried through the reset (director `batlog` reads them)", carried); }
     brightness_init();
+    orientation_init();
     bat_hist_load();
     assert_plan();
     for (int i = 0; i < PLAN_FB_COUNT; i++) {

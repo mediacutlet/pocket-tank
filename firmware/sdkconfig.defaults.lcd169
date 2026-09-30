@@ -1,0 +1,8 @@
+# Waveshare ESP32-S3-(Touch-)LCD-1.69 overlay - layered on sdkconfig.defaults:
+#   idf.py -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.defaults.lcd169" build
+# (delete any old sdkconfig / build dir first so these take effect)
+CONFIG_POCKET_TANK_BOARD_LCD169=y
+CONFIG_POCKET_TANK_DISPLAY_SH8601=n
+CONFIG_POCKET_TANK_TOUCH_FT3168=y
+# the ES8311 port's I2S pins (GPIO 8/9/16/45/46) are this board's LCD reset etc.
+CONFIG_POCKET_TANK_AUDIO_ES8311=n

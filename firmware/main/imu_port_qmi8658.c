@@ -13,8 +13,19 @@
 /* which accel axis is "up" when the tank is held right side up. The boot log
  * prints the live vector ("imu: g=[x y z]") — if the flip is wrong or dead,
  * hold the device upright, read which axis carries ~1 g, and fix these two. */
+#include "sdkconfig.h"
+#ifdef CONFIG_POCKET_TANK_BOARD_LCD169
+/* 1.69in LCD board, calibrated on the bench 2026-09-27: upright in hand
+ * g=[~0 +15700 -5000], upside down [~0 -15800 -3000], flat on the table
+ * Z ~ -16700 (holds state) */
+#define IMU_UP_AXIS 1
+#define IMU_UP_SIGN (1)
+#define IMU_FLIP    1
+#else
 #define IMU_UP_AXIS 1        /* 0=X 1=Y 2=Z; calibrated 2026-08-28: upright-in-hand = -Y ~16k */
 #define IMU_UP_SIGN (-1)
+#define IMU_FLIP    1
+#endif
 
 #define QMI8658_ADDR       0x6B
 #define QMI8658_ADDR_ALT   0x6A
@@ -151,7 +162,7 @@ void imu_port_poll(int64_t now_us) {
     bool dominant = RAILED(other) || (v > 0 ? v : -v) > (other > 0 ? other : -other);
     bool wants_flip = dominant && (s_inverted ? (v > FLIP_THRESH) : (v < -FLIP_THRESH));
     s_streak = wants_flip ? s_streak + 1 : 0;      /* flat / sideways: hold state */
-    if (s_streak >= FLIP_HOLD_POLLS) {
+    if (IMU_FLIP && s_streak >= FLIP_HOLD_POLLS) {
         s_inverted = !s_inverted; s_streak = 0;
         ESP_LOGI(TAG, "orientation: %s", s_inverted ? "inverted" : "upright");
     }

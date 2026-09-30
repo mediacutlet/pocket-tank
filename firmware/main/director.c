@@ -9,6 +9,8 @@
 #include <ctype.h>
 #include "sdkconfig.h"
 #include "esp_log.h"
+#include "freertos/FreeRTOS.h"          /* vTaskDelay: no longer pulled in indirectly on ESP-IDF 6 */
+#include "freertos/task.h"
 #include "progression.h"
 #include "setup.h"
 #include "director.h"

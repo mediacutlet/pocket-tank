@@ -87,8 +87,21 @@ void touch_port_poll(tank_t *t) {
     bool touched = esp_lcd_touch_get_coordinates(s_tp, x, y, st, &n, 1) && n > 0;
     /* portrait panel (px,py) -> landscape tank (tx,ty): tx = TANK_W-1-py, ty = px;
      * flipped screen: mirror both, so downstream gestures live in displayed space */
+#ifdef CONFIG_POCKET_TANK_BOARD_LCD169
+    /* 1.69in LCD: the panel shows the tank scaled to LCD169_VIEW_W x _H and
+     * rotated the same way (display_port_st7789.c): panel (px,py) = view
+     * (VIEW_W-1-py, px), inverted (py, VIEW_H-1-px); then scale view -> tank */
+    const float kx = (float)TANK_W / LCD169_VIEW_W, ky = (float)TANK_H / LCD169_VIEW_H;
+    /* ... and its y runs opposite to the panel's logical y too (bench 2026-09-28:
+       taps on the left edge read raw y ~15, on the right ~264) */
+    float tx = touched ? (s_inverted ? (float)(LCD169_VIEW_W - 1 - y[0]) : (float)y[0]) * kx : s_lx;
+    /* the CST816T's x runs opposite to the panel's logical x (measured on the
+       bench 2026-09-27: NEXT at the bottom read raw x ~27) */
+    float ty = touched ? (s_inverted ? (float)x[0] : (float)(LCD169_VIEW_H - 1 - x[0])) * ky - s_bias_y : s_ly;
+#else
     float tx = touched ? (s_inverted ? (float)y[0] : (float)(TANK_W - 1 - y[0])) : s_lx;
     float ty = touched ? (s_inverted ? (float)(TANK_H - 1 - x[0]) : (float)x[0]) - s_bias_y : s_ly;
+#endif
     if (touched && ty < 0) ty = 0;
     if (touched && !s_down) {
         audio_port_prewarm();                   /* the release's cue plays warm */

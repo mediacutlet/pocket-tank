@@ -1,4 +1,12 @@
 menu "pocket-tank"
+    config POCKET_TANK_BOARD_LCD169
+        bool "Board: Waveshare ESP32-S3-(Touch-)LCD-1.69 (ST7789 240x280) instead of the AMOLED-1.8"
+        default n
+        help
+            Drives the 1.69in LCD board: ST7789V2 over SPI (the tank scaled to 280x240),
+            CST816T touch, battery by ADC, the PWR key on SYS_OUT / SYS_EN. The ES8311
+            audio port cannot be used on this board (its I2S pins are the LCD's).
+            Build with: idf.py -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.defaults.lcd169" build
     config POCKET_TANK_DISPLAY_SH8601
         bool "Drive the Waveshare 1.8in AMOLED (SH8601 / CO5300 over QSPI)"
         default n

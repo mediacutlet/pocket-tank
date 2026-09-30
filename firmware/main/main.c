@@ -41,10 +41,15 @@
 #include "rtc_port.h"
 #include "driver/i2c_master.h"
 #include "esp_async_memcpy.h"
+#include "esp_idf_version.h"
 #include "freertos/semphr.h"
 #include "driver/gpio.h"
 #include "esp_sleep.h"
 #include "driver/rtc_io.h"
+#include "board_pins.h"
+#ifdef CONFIG_POCKET_TANK_BOARD_LCD169
+extern void board_power_hold(void);        /* battery_port_lcd169.c: SYS_EN high, the PWR key's pin an input */
+#endif
 
 /* BOOT (GPIO0, active low, RTC-wake capable): the reset chord (held + a tap
  * on the glass), the director's deep-sleep wake, and the sleep key only on a
@@ -54,7 +59,7 @@
  * be the one key the keeper ever presses - press to sleep, press to wake. */
 #define BTN_SLEEP GPIO_NUM_0
 static bool s_pmic;                        /* an AXP2101 answered: the PWR key exists, power-off is real */
-#ifdef CONFIG_POCKET_TANK_DISPLAY_SH8601
+#if defined(CONFIG_POCKET_TANK_DISPLAY_SH8601) || defined(CONFIG_POCKET_TANK_BOARD_LCD169)
 extern i2c_master_bus_handle_t board_i2c_bus(void);
 #else
 static i2c_master_bus_handle_t board_i2c_bus(void) { return NULL; }
@@ -197,11 +202,17 @@ static void enter_sleep_for(int wake_after_s) {
         int64_t left = grace_us - (esp_timer_get_time() - t0);
         if (left <= 0) break;
         gpio_wakeup_enable(BTN_SLEEP, GPIO_INTR_LOW_LEVEL);
+#ifdef CONFIG_POCKET_TANK_BOARD_LCD169
+        gpio_wakeup_enable(PIN_SYS_OUT, GPIO_INTR_LOW_LEVEL);   /* the PWR key is a GPIO here: it wakes the grace directly */
+#endif
         esp_sleep_enable_gpio_wakeup();
         esp_sleep_enable_timer_wakeup(left < KEY_POLL_US ? left : KEY_POLL_US);
         esp_light_sleep_start();
         esp_sleep_wakeup_cause_t why = esp_sleep_get_wakeup_cause();
         gpio_wakeup_disable(BTN_SLEEP);
+#ifdef CONFIG_POCKET_TANK_BOARD_LCD169
+        gpio_wakeup_disable(PIN_SYS_OUT);
+#endif
         /* wake sources are STICKY in ESP-IDF (s_config.wakeup_triggers): the
          * grace's timer would otherwise follow us into stage 2 and boot the
          * tank 90 s later - which it did (2026-09-14: every sleep since the
@@ -212,6 +223,10 @@ static void enter_sleep_for(int wake_after_s) {
     }
     if (pressed) {                              /* a quick wake: resume in place */
         while (!gpio_get_level(BTN_SLEEP)) vTaskDelay(pdMS_TO_TICKS(10));   /* a BOOT wake press, still down */
+#ifdef CONFIG_POCKET_TANK_BOARD_LCD169
+        while (!gpio_get_level(PIN_SYS_OUT)) { battery_port_key_poll(); vTaskDelay(pdMS_TO_TICKS(10)); }   /* the PWR wake press: */
+        battery_port_key_poll();                /* its release is spent on the wake, not a new sleep */
+#endif
         float napped = (esp_timer_get_time() - t0) / 1e6f;
         tank_tick_sleep(&tank, napped);         /* the nap counts, tiny as it is */
         progression_woke(&tank);                /* a fry that was on its way: born now (2026-09-24) */
@@ -618,6 +633,9 @@ static void nvs_start(void) {
 }
 
 void app_main(void) {
+#ifdef CONFIG_POCKET_TANK_BOARD_LCD169
+    board_power_hold();                      /* before anything slow: on battery the board is only on while PWR is held until this */
+#endif
     ESP_LOGI(TAG, "pocket-tank v%s %s (build %s) boot%s", PT_RELEASE, PT_RELEASE_STAGE, version_port_string(),
              esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_EXT0 ? " (woken by button)" : "");
     gpio_config_t btn = { .pin_bit_mask = 1ULL << BTN_SLEEP, .mode = GPIO_MODE_INPUT,
@@ -682,7 +700,10 @@ void app_main(void) {
        slot and the panel silently loses its pixel path (black screen). */
     if (scene && fb[0] && fb[1] != fb[0]) {
         async_memcpy_config_t amc_cfg = ASYNC_MEMCPY_DEFAULT_CONFIG();
-        amc_cfg.backlog = 4; amc_cfg.sram_trans_align = 4; amc_cfg.psram_trans_align = 64;
+        amc_cfg.backlog = 4;
+#if ESP_IDF_VERSION < ESP_IDF_VERSION_VAL(6, 0, 0)
+        amc_cfg.sram_trans_align = 4; amc_cfg.psram_trans_align = 64;
+#endif                                            /* IDF 6: dma_burst_size (default 16) replaces both */
         s_amc_done = xSemaphoreCreateBinary();
         if (esp_async_memcpy_install(&amc_cfg, &s_amc) != ESP_OK) {
             s_amc = NULL; ESP_LOGW(TAG, "async memcpy unavailable: CPU scene restore");

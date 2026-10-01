@@ -12,7 +12,9 @@ reset the chip before anyone read the log.
 1. **Flash only through `tools/flash.sh`** (`--model` for the model partition
    too). It runs `tools/preflight.py` first, which archives `batlog` + `state`
    to `docs/batlog/<date_time>.txt`, and refuses to flash without the archive.
-   Commit the archive with the flash.
+   Commit the archive with the flash. **The 2.8" CYD is the exception:** it is
+   flashed with `tools/build_cyd.sh` (docs/CYD.md). It has no fuel gauge, so
+   there is no battery log to archive, and this table is about the AMOLED tank.
 2. **Any morning after a night on battery: `tools/preflight.py` first**, before
    the director, before a flash, before anything. Then update the table below.
 3. **The log itself now survives resets** (batlog.c: RTC_NOINIT + magic + crc;
@@ -49,6 +51,23 @@ reset the chip before anyone read the log.
    tank.c (the 09-11 pass cut asks 55% by calming the signature; the boredom
    band of 2026-09-14 added ~2 asks/min/fish while idle).
 3. Record results in this table and in docs/stats.md; close the row.
+
+## The CYD right now (the 2.8" ES3C28P, a separate board)
+
+- **Firmware:** v0.2.0 alpha, build `ea323756cfe2` (main after the upstream
+  v0.2.0 merge), app only, flashed 2026-09-30 with `tools/build_cyd.sh`.
+  `-O2` throughout, assertions on, log level INFO - what upstream ships; no
+  bring-up instrumentation. The model partition is the one flashed
+  2026-09-29 at the full reset.
+- **IMU:** an MPU-6050 (GY-521-style) on the I2C socket, SDA IO16 / SCL IO15,
+  0x68, **held flat against the back, pins toward the top edge** - not yet
+  soldered. Both `POCKET_TANK_IMU_QMI8658` and `_MPU6050` are on; the
+  QMI8658C is on order. Face-down sleep is on, FACE DOWN = SLEEP.
+- **Verified on it, 2026-09-30:** the flip both ways, flat and sideways hold,
+  a pick-up reads MOVING, face down sleeps and face up or BOOT wakes in every
+  order (docs/CYD.md, *The IMU*).
+- **Nothing in flight.** No battery log on this board (no fuel gauge), so no
+  preflight; a flash resets nothing that is being measured.
 
 ## Firmware on the tank right now
 

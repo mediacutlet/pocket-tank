@@ -15,9 +15,13 @@ bool  advisor_core_sample = true;
 float advisor_core_temp   = 1.0f;
 
 /* ---- schema.md state encoding: must match model/gen_traces.py exactly ---- */
-#define SCHEMA_NEAR 70.0f
-#define SCHEMA_MID  180.0f
-#define SCHEMA_FAR  380.0f
+/* Bands in pixels of the 448-wide tank the model was trained on, scaled to
+ * this build's width: a 320-wide tank (the CYD) would otherwise almost never
+ * see "far", and the model would be asked about distances it never learned. */
+#define SCHEMA_SCALE (TANK_W / 448.0f)
+#define SCHEMA_NEAR (70.0f * SCHEMA_SCALE)
+#define SCHEMA_MID  (180.0f * SCHEMA_SCALE)
+#define SCHEMA_FAR  (380.0f * SCHEMA_SCALE)
 
 static const char *bucket(float d) {
     if (d < SCHEMA_NEAR) return "near";

@@ -27,7 +27,9 @@ wall clear last explore time day  ->  seek_food urgency 8
 This repo is the complete project: the trained model, the distillation
 pipeline that made it, a PC simulator, and the firmware for a real board.
 Got the board? **[Install it from your browser](https://stratobuilds.com/pocket-tank-installer/)**,
-no toolchain needed.
+no toolchain needed. Got the 2.8-inch **CYD** (ES3C28P) instead? This fork
+runs there too: **[build and flash it](#run-it-on-the-28-cyd)** with one
+script.
 
 The current release is **v0.2.0** (alpha); the settings page shows the one
 on your tank. What changed in each release:
@@ -43,6 +45,7 @@ on your tank. What changed in each release:
 - [Try it: firmware in QEMU](#try-it-firmware-in-qemu)
 - [Install from your browser](#install-from-your-browser)
 - [Run it on real hardware](#run-it-on-real-hardware)
+- [Run it on the 2.8" CYD](#run-it-on-the-28-cyd)
 - [Train your own](#train-your-own)
 - [Layout](#layout)
 - [Documentation](#documentation)
@@ -421,9 +424,9 @@ cd sim && make && ./fishsim
 ```
 
 On macOS the Makefile targets x86_64 by default to match an Intel Homebrew
-SDL2; use `make ARCH=` for a native build. On Linux it builds for the host.
-The trained model
-(`model/out/model_q4.bin` + `tokenizer.bin`) ships in the repo, so the LLM
+SDL2; use `make ARCH=` for a native build.  On Linux it builds for the host.
+`make CYD=1` builds `fishsim-cyd`, the tank at the 2.8" CYD's 320 x 240 ([docs/CYD.md](docs/CYD.md)). 
+The trained model (`model/out/model_q4.bin` + `tokenizer.bin`) ships in the repo, so the LLM
 brain works out of the box.
 
 In the window, the mouse is your finger: tap the water surface or drag down
@@ -542,6 +545,70 @@ built or tested here, and they may lag behind this repo:
   [Pull request #10](https://github.com/mediacutlet/pocket-tank/pull/10) has
   the details.
 
+## Run it on the 2.8" CYD
+
+This fork also runs the tank on the **ES3C28P "cheap yellow display"**: an
+ESP32-S3 with 16 MB flash and 8 MB PSRAM, a 320×240 ILI9341 IPS panel over
+SPI, FT6336 touch and ES8311 audio, with every page laid out for the smaller
+screen. The browser installer is for the AMOLED board only; the CYD is built
+and flashed from this tree with ESP-IDF 5.5 (`IDF_PATH`, or
+`~/.espressif/esp-idf/v5.5`):
+
+```bash
+tools/build_cyd.sh                          # build only
+tools/build_cyd.sh <port> --model           # the first flash: the app and the 8 MB model partition
+tools/build_cyd.sh <port>                   # after that: the app alone
+```
+
+`<port>` is the board's stable path,
+`/dev/serial/by-id/usb-Espressif_USB_JTAG_serial_debug_unit_<MAC>-if00`, never
+a `/dev/ttyACM<n>`, whose numbers shuffle between plug-ins. The script keeps
+its own build directory (`firmware/build_cyd`) and sdkconfig
+(`sdkconfig.defaults` with `sdkconfig.defaults.cyd` on top), so the AMOLED
+build is never touched, and it flashes nothing when the build fails.
+
+**Updating keeps the tank**, as on the AMOLED board: the script writes the
+bootloader, the partition table and the app, and the save in NVS is left
+alone. **To start over from a blank board**, erase it and flash the model
+again:
+
+```bash
+. ~/.espressif/esp-idf/v5.5/export.sh       # esptool.py comes with ESP-IDF
+esptool.py --chip esp32s3 -p <port> erase_flash
+tools/build_cyd.sh <port> --model
+```
+
+### Gestures
+
+The movement gestures need an IMU. The CYD has none on the board: a
+QMI8658 or an MPU-6050 breakout on its I2C socket (VCC 3V3, GND, SDA IO16,
+SCL IO15), detected at boot - which chips, and the wiring pin by pin, in
+[docs/CYD.md](docs/CYD.md), *Supported IMUs, and wiring one*. Turning, holding still and handling
+are the AMOLED board's too; face down is the CYD's.
+
+| gesture | what the tank does |
+|---|---|
+| turn it upside down, about 0.75 s | the picture and touch turn 180 degrees to stay readable; turn it back and they follow |
+| lay it flat, or stand it on its side | nothing - it keeps the way it was, so it never flaps on a table |
+| pick it up, carry it | the sound stays warm, and holding it counts as attention for the tank light |
+| lay it screen down, level and still, 2 s | it saves, darkens and sleeps, as a short press of BOOT |
+| turn it screen up, or pick it up, within 20 minutes | it wakes where it was, fish and all - after any sleep that began face down |
+| short press of BOOT | sleeps the tank; within 20 minutes another press wakes it in place (face down or not), after that it boots |
+| hold BOOT and tap the glass | the *Reset tank?* prompt |
+| double-tap the glass | the tank light on or off (LIGHTS OUT: MANUAL, the default) |
+
+The settings page's FACE DOWN row (SLEEP / IGNORE) switches the face-down
+sleep and its wake off; it takes the place of the SCREEN row once an IMU
+answers. After 20 minutes asleep the board deep-sleeps, and only BOOT wakes
+it - waking on movement then would need the IMU's INT wire.
+
+Back up the factory image before the first flash
+(`esptool.py --chip esp32s3 -p <port> -b 921600 read_flash 0 0x1000000 factory_16MB.bin`)
+and the board goes back to how it arrived with one `write_flash`. In the
+simulator, `make -C sim CYD=1` builds `fishsim-cyd` at the CYD's 320×240.
+[docs/CYD.md](docs/CYD.md) has the board, the pins and everything the port
+changed.
+
 ## Train your own
 
 The whole distillation pipeline is here. `model/gen_traces.py` runs the
@@ -596,6 +663,7 @@ seven-minute prompt check before an overnight run is always worth it.
 - [docs/AUDIO.md](docs/AUDIO.md) — the sound design: the cues, the asset pipeline, the power rules
 - [docs/memory_budget.md](docs/memory_budget.md) — flash, PSRAM, and SRAM plan
 - [docs/bringup.md](docs/bringup.md) — hardware bring-up checklist
+- [docs/CYD.md](docs/CYD.md) — the 2.8" ESP32-S3 CYD: the board, building, what the port changed, the IMU and its gestures
 
 ## Status
 

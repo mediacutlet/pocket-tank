@@ -27,6 +27,7 @@
 #include "imu_port.h"
 #include "director.h"
 #include "brightness.h"
+#include "orientation.h"
 #include "batlog.h"
 #include "codec_port.h"
 #include "progression.h"
@@ -54,7 +55,9 @@
  * be the one key the keeper ever presses - press to sleep, press to wake. */
 #define BTN_SLEEP GPIO_NUM_0
 static bool s_pmic;                        /* an AXP2101 answered: the PWR key exists, power-off is real */
-#ifdef CONFIG_POCKET_TANK_DISPLAY_SH8601
+static bool s_imu;                         /* an IMU answered: it turns the picture (and, on the CYD, the face-down gesture) */
+static bool s_sleep_by_face;               /* the next sleep was the face-down gesture: face up wakes it */
+#if defined(CONFIG_POCKET_TANK_DISPLAY_SH8601) || defined(CONFIG_POCKET_TANK_DISPLAY_ILI9341)
 extern i2c_master_bus_handle_t board_i2c_bus(void);
 #else
 static i2c_master_bus_handle_t board_i2c_bus(void) { return NULL; }
@@ -170,6 +173,16 @@ static int restore_fish(void) {
     return n;
 }
 static void enter_sleep_for(int wake_after_s) {
+    /* the face-down gesture's sleep: the IMU stays awake through the grace so
+       turning the screen up can wake the tank (the CYD, no PMIC: no rails
+       cycle around it, so the latch-up guard below has nothing to guard) */
+    bool by_face = s_sleep_by_face; s_sleep_by_face = false;
+#if CONFIG_POCKET_TANK_IMU_FACE_DOWN_SLEEP
+    /* any sleep that starts face down - the gesture's, or BOOT pressed while
+       it lies there - wakes when it is turned face up. A BOOT sleep face up
+       keeps BOOT as its only wake: "not face down" would be true at once. */
+    if (!by_face && orientation_face_sleep() && imu_port_face_down_now() == 1) by_face = true;
+#endif
     int pct0 = battery_pct(), mv0 = battery_port_vbat_mv();
     int64_t grace_us = wake_after_s > 0 ? DIRECTOR_GRACE_US : SLEEP_GRACE_US;
     ESP_LOGI(TAG, "sleep: save, panel off, %d s grace then %s | battery %d%% %d mV",
@@ -183,7 +196,7 @@ static void enter_sleep_for(int wake_after_s) {
     snapshot_fish();
     audio_port_sleep();        /* amp low, codec down, rail off - before the rails cycle */
     batlog_add(pct0, mv0, display_port_brightness(), true, "sleep");
-    imu_port_sleep();          /* quiesce BEFORE the rails cycle (latch-up guard) */
+    if (!by_face) imu_port_sleep();   /* quiesce BEFORE the rails cycle (latch-up guard) */
     display_port_sleep();
     while (!gpio_get_level(BTN_SLEEP)) vTaskDelay(pdMS_TO_TICKS(10));   /* wake triggers are level-low: never arm them held */
     vTaskDelay(pdMS_TO_TICKS(30));
@@ -209,6 +222,13 @@ static void enter_sleep_for(int wake_after_s) {
          * slice, then arm stage 2's own. */
         esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_ALL);
         if (why == ESP_SLEEP_WAKEUP_GPIO || battery_port_key_poll()) { pressed = true; break; }
+        /* a face-down sleep wakes when the screen is no longer face down -
+           turned up, or picked up. No answer from the IMU keeps it asleep:
+           a bus hiccup must not wake the tank. */
+        if (by_face && imu_port_face_down_now() == 0) {
+            ESP_LOGI(TAG, "no longer face down: waking");
+            pressed = true; break;
+        }
     }
     if (pressed) {                              /* a quick wake: resume in place */
         while (!gpio_get_level(BTN_SLEEP)) vTaskDelay(pdMS_TO_TICKS(10));   /* a BOOT wake press, still down */
@@ -224,7 +244,9 @@ static void enter_sleep_for(int wake_after_s) {
         return;
     }
     /* stage 2: the grace passed. The save (written before the grace) plus the
-       RTC clock cover the whole dark stretch at the next boot. */
+       RTC clock cover the whole dark stretch at the next boot. The IMU kept
+       awake for a face-down wake sleeps now: deep sleep cannot hear it. */
+    if (by_face) imu_port_sleep();
     if (wake_after_s <= 0 && s_pmic) {
         batlog_add(battery_pct(), battery_port_vbat_mv(), 0, true, "off");   /* mirrored to NVS: the morning reads it back */
         ESP_LOGI(TAG, "grace over: PMIC power-off (the PWR key or USB boots the tank; the night is lived through at that boot)");
@@ -412,6 +434,7 @@ static void reset_tank(void) {
     progression_reset(&tank, (uint32_t)esp_timer_get_time() ^ 0xC0FFEEu);
     notice_sync(&tank);                         /* a fresh tank has nothing to announce */
     brightness_save();                          /* the erase took the setting with it */
+    orientation_save();                         /* ... and this one */
     ESP_LOGI(TAG, "fresh tank: %s + %s, both fry", tank.fish[0].name, tank.fish[1].name);
     setup_begin(&tank);                         /* welcome, names, colours - as on a fresh install */
 }
@@ -429,7 +452,20 @@ static void tank_task(void *arg) {
         imu_port_poll(now);
         if (imu_port_moving()) audio_port_prewarm();   /* in a hand: the codec stays warm (docs/AUDIO.md) */
         if (imu_port_handled()) tank_handled(&tank);   /* ... and the light stays on (two polls of motion: a bump on the desk is not a pick-up) */
-        bool inv = imu_port_inverted();
+#if CONFIG_POCKET_TANK_IMU_FACE_DOWN_SLEEP
+        /* screen down and still for 2 s: the sleep key, if the keeper allows
+           it. Taken either way, so switching it on later fires nothing stale. */
+        if (imu_port_take_face_down() && orientation_face_sleep()) {
+            ESP_LOGI(TAG, "face down: sleeping (face up wakes it within the grace)");
+            s_sleep_by_face = true;
+            enter_sleep();
+        }
+        /* with an IMU answering, the IMU turns the picture and the settings
+           row is FACE DOWN, not SCREEN: a saved SCREEN choice is set aside */
+        bool inv = s_imu ? imu_port_inverted() : orientation_flipped();
+#else
+        bool inv = imu_port_inverted() != orientation_flipped();   /* the IMU's flip, turned again by the keeper's SCREEN choice */
+#endif
         display_port_set_inverted(inv);   /* per-frame, so a flip lands between flushes */
         touch_port_set_inverted(inv);
         touch_port_poll(&tank);
@@ -441,7 +477,9 @@ static void tank_task(void *arg) {
           if (w == SET_TAP_BRIGHT) brightness_set_level(v);
           else if (w == SET_TAP_VOLUME) { audio_port_set_volume(v); if (v) audio_port_play(SND_CONFIRM, AUDIO_PITCH_ONE); }
           else if (w == SET_TAP_LIGHT) ESP_LOGI(TAG, "settings: lights out %s", v ? "AUTO (the idle rule)" : "MANUAL (double-tap the glass)");
-          else if (w == SET_TAP_IDLE) ESP_LOGI(TAG, "settings: lights out after %d s still", v); }
+          else if (w == SET_TAP_IDLE) ESP_LOGI(TAG, "settings: lights out after %d s still", v);
+          else if (w == SET_TAP_FLIP) orientation_set(v != 0);
+          else if (w == SET_TAP_FACE) orientation_set_face_sleep(v != 0); }
         { int r = touch_port_take_shop();                               /* the shop's UNLOCK / MOVE / SELL */
           if (r >= SHOP_TAP_SELL) {                                     /* sold back: the refund, the piece gone, the row for sale again */
               int item = r - SHOP_TAP_SELL;
@@ -500,6 +538,10 @@ static void tank_task(void *arg) {
                 render_milestones(&tank, fb[cur], TANK_W);
                 sel = -1;
             } else if (touch_port_settings()) {  /* settings page: brightness + volume */
+                render_settings_set_flip(orientation_flipped());
+#if CONFIG_POCKET_TANK_IMU_FACE_DOWN_SLEEP
+                render_settings_set_imu(s_imu, orientation_face_sleep());
+#endif
                 render_settings(&tank, fb[cur], TANK_W, brightness_level(), audio_port_volume());
                 sel = -1;
             } else if (touch_port_shop()) {      /* the shop: sand dollars and what they buy */
@@ -628,6 +670,7 @@ void app_main(void) {
     { int carried = batlog_init();       /* the battery log survives every reset but a power-on */
       if (carried) ESP_LOGI(TAG, "batlog: %d samples carried through the reset (director `batlog` reads them)", carried); }
     brightness_init();
+    orientation_init();
     bat_hist_load();
     assert_plan();
     for (int i = 0; i < PLAN_FB_COUNT; i++) {
@@ -675,7 +718,7 @@ void app_main(void) {
     codec_port_init(board_i2c_bus());  /* the ES8311 fully down until a cue needs it (its digital side shares VCC3V3) */
     audio_port_init(board_i2c_bus());  /* the sound bank + player task (docs/AUDIO.md); silent without the codec */
     tank_events_set(on_tank_event, NULL);
-    imu_port_init(board_i2c_bus());   /* screen auto-flip; absent IMU = always upright */
+    s_imu = imu_port_init(board_i2c_bus());   /* screen auto-flip; absent IMU = always upright */
     director_init();                  /* serial scenario console (filming / bench) */
     /* scene-prefetch DMA: installed only AFTER the display grabbed its SPI DMA
        channel — installed earlier, async memcpy steals SPI2's GDMA trigger

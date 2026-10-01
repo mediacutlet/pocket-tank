@@ -1,4 +1,19 @@
 menu "pocket-tank"
+    choice POCKET_TANK_BOARD
+        prompt "Board"
+        default POCKET_TANK_BOARD_AMOLED18
+        help
+            Which board the firmware is built for. Selects the pins, the tank
+            size (common/tank.h) and which display / touch ports can be used.
+        config POCKET_TANK_BOARD_AMOLED18
+            bool "Waveshare ESP32-S3-Touch-AMOLED-1.8 (448x368)"
+        config POCKET_TANK_BOARD_CYD28
+            bool "2.8in ESP32-S3 CYD, ES3C28P: ILI9341 + FT6336 (320x240)"
+    endchoice
+    config POCKET_TANK_DISPLAY_ILI9341
+        bool "Drive the CYD's ILI9341 over SPI, backlight PWM on GPIO45"
+        depends on POCKET_TANK_BOARD_CYD28
+        default n
     config POCKET_TANK_DISPLAY_SH8601
         bool "Drive the Waveshare 1.8in AMOLED (SH8601 / CO5300 over QSPI)"
         default n
@@ -12,6 +27,84 @@ menu "pocket-tank"
         default n
         help
             Enable for the real board (docs/AUDIO.md). Off = stub audio port: cues compile, nothing plays.
+    config POCKET_TANK_IMU_QMI8658
+        bool "Look for a QMI8658 IMU (I2C 0x6B / 0x6A)"
+        default y
+        help
+            The AMOLED board's IMU, and the part the CYD is waiting for.
+            Probed first at boot; the screen's 180-degree flip and the
+            handling detector run on whichever enabled IMU answers.
+    config POCKET_TANK_IMU_QMI8658_UP_AXIS
+        int "QMI8658: the axis along the screen's up (0=X 1=Y 2=Z)"
+        range 0 2
+        default 1
+        depends on POCKET_TANK_IMU_QMI8658
+        help
+            The default is the AMOLED board's, calibrated 2026-08-28. A
+            QMI8658 mounted elsewhere is a bench fact: hold the board right
+            side up and run the director's `imu`.
+    config POCKET_TANK_IMU_QMI8658_UP_NEGATIVE
+        bool "QMI8658: that axis reads negative when held right side up"
+        default y
+        depends on POCKET_TANK_IMU_QMI8658
+    config POCKET_TANK_IMU_QMI8658_OUT_AXIS
+        int "QMI8658: the axis out of the glass (0=X 1=Y 2=Z)"
+        range 0 2
+        default 2
+        depends on POCKET_TANK_IMU_QMI8658
+    config POCKET_TANK_IMU_QMI8658_OUT_NEGATIVE
+        bool "QMI8658: that axis reads negative lying flat, screen up"
+        default n
+        depends on POCKET_TANK_IMU_QMI8658
+        help
+            Only the face-down gesture uses it. Not measured on the AMOLED,
+            which does not enable the gesture.
+    config POCKET_TANK_IMU_MPU6050
+        bool "Look for an MPU-6050 IMU (I2C 0x68 / 0x69)"
+        default y if POCKET_TANK_BOARD_CYD28
+        default n
+        help
+            The CYD has no IMU of its own; an MPU-6050 breakout on its I2C
+            socket stands in (docs/CYD.md). Probed after the QMI8658, so a
+            board carrying both uses the QMI8658.
+    config POCKET_TANK_IMU_MPU6050_UP_AXIS
+        int "MPU-6050: the axis along the screen's up (0=X 1=Y 2=Z)"
+        range 0 2
+        default 1
+        depends on POCKET_TANK_IMU_MPU6050
+        help
+            A bench fact, because the breakout is mounted by hand: hold the
+            board right side up and run the director's `imu`; the axis
+            carrying about 16000 counts is this one.
+    config POCKET_TANK_IMU_MPU6050_UP_NEGATIVE
+        bool "MPU-6050: that axis reads negative when held right side up"
+        default n
+        depends on POCKET_TANK_IMU_MPU6050
+    config POCKET_TANK_IMU_MPU6050_OUT_AXIS
+        int "MPU-6050: the axis out of the glass (0=X 1=Y 2=Z)"
+        range 0 2
+        default 2
+        depends on POCKET_TANK_IMU_MPU6050
+        help
+            The axis that carries gravity when the board lies flat on its
+            back. The flip ignores it: lying flat holds the last orientation.
+    config POCKET_TANK_IMU_MPU6050_OUT_NEGATIVE
+        bool "MPU-6050: that axis reads negative lying flat, screen up"
+        default n
+        depends on POCKET_TANK_IMU_MPU6050
+        help
+            Only the face-down gesture uses it: lying screen down reads the
+            other sign.
+    config POCKET_TANK_IMU_FACE_DOWN_SLEEP
+        bool "Face down sleeps the tank, face up wakes it (a settings toggle)"
+        default y if POCKET_TANK_BOARD_CYD28
+        default n
+        depends on POCKET_TANK_IMU_QMI8658 || POCKET_TANK_IMU_MPU6050
+        help
+            Screen down and still for 2 s is a short press of the sleep key;
+            turned face up within the 20-minute grace, the tank wakes in place.
+            The compact settings page's SCREEN row becomes FACE DOWN SLEEP /
+            IGNORE once an IMU answers (the IMU turns the picture itself).
     config POCKET_TANK_NO_PIE
         bool "Disable the PIE SIMD inference kernel (scalar dot products)"
         default n

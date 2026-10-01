@@ -1,30 +1,21 @@
-/* imu_port_qmi8658.c — QMI8658 6-axis IMU (I2C 0x6B, alt 0x6A) as an
- * orientation sensor: accel only at 31.25 Hz, gyro off. Polled ~4x/s from the
- * tank task; the inverted flag flips only after the gravity component along
- * the panel's landscape-vertical axis has clearly (>0.5 g) pointed the other
- * way for 3 consecutive polls, and holds its last state while the device lies
- * flat (no axis dominant), so the screen never flaps on a table. */
+/* imu_port.c — an accelerometer as an orientation sensor, and a handling
+ * detector. Accel only, polled ~4x/s from the tank task; the inverted flag
+ * flips only after the gravity component along the panel's landscape-vertical
+ * axis has clearly pointed the other way for 3 consecutive polls, and holds
+ * its last state while the device lies flat (no axis dominant), so the screen
+ * never flaps on a table.
+ *
+ * Which chip answers is decided at boot, in the order below, among the ones
+ * the build enables (Kconfig): a QMI8658 (imu_qmi8658.c), then an MPU-6050
+ * (imu_mpu6050.c). Both report counts at +-2 g, so everything here is the same
+ * for either -- see imu_chip.h. (This was imu_port_qmi8658.c, the QMI8658 and
+ * this logic in one file, until the CYD needed a second part.) */
 #include "imu_port.h"
+#include "imu_chip.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-
-/* which accel axis is "up" when the tank is held right side up. The boot log
- * prints the live vector ("imu: g=[x y z]") — if the flip is wrong or dead,
- * hold the device upright, read which axis carries ~1 g, and fix these two. */
-#define IMU_UP_AXIS 1        /* 0=X 1=Y 2=Z; calibrated 2026-08-28: upright-in-hand = -Y ~16k */
-#define IMU_UP_SIGN (-1)
-
-#define QMI8658_ADDR       0x6B
-#define QMI8658_ADDR_ALT   0x6A
-#define REG_WHO_AM_I       0x00   /* reads 0x05 */
-#define REG_CTRL1          0x02
-#define REG_CTRL2          0x03
-#define REG_CTRL7          0x08
-#define REG_RESET          0x60   /* write 0xB0 = soft reset */
-#define REG_AX_L           0x35
-#define WHO_AM_I_VAL       0x05
 
 #define POLL_INTERVAL_US   250000
 /* 2026-08-31: was 8192 (0.5 g) - that only fired within ~60 deg of vertical,
@@ -38,71 +29,67 @@
  * holding still a few hundred; a pick-up thousands. */
 #define MOTION_THRESH      220    /* ~0.013 g */
 #define IMU_MOTION_HOLD_US 1000000
+/* face down: the axis out of the glass points away from screen-up by more
+ * than half a g (the CYD's breakout reads 0.79 g there, light), while both
+ * in-screen axes stay under a third of one - lying flat, not tilted - and
+ * nothing moves, for 2 s. */
+#define FACE_THRESH        8192   /* 0.5 g */
+#define FACE_FLAT          5734   /* 0.35 g */
+#define IMU_FACE_HOLD_POLLS 8     /* 2 s at 4 Hz */
+/* still enough, for this purpose: a hand steadying the board reads 200-800
+ * a poll, which the handling detector's 220 would call moving; lifting it or
+ * carrying it reads thousands. Lying face down and level is itself most of
+ * the evidence. */
+#define FACE_STILL         1000   /* ~0.06 g */
 
 static const char *TAG = "imu";
-static i2c_master_dev_handle_t s_dev;
+/* the chip that answered, through imu_chip.h. NULL = no IMU, and every
+ * function below is a no-op. */
+static const struct imu_chip *s_chip;
 static bool s_inverted;
 static int s_streak;              /* consecutive polls voting for a flip */
 static int64_t s_next_us;
 static int16_t s_prev[3]; static bool s_have_prev;
 static int64_t s_moved_us; static int s_motion; static int16_t s_last[3];
 static int64_t s_handled_us; static bool s_prev_moved;   /* two polls in a row over the threshold */
+#if CONFIG_POCKET_TANK_IMU_FACE_DOWN_SLEEP
+static int s_face_polls;          /* consecutive still, face-down polls */
+static bool s_face_armed;         /* seen not face down since the gesture last fired */
+static bool s_face_fired;         /* the gesture, waiting to be taken */
 
-static bool wr8(uint8_t reg, uint8_t val) {
-    uint8_t buf[2] = { reg, val };
-    return i2c_master_transmit(s_dev, buf, 2, 100) == ESP_OK;
+/* the screen is facing the table: the out-of-glass axis reads the other way
+ * from screen-up, by a clear margin, and the screen lies level */
+static bool face_down(const int16_t a[3]) {
+    const int out = s_chip->out_axis, up = s_chip->up_axis, side = 3 - up - out;
+    int toward = a[out] * s_chip->out_up_sign;
+    int u = a[up] < 0 ? -a[up] : a[up], w = a[side] < 0 ? -a[side] : a[side];
+    return toward < -FACE_THRESH && u < FACE_FLAT && w < FACE_FLAT;
 }
-static bool rdn(uint8_t reg, uint8_t *val, size_t n) {
-    return i2c_master_transmit_receive(s_dev, &reg, 1, val, n, 100) == ESP_OK;
-}
+#endif
 
-/* soft reset + full config. The chip sits on an always-on rail, so it keeps
- * whatever state it fell into across reboots and reflashes - 2026-08-31 it
- * was found latched with two axes railed at full scale (garbage that only a
- * reset clears; only a full PMIC power-off ever power-cycles it). Never
- * trust its power-on state. */
-static bool imu_reset_config(void) {
-    bool rst = wr8(REG_RESET, 0xB0);
-    vTaskDelay(pdMS_TO_TICKS(25));
-    bool ok = wr8(REG_CTRL1, 0x40)   /* address auto-increment for burst reads */
-           && wr8(REG_CTRL2, 0x08)   /* accel +-2g, 31.25 Hz */
-           && wr8(REG_CTRL7, 0x01);  /* accel on, gyro off */
-    uint8_t c1 = 0xEE, c2 = 0xEE, c7 = 0xEE;   /* readback: is it even listening? */
-    rdn(REG_CTRL1, &c1, 1); rdn(REG_CTRL2, &c2, 1); rdn(REG_CTRL7, &c7, 1);
-    ESP_LOGI(TAG, "reset %s, ctrl readback 1=0x%02x 2=0x%02x 7=0x%02x (want 40/08/01)",
-             rst ? "acked" : "NACKED", c1, c2, c7);
-    return ok;
-}
-
+/* The QMI8658 first, as it always was; then the MPU-6050 (the CYD's stand-in
+ * while its QMI8658C is on the way). Each only where the build enables it. */
 bool imu_port_init(i2c_master_bus_handle_t bus) {
     if (!bus) return false;
-    uint8_t addr = QMI8658_ADDR;
-    if (i2c_master_probe(bus, addr, 50) != ESP_OK) {
-        addr = QMI8658_ADDR_ALT;
-        if (i2c_master_probe(bus, addr, 50) != ESP_OK) { ESP_LOGW(TAG, "no QMI8658"); return false; }
-    }
-    i2c_device_config_t cfg = { .dev_addr_length = I2C_ADDR_BIT_LEN_7,
-                                .device_address = addr, .scl_speed_hz = 400000 };
-    if (i2c_master_bus_add_device(bus, &cfg, &s_dev) != ESP_OK) return false;
-    uint8_t who = 0;
-    if (!rdn(REG_WHO_AM_I, &who, 1) || who != WHO_AM_I_VAL) {
-        ESP_LOGW(TAG, "QMI8658 whoami 0x%02x (want 0x05)", who);
-        s_dev = NULL; return false;
-    }
-    if (!imu_reset_config()) { ESP_LOGW(TAG, "QMI8658 config failed"); s_dev = NULL; return false; }
-    ESP_LOGI(TAG, "QMI8658 up at 0x%02x: orientation axis %c%s", addr,
-             IMU_UP_SIGN > 0 ? '+' : '-', IMU_UP_AXIS == 0 ? "X" : IMU_UP_AXIS == 1 ? "Y" : "Z");
-    return true;
+#if CONFIG_POCKET_TANK_IMU_QMI8658
+    if (!s_chip) s_chip = imu_qmi8658_probe(bus);
+#endif
+#if CONFIG_POCKET_TANK_IMU_MPU6050
+    if (!s_chip) s_chip = imu_mpu6050_probe(bus);
+#endif
+    if (!s_chip) ESP_LOGW(TAG, "no IMU answered -- the screen follows the SCREEN setting alone");
+    return s_chip != NULL;
 }
 
 void imu_port_poll(int64_t now_us) {
-    if (!s_dev || now_us < s_next_us) return;
+    if (!s_chip || now_us < s_next_us) return;
     s_next_us = now_us + POLL_INTERVAL_US;
-    uint8_t raw[6];
-    if (!rdn(REG_AX_L, raw, 6)) return;
-    int16_t a[3] = { (int16_t)(raw[0] | raw[1] << 8),
-                     (int16_t)(raw[2] | raw[3] << 8),
-                     (int16_t)(raw[4] | raw[5] << 8) };
+    int16_t a[3];
+    if (!s_chip->read_accel(a)) return;
+    /* the chip's mounting, from imu_chip.h: up along the screen, out of the
+     * glass, and the third axis the other in-screen one */
+    const int up = s_chip->up_axis, sign = s_chip->up_sign;
+    const int side = 3 - up - s_chip->out_axis;
     static int logged;
     if (logged < 3) { logged++; ESP_LOGI(TAG, "g=[%d %d %d] inverted=%d", a[0], a[1], a[2], (int)s_inverted); }
     /* handling: movement since the last poll, railed channels ignored */
@@ -120,6 +107,18 @@ void imu_port_poll(int64_t now_us) {
     }
     for (int i = 0; i < 3; i++) { s_prev[i] = a[i]; s_last[i] = a[i]; }
     s_have_prev = true;
+#if CONFIG_POCKET_TANK_IMU_FACE_DOWN_SLEEP
+    /* the face-down gesture: still and face down for 2 s, once per episode */
+    if (face_down(a) && s_motion <= FACE_STILL) {
+        if (++s_face_polls == IMU_FACE_HOLD_POLLS && s_face_armed) {
+            s_face_fired = true; s_face_armed = false;
+            ESP_LOGI(TAG, "face down and still for 2 s");
+        }
+    } else {
+        s_face_polls = 0;
+        if (!face_down(a)) s_face_armed = true;
+    }
+#endif
     /* railed axis = a channel latched at full scale. Found 2026-08-31: X and
      * Z pegged at +-32767 while Y tracked reality, with clean comms, clean
      * config readback, soft reset no help - damaged channels on the MEMS die.
@@ -129,24 +128,24 @@ void imu_port_poll(int64_t now_us) {
      * case it is recoverable stiction rather than damage). */
 #define RAILED(x) ((x) <= -32000 || (x) >= 32000)
     static int s_bad; static int64_t s_gate; static bool s_warned;
-    if (RAILED(a[IMU_UP_AXIS])) {
+    if (RAILED(a[up])) {
         if (++s_bad >= 12 && now_us > s_gate) {              /* ~3 s railed */
             ESP_LOGW(TAG, "up axis railed (g=[%d %d %d]) - soft reset", a[0], a[1], a[2]);
-            imu_reset_config();
+            s_chip->reset_config();
             s_bad = 0; s_gate = now_us + 5000000;
         }
         return;
     }
     s_bad = 0;
-    int v = a[IMU_UP_AXIS] * IMU_UP_SIGN;
+    int v = a[up] * sign;
     /* the other IN-SCREEN axis (Z is out of the glass): the up-axis must
      * carry more of gravity than it, or we are sideways/flat - hold state.
      * Skipped when that axis is railed - one good axis is enough to flip. */
-    int other = a[IMU_UP_AXIS == 0 ? 1 : 0];
+    int other = a[side];
     if (RAILED(other) && !s_warned) {
         s_warned = true;
         ESP_LOGW(TAG, "axis %c railed (sensor damage?) - flip runs on the up axis alone",
-                 IMU_UP_AXIS == 0 ? 'Y' : 'X');
+                 "XYZ"[side]);
     }
     bool dominant = RAILED(other) || (v > 0 ? v : -v) > (other > 0 ? other : -other);
     bool wants_flip = dominant && (s_inverted ? (v > FLIP_THRESH) : (v < -FLIP_THRESH));
@@ -162,14 +161,25 @@ void imu_port_last(int16_t out[3], int *motion) { for (int i = 0; i < 3; i++) ou
 bool imu_port_handled(void) { return s_handled_us && esp_timer_get_time() - s_handled_us < IMU_MOTION_HOLD_US; }
 bool imu_port_moving(void) { return s_moved_us && esp_timer_get_time() - s_moved_us < IMU_MOTION_HOLD_US; }
 int  imu_port_motion(void) { return s_motion; }
+#if CONFIG_POCKET_TANK_IMU_FACE_DOWN_SLEEP
+bool imu_port_take_face_down(void) { bool f = s_face_fired; s_face_fired = false; return f; }
+int  imu_port_face_down_now(void) {
+    int16_t a[3];
+    if (!s_chip || !s_chip->read_accel(a)) return -1;
+    return face_down(a) ? 1 : 0;
+}
+#else
+bool imu_port_take_face_down(void) { return false; }   /* the gesture is not built: never */
+int  imu_port_face_down_now(void) { return -1; }
+#endif
 
 /* drowse bracket (see imu_port.h). Sleep: sensors off, chip quiesced while
  * the neighbouring rails cycle. Wake: never trust what the chip did in the
  * dark - full soft reset + reconfigure. */
 void imu_port_sleep(void) {
-    if (s_dev) (void)wr8(REG_CTRL7, 0x00);
+    if (s_chip) s_chip->sleep();
 }
 void imu_port_wake(void) {
-    if (!s_dev) return;
-    if (!imu_reset_config()) ESP_LOGW(TAG, "wake reconfig failed");
+    if (!s_chip) return;
+    if (!s_chip->reset_config()) ESP_LOGW(TAG, "wake reconfig failed");
 }

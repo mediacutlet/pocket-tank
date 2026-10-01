@@ -18,6 +18,14 @@ bool imu_port_moving(void);
  * desk or a mug set down beside it is one spike. */
 bool imu_port_handled(void);
 int  imu_port_motion(void);                       /* last poll's movement, counts (director / tuning) */
+/* face-down gesture (2026-09-30, the CYD): true ONCE when the screen has lain
+ * face down and still for IMU_FACE_HOLD_POLLS (2 s); re-armed only after the
+ * device has been seen not face down, so waking it while it still lies there
+ * does not put it straight back to sleep. */
+bool imu_port_take_face_down(void);
+/* one fresh read, for the sleep loop with the tank task stopped: 1 = face
+ * down, 0 = not, -1 = no answer (the caller keeps sleeping). */
+int  imu_port_face_down_now(void);
 void imu_port_last(int16_t out[3], int *motion);  /* the last poll's raw sample + its movement (director `imu`) */
 /* drowse bracket: quiesce the accel before the panel/touch rails cut (a
  * powered chip beside rail transitions is the latch-up recipe that railed

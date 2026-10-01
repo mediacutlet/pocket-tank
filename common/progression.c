@@ -133,10 +133,16 @@ typedef struct {
  * tank kept since the first install updates clean (its badges stay seen and
  * the bubble column stays put). Never add a field mid-struct again. */
 #define SAVE_PRE_BUBBLE_SIZE 1432
+/* Only the AMOLED's 448 x 368 tank ever wrote that layout: the save carries the
+ * algae grid, whose size follows the tank, so a CYD save (320 x 240) is shaped
+ * differently from the first byte of the grid on and was never 1432 bytes. */
+#define SAVE_HAS_PRE_BUBBLE (TANK_W == 448 && TANK_H == 368)
+#if SAVE_HAS_PRE_BUBBLE
 _Static_assert(offsetof(save_t, ms_seen) == offsetof(save_t, bubble_x) + sizeof(float),
                "the pre-bubble migration expects the seen masks right after bubble_x");
 _Static_assert(offsetof(save_t, bubble_x) + sizeof(((save_t *)0)->ms_seen) + sizeof(uint32_t) == SAVE_PRE_BUBBLE_SIZE,
                "the pre-bubble migration expects the 1432-byte layout's masks to end at 1432");
+#endif
 
 /* ---- SAVE LAYOUT LOCK (2026-09-29): a new field goes at the END of save_t
  * with its own assert here; never edit an existing line here. ----
@@ -153,7 +159,19 @@ _Static_assert(offsetof(save_t, bubble_x) + sizeof(((save_t *)0)->ms_seen) + siz
  * 1616, 1624, 1640, 1656 - sim/testdata/saves holds them. */
 _Static_assert(SAVE_MAGIC == 0x50544b32u, "SAVE LAYOUT LOCK: a new magic = every saved tank starts fresh");
 _Static_assert(sizeof SAVE_NVS_NS == 5 && sizeof SAVE_NVS_KEY == 5, "SAVE LAYOUT LOCK: the NVS namespace / key are \"tank\" / \"save\"");
-#define SAVE_AT(f, off) _Static_assert(offsetof(save_t, f) == (off), "SAVE LAYOUT LOCK: save_t." #f " moved")
+/* Every offset below is in the AMOLED's numbering. Only the algae grid
+ * follows the tank (28 x 23 = 644 cells at 448 x 368; 20 x 15 = 300 on the
+ * CYD's 320 x 240), so on another board everything past it sits by the
+ * grids' difference: SAVE_OFF moves an offset past the AMOLED's grid end
+ * (1104) by exactly that, and the lock holds the same fields frozen on every
+ * board. It stays the identity at 448 x 368. The difference has to keep the
+ * struct's 8-byte alignment, or the tail would pad differently and no single
+ * shift would describe it. */
+#define SAVE_AMOLED_ALGAE_CELLS 644
+#define SAVE_OFF(off) ((off) < 1104 ? (off) : (off) - SAVE_AMOLED_ALGAE_CELLS + ALGAE_CELLS)
+_Static_assert((ALGAE_CELLS - SAVE_AMOLED_ALGAE_CELLS) % 8 == 0,
+               "SAVE LAYOUT LOCK: this tank's algae grid moves the tail off its 8-byte alignment");
+#define SAVE_AT(f, off) _Static_assert(offsetof(save_t, f) == SAVE_OFF(off), "SAVE LAYOUT LOCK: save_t." #f " moved")
 #define FISH_AT(f, off) _Static_assert(offsetof(fish_save_t, f) == (off), "SAVE LAYOUT LOCK: fish_save_t." #f " moved")
 FISH_AT(preset, 0); FISH_AT(stage, 1); FISH_AT(pad, 2); FISH_AT(size, 4); FISH_AT(trust, 8);
 FISH_AT(bold, 12); FISH_AT(sociable, 16); FISH_AT(bold0, 20); FISH_AT(sociable0, 24);
@@ -184,12 +202,12 @@ SAVE_AT(coral_growth, 1636);
 SAVE_AT(cluster_x, 1640); SAVE_AT(cluster_z1, 1644); SAVE_AT(cluster_scheme, 1645);                   /* reef cluster, 09-24 */
 SAVE_AT(pad_cluster, 1646); SAVE_AT(cluster_growth, 1648);
 /* (the next field: SAVE_AT(its_name, 1652 or its type's alignment past it);) */
-_Static_assert(sizeof(save_t) >= 1656, "SAVE LAYOUT LOCK: save_t only ever grows");
+_Static_assert(sizeof(save_t) >= SAVE_OFF(1656), "SAVE LAYOUT LOCK: save_t only ever grows");
 SAVE_AT(shrimp_n, 1652); SAVE_AT(shrimp_food, 1653); SAVE_AT(pad_shrimp, 1654); SAVE_AT(shrimp_cool, 1656);   /* shrimp, 09-29 */
 SAVE_AT(shrimp_eaten, 1660);
-_Static_assert(sizeof(save_t) >= 1664, "SAVE LAYOUT LOCK: save_t only ever grows");
+_Static_assert(sizeof(save_t) >= SAVE_OFF(1664), "SAVE LAYOUT LOCK: save_t only ever grows");
 SAVE_AT(saved_release, 1664);                                                                          /* release stamp, 09-29 (0.2.0) */
-_Static_assert(sizeof(save_t) >= 1672, "SAVE LAYOUT LOCK: save_t only ever grows");
+_Static_assert(sizeof(save_t) >= SAVE_OFF(1672), "SAVE LAYOUT LOCK: save_t only ever grows");
 /* (the next field after the release stamp: SAVE_AT(its_name, 1668 or its type's alignment past it);) */
 /* NVS budget: the save is one blob in the nvs partition (0x9000, 0x6000 =
  * 6 pages of 4096 B; tools/make_installer.py pins the row). A page is 126
@@ -595,7 +613,7 @@ static bool load_save(tank_t *t, int64_t *saved_unix) {
     size_t got = 0;
     bool loaded = persist_port_load(&sv, sizeof sv, &got) && got >= SAVE_CORE_SIZE && got <= sizeof sv;
     if (!loaded || sv.magic != SAVE_MAGIC || sv.n_fish < 2 || sv.n_fish > N_FISH_MAX) return false;
-    if (got == SAVE_PRE_BUBBLE_SIZE) {         /* the first public installer's layout: see SAVE_PRE_BUBBLE_SIZE */
+    if (SAVE_HAS_PRE_BUBBLE && got == SAVE_PRE_BUBBLE_SIZE) {   /* the first public installer's layout: see SAVE_PRE_BUBBLE_SIZE */
         memmove(&sv.ms_seen, &sv.bubble_x, sizeof sv.ms_seen + sizeof sv.tank_ms_seen);
         sv.bubble_x = 0;                       /* = the default column */
     }

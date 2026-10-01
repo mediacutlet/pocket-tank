@@ -52,6 +52,7 @@
 #ifndef POCKET_TANK_SETUP_H
 #define POCKET_TANK_SETUP_H
 #include "tank.h"
+#include "ui.h"
 #include <stdint.h>
 #include <stdbool.h>
 
@@ -121,54 +122,54 @@ enum { SETUP_PG_PLACE = SETUP_PG_BIRTH_END };
  * sim's selftest. The panelled pages (welcome, colours, care) sit inside the
  * bezel curve (x 32..416, y 16..342); the name page draws straight on the
  * tank. */
-#define SETUP_X 32
-#define SETUP_Y 16
-#define SETUP_W 384
-#define SETUP_H 326
-#define SETUP_BTN_W 110
-#define SETUP_BTN_H 42
-#define SETUP_BTN_Y (SETUP_Y + SETUP_H - 12 - SETUP_BTN_H)   /* welcome / care: the foot */
-#define SETUP_BACK_X (SETUP_X + 16)
-#define SETUP_NEXT_X (SETUP_X + SETUP_W - 16 - SETUP_BTN_W)
+#define SETUP_X UI(32)
+#define SETUP_Y UI(16)
+#define SETUP_W UI(384)
+#define SETUP_H UI(326)
+#define SETUP_BTN_W UI(110)
+#define SETUP_BTN_H UI(42)
+#define SETUP_BTN_Y (SETUP_Y + SETUP_H - UI(12) - SETUP_BTN_H)   /* welcome / care: the foot */
+#define SETUP_BACK_X (SETUP_X + UI(16))
+#define SETUP_NEXT_X (SETUP_X + SETUP_W - UI(16) - SETUP_BTN_W)
 #define SETUP_MID_X  (SETUP_X + (SETUP_W - SETUP_BTN_W) / 2)
-#define SETUP_TOP_BTN_W 84                                 /* name / look: the top row */
-#define SETUP_TOP_BTN_Y (SETUP_Y + 24)
-#define SETUP_TOP_BACK_X (SETUP_X + 12)
-#define SETUP_TOP_NEXT_X (SETUP_X + SETUP_W - 12 - SETUP_TOP_BTN_W)
+#define SETUP_TOP_BTN_W UI(84)                                 /* name / look: the top row */
+#define SETUP_TOP_BTN_Y (SETUP_Y + UI(24))
+#define SETUP_TOP_BACK_X (SETUP_X + UI(12))
+#define SETUP_TOP_NEXT_X (SETUP_X + SETUP_W - UI(12) - SETUP_TOP_BTN_W)
 /* the letter wheel: FISH_NAME_MAX slots of a 6x font (30 x 42 px glyphs) at
  * a 44 px pitch across the middle of the tank, chevrons 40 px above and
  * below the active one; a press in the row band picks the nearest slot, the
  * bands above / below it are the chevrons' */
-#define SETUP_SLOT_SCALE 6
-#define SETUP_SLOT_PX  44
+#define SETUP_SLOT_SCALE UI_TEXT(6)
+#define SETUP_SLOT_PX  UI(44)
 #define SETUP_SLOT_W   (5 * SETUP_SLOT_SCALE)
 #define SETUP_SLOT_H   (7 * SETUP_SLOT_SCALE)
 #define SETUP_SLOT_X   ((TANK_W - ((FISH_NAME_MAX - 1) * SETUP_SLOT_PX + SETUP_SLOT_W)) / 2)
-#define SETUP_SLOT_Y   150
-#define SETUP_ARROW_GAP 40
-#define SETUP_SPIN_PX   30                                 /* drag travel per letter */
+#define SETUP_SLOT_Y   UI(150)
+#define SETUP_ARROW_GAP UI(40)
+#define SETUP_SPIN_PX   UI(30)                                 /* drag travel per letter */
 /* the colour page (third design too): no panel, the live FRY wears the pick
  * with a ring round it; one row of 8 body swatches, 42 x 60 px at a 46 px
  * pitch, a tall band around it so a low-landing finger still hits; the
  * accent is a "?" - a fry's markings come in as it grows */
 #define SETUP_SW_N  LOOK_N
-#define SETUP_SW_PX 46
-#define SETUP_SW_W  42
-#define SETUP_SW_H  60
+#define SETUP_SW_PX UI(46)
+#define SETUP_SW_W  UI(42)
+#define SETUP_SW_H  UI(60)
 #define SETUP_SW_X  ((TANK_W - (SETUP_SW_N - 1) * SETUP_SW_PX - SETUP_SW_W) / 2)
-#define SETUP_SW_Y  176
-#define SETUP_ACC_Y 276
+#define SETUP_SW_Y  UI(176)
+#define SETUP_ACC_Y UI(276)
 /* the family page (birth flow): the portrait ringed under the name, then
  * four rows - BODY / MARKINGS (a swatch, whose it is), BOLD / SOCIAL (a bar
  * of the fry's own, the parents' ticks in their body colours) - and a
  * PARENTS legend naming both in their tick colours; BACK + DONE at the foot */
-#define SETUP_FAM_PORTRAIT_Y (SETUP_Y + 78)
-#define SETUP_FAM_ROW_Y      (SETUP_Y + 128)
-#define SETUP_FAM_ROW_DY     26
-#define SETUP_FAM_LABEL_X    (SETUP_X + 28)
-#define SETUP_FAM_VALUE_X    (SETUP_X + 150)
-#define SETUP_FAM_BAR_W      200
-#define SETUP_FAM_BAR_H      8
+#define SETUP_FAM_PORTRAIT_Y (SETUP_Y + UI(78))
+#define SETUP_FAM_ROW_Y      (SETUP_Y + UI(128))
+#define SETUP_FAM_ROW_DY     UI(26)
+#define SETUP_FAM_LABEL_X    (SETUP_X + UI(28))
+#define SETUP_FAM_VALUE_X    (SETUP_X + UI(150))
+#define SETUP_FAM_BAR_W      UI(200)
+#define SETUP_FAM_BAR_H      UI(8)
 /* the placement page's DEPTH control (second design, 2026-09-16 - Strato:
  * "initially i thought 'back' button referred to menu navigation .. the
  * z-layer targeting and buttons are a bit ambiguous"): ONE outlined bar of
@@ -180,16 +181,19 @@ enum { SETUP_PG_PLACE = SETUP_PG_BIRTH_END };
  * for ("THE FISH SWIM THROUGH IT"). DONE stays alone top right in the go
  * teal, the bar in the calm ink, so "choose" and "finish" read apart. The
  * water below SETUP_PLACE_Y is the drag zone. */
-#define SETUP_DEPTH_SEG_W  110
+#define SETUP_DEPTH_SEG_W  UI(110)
 #define SETUP_DEPTH_W      (DECOR_Z_N * SETUP_DEPTH_SEG_W)      /* the plant's three segments; the castle's two (BEHIND / IN
                                                              * FRONT, Strato: no AMONG) are centred the same way - setup.c
                                                              * sizes the bar from tank_decor_z_count */
 #define SETUP_DEPTH_X      ((TANK_W - SETUP_DEPTH_W) / 2)
-#define SETUP_DEPTH_Y      (SETUP_TOP_BTN_Y + SETUP_BTN_H + 24)
-#define SETUP_DEPTH_H      70
-#define SETUP_DEPTH_TILE_H 40
-#define SETUP_DEPTH_HINT_Y (SETUP_DEPTH_Y + SETUP_DEPTH_H + 8)
-#define SETUP_PLACE_Y      (SETUP_DEPTH_HINT_Y + 20)
+#define SETUP_DEPTH_Y      (SETUP_TOP_BTN_Y + SETUP_BTN_H + UI(24))
+/* the tile holds pixel-art glyphs (the castle is 31 px, the coral 28) that
+ * do not scale, so it never gets shorter than 34 px; the bar is the tile and
+ * the word under it */
+#define SETUP_DEPTH_TILE_H (UI(40) < 34 ? 34 : UI(40))
+#define SETUP_DEPTH_H      (SETUP_DEPTH_TILE_H + UI(30))
+#define SETUP_DEPTH_HINT_Y (SETUP_DEPTH_Y + SETUP_DEPTH_H + UI(8))
+#define SETUP_PLACE_Y      (SETUP_DEPTH_HINT_Y + UI(20))
 /* the coral's placement page (2026-09-23) trades the hint line for a COLOR
  * row: CORAL_N swatches at the colour page's pitch, shorter (42 x 26), the
  * chosen one ringed; the coral on the floor below wears the pick at once.
@@ -197,23 +201,23 @@ enum { SETUP_PG_PLACE = SETUP_PG_BIRTH_END };
 #define SETUP_COL_N   CORAL_N
 #define SETUP_COL_PX  SETUP_SW_PX
 #define SETUP_COL_W   SETUP_SW_W
-#define SETUP_COL_H   26
+#define SETUP_COL_H   UI(26)
 #define SETUP_COL_X   ((TANK_W - (SETUP_COL_N - 1) * SETUP_COL_PX - SETUP_COL_W) / 2)
-#define SETUP_COL_Y   (SETUP_DEPTH_Y + SETUP_DEPTH_H + 22)
-#define SETUP_PLACE_CORAL_Y (SETUP_COL_Y + SETUP_COL_H + 8)
+#define SETUP_COL_Y   (SETUP_DEPTH_Y + SETUP_DEPTH_H + UI(22))
+#define SETUP_PLACE_CORAL_Y (SETUP_COL_Y + SETUP_COL_H + UI(8))
 /* the reef cluster's page (2026-09-24): a LOOK row of CLUSTER_SCHEME_N tiles
  * in the COLOR row's place, each three bands (the coral, the tubes, the
  * brain) over the look's name; SETUP_HIT_COLOR0 + i picks it */
 #define SETUP_LOOK_N   CLUSTER_SCHEME_N
-#define SETUP_LOOK_W   110
-#define SETUP_LOOK_PX  118
-#define SETUP_LOOK_H   36
+#define SETUP_LOOK_W   UI(110)
+#define SETUP_LOOK_PX  UI(118)
+#define SETUP_LOOK_H   UI(36)
 #define SETUP_LOOK_X   ((TANK_W - (SETUP_LOOK_N - 1) * SETUP_LOOK_PX - SETUP_LOOK_W) / 2)
 #define SETUP_LOOK_Y   SETUP_COL_Y
-#define SETUP_PLACE_CLUSTER_Y (SETUP_LOOK_Y + SETUP_LOOK_H + 8)
+#define SETUP_PLACE_CLUSTER_Y (SETUP_LOOK_Y + SETUP_LOOK_H + UI(8))
 /* the stage: the clear spot each page leaves for the fish being edited
  * (tank_t.stage_*), top centre between the buttons */
 #define SETUP_STAGE_X   (TANK_W / 2)
-#define SETUP_STAGE_NAME_Y 94
-#define SETUP_STAGE_LOOK_Y 112
+#define SETUP_STAGE_NAME_Y UI(94)
+#define SETUP_STAGE_LOOK_Y UI(112)
 #endif

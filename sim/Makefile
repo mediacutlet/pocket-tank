@@ -1,26 +1,21 @@
-# pocket-tank PC simulator (LVGL v9 + SDL2)
+# pocket-tank PC simulator (SDL3)
 #
-# macOS: built as x86_64 by default because the Homebrew SDL2 here is the
-# Intel build (/usr/local); the sim runs fine under Rosetta. `make ARCH=` for
-# a native build against an arm64 SDL2. Elsewhere (Linux, CI) ARCH is empty
-# and the host compiler's own architecture is used.
+# Builds for the host compiler's architecture (Apple Silicon on a current
+# Mac). Against an Intel Homebrew SDL3 (/usr/local) on Apple Silicon:
+# `make ARCH="-arch x86_64"`, run under Rosetta.
 
 CC      := cc
-ifeq ($(shell uname -s),Darwin)
-ARCH    ?= -arch x86_64
-endif
 ARCH    ?=
-SDL_CFLAGS := $(shell sdl2-config --cflags)
-SDL_LIBS   := $(shell sdl2-config --libs)
+SDL_CFLAGS := $(shell pkg-config --cflags sdl3)
+SDL_LIBS   := $(shell pkg-config --libs sdl3)
 
-CFLAGS  := -O2 -std=c11 $(ARCH) -I. -I../common -I../common/llm -DLV_CONF_INCLUDE_SIMPLE -DSOUNDS_BIN='"../assets/sounds/sounds.bin"' -DPT_VERSION='"$(shell git describe --always --dirty --exclude='*' 2>/dev/null || echo sim)"' $(SDL_CFLAGS) \
+CFLAGS  := -O2 -std=c11 $(ARCH) -I. -I../common -I../common/llm -DSOUNDS_BIN='"../assets/sounds/sounds.bin"' -DPT_VERSION='"$(shell git describe --always --dirty --exclude='*' 2>/dev/null || echo sim)"' $(SDL_CFLAGS) \
            -Wall -Wextra -Wno-unused-parameter -MMD -MP
 LDFLAGS := $(ARCH) $(SDL_LIBS) -lm
 
 APP_SRCS  := main.c advisor_llm.c persist_port_sim.c ../common/tank.c ../common/advisor.c ../common/render.c ../common/icons.c ../common/progression.c ../common/setup.c ../common/audio.c ../common/notice.c ../common/sounds.c ../common/battery.c ../common/llm/q4_model.c ../common/llm/word_tok.c ../common/llm/advisor_core.c
 
-LVGL_SRCS := $(shell find lvgl/src -name '*.c')
-OBJS      := $(patsubst %.c,build/%.o,$(filter-out ../common/%,$(APP_SRCS)) $(LVGL_SRCS)) $(patsubst ../common/%.c,build/common/%.o,$(filter ../common/%,$(APP_SRCS)))
+OBJS      := $(patsubst %.c,build/%.o,$(filter-out ../common/%,$(APP_SRCS))) $(patsubst ../common/%.c,build/common/%.o,$(filter ../common/%,$(APP_SRCS)))
 
 fishsim: $(OBJS)
 	$(CC) -o $@ $(OBJS) $(LDFLAGS)

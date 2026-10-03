@@ -408,20 +408,18 @@ twenty seconds of silence keep everything.
 
 ## Try it: PC simulator
 
-The simulator runs the exact same `common/` code inside an LVGL + SDL2
-window, with the shipped model as the brain. Needs SDL2 and LVGL v9 (cloned
-in-tree):
+The simulator runs the exact same `common/` code inside an SDL3 window, with
+the shipped model as the brain. Needs SDL3:
 
 ```bash
 git clone https://github.com/mediacutlet/pocket-tank.git
 cd pocket-tank
-git clone --depth 1 --branch v9.2.2 https://github.com/lvgl/lvgl.git sim/lvgl
-brew install sdl2        # macOS; apt install libsdl2-dev on Linux
+brew install sdl3        # macOS; apt install libsdl3-dev on Linux
 cd sim && make && ./fishsim
 ```
 
-On macOS the Makefile targets x86_64 by default to match an Intel Homebrew
-SDL2; use `make ARCH=` for a native build. On Linux it builds for the host.
+The Makefile builds for the host (Apple Silicon on a current Mac); with an
+Intel Homebrew SDL3 on Apple Silicon, use `make ARCH="-arch x86_64"`.
 The trained model
 (`model/out/model_q4.bin` + `tokenizer.bin`) ships in the repo, so the LLM
 brain works out of the box.
@@ -567,7 +565,7 @@ seven-minute prompt check before an overnight run is always worth it.
   `icons.c` (baked pixel art), `audio.c` (the sound mixer), `notice.c` (the
   milestone and low-battery announcements), `llm/` (4-bit engine, word
   tokenizer, the shared encoder)
-- `sim/` — the LVGL + SDL2 simulator, its persistence port, and the self-tests
+- `sim/` — the SDL3 simulator, its persistence port, and the self-tests
 - `firmware/` — ESP-IDF app: display, touch, battery, IMU, RTC and audio
   ports for the Waveshare board, the on-device advisor scheduler, the QEMU
   harness, and the partition table
@@ -648,5 +646,5 @@ first boot on real glass, and the tank growing into a pet.
 
 ## License
 
-MIT, see [LICENSE](LICENSE). `model/llama2.c/` and `sim/lvgl/` are cloned
-separately and carry their own MIT licenses.
+MIT, see [LICENSE](LICENSE). `model/llama2.c/` is cloned
+separately and carries its own MIT license.

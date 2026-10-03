@@ -1,4 +1,4 @@
-/* main.c — PC simulator entry: LVGL v9 + SDL window, 448x368 to match the
+/* main.c — PC simulator entry: an SDL3 window, 448x368 to match the
  * ESP32 AMOLED (landscape). This is the only platform-specific file; tank.c,
  * advisor.c and render.c compile unchanged for firmware.
  *
@@ -1356,17 +1356,16 @@ static int selftest_tend(void) {
     return 0;
 }
 
-/* ---------- LVGL + SDL ---------- */
-#include "lvgl/lvgl.h"
-#include <SDL2/SDL.h>
+/* ---------- SDL ---------- */
+#include <SDL3/SDL.h>
 
-static lv_draw_buf_t draw_buf;
 static uint16_t canvas_buf[TANK_W * TANK_H];
 static uint16_t scene_buf[TANK_W * TANK_H];
 static uint8_t  vig_buf[TANK_W * TANK_H];     /* vignette LUT, as on the device */
 static uint16_t card_buf[RENDER_CARD_W * RENDER_CARD_H];   /* stats card cache, as on the device */
 static uint32_t dirty_buf[RENDER_DIRTY_WORDS];
-static lv_obj_t *canvas;
+static SDL_Renderer *s_ren;
+static SDL_Texture  *s_tex;         /* canvas_buf, scaled to the window */
 static uint32_t last_ms;
 static bool llm_available = false;
 static bool llm_active = false;
@@ -1398,19 +1397,25 @@ static bool sim_pill_up(void) {
             (bat_popup_ms && SDL_GetTicks() - bat_popup_ms < BAT_POPUP_S * 1000));
 }
 
-static uint32_t tick_cb(void) { return SDL_GetTicks(); }
-
 /* ---- sound (docs/AUDIO.md): the mixer in common/audio.c fed by an SDL
  * callback; the tank's events and the notice queue become cues here, the
  * same way the device's audio port does it ---- */
-static SDL_AudioDeviceID s_adev;
+static SDL_AudioStream *s_adev;
 static int16_t *s_bank;
 static bool s_loop_on;               /* bubbles_loop running (the setup's bubble page) */
 static int  s_prev_sel = -1;
-static void audio_cb(void *ud, Uint8 *stream, int len) { (void)ud; audio_render((int16_t *)stream, len / 2); }
+static void audio_cb(void *ud, SDL_AudioStream *st, int need, int total) {   /* runs with the stream locked */
+    (void)ud; (void)total;
+    int16_t buf[512];
+    for (int n = need / 2; n > 0; n -= 512) {
+        int c = n < 512 ? n : 512;
+        audio_render(buf, c);
+        SDL_PutAudioStreamData(st, buf, c * 2);
+    }
+}
 static void snd(int cue, int pitch_q8) {
     if (!s_adev) return;
-    SDL_LockAudioDevice(s_adev); audio_play(cue, pitch_q8, SDL_GetTicks()); SDL_UnlockAudioDevice(s_adev);
+    SDL_LockAudioStream(s_adev); audio_play(cue, pitch_q8, SDL_GetTicks()); SDL_UnlockAudioStream(s_adev);
 }
 static int stage_pitch(int fish) {   /* fry high, elder low */
     if (fish < 0 || fish >= tank.n_fish) return AUDIO_PITCH_ONE;
@@ -1443,14 +1448,14 @@ static void sound_init(void) {
     size_t got = s_bank ? fread(s_bank, 1, SND_BANK_BYTES, f) : 0; fclose(f);
     if (got != SND_BANK_BYTES) { printf("sound: bank is %zu bytes, sounds.h says %u - rebuild (tools/make_sounds.py build)\n", got, (unsigned)SND_BANK_BYTES); free(s_bank); s_bank = NULL; return; }
     audio_init(s_bank, SND_BANK_SAMPLES);
-    if (SDL_InitSubSystem(SDL_INIT_AUDIO) != 0) { printf("sound: SDL audio init failed: %s\n", SDL_GetError()); return; }   /* LVGL brings up video later */
-    SDL_AudioSpec want = { 0 }, have;
-    want.freq = SND_RATE; want.format = AUDIO_S16SYS; want.channels = 1; want.samples = 256; want.callback = audio_cb;
-    s_adev = SDL_OpenAudioDevice(NULL, 0, &want, &have, 0);
+    SDL_SetHint(SDL_HINT_AUDIO_DEVICE_SAMPLE_FRAMES, "256");   /* a tap's click lands with the tap */
+    if (!SDL_InitSubSystem(SDL_INIT_AUDIO)) { printf("sound: SDL audio init failed: %s\n", SDL_GetError()); return; }
+    const SDL_AudioSpec spec = { SDL_AUDIO_S16, 1, SND_RATE };
+    s_adev = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &spec, audio_cb, NULL);
     if (!s_adev) { printf("sound: SDL audio failed: %s\n", SDL_GetError()); return; }
-    SDL_PauseAudioDevice(s_adev, 0);
+    SDL_ResumeAudioStreamDevice(s_adev);
     tank_events_set(on_tank_event, NULL);
-    printf("sound: %u cues, %u KB bank, %d Hz (V cycles the volume)\n", (unsigned)SND_COUNT, (unsigned)(SND_BANK_BYTES / 1024), have.freq);
+    printf("sound: %u cues, %u KB bank, %d Hz (V cycles the volume)\n", (unsigned)SND_COUNT, (unsigned)(SND_BANK_BYTES / 1024), SND_RATE);
 }
 /* per frame: the notice queue, the bubble loop, the card cue, night */
 static void sound_frame(uint32_t now, float dt) {
@@ -1459,15 +1464,15 @@ static void sound_frame(uint32_t now, float dt) {
     if (cue >= 0) snd(cue, AUDIO_PITCH_ONE);
     bool loop = setup_active() && !setup_is_birth() && setup_page() == SETUP_PG_BUBBLES;
     if (loop != s_loop_on && s_adev) {
-        SDL_LockAudioDevice(s_adev);
+        SDL_LockAudioStream(s_adev);
         if (loop) audio_play(SND_BUBBLES_LOOP, AUDIO_PITCH_ONE, now); else audio_stop(SND_BUBBLES_LOOP);
-        SDL_UnlockAudioDevice(s_adev);
+        SDL_UnlockAudioStream(s_adev);
         s_loop_on = loop;
     }
     if (selected_fish >= 0 && s_prev_sel < 0) snd(SND_CARD_OPEN, AUDIO_PITCH_ONE);
     if (selected_fish < 0 && s_prev_sel >= 0) snd(SND_CARD_CLOSE, AUDIO_PITCH_ONE);
     s_prev_sel = selected_fish;
-    if (s_adev) { SDL_LockAudioDevice(s_adev); audio_set_night(tank.night); SDL_UnlockAudioDevice(s_adev); }
+    if (s_adev) { SDL_LockAudioStream(s_adev); audio_set_night(tank.night); SDL_UnlockAudioStream(s_adev); }
 }
 
 /* brain indicator, top-right: teal square = rules, amber = LLM */
@@ -1478,8 +1483,7 @@ static void draw_brain_dot(void) {
             canvas_buf[y * TANK_W + x] = col;
 }
 
-static void frame_cb(lv_timer_t *timer) {
-    (void)timer;
+static void frame_cb(void) {
     uint32_t now = SDL_GetTicks();
     float dt = (now - last_ms) / 1000.0f;
     last_ms = now;
@@ -1525,7 +1529,10 @@ static void frame_cb(lv_timer_t *timer) {
     }
     if (setup_active()) render_setup(&tank, canvas_buf, TANK_W, tank.clock);
     if (confirm_view) render_confirm_reset(canvas_buf, TANK_W, 1.0f - (SDL_GetTicks() - confirm_ms) / (float)CONFIRM_MS);
-    lv_obj_invalidate(canvas);
+    SDL_UpdateTexture(s_tex, NULL, canvas_buf, TANK_W * 2);
+    SDL_RenderClear(s_ren);                      /* the letterbox bars */
+    SDL_RenderTexture(s_ren, s_tex, NULL, NULL);
+    SDL_RenderPresent(s_ren);
 }
 
 /* headless check of the LLM advisor path: encode → infer → goals applied.
@@ -2956,23 +2963,21 @@ int main(int argc, char **argv) {
     printf(llm_available
            ? "LLM advisor loaded (press L to toggle rule/LLM brain)\n"
            : "model.bin/tokenizer.bin not found; rule brain only\n");
-    lv_init();
-    lv_tick_set_cb(tick_cb);
-    lv_display_t *disp = lv_sdl_window_create(TANK_W, TANK_H);
-    lv_sdl_window_set_title(disp, "pocket-tank sim 448x368");
-
-    lv_draw_buf_init(&draw_buf, TANK_W, TANK_H, LV_COLOR_FORMAT_RGB565,
-                     TANK_W * 2, canvas_buf, sizeof(canvas_buf));
-    canvas = lv_canvas_create(lv_screen_active());
-    lv_canvas_set_draw_buf(canvas, &draw_buf);
-    lv_obj_center(canvas);
+    SDL_Window *win;
+    if (!SDL_Init(SDL_INIT_VIDEO) ||
+        !SDL_CreateWindowAndRenderer("pocket-tank sim 448x368", TANK_W, TANK_H, SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY, &win, &s_ren) ||
+        !(s_tex = SDL_CreateTexture(s_ren, SDL_PIXELFORMAT_RGB565, SDL_TEXTUREACCESS_STREAMING, TANK_W, TANK_H))) {
+        printf("SDL video failed: %s\n", SDL_GetError());
+        return 1;
+    }
+    SDL_SetRenderLogicalPresentation(s_ren, TANK_W, TANK_H, SDL_LOGICAL_PRESENTATION_LETTERBOX);   /* resize the window: the tank scales, pixels stay crisp */
+    SDL_SetTextureScaleMode(s_tex, SDL_SCALEMODE_NEAREST);
     render_set_scene_cache(scene_buf);
     render_set_vignette_cache(vig_buf);
     render_set_card_cache(card_buf);
     render_set_dirty_mask(dirty_buf);
 
     last_ms = SDL_GetTicks();
-    lv_timer_create(frame_cb, 16, NULL);
 
     bool fdown = false, ndown = false, ldown = false;
     bool udown = false, mdown = false, mkdown = false, rdown = false, zdown = false, gdown = false, xdown = false, sdown = false, vdown = false, bdown = false, fourdown = false, ddown = false;
@@ -2986,10 +2991,16 @@ int main(int argc, char **argv) {
     uint32_t press_ms = 0; int press_x = 0, press_y = 0;
     float press_fx[N_FISH_MAX] = {0}, press_fy[N_FISH_MAX] = {0};
     while (1) {
-        uint32_t wait = lv_timer_handler();
-        const Uint8 *k = SDL_GetKeyboardState(NULL);
-        int mx, my;
-        bool mpress = SDL_GetMouseState(&mx, &my) & SDL_BUTTON(SDL_BUTTON_LEFT);
+        bool quit = false;                          /* the window's close button: as Q */
+        for (SDL_Event ev; SDL_PollEvent(&ev); ) quit |= ev.type == SDL_EVENT_QUIT;
+        uint32_t since = (uint32_t)SDL_GetTicks() - last_ms;   /* a frame every 16 ms (frame_cb stamps last_ms) */
+        if (since >= 16) { frame_cb(); since = 0; }
+        uint32_t wait = 16 - since;
+        const bool *k = SDL_GetKeyboardState(NULL);
+        float fmx, fmy;
+        bool mpress = SDL_GetMouseState(&fmx, &fmy) & SDL_BUTTON_LMASK;
+        SDL_RenderCoordinatesFromWindow(s_ren, fmx, fmy, &fmx, &fmy);   /* window -> tank pixels */
+        int mx = (int)fmx, my = (int)fmy;
         { static int lmx = -1, lmy = -1;            /* a hand near the tank: the mouse moving over the window */
           if (mx != lmx || my != lmy || mpress || k[SDL_SCANCODE_H]) tank_handled(&tank);
           lmx = mx; lmy = my; }
@@ -3017,7 +3028,7 @@ int main(int argc, char **argv) {
             int v = 0, r = render_settings_touch(&tank, (float)mx, (float)my, mpress, &v);
             if (r == SET_TAP_CLOSE) { settings_view = false; milestones_view = true; ms_back = true; }   /* back to the milestones page */
             else if (r == SET_TAP_BRIGHT) sim_bright = v;
-            else if (r == SET_TAP_VOLUME) { if (s_adev) { SDL_LockAudioDevice(s_adev); audio_set_volume(v); SDL_UnlockAudioDevice(s_adev); } if (v) snd(SND_CONFIRM, AUDIO_PITCH_ONE);
+            else if (r == SET_TAP_VOLUME) { if (s_adev) { SDL_LockAudioStream(s_adev); audio_set_volume(v); SDL_UnlockAudioStream(s_adev); } if (v) snd(SND_CONFIRM, AUDIO_PITCH_ONE);
                                             printf("volume: %s\n", v == 0 ? "off" : v == 1 ? "quiet" : "normal"); }
             else if (r == SET_TAP_LIGHT) printf("lights out: %s\n", v ? "AUTO (the idle rule)" : "MANUAL (double-tap the glass, the default)");
             else if (r == SET_TAP_IDLE) printf("lights out after %d s still\n", v);
@@ -3116,7 +3127,7 @@ int main(int argc, char **argv) {
             else { setup_begin(&tank); selected_fish = -1; milestones_view = false; printf("setup: welcome page (click through; BEGIN saves)\n"); }
         }
         sdown = k[SDL_SCANCODE_S];
-        if (k[SDL_SCANCODE_V] && !vdown) { int v = (audio_volume() + 1) % 3; if (s_adev) { SDL_LockAudioDevice(s_adev); audio_set_volume(v); SDL_UnlockAudioDevice(s_adev); }
+        if (k[SDL_SCANCODE_V] && !vdown) { int v = (audio_volume() + 1) % 3; if (s_adev) { SDL_LockAudioStream(s_adev); audio_set_volume(v); SDL_UnlockAudioStream(s_adev); }
                                            printf("volume: %s\n", v == 0 ? "off" : v == 1 ? "quiet" : "normal"); }
         vdown = k[SDL_SCANCODE_V];
         if (k[SDL_SCANCODE_B] && !bdown) { notice_low_battery(); printf("low battery notice queued\n"); }
@@ -3201,7 +3212,7 @@ int main(int argc, char **argv) {
                    tank.veg_growth[0], tank.veg_growth[1], tank.veg_growth[2]);
         }
         gdown = k[SDL_SCANCODE_G];
-        if (k[SDL_SCANCODE_Q] || k[SDL_SCANCODE_ESCAPE]) { progression_save(&tank); break; }
+        if (k[SDL_SCANCODE_Q] || k[SDL_SCANCODE_ESCAPE] || quit) { progression_save(&tank); break; }
         if (k[SDL_SCANCODE_F] && !fdown) tank_feed(&tank, (float)mx, 3);
         if (k[SDL_SCANCODE_N] && !ndown) tank_toggle_light(&tank);
         if (k[SDL_SCANCODE_A]) tank_light_auto(&tank);

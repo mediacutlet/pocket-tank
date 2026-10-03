@@ -224,8 +224,8 @@ void audio_port_sleep(void);                          // amp low, codec down, AL
   button opens it), by the director (`snd off|quiet|normal`), or the sim's
   V key. Picking QUIET or NORMAL plays the confirm cue at that level. Director: `snd <id>`, `snd off`,
   `snd list` for b-roll; the existing `codec` dump stays.
-- **Sim parity:** `sim/` gets the same `audio_port.h` on SDL2 audio
-  (`SDL_QueueAudio`, 16 kHz s16). Same bank, same mixer code in `common/`
+- **Sim parity:** `sim/` gets the same `audio_port.h` on an SDL3 audio
+  stream (a pull callback, 16 kHz s16). Same bank, same mixer code in `common/`
   so pitch and cooldown behave identically on the desk and on the device.
 - **Host tests:** the mixer and rate limiter are pure C in `common/`;
   `host_test/` gets cases for cooldown, clipping and the fade.

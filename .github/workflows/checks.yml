@@ -10,14 +10,13 @@ permissions:
 
 jobs:
   host-tests:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04   # the first Ubuntu runner with libsdl3-dev
     steps:
       - uses: actions/checkout@v4
       - name: Install simulator dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libsdl2-dev
-          git clone --depth 1 --branch v9.2.2 https://github.com/lvgl/lvgl.git sim/lvgl
+          sudo apt-get install -y libsdl3-dev
       - name: Build and test the simulator
         run: make -C sim -j"$(nproc)" check
       - name: Test the audio mixer

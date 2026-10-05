@@ -81,7 +81,9 @@ int  net_port_fail_reason(void);
 const char *update_message_title(void);
 
 /* ---- the UPDATES page in the tank ---- */
-enum { UPD_TAP_NONE = 0, UPD_TAP_CLOSE, UPD_TAP_CHECK, UPD_TAP_FORGET };
+enum { UPD_TAP_NONE = 0, UPD_TAP_CLOSE, UPD_TAP_CHECK, UPD_TAP_FORGET,
+       UPD_TAP_BACKUPS };       /* the SD BACKUPS button (2026-10-04): only where the platform has a card slot */
+extern bool update_backups_button;   /* the platform sets it (the 2.16's microSD): the page shows SD BACKUPS */
 void render_updates_page(uint16_t *fb, int stride);
 int  updates_page_tap(float x, float y);                    /* the bare hit test */
 int  updates_page_touch(float x, float y, bool down);       /* every frame: UPD_TAP_* on a tap's release; FORGET is applied here */
@@ -97,6 +99,8 @@ int  updates_page_touch(float x, float y, bool down);       /* every frame: UPD_
 #define UPD_FORGET_Y  264
 #define UPD_FORGET_W  212
 #define UPD_FORGET_H  34
+#define UPD_BAK_X     (UPD_FORGET_X + UPD_FORGET_W + 16)   /* SD BACKUPS: FORGET's row, to its right */
+#define UPD_BAK_W     (UPD_PANEL_W + 32 - UPD_BAK_X)
 #define UPD_CLOSE_X   (PAGE_BOWL ? 296 : 324)   /* the settings page's CLOSE, same place (in from the glass on the bowl) */
 #define UPD_CLOSE_Y   (PAGE_BOWL ? 318 : 312)
 #define UPD_CLOSE_W   92

@@ -25,6 +25,17 @@ menu "pocket-tank"
             watch, on its side and centred in the glass. Build it with
             SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.watch" into its
             own build directory and sdkconfig (docs/board-amoled-2.06-watch.md).
+    config POCKET_TANK_SQ216
+        bool "The 2.16 build: a 480x480 SQUARE tank for the Waveshare ESP32-S3-Touch-AMOLED-2.16"
+        default n
+        depends on !POCKET_TANK_ROUND && !POCKET_TANK_WATCH
+        help
+            The 1.75C's hardware family (CO5300, CST92xx touch, ES7210, GPIO
+            resets) on a 480 px SQUARE panel: TANK_SQUARE, the rectangle's
+            world a size up, the panel px for px (the pages stay 448x368,
+            centred). Build it with
+            SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.sq216" into its
+            own build directory and sdkconfig.
     config POCKET_TANK_TOUCH_FT3168
         bool "Read the FT3168 capacitive touch (taps / holds)"
         default n

@@ -19,10 +19,16 @@
 
 #include <stdbool.h>
 #include <stdint.h>
+#include "lang.h"
 
 #ifdef TANK_ROUND               /* the round 466 px glass (Waveshare 1.75C, 2026-10-01): the frame is the square around a bowl */
 #define TANK_W 466
 #define TANK_H 466
+#endif
+#ifdef TANK_SQUARE              /* the 2.16 (Waveshare ESP32-S3-Touch-AMOLED-2.16, 2026-10-04): its 480 x 480 square glass,
+                                 * the rectangle's world a size up - the pages stay 448 x 368, centred */
+#define TANK_W 480
+#define TANK_H 480
 #endif
 #ifdef TANK_WATCH               /* the watch (Waveshare 2.06, 2026-10-02): its 410 x 502 glass as it is worn - a PORTRAIT tank
                                  * (Strato, with the first landscape picture on his wrist: "I have to turn my head") */
@@ -146,6 +152,10 @@ typedef enum { VEG_KIND_GRASS, VEG_KIND_SWORD } veg_kind_t;
 #define ALGAE_CELL 18
 #define ALGAE_COLS 23
 #define ALGAE_ROWS 28
+#elif defined(TANK_SQUARE)                     /* the 2.16: 24 x 24 cells of 20 px - 576, inside the 644 the save keeps */
+#define ALGAE_CELL 20
+#define ALGAE_COLS 24
+#define ALGAE_ROWS 24
 #else
 #define ALGAE_CELL 16                          /* px per glass-film grid cell */
 #define ALGAE_COLS (TANK_W / ALGAE_CELL)       /* 28 */
@@ -159,6 +169,8 @@ typedef enum { VEG_KIND_GRASS, VEG_KIND_SWORD } veg_kind_t;
  * 1.8's pitch on every build (VEG_PAY_PX): the same cut, the same sand dollars. */
 #ifdef TANK_WATCH
 #define VEG_SEG_PX 4.3f
+#elif defined(TANK_SQUARE)                     /* 112 px taller than the 1.8: the tip at ~16 from y 464 */
+#define VEG_SEG_PX 4.2f
 #else
 #define VEG_SEG_PX 3.2f
 #endif
@@ -362,6 +374,7 @@ typedef struct tank {
     bool     light_tip_seen;       /* a double-tap has turned the light off once: its notice (notice.h
                                     * NOTICE_LIGHTS_OUT) came up then, and never again (saved) */
     bool     screen_turned;        /* a worn tank (TANK_WORN): settings SCREEN = TURNED (saved) */
+    uint8_t  lang;                 /* the keeper's language, LANG_EN / LANG_ES (lang.h; saved, kept through a reset) */
     bool     light_override;       /* director / sim took manual control of the light.
                                     * Not saved (a saved override once froze a tank in
                                     * permanent day and starved a milestone). */
@@ -861,8 +874,9 @@ float    tank_coral_growth(const tank_t *t);      /* CORAL_START..CORAL_FULL (CO
 #define CLUSTER_SIZE_MIN  0.85f            /* its size on the day it is bought, of the full */
 #define CLUSTER_GROW_S    (14.0f * 86400.0f) /* two weeks to full size, two more for every tentacle */
 #define CLUSTER_SCHEME_N  3
-typedef struct { const char *name; uint32_t coral, tube, brain; } cluster_scheme_t;
+typedef struct { const char *name[LANG_N]; uint32_t coral, tube, brain; } cluster_scheme_t;   /* name: [LANG_EN] / [LANG_ES] */
 extern const cluster_scheme_t CLUSTER_SCHEMES[CLUSTER_SCHEME_N];
+const char *tank_cluster_scheme_name(int i);    /* look i's name in the keeper's language (pt_lang) */
 float    tank_cluster_growth(const tank_t *t);    /* CLUSTER_START..CLUSTER_FULL (CLUSTER_FULL when unset) */
 int      tank_cluster_scheme(const tank_t *t);    /* 0..CLUSTER_SCHEME_N-1 */
 void     tank_cluster_set_scheme(tank_t *t, int i);

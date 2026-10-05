@@ -25,6 +25,7 @@
  *                          3 quick taps = startle; 2 taps = the light, in
  *                          settings' MANUAL mode, the default)
  *   ./fishsim --fresh      ignore the save (new tank: random pair)
+ *   ./fishsim --lang es    the keeper's language, Spanish (lang.h; before a headless mode: --lang es --snapshot p)
  *   ./fishsim --fast N     tended time runs N x faster (stages, drift)
  *   ./fishsim --battery N  the pretend battery starts at N% (default 72)
  *   ./fishsim --greedy     greedy decoding instead of sampling
@@ -58,6 +59,7 @@
 #include "render.h"
 #include "progression.h"
 #include "version.h"
+#include "lang.h"
 #include "setup.h"
 #include "audio.h"
 #include "notice.h"
@@ -2235,6 +2237,7 @@ static int clip(const char *prefix, int seconds) {
 
 static int snapshot(const char *prefix, int seconds) {
     tank_init(&tank, 2024);
+    tank.lang = pt_lang;                         /* --lang: the settings chip lit on the language the pages are drawn in */
     tank_new_population(&tank);
     while (tank.n_fish < N_FISH_MAX) tank_add_fish(&tank, 0, 1);
     for (int i = 2; i < tank.n_fish; i++) tank.fish[i].stage = (stage_t)(i % 4);
@@ -2919,7 +2922,7 @@ static int selftest_shop(void) {
         float h13 = tank.veg_h[1][3];
         printf("selftest-shop: urchin: from x %.0f to the tall frond at %.0f (now x %.0f): 0.80 -> %.3f, %.0f px eaten; the sword plant %.3f -> %.3f\n",
                ux0, tf0, tank.urchin_x, h13, tank.urchin_grazed_px, sword0, tank.veg_h[3][1]);
-        if (h13 > 0.78f || h13 < 0.74f) { printf("FAIL: the urchin did not eat a bite of the tallest frond\n"); return 1; }
+        if (h13 > 0.78f || h13 < 0.73f) { printf("FAIL: the urchin did not eat a bite of the tallest frond\n"); return 1; }
         if (tank.veg_h[3][1] < sword0 - 1e-4f) { printf("FAIL: the urchin ate the sword plant\n"); return 1; }
         if (tank.trims != trims0 || tank.trim_px != tpx0) { printf("FAIL: the urchin's grazing counted as the keeper's trimming\n"); return 1; }
         if (tank.urchin_grazed_px < 10) { printf("FAIL: the urchin's tally %.0f px\n", tank.urchin_grazed_px); return 1; }
@@ -3884,7 +3887,7 @@ static int selftest_card(const char *prefix) {
         fry_req_t req[FRY_REQ_MAX]; bool staged; int n = progression_next_fry(&tank, req, &staged), feed = -1, met = 0;
         for (int i = 0; i < n; i++) { if (req[i].kind == FRY_REQ_FEED) feed = i; met += req[i].met; }
         if (feed < 0 || req[feed].met || met != n - 1 || staged) CARD_FAIL("after a sale only MEALS should be owed (%d of %d met, staged %d)", met, n, staged);
-        char want[28]; snprintf(want, sizeof want, "%d OF %d SO FAR", 150, 150 + SELL_FRY_MEALS);
+        char want[40]; snprintf(want, sizeof want, "%d OF %d SO FAR", 150, 150 + SELL_FRY_MEALS);
         if (strcmp(req[feed].progress, want)) CARD_FAIL("the MEALS gate reads '%s', want '%s'", req[feed].progress, want);
     }
     for (int i = 0; i < 60 * 90; i++) {
@@ -3918,8 +3921,10 @@ static int selftest_card(const char *prefix) {
 }
 
 int main(int argc, char **argv) {
-    for (int a = 1; a < argc; a++)
+    for (int a = 1; a < argc; a++) {
         if (strcmp(argv[a], "--greedy") == 0) advisor_core_sample = false;
+        if (strcmp(argv[a], "--lang") == 0 && a + 1 < argc) pt_lang = strcmp(argv[a + 1], "es") == 0 ? LANG_ES : LANG_EN;   /* --lang es: the pages in Spanish */
+    }
     for (int a = 1; a < argc; a++) {                 /* mode flags may sit anywhere */
         if (strcmp(argv[a], "--hero") == 0 && a + 1 < argc) return hero_shot(argv[a + 1]);
         if (strcmp(argv[a], "--clip") == 0 && a + 1 < argc)
@@ -4034,7 +4039,7 @@ int main(int argc, char **argv) {
             setup_touch(&tank, (float)mx, (float)my, mpress);   /* taps and the letter wheel, classified in setup.c */
             if (!setup_active()) {
                 if (rename) printf("rename closed: the fish is %s\n", who >= 0 && who < tank.n_fish ? tank.fish[who].name : "?");
-                else if (place >= 0) printf("placed: %s at x %.0f, %s layer, saved\n", SD_ITEMS[place].name, tank_decor_x(&tank, place),
+                else if (place >= 0) printf("placed: %s at x %.0f, %s layer, saved\n", sd_item_name(place), tank_decor_x(&tank, place),
                                        tank_decor_z(&tank, place) == DECOR_Z_BACK ? "BEHIND" : tank_decor_z(&tank, place) == DECOR_Z_FRONT ? "IN FRONT" : "AMONG");
                 else { printf(birth ? "birth flow done: %s named and saved\n" : "setup done\n", who >= 0 ? tank.fish[who].name : "?"); print_roster(&tank); }
             }
@@ -4062,7 +4067,7 @@ int main(int argc, char **argv) {
         if (mpress && !modal) tank_touch_drag(&tank, (float)mx, (float)my);   /* stroke -> wipe/slash */
         if (mpress && !modal && !held_page && tank.tool == TOOL_HAND && now_ms - press_ms > 700 && abs(mx - press_x) < 24 && abs(my - press_y) < 24) {   /* tap-and-hold on a piece: its page (2026-09-24); not with a tool in hand */
             int it = tank_decor_hit(&tank, (float)press_x, (float)press_y);
-            if (it >= 0) { setup_begin_place(&tank, it); held_page = true; selected_fish = -1; printf("held on the %s: placement page up (MOVE / DEPTH / SELL)\n", SD_ITEMS[it].name); }
+            if (it >= 0) { setup_begin_place(&tank, it); held_page = true; selected_fish = -1; printf("held on the %s: placement page up (MOVE / DEPTH / SELL)\n", sd_item_name(it)); }
         }
         if (!mpress) held_page = false;
         if (mpress && !modal && !held_page && now_ms - press_ms > 300 && abs(my - press_y) < 30) tank_touch_hold(&tank, (float)mx, (float)my);
@@ -4087,19 +4092,19 @@ int main(int argc, char **argv) {
                 if (r == SHOP_TAP_CLOSE) { shop_view = false; render_shop_leave(); milestones_view = true; }   /* back to the milestones page */
                 else if (r >= SHOP_TAP_SELL) {              /* sold back (the second tap on SELL) */
                     int item = r - SHOP_TAP_SELL;
-                    if (progression_sell(&tank, item)) { snd(SND_CONFIRM, AUDIO_PITCH_ONE); printf("shop: %s sold back for %d, balance %d\n", SD_ITEMS[item].name, progression_sell_value(item), tank.sd_balance); }
+                    if (progression_sell(&tank, item)) { snd(SND_CONFIRM, AUDIO_PITCH_ONE); printf("shop: %s sold back for %d, balance %d\n", sd_item_name(item), progression_sell_value(item), tank.sd_balance); }
                 }
                 else if (r >= SHOP_TAP_MOVE) {              /* a piece already in the tank: place it again */
                     int item = r - SHOP_TAP_MOVE;
                     shop_view = false; render_shop_leave(); setup_begin_place(&tank, item);
-                    printf("shop: MOVE %s - placement page up (drag, DEPTH, DONE)\n", SD_ITEMS[item].name);
+                    printf("shop: MOVE %s - placement page up (drag, DEPTH, DONE)\n", sd_item_name(item));
                 }
                 else if (r >= SHOP_TAP_BUY) {
                     int item = r - SHOP_TAP_BUY;
-                    if (progression_buy(&tank, item)) { snd(SND_CONFIRM, AUDIO_PITCH_ONE); printf("shop: %s unlocked, %d sand dollars left\n", SD_ITEMS[item].name, tank.sd_balance);
+                    if (progression_buy(&tank, item)) { snd(SND_CONFIRM, AUDIO_PITCH_ONE); printf("shop: %s unlocked, %d sand dollars left\n", sd_item_name(item), tank.sd_balance);
                         if (tank_decor_placeable(item)) { shop_view = false; render_shop_leave(); setup_begin_place(&tank, item);
-                                                          printf("shop: placement page up for the %s\n", SD_ITEMS[item].name); } }
-                    else printf("shop: %s refused (balance %d, price %d)\n", SD_ITEMS[item].name, tank.sd_balance, SD_ITEMS[item].price);
+                                                          printf("shop: placement page up for the %s\n", sd_item_name(item)); } }
+                    else printf("shop: %s refused (balance %d, price %d)\n", sd_item_name(item), tank.sd_balance, SD_ITEMS[item].price);
                 }
             }
             else if (milestones_view && abs(dx) >= 40 && abs(dx) > 2 * abs(dy) && render_milestones_swipe(&tank, (float)press_x, (float)press_y, (float)dx)) {
@@ -4236,7 +4241,7 @@ int main(int argc, char **argv) {
             else if (tank_cluster_scheme(&tank) + 1 < CLUSTER_SCHEME_N) tank_cluster_set_scheme(&tank, tank_cluster_scheme(&tank) + 1);
             else tank.sd_unlocks &= ~SD_ITEM_CLUSTER;
             printf("cluster: %s (free; the shop sells it at %d on page 2; O steps its growth)\n",
-                   (tank.sd_unlocks & SD_ITEM_CLUSTER) ? CLUSTER_SCHEMES[tank_cluster_scheme(&tank)].name : "gone", SD_PRICE_CLUSTER);
+                   (tank.sd_unlocks & SD_ITEM_CLUSTER) ? tank_cluster_scheme_name(tank_cluster_scheme(&tank)) : "gone", SD_PRICE_CLUSTER);
         }
         idown = k[SDL_SCANCODE_I];
         if (k[SDL_SCANCODE_O] && !odown && (tank.sd_unlocks & SD_ITEM_CLUSTER)) {

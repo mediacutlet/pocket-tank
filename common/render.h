@@ -295,7 +295,9 @@ int  render_confirm_hit(float x, float y);
  * render_settings_tap is the bare hit test (tests). */
 enum { SET_TAP_NONE = 0, SET_TAP_CLOSE = 1, SET_TAP_BRIGHT = 2, SET_TAP_VOLUME = 3, SET_TAP_LIGHT = 4, SET_TAP_IDLE = 5,
        SET_TAP_UPDATES = 6,     /* the UPDATES button, bottom left (2026-09-30): the platform opens the updates page (update.h) */
-       SET_TAP_SCREEN = 7 };    /* a worn tank's SCREEN row (2026-10-02): *value 1 = TURNED, already applied and marked
+       SET_TAP_SCREEN = 7,
+       SET_TAP_LANG = 8 };      /* the language chip, top right (2026-10-04): *value LANG_EN / LANG_ES, already applied
+                                   (tank_t.lang + pt_lang) and marked for the save - the next frame draws in it */    /* a worn tank's SCREEN row (2026-10-02): *value 1 = TURNED, already applied and marked
                                    for the save - the platform only logs it (the picture turns on the next frame) */
 void render_settings(const tank_t *t, uint16_t *fb, int stride, int bright_pct, int volume);
 int  render_settings_tap(float x, float y, int *value);
@@ -315,6 +317,8 @@ void render_rect_edge(uint16_t *fb, int stride, int x, int y, int w, int h, uint
 void render_ring(uint16_t *fb, int stride, float cx, float cy, float r, uint32_t rgb);   /* the card's selection ring */
 void render_button(uint16_t *fb, int stride, int x, int y, int w, int h, uint32_t fill, uint32_t edge, const char *label, int scale);
 /* one 5x7 glyph from any table (rows: 5 bits, high bit left) at scale - the case-sensitive font in update.c draws with it */
+/* the number of characters (cells) in a UTF-8 string: a Spanish Ñ or Á is one */
+int  render_text_len(const char *s);
 void render_glyph(uint16_t *fb, int stride, int x, int y, int scale, uint32_t rgb, const uint8_t *rows);
 /* an adult fish facing right at (x,y), body length ~42 x size px, tail
  * swimming on `clock` - the setup's live preview of a colour choice */
@@ -485,6 +489,13 @@ void render_fish_portrait(uint16_t *fb, int stride, float x, float y, float size
 #define SET_STEP_PX   15              /* drag travel per step */
 #define SET_LIGHT_BAND_END (SET_SEG_Y(SET_ROW3_Y) + SET_SEG_H + 8)   /* the segments' band stops just under them */
 #define SET_UPD_W     112
+/* the language chip (2026-10-04): EN | ES, two segments on the title's line,
+ * at its right - in from the glass on the bowl */
+#define SET_LANG_SEG_W 36
+#define SET_LANG_W    (2 * SET_LANG_SEG_W + 4)
+#define SET_LANG_X    (PAGE_BOWL ? 300 : 316)
+#define SET_LANG_H    30
+#define SET_LANG_Y    (SET_TITLE_Y - 4)
 #if TANK_WORN                        /* the watch: UPDATES 114..226 and CLOSE 242..334, clear of the lower corners */
 #define SET_UPD_X     114
 #undef  SET_CLOSE_X

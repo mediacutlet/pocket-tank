@@ -153,9 +153,9 @@ enum { FRY_REQ_TRUST, FRY_REQ_FEED, FRY_REQ_HOLD, FRY_REQ_GROW, FRY_REQ_CHANGE, 
 #define FRY_REQ_MAX 5
 typedef struct {
     int   kind;
-    char  title[12];
-    char  words[28], words2[28];   /* what to do, a plain sentence over two lines */
-    char  progress[28];            /* where it stands */
+    char  title[16];
+    char  words[40], words2[40];   /* what to do, a plain sentence over two lines (UTF-8: an accent is 2 bytes) */
+    char  progress[40];            /* where it stands */
     float frac;
     bool  met;
 } fry_req_t;
@@ -199,11 +199,15 @@ const char *const *progression_fry_tip(int kind);
 #define SD_PRICE_URCHIN 120       /* 2026-10-02: the grass's snail (the snail is 80, the grass pays 25 per 250 cm) */
 typedef struct {
     uint32_t    bit;               /* SD_ITEM_* */
-    const char *name;              /* <= 12 chars, the pixel font */
-    const char *words, *words2;    /* what it does, two lines of <= 25 chars */
+    const char *name[LANG_N];      /* <= 12 chars, the pixel font; [LANG_EN] / [LANG_ES] (lang.h) */
+    const char *words[LANG_N], *words2[LANG_N];   /* what it does, two lines of <= 25 chars (EN) */
     int         price;
 } sd_item_t;
 extern const sd_item_t SD_ITEMS[SD_ITEM_COUNT];
+/* an item's words in the keeper's language (pt_lang); "" out of range */
+const char *sd_item_name(int i);
+const char *sd_item_words(int i);
+const char *sd_item_words2(int i);
 /* the shop's sale: false when the balance is short or it is already owned;
  * true = unlocked, placed in the tank (tank_plant_place / tank_snail_place)
  * and saved at once */
@@ -266,6 +270,9 @@ const char *const *progression_sd_earn_lines(void);
                                  * youngest fish (~26 lit minutes fed and calm, or following) */
 
 /* milestone labels (UI / logs); order = bit order in tank.h */
-extern const char *const MS_NAMES[MS_FISH_COUNT];
-extern const char *const TMS_NAMES[TMS_COUNT];
+extern const char *const MS_NAMES[LANG_N][MS_FISH_COUNT];   /* [LANG_EN] / [LANG_ES] */
+extern const char *const TMS_NAMES[LANG_N][TMS_COUNT];
+/* the label of bit index i in the keeper's language (pt_lang); "" out of range */
+const char *progression_ms_name(int i);
+const char *progression_tms_name(int i);
 #endif

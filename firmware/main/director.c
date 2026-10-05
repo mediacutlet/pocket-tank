@@ -27,6 +27,7 @@ bool net_port_set_manifest_url(const char *url);
 #include "codec_port.h"
 #include "audio_port.h"
 #include "imu_port.h"
+#include "sd_backup.h"
 #include "audio.h"
 #include "notice.h"
 #include "esp_timer.h"
@@ -168,7 +169,7 @@ static void show_state(const tank_t *t) {
                  tank_coral_growth(t), CORAL_FULL, tank_coral_growth(t) >= CORAL_FULL ? "the crown is out" : tank_coral_growth(t) >= 1 ? "the fan is complete, the crown coming" : "growing");
     if (t->sd_unlocks & SD_ITEM_CLUSTER)
         ESP_LOGI(TAG, "reef cluster placed: centre x %.0f (%s), %s, look %s, growth %.2f of %.0f (%s)", tank_decor_x(t, 4), t->cluster_x > 0 ? "the keeper's" : "the default",
-                 t->cluster_z == DECOR_Z_BACK ? "BEHIND" : t->cluster_z == DECOR_Z_FRONT ? "IN FRONT" : "AMONG the grass", CLUSTER_SCHEMES[tank_cluster_scheme(t)].name,
+                 t->cluster_z == DECOR_Z_BACK ? "BEHIND" : t->cluster_z == DECOR_Z_FRONT ? "IN FRONT" : "AMONG the grass", tank_cluster_scheme_name(tank_cluster_scheme(t)),
                  tank_cluster_growth(t), CLUSTER_FULL, tank_cluster_growth(t) >= CLUSTER_FULL ? "in full bloom" : tank_cluster_growth(t) >= 1 ? "full size, blooming" : "filling out");
     ESP_LOGI(TAG, "nursery bed %d (a bed >= %.2f) | parked real tank: %s", tank_nursery_bed(t), (double)VEG_NURSERY,
              nvs_has("bk") ? "YES (restore)" : "no (this IS the real tank)");
@@ -317,6 +318,14 @@ static void run(tank_t *t, char *line) {
         progression_slept(t, h * 3600.0f);      /* growth + the full-night badge, as a real wake would */
         ESP_LOGI(TAG, "slept %.1f h", h);
         show_state(t);
+    } else if (!strcmp(c, "sd")) {              /* the 2.16's card: sd (the copies) | sd backup | sd restore [Syymmdd.BIN] (then a restart) */
+        if (argc > 1 && !strcmp(argv[1], "backup")) sd_backup_now("director");
+        else if (argc > 1 && !strcmp(argv[1], "restore")) {
+            if (sd_backup_restore(argc > 2 ? argv[2] : NULL)) { ESP_LOGW(TAG, "restored: restarting into it"); vTaskDelay(pdMS_TO_TICKS(200)); esp_restart(); }
+        } else sd_backup_status();
+    } else if (!strcmp(c, "rot")) {             /* the 2.16: rot <0-3> holds the picture so many quarter turns clockwise; rot auto = the IMU's */
+        if (argc > 1) imu_port_force_rotation(!strcmp(argv[1], "auto") ? -1 : atoi(argv[1]));
+        ESP_LOGI(TAG, "rot: %d quarter turn(s) clockwise", imu_port_rotation());
     } else if (!strcmp(c, "imu")) {             /* a short trace of raw polls: is the table really still? */
         int n = argc > 1 ? atoi(argv[1]) : 8; if (n < 1) n = 1; if (n > 40) n = 40;
         for (int i = 0; i < n; i++) {               /* (the console runs in the tank task: poll here, the task is blocked) */
@@ -344,9 +353,9 @@ static void run(tank_t *t, char *line) {
     } else if (!strcmp(c, "buy") && argc > 1) {      /* buy plant|snail|...|shrimp: the shop's sale, at the price */
         int item = !strcmp(argv[1], "plant") ? 0 : !strcmp(argv[1], "snail") ? 1 : !strcmp(argv[1], "castle") ? 2 : !strcmp(argv[1], "coral") ? 3 : !strcmp(argv[1], "cluster") ? 4 : !strcmp(argv[1], "shrimp") ? 5 : !strcmp(argv[1], "urchin") ? 6 : -1;
         if (item < 0) ESP_LOGW(TAG, "buy plant|snail|castle|coral|cluster|shrimp|urchin");
-        else if (progression_buy(t, item)) ESP_LOGI(TAG, "%s unlocked, %d sand dollars left%s", SD_ITEMS[item].name, (int)t->sd_balance,
+        else if (progression_buy(t, item)) ESP_LOGI(TAG, "%s unlocked, %d sand dollars left%s", sd_item_name(item), (int)t->sd_balance,
                                                     tank_decor_placeable(item) ? " (`place` opens the placement page)" : "");
-        else ESP_LOGW(TAG, "%s refused: owned, or %d < %d", SD_ITEMS[item].name, (int)t->sd_balance, SD_ITEMS[item].price);
+        else ESP_LOGW(TAG, "%s refused: owned, or %d < %d", sd_item_name(item), (int)t->sd_balance, SD_ITEMS[item].price);
     } else if (!strcmp(c, "coral") && argc > 1) {    /* coral <0..7|rrggbb> (its colour) | coral grow <0.12..1.25> (its growth, staged; 1 = the fan, 1.25 = the crown) */
         if (!(t->sd_unlocks & SD_ITEM_CORAL)) { ESP_LOGW(TAG, "no coral in the tank (`buy coral`)"); return; }
         if (!strcmp(argv[1], "grow") && argc > 2) {
@@ -377,11 +386,11 @@ static void run(tank_t *t, char *line) {
     } else if (!strcmp(c, "sell") && argc > 1) {     /* sell plant|castle|coral|cluster: the sale back at 20% (never the snail) */
         int item = !strcmp(argv[1], "plant") ? 0 : !strcmp(argv[1], "castle") ? 2 : !strcmp(argv[1], "coral") ? 3 : !strcmp(argv[1], "cluster") ? 4 : -1;
         if (item < 0) ESP_LOGW(TAG, "sell plant|castle|coral|cluster (the snail stays)");
-        else if (progression_sell(t, item)) ESP_LOGI(TAG, "%s sold back for %d, balance %d", SD_ITEMS[item].name, progression_sell_value(item), (int)t->sd_balance);
-        else ESP_LOGW(TAG, "%s: not in the tank", SD_ITEMS[item].name);
+        else if (progression_sell(t, item)) ESP_LOGI(TAG, "%s sold back for %d, balance %d", sd_item_name(item), progression_sell_value(item), (int)t->sd_balance);
+        else ESP_LOGW(TAG, "%s: not in the tank", sd_item_name(item));
     } else if (!strcmp(c, "cluster") && argc > 1) {  /* cluster look <0-2> | cluster grow <0..2> (1 = full size, 2 = every tentacle) */
         if (!(t->sd_unlocks & SD_ITEM_CLUSTER)) { ESP_LOGW(TAG, "no cluster in the tank (`buy cluster`)"); return; }
-        if (!strcmp(argv[1], "look") && argc > 2) { tank_cluster_set_scheme(t, atoi(argv[2])); progression_save(t); ESP_LOGI(TAG, "cluster look %s, saved", CLUSTER_SCHEMES[tank_cluster_scheme(t)].name); }
+        if (!strcmp(argv[1], "look") && argc > 2) { tank_cluster_set_scheme(t, atoi(argv[2])); progression_save(t); ESP_LOGI(TAG, "cluster look %s, saved", tank_cluster_scheme_name(tank_cluster_scheme(t))); }
         else if (!strcmp(argv[1], "grow") && argc > 2) {
             float g = (float)atof(argv[2]); if (g < CLUSTER_START + 1e-4f) g = CLUSTER_START + 1e-4f; if (g > CLUSTER_FULL) g = CLUSTER_FULL;
             t->cluster_growth = g; progression_save(t); ESP_LOGI(TAG, "cluster growth %.2f (1 = full size, %.0f = every tentacle), saved", g, CLUSTER_FULL); }

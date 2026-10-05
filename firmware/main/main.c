@@ -25,6 +25,7 @@
 #include "battery_port.h"
 #include "battery.h"
 #include "imu_port.h"
+#include "sd_backup.h"
 #include "director.h"
 #include "update.h"
 #include "update_mode.h"
@@ -291,6 +292,7 @@ static void enter_sleep_for(int wake_after_s) {
     if (!progression_save(&tank))               /* never cancels: a tank that can't save (NVS down, a save that
                                                    wouldn't load) must still sleep, or the key goes dead */
         ESP_LOGE(TAG, "sleep: the tank save failed - sleeping anyway, the last good save stands");
+    else sd_backup_now("sleep");                /* the 2.16: a copy on the card too */
     bat_hist_save();                            /* the screen-on time so far */
     snapshot_fish();
     audio_port_sleep();        /* amp low, codec down, rail off - before the rails cycle */
@@ -411,6 +413,7 @@ static void enter_poweroff(void) {
     touch_port_confirm_answer(-1);
     if (!progression_save(&tank))               /* never cancels (see enter_sleep_for) */
         ESP_LOGE(TAG, "power-off: the tank save failed - cutting anyway, the last good save stands");
+    else sd_backup_now("power-off");
     bat_hist_save();
     audio_port_sleep();
     batlog_add(battery_pct(), battery_port_vbat_mv(), display_port_brightness(), true, "off");   /* to NVS too: the shelf time is measurable at the next boot */
@@ -456,6 +459,47 @@ static void sleep_button_poll(int64_t now) {
             touch_port_confirm_open();
         }
     }
+}
+
+/* IO18, the 2.16's third key (2026-10-04, the keeper's wishes): a TAP feeds -
+ * three pellets at the keeper's usual spot (the tank remembers it), as a tap
+ * on the surface would - and a HOLD (0.6 s) is the light, as the double tap
+ * on the glass is: MANUAL toggles it, AUTO puts it out now or brings it back.
+ * So the feed comes at the release, once it is known not to be a hold. Pulled
+ * up on the board, low while down; not more than one feed a second. No other
+ * board has the key (the watch's GPIO 18 is its motor): the 2.16 only. */
+#define BTN_FEED GPIO_NUM_18
+#define BTN_HOLD_US 600000
+static void feed_button_poll(int64_t now) {
+    static bool init, held_done; static int64_t low_since, last_feed;
+    if (!board_is_sq216()) return;
+    if (!init) {
+        gpio_config_t k = { .pin_bit_mask = 1ULL << BTN_FEED, .mode = GPIO_MODE_INPUT, .pull_up_en = GPIO_PULLUP_ENABLE };
+        gpio_config(&k); init = true;
+        if (!gpio_get_level(BTN_FEED)) held_done = true;   /* down at boot: wait for its release, it is nobody's press */
+    }
+    if (!gpio_get_level(BTN_FEED)) {                       /* down */
+        if (!low_since) low_since = now;
+        if (!held_done && now - low_since >= BTN_HOLD_US) {  /* the hold: the light, once */
+            held_done = true;
+            if (!tank.light_auto) {
+                tank.light_manual_off = !tank.light_manual_off;
+                if (tank.light_manual_off) tank.light_tip_seen = true;
+            } else if (tank.night) tank_handled(&tank);    /* AUTO: a touch's worth of presence turns it on */
+            else tank.idle_s = (float)tank.light_idle_s + 1.0f;   /* ... or the idle rule's time is up now */
+            progression_settings_changed();
+            ESP_LOGI(TAG, "IO18 held: the light %s", tank.light_auto ? (tank.night ? "on" : "out") : tank.light_manual_off ? "out" : "on");
+        }
+        return;
+    }
+    /* up */
+    bool tap = low_since && !held_done && now - low_since >= BTN_DEBOUNCE_US;
+    low_since = 0; held_done = false;
+    if (!tap || now - last_feed < 1000000) return;
+    last_feed = now;
+    float x = tank.feed_spot_x >= 0 ? tank.feed_spot_x : TANK_W * 0.5f;
+    tank_feed(&tank, x, 3);
+    ESP_LOGI(TAG, "IO18: feed at x %.0f", x);
 }
 
 /* the keeper said YES: every saved tank goes - the live one and a director-
@@ -593,6 +637,12 @@ static void tank_task(void *arg) {
         float dt = (now - last) / 1e6f; last = now; if (dt > 0.25f) dt = 0.25f;
         if (slept_from) sleep_us += now - slept_from;
         sleep_button_poll(now);
+        feed_button_poll(now);
+        sd_backup_poll(now);
+        if (touch_port_take_backup_restore()) {   /* a copy chosen on the SD BACKUPS page: the tank saved (so UNDO.BIN is it), then the copy, then a restart */
+            progression_save(&tank);
+            sd_backup_page_restore();
+        }
         pwr_key_poll(now);
         imu_port_poll(now);
         if (imu_port_moving()) audio_port_prewarm();   /* in a hand: the codec stays warm (docs/AUDIO.md) */
@@ -602,6 +652,10 @@ static void tank_task(void *arg) {
         inv = tank_screen_turned(&tank);  /* worn on a wrist the live flip never runs (the arm swings through every angle):
                                              the way up is the keeper's setting, or what AUTO learned from the taps (tank.h) */
 #endif
+        if (board_is_sq216()) {           /* the square turns all four ways, in the panel; the 180 is one of them */
+            int rot = imu_port_rotation();
+            display_port_set_rotation(rot); touch_port_set_rotation(rot); inv = false;
+        }
         display_port_set_inverted(inv);   /* per-frame, so a flip lands between flushes */
         touch_port_set_inverted(inv);
         touch_port_poll(&tank);
@@ -619,19 +673,19 @@ static void tank_task(void *arg) {
           if (r >= SHOP_TAP_SELL) {                                     /* sold back: the refund, the piece gone, the row for sale again */
               int item = r - SHOP_TAP_SELL;
               if (progression_sell(&tank, item)) { audio_port_play(SND_CONFIRM, AUDIO_PITCH_ONE);
-                  ESP_LOGI(TAG, "shop: %s sold back for %d, balance %d", SD_ITEMS[item].name, progression_sell_value(item), (int)tank.sd_balance); }
+                  ESP_LOGI(TAG, "shop: %s sold back for %d, balance %d", sd_item_name(item), progression_sell_value(item), (int)tank.sd_balance); }
           } else if (r >= SHOP_TAP_MOVE) {                              /* a piece already in the tank: place it again */
               int item = r - SHOP_TAP_MOVE;
               touch_port_show_shop(false); setup_begin_place(&tank, item);
-              ESP_LOGI(TAG, "shop: MOVE %s - placement page up (drag, DEPTH, DONE)", SD_ITEMS[item].name);
+              ESP_LOGI(TAG, "shop: MOVE %s - placement page up (drag, DEPTH, DONE)", sd_item_name(item));
           } else if (r >= SHOP_TAP_BUY) {
               int item = r - SHOP_TAP_BUY;
               if (progression_buy(&tank, item)) { audio_port_play(SND_CONFIRM, AUDIO_PITCH_ONE);
-                  ESP_LOGI(TAG, "shop: %s unlocked, %d sand dollars left", SD_ITEMS[item].name, (int)tank.sd_balance);
+                  ESP_LOGI(TAG, "shop: %s unlocked, %d sand dollars left", sd_item_name(item), (int)tank.sd_balance);
                   if (tank_decor_placeable(item)) {                     /* a placeable piece: the page opens over the live tank */
                       touch_port_show_shop(false); setup_begin_place(&tank, item);
-                      ESP_LOGI(TAG, "shop: placement page up for the %s", SD_ITEMS[item].name); } }
-              else ESP_LOGI(TAG, "shop: %s refused (balance %d, price %d)", SD_ITEMS[item].name, (int)tank.sd_balance, SD_ITEMS[item].price); } }
+                      ESP_LOGI(TAG, "shop: placement page up for the %s", sd_item_name(item)); } }
+              else ESP_LOGI(TAG, "shop: %s refused (balance %d, price %d)", sd_item_name(item), (int)tank.sd_balance, SD_ITEMS[item].price); } }
         brightness_apply(tank.night);
         { static int64_t last_bat; if (now - last_bat > 5LL * 60 * 1000000) {   /* battery log: awake sample every 5 min */
             batlog_add(battery_pct(), battery_port_vbat_mv(), display_port_brightness(), false, last_bat ? "" : "boot"); last_bat = now; } }
@@ -678,6 +732,9 @@ static void tank_task(void *arg) {
                 sel = -1;
             } else if (touch_port_settings()) {  /* settings page: brightness + volume */
                 render_settings(&tank, fb[cur], TANK_W, brightness_level(), audio_port_volume());
+                sel = -1;
+            } else if (touch_port_backups()) {   /* the 2.16's SD BACKUPS page (from the updates page) */
+                sd_backup_page_render(fb[cur], TANK_W);
                 sel = -1;
             } else if (touch_port_updates()) {   /* the updates page (2026-09-30): version, network, CHECK FOR UPDATES */
                 render_updates_page(fb[cur], TANK_W);
@@ -862,6 +919,7 @@ void app_main(void) {
        internal heap to itself. Back from it, the normal boot goes on. */
     render_clock_us = esp_timer_get_time;    /* per-stage frame profiling in the display log */
     display_port_init();
+    update_backups_button = board_is_sq216();   /* the updates page offers the microSD's copies (sd_backup.h) */
     if (pwr_sensed()) {                      /* the PWR key's sense line: a plain input (a deep-sleep wake left it an RTC pad) */
         rtc_gpio_deinit(PWR_SENSE);
         gpio_config_t sense = { .pin_bit_mask = 1ULL << PWR_SENSE, .mode = GPIO_MODE_INPUT };
@@ -954,6 +1012,7 @@ void app_main(void) {
         int put_back = restore_fish();       /* where they fell asleep, on the goal they had */
         ESP_LOGI(TAG, "wake: %d of %d fish put back where they were", put_back, tank.n_fish);
     } else {                                 /* a cold boot - power-on, a flash, a PMIC power-off, a cell that died: the absence is lived through just the same (2026-09-16) */
+        sd_backup_restore_if_empty();        /* the 2.16: no tank in NVS (a --full flash) and a copy on the card - it comes back */
         float h = progression_boot(&tank);
         s_boot_lived_h = h;
         ESP_LOGI(TAG, "cold boot: %s%.1f h lived through since the save | hunger[0] %.1f | battery %d%% %d mV",

@@ -178,10 +178,13 @@ const uint32_t CORAL_PAL[CORAL_N] = { 0xff7a1e, 0xf2698f, 0xd24bb4, 0x8a5be0, 0x
  * orange coral, purple tubes, a cyan brain; LAGOON pink / blue / lime;
  * DUSK magenta / teal / gold */
 const cluster_scheme_t CLUSTER_SCHEMES[CLUSTER_SCHEME_N] = {
-    { "REEF",   0xff6a2a, 0x9b4fe0, 0x5fd8e8 },
-    { "LAGOON", 0xf25c8a, 0x3f8ff0, 0xb9f04a },
-    { "DUSK",   0xd24bb4, 0x2ec9b4, 0xf2c23a },
+    { { "REEF",   "ARRECIFE" }, 0xff6a2a, 0x9b4fe0, 0x5fd8e8 },
+    { { "LAGOON", "LAGUNA" },   0xf25c8a, 0x3f8ff0, 0xb9f04a },
+    { { "DUSK",   "OCASO" },    0xd24bb4, 0x2ec9b4, 0xf2c23a },
 };
+const char *tank_cluster_scheme_name(int i) {
+    return i >= 0 && i < CLUSTER_SCHEME_N ? CLUSTER_SCHEMES[i].name[pt_lang == LANG_ES ? LANG_ES : LANG_EN] : "";
+}
 
 void tank_set_name(tank_t *t, int slot, const char *name) {
     if (slot < 0 || slot >= N_FISH_MAX) return;
@@ -348,6 +351,7 @@ void tank_init(tank_t *t, uint32_t seed) {
     t->clock = 0; t->night = false; t->idle_s = 0;
     t->light_idle_s = LIGHT_IDLE_S; t->light_auto = false; t->light_manual_off = false; t->light_tip_seen = false;
     t->screen_turned = false;
+    t->lang = 0;                              /* LANG_EN (lang.h); progression_reset carries the keeper's over */
     t->light_override = false; t->light_on = true;
     t->hold_active = false; t->hold_time = 0; t->hold_approached = false;
     t->tap_count = 0; t->tap_burst_t = 99; t->startled = false;

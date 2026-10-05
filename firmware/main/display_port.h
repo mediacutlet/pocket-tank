@@ -48,6 +48,11 @@ bool board_has_expander(void);                  /* the 1.8, positively: its IO e
  * panel, sent unturned; the rectangle image still runs on it the 1.8's way -
  * its 448 x 368 frame turned 90 degrees, centred in the glass. */
 bool board_is_watch(void);
+/* the 2.16 (480 x 480 square, BOARD_SQ216): board_is_round() is true on it
+ * too - the round board's path, with the frame px for px on a bigger square */
+bool board_is_sq216(void);
+int  board_round_panel(void);
+void display_port_set_rotation(int quarter);    /* the 2.16: the picture turned 0..3 quarters clockwise, by the panel (MADCTL) */                   /* the round path's square panel, px across: 466, or 480 on the 2.16 */
 int  board_pwr_sense_pin(void);                 /* the GPIO that is high while the PWR key is down (the 1.75C: 3, the watch: 10), -1 = none */
 /* a portrait panel bigger than the frame (the rectangle image on the watch):
  * where the frame's corner sits on the panel, in panel px (0, 0 otherwise) */

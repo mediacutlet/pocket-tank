@@ -5,6 +5,7 @@
  * ~1 s (the pill answers a plug-in within a second); any I2C error or
  * absent battery hides the meter. */
 #include "battery_port.h"
+#include "display_port.h"   /* board_is_sq216 */
 #include "driver/i2c_master.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
@@ -37,12 +38,19 @@ bool battery_port_init(i2c_master_bus_handle_t bus) {
      * 1000 mA (code 16) top of the table - several C for the 200 mAh 302530
      * cell on this board. 0.5C = 100 mA (code 4; codes 0-8 are 25 mA steps)
      * charges it in ~2.5 h and is kind to it; 200 mA (code 8) is the 1C
-     * alternative. CV stays at the default 4.2 V (code 3). */
+     * alternative. CV stays at the default 4.2 V (code 3).
+     * The 2.16 (2026-10-04): the tank awake draws ~75 mA, so 100 mA left ~25
+     * for the cell: 1% per 5 minutes, "full in 9 h" on the glass. Its cell is
+     * Waveshare's 1000 mAh, and their own example for the board charges at
+     * 400 mA (code 10 - past 200 the steps are 100 mA): 0.4C, kind to it, and
+     * with the tank's draw still inside a plain USB port's 500 mA. */
+    const int code = board_is_sq216() ? 10 : 4, ma = code <= 8 ? code * 25 : 300 + (code - 9) * 100;
     uint8_t icc;
     if (rd(0x62, &icc)) {
-        uint8_t wr[2] = { 0x62, (uint8_t)((icc & 0xE0) | 4) };
+        uint8_t wr[2] = { 0x62, (uint8_t)((icc & 0xE0) | code) };
         bool ok = i2c_master_transmit(s_dev, wr, 2, 100) == ESP_OK;
-        ESP_LOGI("battery", "AXP2101 fuel gauge up; charge current code %d -> %s", icc & 0x1F, ok ? "4 (100 mA)" : "unchanged (write failed)");
+        if (ok) ESP_LOGI("battery", "AXP2101 fuel gauge up; charge current code %d -> %d (%d mA)", icc & 0x1F, code, ma);
+        else ESP_LOGI("battery", "AXP2101 fuel gauge up; charge current code %d unchanged (write failed)", icc & 0x1F);
     } else ESP_LOGI("battery", "AXP2101 fuel gauge up");
     return true;
 }

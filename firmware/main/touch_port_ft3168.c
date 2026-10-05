@@ -17,6 +17,7 @@
  * (display_port_panel_to_tank) and everything after that is the same.
  * The WATCH (2.06, 2026-10-02) has the FT3168 of the 1.8's V1 board, its
  * reset on a GPIO. Its own build is a portrait tank: panel px = tank px. */
+#include "sd_backup.h"
 #include "touch_port.h"
 #include "display_port.h"
 #include "update.h"
@@ -68,6 +69,8 @@ void touch_port_set_bias(int px) { s_bias_y = px; }
 int  touch_port_bias(void) { return s_bias_y; }
 
 void touch_port_set_inverted(bool inverted) { s_inverted = inverted; }
+static int s_rot;                                 /* the 2.16: the picture's quarter turns (display_port_set_rotation) */
+void touch_port_set_rotation(int quarter) { s_rot = quarter & 3; }
 extern i2c_master_bus_handle_t board_i2c_bus(void);
 extern bool board_is_v2(void);
 
@@ -78,11 +81,16 @@ extern bool board_is_v2(void);
  * x = b1:b3.hi, y = b2:b3.lo, 12 bits each, in panel px - mirrored on both
  * axes against the picture (Waveshare's BSP sets mirror_x and mirror_y). */
 static i2c_master_dev_handle_t s_cst;
+/* the 2.16's CST9220 is the same protocol on another reset pin; its glass is
+ * turned against the picture instead of mirrored (the BSP: MADCTL A0 on the
+ * panel, swap_xy + mirror_y on the touch - and this port turns both 180
+ * degrees, MADCTL 60, so the keys sit on top) */
+#define CST_RST ((gpio_num_t)(board_is_sq216() ? S_PIN_TP_RST : R_PIN_TP_RST))
 static bool cst9217_init(void) {
-    gpio_config_t rst = { .pin_bit_mask = 1ULL << R_PIN_TP_RST, .mode = GPIO_MODE_OUTPUT };
-    gpio_config(&rst); gpio_sleep_sel_dis(R_PIN_TP_RST);
-    gpio_set_level(R_PIN_TP_RST, 0); vTaskDelay(pdMS_TO_TICKS(10));
-    gpio_set_level(R_PIN_TP_RST, 1); vTaskDelay(pdMS_TO_TICKS(50));
+    gpio_config_t rst = { .pin_bit_mask = 1ULL << CST_RST, .mode = GPIO_MODE_OUTPUT };
+    gpio_config(&rst); gpio_sleep_sel_dis(CST_RST);
+    gpio_set_level(CST_RST, 0); vTaskDelay(pdMS_TO_TICKS(10));
+    gpio_set_level(CST_RST, 1); vTaskDelay(pdMS_TO_TICKS(50));
     if (i2c_master_probe(board_i2c_bus(), I2C_ADDR_CST9217, 50) != ESP_OK) { ESP_LOGW(TAG, "no CST9217"); return false; }
     i2c_device_config_t cfg = { .dev_addr_length = I2C_ADDR_BIT_LEN_7, .device_address = I2C_ADDR_CST9217, .scl_speed_hz = 400000,
                                 .flags.disable_ack_check = 1 };   /* it NACKs a read now and then while it scans: not an error, and not a log line each */
@@ -97,7 +105,7 @@ static bool cst9217_init(void) {
  * reset brings it back: the wake is a reboot, and cst9217_init pulses it. */
 bool touch_port_deep_sleep(void) {
     if (!s_cst) return false;
-    gpio_set_level(R_PIN_TP_RST, 1); vTaskDelay(pdMS_TO_TICKS(150));
+    gpio_set_level(CST_RST, 1); vTaskDelay(pdMS_TO_TICKS(150));
     static const uint8_t open[2] = { 0xD1, 0x1E }, dbg[2] = { 0xD1, 0x01 }, slp[2] = { 0xD1, 0x05 }, where[2] = { 0x00, 0x02 };
     uint8_t r[4] = { 0 };
     bool open_ok = false;
@@ -112,7 +120,7 @@ bool touch_port_deep_sleep(void) {
     bool ok = i2c_master_transmit(s_cst, slp, 2, 20) == ESP_OK && open_ok && dbg_ok;
     ESP_LOGI(TAG, "CST9217 sleep: command mode %s, debug mode %s -> %s", open_ok ? "ok" : "NO ECHO", dbg_ok ? "ok" : "NO ECHO",
              ok ? "asleep, reset held high" : "not confirmed: back into reset for the night");
-    if (!ok) gpio_set_level(R_PIN_TP_RST, 0);
+    if (!ok) gpio_set_level(CST_RST, 0);
     return ok;
 }
 /* A press is one press: the chip answers some reads mid-touch with nothing (no
@@ -149,9 +157,11 @@ static bool cst9217_read(uint16_t *x, uint16_t *y) {
     }
     if (finger) {
         int rx = (d[1] << 4) | (d[3] >> 4), ry = (d[2] << 4) | (d[3] & 0x0F);
-        if (rx > R_PANEL - 1) rx = R_PANEL - 1;
-        if (ry > R_PANEL - 1) ry = R_PANEL - 1;
-        lx = (uint16_t)(R_PANEL - 1 - rx); ly = (uint16_t)(R_PANEL - 1 - ry);
+        const int pn = board_round_panel();
+        if (rx > pn - 1) rx = pn - 1;
+        if (ry > pn - 1) ry = pn - 1;
+        if (board_is_sq216()) { lx = (uint16_t)ry; ly = (uint16_t)(pn - 1 - rx); }   /* the BSP's (479 - y, x), turned 180 degrees */
+        else { lx = (uint16_t)(pn - 1 - rx); ly = (uint16_t)(pn - 1 - ry); }
         if (!down) { s_cst_gaps = s_cst_said = s_cst_back = s_cst_maxgap_ms = 0; said_in = false;
                      s_cst_again_ms = lift_us ? (int)((now - lift_us) / 1000) : -1; }
         else {
@@ -274,7 +284,17 @@ bool touch_port_init(void) {
  * below the cross at the top left of the glass. A first sitting of 27, the
  * watch held in the hand and tapped with its thumb, sat 10 px left of these
  * (0.974 x + 5.7, 0.975 y + 14.7): the grip moves where a finger lands by
- * most of a millimeter, and a watch is used worn. */
+ * most of a millimeter, and a watch is used worn.
+ *
+ * The 2.16 (CST9220, the square tank), 2026-10-04: 18 presses on its 3 x 3
+ * (tools/touch_calib.py, two passes), the bias inside:
+ *
+ *   target x   48  240  432      reported   36  236  438   (rms 6.8 px)
+ *   target y   40  240  440      reported   38  245  450   (rms 5.8 px)
+ *
+ * reported = 1.046 x - 14.5 and 1.030 y - 2.9: like the 1.8 and the bowl
+ * it reads LARGE about the top left - a press by the left wall 12 px
+ * further left, one at the foot 10 px low. */
 #define CAL_X_GAIN 1.142f
 #define CAL_X_OFF  33.0f
 #define CAL_Y_GAIN 1.138f
@@ -285,9 +305,27 @@ bool touch_port_init(void) {
 #define CAL_W_X_OFF  (-14.8f)
 #define CAL_W_Y_GAIN 0.957f
 #define CAL_W_Y_OFF  (-13.5f)
+#define CAL_S_X_GAIN 1.046f
+#define CAL_S_X_OFF  14.5f
+#define CAL_S_Y_GAIN 1.030f
+#define CAL_S_Y_OFF  2.9f
 static void cal_point(float rx, float ry, float *tx, float *ty);
 /* an upright raw report -> the finger's point on the picture as shown: calibrated, then turned with the picture */
 static void cal_view(float rx, float ry, float *tx, float *ty) {
+    if (board_is_sq216()) {                           /* the square turns all four ways (2026-10-04): the panel's stretch undone
+                                                         upright, the turn, THEN the finger's low landing in the picture's own down */
+        const float M = TANK_W - 1;
+        float px = (rx + CAL_S_X_OFF) / CAL_S_X_GAIN, py = (ry + CAL_S_Y_OFF) / CAL_S_Y_GAIN, x, y;
+        switch (s_rot) {                              /* picture turned a quarter clockwise: tank (x, y) is panel (M - y, x) */
+        case 1:  x = py;     y = M - px; break;
+        case 2:  x = M - px; y = M - py; break;
+        case 3:  x = M - py; y = px;     break;
+        default: x = px;     y = py;     break;
+        }
+        y -= s_bias_y;
+        *tx = x < 0 ? 0 : x > M ? M : x; *ty = y < 0 ? 0 : y > TANK_H - 1 ? TANK_H - 1 : y;
+        return;
+    }
     cal_point(rx, ry, tx, ty);
     if (s_inverted) { *tx = TANK_W - 1 - *tx; *ty = TANK_H - 1 - *ty; }
 }
@@ -406,6 +444,7 @@ static void stroke_point(bool landed, float tx, float ty, float *dx, float *dy) 
     if (*dy > TANK_H - 1) *dy = TANK_H - 1;
 }
 static bool s_upd; static int s_upd_act;                 /* the UPDATES page (2026-09-30) */
+static bool s_bak, s_bak_restore;                        /* the 2.16's SD BACKUPS page, from the updates page (2026-10-04) */
 bool touch_port_read_raw(float *x, float *y) {
     uint16_t px[1], py[1];
     if (!panel_read(px, py)) return false;
@@ -443,8 +482,14 @@ void touch_port_poll(tank_t *t) {
     if (s_upd && !s_cf && !su) {                             /* the UPDATES page: CHECK (main restarts), FORGET, CLOSE */
         int r = updates_page_touch(tx, ty, touched);
         if (r == UPD_TAP_CLOSE) { s_upd = false; s_set = true; s_back = true; ESP_LOGI(TAG, "updates page: CLOSE -> settings"); }
+        else if (r == UPD_TAP_BACKUPS) { s_upd = false; s_bak = true; s_back = true; sd_backup_page_open(); }
         else if (r == UPD_TAP_CHECK) { s_upd_act = r; ESP_LOGI(TAG, "updates page: CHECK FOR UPDATES"); }
         else if (r == UPD_TAP_FORGET) ESP_LOGI(TAG, "updates page: network forgotten");
+    }
+    if (s_bak && !s_cf && !su) {                             /* the SD BACKUPS page: a copy, its question, CLOSE */
+        int r = sd_backup_page_touch(tx, ty, touched);
+        if (r == SDP_CLOSE) { s_bak = false; s_upd = true; s_back = true; }
+        else if (r == SDP_RESTORE) s_bak_restore = true;     /* main saves the tank, then the page restores and restarts */
     }
     if (su && !s_cf) {
         bool birth = setup_is_birth(), rename = setup_is_rename(); int who = setup_fish(), place = setup_item();
@@ -452,14 +497,14 @@ void touch_port_poll(tank_t *t) {
         if (!setup_active()) {
             if (rename) ESP_LOGI(TAG, "rename closed: the fish is %s", who >= 0 && who < t->n_fish ? t->fish[who].name : "?");
             else if (birth) ESP_LOGI(TAG, "birth flow done: %s named and saved", who >= 0 && who < t->n_fish ? t->fish[who].name : "?");
-            else if (place >= 0) ESP_LOGI(TAG, "placed: %s at x %.0f, %s layer, saved", SD_ITEMS[place].name, tank_decor_x(t, place),
+            else if (place >= 0) ESP_LOGI(TAG, "placed: %s at x %.0f, %s layer, saved", sd_item_name(place), tank_decor_x(t, place),
                                           tank_decor_z(t, place) == DECOR_Z_BACK ? "BEHIND" : tank_decor_z(t, place) == DECOR_Z_FRONT ? "IN FRONT" : "AMONG");
             else ESP_LOGI(TAG, "setup done: %s + %s", t->fish[0].name, t->fish[1].name);
         }
     }
     { int rf = setup_take_renamed();                         /* a rename closed (2026-10-01): back to the milestones page, the fish's card up */
       if (rf >= 0) { s_ms = true; s_set = false; s_shop = false; s_sel = -1; render_milestones_show_fish(t, rf); } }
-    bool modal = s_ms || s_set || s_shop || s_cf || su || s_bat || s_upd;   /* a page or a prompt owns the glass */
+    bool modal = s_ms || s_set || s_shop || s_cf || su || s_bat || s_upd || s_bak;   /* a page or a prompt owns the glass */
     if (touched) {                                           /* stroke = wipe/slash, reaching the glass (stroke_point above) */
         float dx, dy; stroke_point(!s_down, tx, ty, &dx, &dy);
         if (!s_down) { s_dx0 = s_dx1 = dx; s_frames = 0; s_raw_px = x[0]; s_raw_py = y[0]; }
@@ -474,7 +519,7 @@ void touch_port_poll(tank_t *t) {
     if (touched && !modal && !s_held_page && t->tool == TOOL_HAND && now - s_press_us > 700000 && fabsf(tx - s_px) < 24 && fabsf(ty - s_py) < 24) {
         int it = tank_decor_hit(t, s_px, s_py);
         if (it >= 0) { setup_begin_place(t, it); s_held_page = true; s_sel = -1;
-                       ESP_LOGI(TAG, "held on the %s: placement page up", SD_ITEMS[it].name); }
+                       ESP_LOGI(TAG, "held on the %s: placement page up", sd_item_name(it)); }
     }
     if (touched && !modal && !s_held_page && now - s_press_us > 300000 && fabsf(ty - s_py) < 30) tank_touch_hold(t, tx, ty);
     if (!touched && s_down) {
@@ -507,7 +552,7 @@ void touch_port_poll(tank_t *t) {
         if (held_us < 350000 && dx * dx + dy * dy < 24 * 24) {
             if (notice_current()) {                                 /* (the lights-out notice lets its tap through: notice.h) */
                 bool took = notice_dismiss(); ESP_LOGI(TAG, "tap closed the announcement"); if (took) goto released; }
-            if (s_set || s_upd || s_back) { s_back = false; goto released; }   /* the settings / updates page had the glass (their touch calls above) */
+            if (s_set || s_upd || s_bak || s_back) { s_back = false; goto released; }   /* the settings / updates page had the glass (their touch calls above) */
             if (s_shop) {                                           /* the shop: a row's modal, UNLOCK, HOW TO EARN, CLOSE */
                 int r = render_shop_tap(t, s_px, s_py);
                 ESP_LOGI(TAG, "shop tap at %.0f,%.0f -> %s", s_px, s_py, r == SHOP_TAP_CLOSE ? "CLOSE" : r >= SHOP_TAP_SELL ? "SELL" : r >= SHOP_TAP_MOVE ? "MOVE" : r >= SHOP_TAP_BUY ? "UNLOCK" : r == SHOP_TAP_KEPT ? "modal" : "nothing");
@@ -611,7 +656,9 @@ int touch_port_selected(void) { return s_sel; }
 bool touch_port_milestones(void) { return s_ms; }
 void touch_port_show_milestones(bool on) { if (s_ms && !on) render_milestones_leave(); s_ms = on; }
 void touch_port_dismiss(void) { s_sel = -1; if (s_ms) render_milestones_leave(); if (s_shop) render_shop_leave(); s_ms = false; s_set = false; s_shop = false; s_bat = false; s_upd = false; }
-bool touch_port_updates(void) { return s_upd; }
+bool touch_port_updates(void) { return s_upd || s_bak; }   /* (the backups page counts as one: every "a page is up" check holds) */
+bool touch_port_backups(void) { return s_bak; }
+bool touch_port_take_backup_restore(void) { bool r = s_bak_restore; s_bak_restore = false; return r; }
 void touch_port_show_updates(bool on) { s_upd = on; if (on) { s_ms = false; s_set = false; s_shop = false; s_sel = -1; s_bat = false; } }
 int  touch_port_take_update(void) { int r = s_upd_act; s_upd_act = 0; return r; }
 

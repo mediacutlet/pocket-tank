@@ -68,4 +68,18 @@
 #define W_PANEL_W         410      /* native portrait */
 #define W_PANEL_H         502
 #define W_PANEL_X_GAP     0x16
+
+/* ---- the 2.16 (480x480 SQUARE CO5300 + CST9220) ----
+ * Sources: Waveshare's BSP (waveshare/esp32_s3_touch_amoled_2_16 2.0.1) and
+ * the schematic (github.com/waveshareteam/ESP32-S3-Touch-AMOLED-2.16). The
+ * 1.75C's family: no IO expander, the resets on GPIOs, PCLK 38, TP_INT 11,
+ * an ES7210 at 0x40 and A3V3 on ALDO1 - but an RTC chip too (the watch's
+ * tell), so it is not told apart at boot: its own build (BOARD_SQ216).
+ * DSI_PWR_EN is pulled up to VCC3V3. The I2S master clock moved: 42, not 16 -
+ * 16 is SYS_OUT (the PWR key's sense) here. */
+#define S_PIN_LCD_RST     39
+#define S_PIN_TP_RST      40
+#define S_PIN_PWR_SENSE   16       /* SYS_OUT: high while the PWR key is down */
+#define S_PIN_I2S_MCLK    42
+#define S_PANEL           480      /* square, no gap */
 #endif

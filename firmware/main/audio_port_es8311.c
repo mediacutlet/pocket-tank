@@ -21,7 +21,7 @@
 
 static const char *TAG = "audio";
 
-#define PIN_I2S_MCLK  16
+#define PIN_I2S_MCLK  (board_is_sq216() ? S_PIN_I2S_MCLK : 16)
 #define PIN_I2S_BCLK  (board_is_watch() ? W_PIN_I2S_BCLK : 9)
 #define PIN_I2S_WS    45
 #define PIN_I2S_DOUT  (board_is_watch() ? W_PIN_I2S_DOUT : 8)        /* ESP -> codec DSDIN */

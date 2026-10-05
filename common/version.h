@@ -45,6 +45,9 @@
 #if defined(TANK_ROUND)
 #define PT_BOARD         "round175c"
 #define PT_BOARD_NAME    "ESP32-S3-Touch-AMOLED-1.75C"
+#elif defined(BOARD_SQ216)
+#define PT_BOARD         "sq216"
+#define PT_BOARD_NAME    "ESP32-S3-Touch-AMOLED-2.16"
 #elif defined(TANK_WATCH)
 #define PT_BOARD         "watch206"
 #define PT_BOARD_NAME    "ESP32-S3-Touch-AMOLED-2.06"

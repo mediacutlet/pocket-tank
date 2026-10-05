@@ -5,6 +5,7 @@
 #include "tank.h"
 #include "version.h"
 #include "progression.h"     /* version_port_string */
+#include "lang.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -154,31 +155,35 @@ static bool in_box(float x, float y, int bx, int by, int bw, int bh, int slop) {
  * 1. THE UPDATES PAGE in the tank (no radio)
  * ==================================================================== */
 
+bool update_backups_button;
 void render_updates_page(uint16_t *fb, int stride) {
     page_bg(fb, stride);
-    text_c(fb, stride, 14, 3, C_TEXT, "UPDATES");
+    text_c(fb, stride, 14, 3, C_TEXT, TR("UPDATES", "ACTUALIZACIONES"));
     char line[64];
-    snprintf(line, sizeof line, "VERSION %s %s", PT_RELEASE, PT_RELEASE_STAGE);
+    snprintf(line, sizeof line, TR("VERSION %s %s", "VERSIÓN %s %s"), PT_RELEASE, PT_RELEASE_STAGE);
     render_text(fb, stride, 32, 62, 2, C_TEXT, line);
     snprintf(line, sizeof line, "BUILD %s", version_port_string());
     render_text(fb, stride, 32, 84, 2, C_DIM, line);
     char ssid[NET_SSID_MAX + 1], pass[NET_PASS_MAX + 1];
     if (net_port_creds_get(ssid, pass)) {
-        render_text(fb, stride, 32, 122, 2, C_CAPT, "NETWORK");
-        update_text(fb, stride, 32 + render_text_w("NETWORK", 2) + 14, 122, 2, C_TEXT, ssid);
-    } else render_text(fb, stride, 32, 122, 2, C_CAPT, "NO NETWORK SAVED YET");
-    render_text(fb, stride, 32, 152, 2, C_DIM, "THE TANK PAUSES FOR A MOMENT");
-    render_text(fb, stride, 32, 174, 2, C_DIM, "AND COMES BACK BY ITSELF");
-    render_button(fb, stride, UPD_CHECK_X, UPD_CHECK_Y, UPD_CHECK_W, UPD_CHECK_H, C_GO, C_GO_E, "CHECK FOR UPDATES", 2);
+        render_text(fb, stride, 32, 122, 2, C_CAPT, TR("NETWORK", "RED"));
+        update_text(fb, stride, 32 + render_text_w(TR("NETWORK", "RED"), 2) + 14, 122, 2, C_TEXT, ssid);
+    } else render_text(fb, stride, 32, 122, 2, C_CAPT, TR("NO NETWORK SAVED YET", "AÚN NO HAY RED GUARDADA"));
+    render_text(fb, stride, 32, 152, 2, C_DIM, TR("THE TANK PAUSES FOR A MOMENT", "LA PECERA SE PAUSA UN RATO"));
+    render_text(fb, stride, 32, 174, 2, C_DIM, TR("AND COMES BACK BY ITSELF", "Y VUELVE SOLA"));
+    render_button(fb, stride, UPD_CHECK_X, UPD_CHECK_Y, UPD_CHECK_W, UPD_CHECK_H, C_GO, C_GO_E, TR("CHECK FOR UPDATES", "BUSCAR ACTUALIZACIONES"), 2);
     if (net_port_creds_get(ssid, pass))
-        render_button(fb, stride, UPD_FORGET_X, UPD_FORGET_Y, UPD_FORGET_W, UPD_FORGET_H, C_INNER, C_DIM, "FORGET NETWORK", 2);
-    render_button(fb, stride, UPD_CLOSE_X, UPD_CLOSE_Y, UPD_CLOSE_W, UPD_CLOSE_H, C_INNER, C_EDGE, "CLOSE", 2);
+        render_button(fb, stride, UPD_FORGET_X, UPD_FORGET_Y, UPD_FORGET_W, UPD_FORGET_H, C_INNER, C_DIM, TR("FORGET NETWORK", "OLVIDAR RED"), 2);
+    if (update_backups_button)
+        render_button(fb, stride, UPD_BAK_X, UPD_FORGET_Y, UPD_BAK_W, UPD_FORGET_H, C_INNER, C_EDGE, TR("SD BACKUPS", "COPIAS SD"), 2);
+    render_button(fb, stride, UPD_CLOSE_X, UPD_CLOSE_Y, UPD_CLOSE_W, UPD_CLOSE_H, C_INNER, C_EDGE, TR("CLOSE", "CERRAR"), 2);
 }
 int updates_page_tap(float x, float y) {
     x -= PAGE_X; y -= PAGE_Y;                           /* the page's own coordinates (render.h) */
     if (x >= UPD_CLOSE_X - 8 && y >= UPD_CLOSE_Y - 4) return UPD_TAP_CLOSE;
     if (in_box(x, y, UPD_CHECK_X, UPD_CHECK_Y, UPD_CHECK_W, UPD_CHECK_H, 8)) return UPD_TAP_CHECK;
     char ssid[NET_SSID_MAX + 1], pass[NET_PASS_MAX + 1];
+    if (update_backups_button && in_box(x, y, UPD_BAK_X, UPD_FORGET_Y, UPD_BAK_W, UPD_FORGET_H, 6)) return UPD_TAP_BACKUPS;
     if (in_box(x, y, UPD_FORGET_X, UPD_FORGET_Y, UPD_FORGET_W, UPD_FORGET_H, 8) && net_port_creds_get(ssid, pass)) return UPD_TAP_FORGET;
     return UPD_TAP_NONE;
 }
@@ -222,7 +227,7 @@ static struct {
     int  percent;
     float t;                                 /* seconds on the current page */
     /* the message page */
-    char title[24], line1[40], line2[40]; bool line1_ascii;
+    char title[32], line1[48], line2[48]; bool line1_ascii;
     const char *primary, *secondary, *tertiary; int act_primary, act_secondary, act_tertiary;
     /* the keyboard */
     int  kb_mode, kb_page; bool kb_caps;
@@ -275,7 +280,8 @@ static void kb_key(int cell) {
     }
 }
 static void draw_keyboard(uint16_t *fb, int stride) {
-    static const char *const FK_LABEL[7] = { "MORE", "DEL", "", "CAPS", "123", "BACK", "JOIN" };
+    static const char *const FK_LABEL[LANG_N][7] = { { "MORE", "DEL", "", "CAPS", "123", "BACK", "JOIN" },
+                                                     { "MÁS", "BORR", "", "MAY", "123", "ATRÁS", "UNIR" } };
     for (int cell = 0; cell < UPD_KB_COLS * UPD_KB_ROWS; cell++) {
         int x = UPD_KB_X + (cell % UPD_KB_COLS) * UPD_KB_PX, y = UPD_KB_Y + (cell / UPD_KB_COLS) * UPD_KB_PY;
         if (cell < KB_CHARS) {
@@ -284,10 +290,11 @@ static void draw_keyboard(uint16_t *fb, int stride) {
             update_text(fb, stride, x + (UPD_KB_W - update_text_w(lbl, 3)) / 2, y + (UPD_KB_H - 21) / 2, 3, C_TEXT, lbl);
         } else {
             int fk = cell - KB_CHARS;
-            const char *lbl = fk == FK_MODE ? (s.kb_mode ? "ABC" : "123") : FK_LABEL[fk];
+            const char *lbl = fk == FK_MODE ? (s.kb_mode ? "ABC" : "123") : FK_LABEL[pt_lang == LANG_ES][fk];
             bool lit = (fk == FK_SHIFT && s.kb_caps && !s.kb_mode) || fk == FK_JOIN;
             bool dim = (fk == FK_SHIFT && s.kb_mode) || fk == FK_BACK;   /* BACK: rare, and it leaves the page - quieter */
-            render_button(fb, stride, x, y, UPD_KB_W, UPD_KB_H, lit ? C_GO : dim ? C_KEY : C_INNER, dim ? C_DIM : lit ? C_GO_E : C_EDGE, lbl, 2);
+            render_button(fb, stride, x, y, UPD_KB_W, UPD_KB_H, lit ? C_GO : dim ? C_KEY : C_INNER, dim ? C_DIM : lit ? C_GO_E : C_EDGE, lbl,
+                          pt_lang != LANG_ES || render_text_w(lbl, 2) <= UPD_KB_W - 2 ? 2 : 1);   /* the Spanish ATRÁS: a size down */
             if (fk == FK_SPACE) render_rect(fb, stride, x + 10, y + UPD_KB_H / 2 + 4, UPD_KB_W - 20, 3, C_TEXT);   /* the space bar's bar */
             if (fk == FK_MORE) {                      /* the page pips under MORE */
                 int n = kb_pages(), px0 = x + UPD_KB_W / 2 - (n * 8 - 4) / 2;
@@ -337,10 +344,10 @@ static void busy(const char *title) {
     s.percent = -1;
     s.page = UPD_PG_BUSY; s.t = 0; s.hit = HIT_NONE;
 }
-static void start_scan(void)    { net_port_scan_start(); s.n_aps = 0; s.list_page = 0; go(STEP_SCANNING, UPD_PG_BUSY); busy("LOOKING FOR NETWORKS"); }
-static void start_connect(void) { net_port_connect_start(s.ssid, s.pass); go(STEP_CONNECTING, UPD_PG_BUSY); busy("CONNECTING TO"); }
-static void start_check(void)   { net_port_check_start(); s.have_m = false; go(STEP_CHECKING, UPD_PG_BUSY); busy("CHECKING FOR UPDATES"); }
-static void start_install(void) { net_port_install_start(); go(STEP_INSTALLING, UPD_PG_BUSY); busy("DOWNLOADING"); s.percent = 0; }
+static void start_scan(void)    { net_port_scan_start(); s.n_aps = 0; s.list_page = 0; go(STEP_SCANNING, UPD_PG_BUSY); busy(TR("LOOKING FOR NETWORKS", "BUSCANDO REDES")); }
+static void start_connect(void) { net_port_connect_start(s.ssid, s.pass); go(STEP_CONNECTING, UPD_PG_BUSY); busy(TR("CONNECTING TO", "CONECTANDO A")); }
+static void start_check(void)   { net_port_check_start(); s.have_m = false; go(STEP_CHECKING, UPD_PG_BUSY); busy(TR("CHECKING FOR UPDATES", "BUSCANDO VERSIÓN")); }
+static void start_install(void) { net_port_install_start(); go(STEP_INSTALLING, UPD_PG_BUSY); busy(TR("DOWNLOADING", "DESCARGANDO")); s.percent = 0; }
 static void leave(int outcome)  { s.outcome = outcome; s.step = STEP_NONE; }
 /* the keyboard, keeping what was typed for this network (a stray BACK or a
  * refused try must not cost a long passphrase); fresh = start empty */
@@ -386,19 +393,19 @@ const char *update_typed(void) { return s.pass; }
 
 static void fail(int err) {
     switch (err) {
-    case NET_ERR_NO_SIGNAL: message("NO SIGNAL", s.ssid, true, "IS NOT IN RANGE", "TRY AGAIN", ACT_RETRY_CONNECT, "OTHER NETWORK", ACT_SCAN); break;
-    case NET_ERR_PASSWORD:  message3("NOT ACCEPTED", s.ssid, true, "REFUSED THE PASSWORD. SOME ROUTERS",
-                                     "TRY AGAIN", ACT_RETRY_CONNECT, "TYPE IT AGAIN", ACT_RETYPE, "OTHER NETWORK", ACT_SCAN);
-                            snprintf(s.line2, sizeof s.line2, "REFUSE THE FIRST TRIES. TRY AGAIN?"); break;
-    case NET_ERR_NO_NET:    message("NO ANSWER", "THE UPDATE SERVER DID NOT", false, "ANSWER. IS THE INTERNET UP?", "TRY AGAIN", ACT_RETRY_CHECK, "OTHER NETWORK", ACT_SCAN); break;
-    case NET_ERR_BAD_MANIFEST: message("ODD ANSWER", "THE UPDATE SERVER SENT", false, "SOMETHING THIS TANK CANNOT READ", "TRY AGAIN", ACT_RETRY_CHECK, NULL, 0); break;
-    case NET_ERR_DOWNLOAD:  message("DOWNLOAD STOPPED", "NOTHING HAS CHANGED", false, "", "TRY AGAIN", ACT_RETRY_INSTALL, NULL, 0); break;
-    case NET_ERR_VERIFY:    message("NOT VERIFIED", "THE UPDATE WAS NOT SIGNED", false, "BY POCKET TANK. NOTHING CHANGED", NULL, 0, NULL, 0); break;
-    case NET_ERR_SPACE:     message("TOO BIG", "THE UPDATE DOES NOT FIT", false, "THIS TANK. NOTHING CHANGED", NULL, 0, NULL, 0); break;
-    case NET_ERR_ABORTED:   message("CANCELED", "NOTHING HAS CHANGED", false, "", NULL, 0, NULL, 0); break;
-    case NET_ERR_RADIO:     message("NO RADIO", "THE WI-FI RADIO DID NOT", false, "START. TRY AGAIN LATER", NULL, 0, NULL, 0); break;
-    case NET_ERR_BOARD:     message("WRONG BOARD", "THIS UPDATE IS FOR", false, "ANOTHER BOARD. NOTHING CHANGED", NULL, 0, NULL, 0); break;
-    default:                message("SOMETHING WENT WRONG", "NOTHING HAS CHANGED", false, "", "TRY AGAIN", ACT_SCAN, NULL, 0); break;
+    case NET_ERR_NO_SIGNAL: message(TR("NO SIGNAL", "SIN SEÑAL"), s.ssid, true, TR("IS NOT IN RANGE", "ESTÁ FUERA DE ALCANCE"), TR("TRY AGAIN", "REINTENTAR"), ACT_RETRY_CONNECT, TR("OTHER NETWORK", "OTRA RED"), ACT_SCAN); break;
+    case NET_ERR_PASSWORD:  message3(TR("NOT ACCEPTED", "NO ACEPTADA"), s.ssid, true, TR("REFUSED THE PASSWORD. SOME ROUTERS", "RECHAZÓ LA CONTRASEÑA"),
+                                     TR("TRY AGAIN", "REINTENTAR"), ACT_RETRY_CONNECT, TR("TYPE IT AGAIN", "REESCRIBIR"), ACT_RETYPE, TR("OTHER NETWORK", "OTRA RED"), ACT_SCAN);
+                            snprintf(s.line2, sizeof s.line2, TR("REFUSE THE FIRST TRIES. TRY AGAIN?", "PUEDE FALLAR AL INICIO. ¿OTRA VEZ?")); break;
+    case NET_ERR_NO_NET:    message(TR("NO ANSWER", "SIN RESPUESTA"), TR("THE UPDATE SERVER DID NOT", "EL SERVIDOR NO RESPONDIÓ."), false, TR("ANSWER. IS THE INTERNET UP?", "¿HAY INTERNET?"), TR("TRY AGAIN", "REINTENTAR"), ACT_RETRY_CHECK, TR("OTHER NETWORK", "OTRA RED"), ACT_SCAN); break;
+    case NET_ERR_BAD_MANIFEST: message(TR("ODD ANSWER", "RESPUESTA RARA"), TR("THE UPDATE SERVER SENT", "EL SERVIDOR ENVIÓ ALGO QUE"), false, TR("SOMETHING THIS TANK CANNOT READ", "ESTA PECERA NO PUEDE LEER"), TR("TRY AGAIN", "REINTENTAR"), ACT_RETRY_CHECK, NULL, 0); break;
+    case NET_ERR_DOWNLOAD:  message(TR("DOWNLOAD STOPPED", "DESCARGA DETENIDA"), TR("NOTHING HAS CHANGED", "NO SE CAMBIÓ NADA"), false, "", TR("TRY AGAIN", "REINTENTAR"), ACT_RETRY_INSTALL, NULL, 0); break;
+    case NET_ERR_VERIFY:    message(TR("NOT VERIFIED", "NO VERIFICADA"), TR("THE UPDATE WAS NOT SIGNED", "LA ACTUALIZACIÓN NO ESTÁ FIRMADA"), false, TR("BY POCKET TANK. NOTHING CHANGED", "POR POCKET TANK. NO CAMBIÓ NADA"), NULL, 0, NULL, 0); break;
+    case NET_ERR_SPACE:     message(TR("TOO BIG", "DEMASIADO GRANDE"), TR("THE UPDATE DOES NOT FIT", "LA ACTUALIZACIÓN NO CABE EN"), false, TR("THIS TANK. NOTHING CHANGED", "ESTA PECERA. NO CAMBIÓ NADA"), NULL, 0, NULL, 0); break;
+    case NET_ERR_ABORTED:   message(TR("CANCELED", "CANCELADA"), TR("NOTHING HAS CHANGED", "NO SE CAMBIÓ NADA"), false, "", NULL, 0, NULL, 0); break;
+    case NET_ERR_RADIO:     message(TR("NO RADIO", "SIN RADIO"), TR("THE WI-FI RADIO DID NOT", "LA RADIO WI-FI NO ARRANCÓ."), false, TR("START. TRY AGAIN LATER", "INTÉNTALO MÁS TARDE"), NULL, 0, NULL, 0); break;
+    case NET_ERR_BOARD:     message(TR("WRONG BOARD", "PLACA INCORRECTA"), TR("THIS UPDATE IS FOR", "ESTA ACTUALIZACIÓN ES PARA"), false, TR("ANOTHER BOARD. NOTHING CHANGED", "OTRA PLACA. NO CAMBIÓ NADA"), NULL, 0, NULL, 0); break;
+    default:                message(TR("SOMETHING WENT WRONG", "ALGO SALIÓ MAL"), TR("NOTHING HAS CHANGED", "NO SE CAMBIÓ NADA"), false, "", TR("TRY AGAIN", "REINTENTAR"), ACT_SCAN, NULL, 0); break;
     }
 }
 static void act(int a) {
@@ -423,7 +430,7 @@ void update_tick(float dt) {
         if (st == NET_DONE) {
             s.n_aps = net_port_scan_results(s.aps, NET_SCAN_MAX); s.list_page = 0;
             if (s.n_aps) go(STEP_LIST, UPD_PG_SCAN);
-            else message("NO NETWORKS", "NOTHING IN RANGE.", false, "IS THE ROUTER ON?", "LOOK AGAIN", ACT_SCAN, NULL, 0);
+            else message(TR("NO NETWORKS", "SIN REDES"), TR("NOTHING IN RANGE.", "NO HAY NADA AL ALCANCE."), false, TR("IS THE ROUTER ON?", "¿EL ROUTER ESTÁ ENCENDIDO?"), TR("LOOK AGAIN", "BUSCAR REDES"), ACT_SCAN, NULL, 0);
         } else if (st == NET_FAILED) fail(net_port_fail_reason());
         break;
     case STEP_CONNECTING:
@@ -439,10 +446,10 @@ void update_tick(float dt) {
         if (st == NET_DONE && m) {
             s.m = *m; s.have_m = true;
             if (strcmp(m->board, PT_BOARD) != 0)            /* another board's manifest (2026-10-02): never offered */
-                message("WRONG BOARD", "THIS UPDATE IS FOR", false, "ANOTHER BOARD. NOTHING CHANGED", NULL, 0, NULL, 0);
-            else if (!newer(m)) { message("UP TO DATE", "YOUR TANK HAS THE LATEST", false, "VERSION", NULL, 0, NULL, 0); s.step = STEP_UP_TO_DATE; }
+                message(TR("WRONG BOARD", "PLACA INCORRECTA"), TR("THIS UPDATE IS FOR", "ESTA ACTUALIZACIÓN ES PARA"), false, TR("ANOTHER BOARD. NOTHING CHANGED", "OTRA PLACA. NO CAMBIÓ NADA"), NULL, 0, NULL, 0);
+            else if (!newer(m)) { message(TR("UP TO DATE", "AL DÍA"), TR("YOUR TANK HAS THE LATEST", "TU PECERA TIENE LA ÚLTIMA"), false, TR("VERSION", "VERSIÓN"), NULL, 0, NULL, 0); s.step = STEP_UP_TO_DATE; }
             else if (m->needs_cable || (m->min_from && m->min_from > (uint32_t)PT_RELEASE_NUM))
-                message("NEEDS THE CABLE", "THIS UPDATE IS INSTALLED", false, "FROM POCKETANK.COM/INSTALL", NULL, 0, NULL, 0);
+                message(TR("NEEDS THE CABLE", "REQUIERE CABLE"), TR("THIS UPDATE IS INSTALLED", "ESTA ACTUALIZACIÓN SE INSTALA"), false, TR("FROM POCKETANK.COM/INSTALL", "DESDE POCKETANK.COM/INSTALL"), NULL, 0, NULL, 0);
             else go(STEP_OFFER, UPD_PG_OFFER);
         } else if (st == NET_FAILED) fail(net_port_fail_reason());
         break; }
@@ -453,7 +460,7 @@ void update_tick(float dt) {
         int pct = s.percent;
         st = net_port_install_state(&pct);
         s.percent = pct;
-        if (st == NET_DONE) go(STEP_RESTART, UPD_PG_BUSY), busy("INSTALLED"), s.percent = 100;
+        if (st == NET_DONE) go(STEP_RESTART, UPD_PG_BUSY), busy(TR("INSTALLED", "INSTALADA")), s.percent = 100;
         else if (st == NET_FAILED) fail(net_port_fail_reason());
         break; }
     case STEP_RESTART:
@@ -597,8 +604,8 @@ static void wrap2(const char *src, char *l1, char *l2, size_t cap) {   /* two li
 }
 void render_clock_sync(uint16_t *fb, int stride, float clock) {
     page_bg(fb, stride);
-    text_c(fb, stride, 120, 3, C_TEXT, "WAKING UP");
-    text_c(fb, stride, 158, 2, C_CAPT, "CHECKING THE TIME");
+    text_c(fb, stride, 120, 3, C_TEXT, TR("WAKING UP", "DESPERTANDO"));
+    text_c(fb, stride, 158, 2, C_CAPT, TR("CHECKING THE TIME", "CONSULTANDO LA HORA"));
     spinner(fb, stride, CX, 224, clock);
 }
 void render_update(uint16_t *fb, int stride, float clock) {
@@ -606,30 +613,30 @@ void render_update(uint16_t *fb, int stride, float clock) {
     char line[80];
     switch (s.page) {
     case UPD_PG_POWER:
-        text_c(fb, stride, 96, 3, C_TEXT, "PLUG IN TO UPDATE");
-        snprintf(line, sizeof line, "THE BATTERY IS AT %d%%", s.battery_pct);
+        text_c(fb, stride, 96, 3, C_TEXT, TR("PLUG IN TO UPDATE", "CONECTA EL CABLE"));
+        snprintf(line, sizeof line, TR("THE BATTERY IS AT %d%%", "LA BATERÍA ESTÁ AL %d%%"), s.battery_pct);
         text_c(fb, stride, 150, 2, C_CAPT, line);
-        text_c(fb, stride, 176, 2, C_DIM, "AN UPDATE NEEDS THE CABLE IN");
-        render_button(fb, stride, UPD_BTN_MID_X, UPD_BTN_Y, UPD_BTN_W, UPD_BTN_H, C_INNER, C_EDGE, "BACK TO TANK", 2);
+        text_c(fb, stride, 176, 2, C_DIM, TR("AN UPDATE NEEDS THE CABLE IN", "ACTUALIZAR REQUIERE EL CABLE"));
+        render_button(fb, stride, UPD_BTN_MID_X, UPD_BTN_Y, UPD_BTN_W, UPD_BTN_H, C_INNER, C_EDGE, TR("BACK TO TANK", "A LA PECERA"), 2);
         break;
     case UPD_PG_BUSY:
         text_c(fb, stride, 96, 3, C_TEXT, s.title);
         if (s.step == STEP_CONNECTING) atext_c(fb, stride, 134, 2, C_CAPT, s.ssid);
         else if (s.step == STEP_INSTALLING || s.step == STEP_RESTART) {
-            snprintf(line, sizeof line, "VERSION %s", s.m.release); text_c(fb, stride, 134, 2, C_CAPT, line);
+            snprintf(line, sizeof line, TR("VERSION %s", "VERSIÓN %s"), s.m.release); text_c(fb, stride, 134, 2, C_CAPT, line);
         }
         if (s.percent >= 0) {                                 /* the bar */
             const int BX = 64, BW = 320, BY = 196, BH = 16;
             render_rect(fb, stride, BX, BY, BW, BH, C_INNER); render_rect_edge(fb, stride, BX, BY, BW, BH, C_DIM);
             render_rect(fb, stride, BX + 2, BY + 2, (BW - 4) * s.percent / 100, BH - 4, C_EDGE);
             snprintf(line, sizeof line, "%d%%", s.percent); text_c(fb, stride, BY + 26, 2, C_TEXT, line);
-            if (s.step == STEP_RESTART) text_c(fb, stride, 252, 2, C_CAPT, "RESTARTING");
-            else text_c(fb, stride, 252, 2, C_DIM, "KEEP THE TANK ON");
+            if (s.step == STEP_RESTART) text_c(fb, stride, 252, 2, C_CAPT, TR("RESTARTING", "REINICIANDO"));
+            else text_c(fb, stride, 252, 2, C_DIM, TR("KEEP THE TANK ON", "NO APAGUES LA PECERA"));
         } else spinner(fb, stride, CX, 214, clock);
-        if (s.step != STEP_RESTART) render_button(fb, stride, UPD_BTN_MID_X, UPD_BTN_Y, UPD_BTN_W, UPD_BTN_H, C_INNER, C_EDGE, "CANCEL", 2);
+        if (s.step != STEP_RESTART) render_button(fb, stride, UPD_BTN_MID_X, UPD_BTN_Y, UPD_BTN_W, UPD_BTN_H, C_INNER, C_EDGE, TR("CANCEL", "CANCELAR"), 2);
         break;
     case UPD_PG_SCAN: {
-        text_c(fb, stride, 22, 2, C_CAPT, "CHOOSE YOUR NETWORK");
+        text_c(fb, stride, 22, 2, C_CAPT, TR("CHOOSE YOUR NETWORK", "ELIGE TU RED"));
         int pages = (s.n_aps + UPD_ROWS_PER - 1) / UPD_ROWS_PER;
         for (int r = 0; r < UPD_ROWS_PER; r++) {
             int i = s.list_page * UPD_ROWS_PER + r; if (i >= s.n_aps) break;
@@ -638,7 +645,7 @@ void render_update(uint16_t *fb, int stride, float clock) {
             render_rect_edge(fb, stride, UX, y, UW - (pages > 1 ? 36 : 0), UPD_ROW_H - 4, C_INNER);
             update_text(fb, stride, UX + 12, y + (UPD_ROW_H - 4 - 14) / 2, 2, C_TEXT, s.aps[i].ssid);
             signal_bars(fb, stride, UX + UW - (pages > 1 ? 36 : 0) - 44, y + 8, s.aps[i].rssi);
-            if (!s.aps[i].secured) render_text(fb, stride, UX + UW - (pages > 1 ? 36 : 0) - 44 - 8 - render_text_w("OPEN", 1), y + 12, 1, C_DIM, "OPEN");
+            if (!s.aps[i].secured) render_text(fb, stride, UX + UW - (pages > 1 ? 36 : 0) - 44 - 8 - render_text_w(TR("OPEN", "ABIERTA"), 1), y + 12, 1, C_DIM, TR("OPEN", "ABIERTA"));
         }
         if (pages > 1) {                                       /* chevrons and pips on the right */
             int cx = UPD_ARROW_X + 4;
@@ -646,30 +653,30 @@ void render_update(uint16_t *fb, int stride, float clock) {
             for (int i = 0; i < 4; i++) { render_rect(fb, stride, cx - 3 - i * 3, UPD_ROW_Y0 + UPD_ROWS_PER * UPD_ROW_H - 30 - i * 3, 3, 3, s.list_page < pages - 1 ? C_EDGE : C_DIM); render_rect(fb, stride, cx + i * 3, UPD_ROW_Y0 + UPD_ROWS_PER * UPD_ROW_H - 30 - i * 3, 3, 3, s.list_page < pages - 1 ? C_EDGE : C_DIM); }
             for (int i = 0; i < pages; i++) render_rect(fb, stride, cx - 1, UPD_ROW_Y0 + UPD_ROWS_PER * UPD_ROW_H / 2 - pages * 4 + i * 8, 4, 4, i == s.list_page ? C_EDGE : C_DIM);
         }
-        render_button(fb, stride, UPD_BTN_L_X, UPD_BTN_Y, UPD_BTN_W, UPD_BTN_H, C_INNER, C_EDGE, "BACK TO TANK", 2);
-        render_button(fb, stride, UPD_BTN_R_X, UPD_BTN_Y, UPD_BTN_W, UPD_BTN_H, C_INNER, C_EDGE, "SCAN AGAIN", 2);
+        render_button(fb, stride, UPD_BTN_L_X, UPD_BTN_Y, UPD_BTN_W, UPD_BTN_H, C_INNER, C_EDGE, TR("BACK TO TANK", "A LA PECERA"), 2);
+        render_button(fb, stride, UPD_BTN_R_X, UPD_BTN_Y, UPD_BTN_W, UPD_BTN_H, C_INNER, C_EDGE, TR("SCAN AGAIN", "BUSCAR REDES"), 2);
         break; }
     case UPD_PG_PASSWORD:
-        render_text(fb, stride, UX + (PAGE_BOWL ? 30 : 0), 22, 2, C_CAPT, "PASSWORD FOR");
-        update_text(fb, stride, UX + (PAGE_BOWL ? 30 : 0) + render_text_w("PASSWORD FOR", 2) + 12, 22, 2, C_TEXT, s.ssid);
+        render_text(fb, stride, UX + (PAGE_BOWL ? 30 : 0), 22, 2, C_CAPT, TR("PASSWORD FOR", "CONTRASEÑA DE"));
+        update_text(fb, stride, UX + (PAGE_BOWL ? 30 : 0) + render_text_w(TR("PASSWORD FOR", "CONTRASEÑA DE"), 2) + 12, 22, 2, C_TEXT, s.ssid);
         draw_field(fb, stride, clock);
         draw_keyboard(fb, stride);
         break;
     case UPD_PG_OFFER: {
-        text_c(fb, stride, 52, 3, C_TEXT, "UPDATE READY");
+        text_c(fb, stride, 52, 3, C_TEXT, TR("UPDATE READY", "ACTUALIZACIÓN LISTA"));
         uint32_t bytes = s.m.app_size + (s.m.model_offered ? s.m.model_size : 0);
-        snprintf(line, sizeof line, "VERSION %s %s, %.1f MB", s.m.release, PT_RELEASE_STAGE, bytes / 1048576.0);
+        snprintf(line, sizeof line, TR("VERSION %s %s, %.1f MB", "VERSIÓN %s %s, %.1f MB"), s.m.release, PT_RELEASE_STAGE, bytes / 1048576.0);
         text_c(fb, stride, 92, 2, C_CAPT, line);
         char l1[32], l2[32]; wrap2(s.m.note, l1, l2, sizeof l1);
         text_c(fb, stride, 138, 2, C_TEXT, l1);
         if (l2[0]) text_c(fb, stride, 160, 2, C_TEXT, l2);
         int secs = (int)(bytes / 120000) + 10;
-        if (secs < 90) snprintf(line, sizeof line, "IT TAKES ABOUT A MINUTE");
-        else snprintf(line, sizeof line, "IT TAKES ABOUT %d MINUTES", (secs + 30) / 60);
+        if (secs < 90) snprintf(line, sizeof line, TR("IT TAKES ABOUT A MINUTE", "TARDA CERCA DE UN MINUTO"));
+        else snprintf(line, sizeof line, TR("IT TAKES ABOUT %d MINUTES", "TARDA CERCA DE %d MINUTOS"), (secs + 30) / 60);
         text_c(fb, stride, 208, 2, C_DIM, line);
-        text_c(fb, stride, 230, 2, C_DIM, "THE TANK RESTARTS BY ITSELF");
-        render_button(fb, stride, UPD_BTN_L_X, UPD_BTN_Y, UPD_BTN_W, UPD_BTN_H, C_GO, C_GO_E, "UPDATE", 2);
-        render_button(fb, stride, UPD_BTN_R_X, UPD_BTN_Y, UPD_BTN_W, UPD_BTN_H, C_INNER, C_EDGE, "NOT NOW", 2);
+        text_c(fb, stride, 230, 2, C_DIM, TR("THE TANK RESTARTS BY ITSELF", "LA PECERA SE REINICIA SOLA"));
+        render_button(fb, stride, UPD_BTN_L_X, UPD_BTN_Y, UPD_BTN_W, UPD_BTN_H, C_GO, C_GO_E, TR("UPDATE", "ACTUALIZAR"), 2);
+        render_button(fb, stride, UPD_BTN_R_X, UPD_BTN_Y, UPD_BTN_W, UPD_BTN_H, C_INNER, C_EDGE, TR("NOT NOW", "AHORA NO"), 2);
         break; }
     case UPD_PG_CALIB: {
         int tx, ty, i = update_calib_target(&tx, &ty);
@@ -677,7 +684,7 @@ void render_update(uint16_t *fb, int stride, float clock) {
         tx -= PAGE_X; ty -= PAGE_Y;                      /* drawn on the page */
         render_rect(fb, stride, tx - 24, ty - 1, 49, 3, C_EDGE); render_rect(fb, stride, tx - 1, ty - 24, 3, 49, C_EDGE);
         render_rect(fb, stride, tx - 4, ty - 4, 9, 9, C_TEXT);
-        snprintf(line, sizeof line, "TAP THE CROSS  %d OF 9", i + 1);
+        snprintf(line, sizeof line, TR("TAP THE CROSS  %d OF 9", "TOCA LA CRUZ  %d DE 9"), i + 1);
         text_c(fb, stride, ty < PAGE_H / 2 ? PAGE_H - 60 : 46, 2, C_CAPT, line);
         break; }
     case UPD_PG_MESSAGE: {
@@ -685,7 +692,7 @@ void render_update(uint16_t *fb, int stride, float clock) {
         if (s.line1_ascii) atext_c(fb, stride, 130, 2, C_CAPT, s.line1); else text_c(fb, stride, 130, 2, C_CAPT, s.line1);
         if (s.line2[0]) text_c(fb, stride, 152, 2, C_CAPT, s.line2);
         if (s.step == STEP_UP_TO_DATE) {
-            snprintf(line, sizeof line, "VERSION %s %s", PT_RELEASE, PT_RELEASE_STAGE); text_c(fb, stride, 186, 2, C_DIM, line);
+            snprintf(line, sizeof line, TR("VERSION %s %s", "VERSIÓN %s %s"), PT_RELEASE, PT_RELEASE_STAGE); text_c(fb, stride, 186, 2, C_DIM, line);
             float left = 1.0f - s.t / UPD_UP_TO_DATE_S; if (left < 0) left = 0;
             render_rect(fb, stride, UX, 220, (int)(UW * left), 2, C_INNER);
         }
@@ -693,7 +700,7 @@ void render_update(uint16_t *fb, int stride, float clock) {
         if (s.primary)   render_button(fb, stride, primary_x(), by, UPD_BTN_W, UPD_BTN_H, C_GO, C_GO_E, s.primary, 2);
         if (s.secondary) render_button(fb, stride, UPD_BTN_R_X, by, UPD_BTN_W, UPD_BTN_H, C_INNER, C_EDGE, s.secondary, 2);
         if (s.tertiary)  render_button(fb, stride, UPD_BTN_L_X, UPD_BTN_Y, UPD_BTN_W, UPD_BTN_H, C_INNER, C_EDGE, s.tertiary, 2);
-        render_button(fb, stride, s.tertiary ? UPD_BTN_R_X : UPD_BTN_MID_X, UPD_BTN_Y, UPD_BTN_W, UPD_BTN_H, C_INNER, C_EDGE, "BACK TO TANK", 2);
+        render_button(fb, stride, s.tertiary ? UPD_BTN_R_X : UPD_BTN_MID_X, UPD_BTN_Y, UPD_BTN_W, UPD_BTN_H, C_INNER, C_EDGE, TR("BACK TO TANK", "A LA PECERA"), 2);
         break; }
     default: break;
     }

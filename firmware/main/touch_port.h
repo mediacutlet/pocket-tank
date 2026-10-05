@@ -63,4 +63,8 @@ void touch_port_set_lift(int ms, int said);
 int  touch_port_lift_ms(void);
 bool touch_port_lift_said(void);
 void touch_port_raw_seen(int *x0, int *x1, int *y0, int *y1);   /* the raw report's extremes since boot, in tank space (x1 < x0: no touch yet) */
+/* the 2.16's square: the picture turned 0..3 quarters clockwise (display_port_set_rotation) - taps turned back with it */
+void touch_port_set_rotation(int quarter);
+bool touch_port_backups(void);              /* the 2.16's SD BACKUPS page is up (touch_port_updates is true too) */
+bool touch_port_take_backup_restore(void);  /* a copy was confirmed: main saves the tank, then sd_backup_page_restore */
 #endif

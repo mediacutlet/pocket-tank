@@ -7,6 +7,7 @@ static bool s_ms;
 bool touch_port_milestones(void) { return s_ms; }
 void touch_port_show_milestones(bool on) { s_ms = on; }
 void touch_port_set_inverted(bool inverted) { (void)inverted; }
+void touch_port_set_rotation(int quarter) { (void)quarter; }
 /* no glass to tap: the prompt can only be answered by the director */
 static bool s_cf; static int s_cf_ans;
 void touch_port_confirm_open(void) { s_cf = true; s_cf_ans = 0; }
@@ -40,3 +41,5 @@ void touch_port_set_lift(int ms, int said) { (void)ms; (void)said; }
 int  touch_port_lift_ms(void) { return 0; }
 bool touch_port_lift_said(void) { return false; }
 void touch_port_raw_seen(int *x0, int *x1, int *y0, int *y1) { *x0 = *y0 = 0; *x1 = *y1 = -1; }
+bool touch_port_backups(void) { return false; }
+bool touch_port_take_backup_restore(void) { return false; }

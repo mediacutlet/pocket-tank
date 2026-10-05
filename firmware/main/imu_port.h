@@ -9,6 +9,8 @@
 bool imu_port_init(i2c_master_bus_handle_t bus);  /* false = no IMU, never inverted */
 void imu_port_poll(int64_t now_us);               /* call every frame; rate-limited inside */
 bool imu_port_inverted(void);                     /* true = device is upside down */
+int  imu_port_rotation(void);                     /* the 2.16: the picture's quarter turns clockwise, 0..3 (0/2 elsewhere) */
+void imu_port_force_rotation(int quarter);        /* director `rot <0-3>|auto`: -1 = back to the IMU */
 /* handling detector (2026-09-15, for the audio port): true while the
  * device has moved within the last IMU_MOTION_HOLD_US - picked up, in a
  * hand, carried. Lying on a table it goes false. */

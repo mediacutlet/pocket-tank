@@ -19,6 +19,9 @@ target_compile_definitions(${COMPONENT_LIB} PUBLIC POP_CAP=5)
 if(CONFIG_POCKET_TANK_ROUND)
     target_compile_definitions(${COMPONENT_LIB} PUBLIC TANK_ROUND)
 endif()
+if(CONFIG_POCKET_TANK_SQ216)   # the 2.16's 480 x 480 square panel: the square tank, the glass px for px
+    target_compile_definitions(${COMPONENT_LIB} PUBLIC BOARD_SQ216 TANK_SQUARE)
+endif()
 if(CONFIG_POCKET_TANK_WATCH)   # the watch's 410 x 502 portrait tank
     target_compile_definitions(${COMPONENT_LIB} PUBLIC TANK_WATCH)
 endif()

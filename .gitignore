@@ -31,6 +31,10 @@ sim/build-round/
 sim/build-watch/
 sim/fishsim-round
 sim/fishsim-watch
+sim/build-square/
+sim/fishsim-square
+firmware/build-sq216/
+firmware/build-sq216.log
 # tools/board_sheet.py: the three glasses side by side
 sim/sheets/
 

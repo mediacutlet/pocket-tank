@@ -1,4 +1,6 @@
 #include "progression.h"
+#include "lang.h"
+uint8_t pt_lang = LANG_EN;                    /* lang.h: the tank's language, for code that holds no tank */
 #include "tank_events.h"
 #include "version.h"
 #include <stddef.h>
@@ -11,18 +13,31 @@
 #define SAVE_HEARTBEAT_S 600.0f
 #define SAVE_MIN_GAP_S   30.0f
 
-const char *const MS_NAMES[MS_FISH_COUNT] = {
+const char *const MS_NAMES[LANG_N][MS_FISH_COUNT] = { {
     "arrived", "first meal from you", "first hold-approach", "first dart", "first bubbles",
     "(inspected)", "(retired)", "(retired)", "first follow",
     "reached juv", "reached adult", "reached elder",
     "first rest in the seagrass",
-};
-const char *const TMS_NAMES[TMS_COUNT] = {
+}, {
+    "llegó", "primera comida de tu mano", "primera visita a tu dedo", "primera carrera", "primeras burbujas",
+    "(inspeccionó)", "(retirado)", "(retirado)", "siguió a un amigo",
+    "llegó a juvenil", "llegó a adulto", "llegó a mayor",
+    "primer descanso en hierba",
+} };
+const char *const TMS_NAMES[LANG_N][TMS_COUNT] = { {
     "a pair", "a trio", "a quartet", "a quintet", "a sextet",
     "first full night's sleep", "first play session", "the tank changed someone", "first feeding",
     "first trimming", "first glass cleaning", "a school of ten shrimp",
     "first visit to the reef",
-};
+}, {
+    "una pareja", "un trío", "un cuarteto", "un quinteto", "un sexteto",
+    "primera noche completa", "primera sesión de juego", "la pecera cambió a alguien", "primera comida",
+    "primera poda", "primera limpieza de vidrio", "un banco de diez camarones",
+    "primera visita al arrecife",
+} };
+static int lang_ix(void) { return pt_lang == LANG_ES ? LANG_ES : LANG_EN; }
+const char *progression_ms_name(int i)  { return i >= 0 && i < MS_FISH_COUNT ? MS_NAMES[lang_ix()][i] : ""; }
+const char *progression_tms_name(int i) { return i >= 0 && i < TMS_COUNT ? TMS_NAMES[lang_ix()][i] : ""; }
 
 /* the save keeps 644 film cells - the rectangle's 28 x 23 grid, frozen by the
  * layout lock below. A build with another grid (the bowl's 26 x 22) saves its
@@ -133,7 +148,7 @@ typedef struct {
     int32_t  sale_meals_need;
     /* a worn tank's way up (2026-10-02, the watch: tank_screen_*): settings
      * SCREEN, 1 = TURNED. Older saves (and every other board) read 0: NORMAL. */
-    uint8_t  screen_turned, pad_screen[3];
+    uint8_t  screen_turned, lang, pad_screen[2];
     /* the urchin (2026-10-02): its x on the floor (0 = not placed yet: it
      * starts by the reef bed) and the grass it has eaten, lifetime, in the
      * trim's px (its card). Older saves read zeros. */
@@ -219,7 +234,7 @@ SAVE_AT(saved_release, 1664);                                                   
 _Static_assert(sizeof(save_t) >= 1672, "SAVE LAYOUT LOCK: save_t only ever grows");
 SAVE_AT(sale_meals_need, 1668);                                                                        /* a fish sold, 10-01 */
 _Static_assert(sizeof(save_t) >= 1672, "SAVE LAYOUT LOCK: save_t only ever grows");
-SAVE_AT(screen_turned, 1672); SAVE_AT(pad_screen, 1673);                  /* the watch's way up, 10-02 */
+SAVE_AT(screen_turned, 1672); SAVE_AT(lang, 1673); SAVE_AT(pad_screen, 1674);   /* the watch's way up, 10-02; the language, 10-04 (was padding: 0 = English) */
 _Static_assert(sizeof(save_t) >= 1680, "SAVE LAYOUT LOCK: save_t only ever grows");
 SAVE_AT(urchin_x, 1676); SAVE_AT(urchin_grazed_px, 1680);                                              /* the urchin, 10-02 */
 _Static_assert(sizeof(save_t) >= 1688, "SAVE LAYOUT LOCK: save_t only ever grows");
@@ -276,14 +291,17 @@ void  progression_newborn_done(tank_t *t) { s_newborn = -1; progression_save(t);
 static void set_ms(fish_t *f, uint32_t bit) { if (!(f->ms_bits & bit)) { f->ms_bits |= bit; mark_dirty(); } }
 /* ---- sand dollars ---- */
 const sd_item_t SD_ITEMS[SD_ITEM_COUNT] = {
-    { SD_ITEM_PLANT, "SWORD PLANT", "BROAD, VERTICAL LEAVES", "MORE COVER FOR YOUR CRITTERS", SD_PRICE_PLANT },   /* Strato's words (2026-09-16); the second line is 28 chars, the shop modal is 352 wide for it */
-    { SD_ITEM_SNAIL, "SNAIL",       "GRAZES THE GLASS CLEAN,",   "EVEN WHILE THE TANK SLEEPS",  SD_PRICE_SNAIL },
-    { SD_ITEM_CASTLE, "CASTLE",     "STONE TOWERS AND AN ARCH",  "THE FISH SWIM THROUGH IT",    SD_PRICE_CASTLE },   /* 2026-09-16 */
-    { SD_ITEM_CORAL,  "CORAL",      "A BRANCHING REEF CORAL,",   "GROWS FOR WEEKS, YOUR COLOR", SD_PRICE_CORAL },    /* 2026-09-23 */
-    { SD_ITEM_CLUSTER, "REEF CLUSTER", "A MATURE REEF ON A ROCK,", "FILLS OUT, THEN IT BLOOMS",  SD_PRICE_CLUSTER },  /* 2026-09-24: the dearest; three looks on its page */
-    { SD_ITEM_SHRIMP,  "SHRIMP",    "A SCHOOL OF CHERRY SHRIMP", "THEY EAT SCRAPS AND MULTIPLY", SD_PRICE_SHRIMP },
-    { SD_ITEM_URCHIN,  "SEA URCHIN", "NIBBLES THE TALL GRASS,",  "EVEN WHILE THE TANK SLEEPS",  SD_PRICE_URCHIN },  /* 2026-10-02: the episode 5 promise, a resident like the snail */  /* 2026-09-29: a resident, like the snail; Strato: "should mention that they multiply" (28 chars, as the plant's) */
+    { SD_ITEM_PLANT, { "SWORD PLANT", "PLANTA ESPADA" }, { "BROAD, VERTICAL LEAVES", "HOJAS ANCHAS Y VERTICALES" }, { "MORE COVER FOR YOUR CRITTERS", "MÁS REFUGIO PARA TUS PECES" }, SD_PRICE_PLANT },   /* Strato's words (2026-09-16); the second line is 28 chars, the shop modal is 352 wide for it */
+    { SD_ITEM_SNAIL, { "SNAIL", "CARACOL" }, { "GRAZES THE GLASS CLEAN,", "LIMPIA EL VIDRIO PASTANDO," }, { "EVEN WHILE THE TANK SLEEPS", "AUN CUANDO LA PECERA DUERME" },  SD_PRICE_SNAIL },
+    { SD_ITEM_CASTLE, { "CASTLE", "CASTILLO" }, { "STONE TOWERS AND AN ARCH", "TORRES DE PIEDRA Y UN ARCO" }, { "THE FISH SWIM THROUGH IT", "LOS PECES NADAN POR ÉL" },    SD_PRICE_CASTLE },   /* 2026-09-16 */
+    { SD_ITEM_CORAL,  { "CORAL", "CORAL" }, { "A BRANCHING REEF CORAL,", "UN CORAL RAMIFICADO," }, { "GROWS FOR WEEKS, YOUR COLOR", "CRECE SEMANAS, DE TU COLOR" }, SD_PRICE_CORAL },    /* 2026-09-23 */
+    { SD_ITEM_CLUSTER, { "REEF CLUSTER", "ARRECIFE" }, { "A MATURE REEF ON A ROCK,", "UN ARRECIFE MADURO EN ROCA," }, { "FILLS OUT, THEN IT BLOOMS", "SE LLENA Y LUEGO FLORECE" },  SD_PRICE_CLUSTER },  /* 2026-09-24: the dearest; three looks on its page */
+    { SD_ITEM_SHRIMP,  { "SHRIMP", "CAMARONES" }, { "A SCHOOL OF CHERRY SHRIMP", "UN BANCO DE CAMARONES CEREZA" }, { "THEY EAT SCRAPS AND MULTIPLY", "COMEN RESTOS Y SE REPRODUCEN" }, SD_PRICE_SHRIMP },
+    { SD_ITEM_URCHIN,  { "SEA URCHIN", "ERIZO DE MAR" }, { "NIBBLES THE TALL GRASS,", "MORDISQUEA LA HIERBA ALTA," }, { "EVEN WHILE THE TANK SLEEPS", "AUN CUANDO LA PECERA DUERME" },  SD_PRICE_URCHIN },  /* 2026-10-02: the episode 5 promise, a resident like the snail */  /* 2026-09-29: a resident, like the snail; Strato: "should mention that they multiply" (28 chars, as the plant's) */
 };
+const char *sd_item_name(int i)   { return i >= 0 && i < SD_ITEM_COUNT ? SD_ITEMS[i].name[lang_ix()] : ""; }
+const char *sd_item_words(int i)  { return i >= 0 && i < SD_ITEM_COUNT ? SD_ITEMS[i].words[lang_ix()] : ""; }
+const char *sd_item_words2(int i) { return i >= 0 && i < SD_ITEM_COUNT ? SD_ITEMS[i].words2[lang_ix()] : ""; }
 static void sd_award(tank_t *t, int n) {
     if (n <= 0) return;
     t->sd_balance += n; t->sd_earned += n; s_sd_pending += n;
@@ -369,19 +387,32 @@ bool progression_buy(tank_t *t, int item) {
     return true;
 }
 const char *const *progression_sd_earn_lines(void) {
-    static char lines[SD_EARN_LINES][30]; static const char *ptr[SD_EARN_LINES + 1]; static bool made;
-    if (!made) {
-        /* <= 25 chars each: the modal is 336 px wide at scale 2 */
-        snprintf(lines[0], 30, "+%d  EVERY MEAL EATEN", SD_MEAL);
-        snprintf(lines[1], 30, "+%d/%d/%d  A FISH GROWS UP", SD_STAGE_JUV, SD_STAGE_ADULT, SD_STAGE_ELDER);
-        snprintf(lines[2], 30, "+%d  A NEW FRY IS BORN", SD_BIRTH);
-        snprintf(lines[3], 30, "+%d  A FISH FULLY TRUSTS", SD_TRUST);
-        snprintf(lines[4], 30, "+%d  %d ALGAE COLONIES", SD_CHORE, SD_CHORE_EVERY);
-        snprintf(lines[5], 30, "+%d  %d CM OF GRASS CUT", SD_CHORE, SD_TRIM_CM);
-        for (int i = 0; i < SD_EARN_LINES; i++) ptr[i] = lines[i];
-        ptr[SD_EARN_LINES] = NULL; made = true;
+    /* one set per language, each made the first time it is asked for */
+    static char lines[LANG_N][SD_EARN_LINES][40]; static const char *ptr[LANG_N][SD_EARN_LINES + 1]; static bool made[LANG_N];
+    int lg = lang_ix();
+    if (!made[lg]) {
+        char (*l)[40] = lines[lg];
+        if (lg == LANG_EN) {
+            /* <= 25 chars each: the modal is 336 px wide at scale 2 */
+            snprintf(l[0], 40, "+%d  EVERY MEAL EATEN", SD_MEAL);
+            snprintf(l[1], 40, "+%d/%d/%d  A FISH GROWS UP", SD_STAGE_JUV, SD_STAGE_ADULT, SD_STAGE_ELDER);
+            snprintf(l[2], 40, "+%d  A NEW FRY IS BORN", SD_BIRTH);
+            snprintf(l[3], 40, "+%d  A FISH FULLY TRUSTS", SD_TRUST);
+            snprintf(l[4], 40, "+%d  %d ALGAE COLONIES", SD_CHORE, SD_CHORE_EVERY);
+            snprintf(l[5], 40, "+%d  %d CM OF GRASS CUT", SD_CHORE, SD_TRIM_CM);
+        } else {
+            /* <= 27 chars each: drawn at X + 14 in the 352 px modal at scale 2 */
+            snprintf(l[0], 40, "+%d  POR CADA COMIDA", SD_MEAL);
+            snprintf(l[1], 40, "+%d/%d/%d  UN PEZ CRECE", SD_STAGE_JUV, SD_STAGE_ADULT, SD_STAGE_ELDER);
+            snprintf(l[2], 40, "+%d  NACE UN ALEVÍN", SD_BIRTH);
+            snprintf(l[3], 40, "+%d  CONFIANZA TOTAL", SD_TRUST);
+            snprintf(l[4], 40, "+%d  %d COLONIAS DE ALGAS", SD_CHORE, SD_CHORE_EVERY);
+            snprintf(l[5], 40, "+%d  PODAR %d CM DE HIERBA", SD_CHORE, SD_TRIM_CM);
+        }
+        for (int i = 0; i < SD_EARN_LINES; i++) ptr[lg][i] = l[i];
+        ptr[lg][SD_EARN_LINES] = NULL; made[lg] = true;
     }
-    return ptr;
+    return ptr[lg];
 }
 static void set_tms(tank_t *t, uint32_t bit) { if (!(t->tank_ms_bits & bit)) { t->tank_ms_bits |= bit; mark_dirty(); } }
 
@@ -518,27 +549,36 @@ static void arrival_conditions(const tank_t *t, int *met, int *total) {
 }
 
 /* how each gate is moved - the words behind the HOW? button */
-static const char *const TIP_TRUST[]  = { "REST A FINGER ON THE GLASS", "AND KEEP IT STILL. EVERY", "FISH EARNS TRUST WHILE IT", "RESTS THERE. 3 QUICK TAPS", "SCARE THEM AND COST TRUST.", NULL };
-static const char *const TIP_FEED[]   = { "TAP THE WATER AT THE TOP", "OF THE TANK TO DROP FOOD.", "A FEEDING COUNTS AS A MEAL", "ONCE A FISH EATS FROM IT.", NULL };
-static const char *const TIP_HOLD[]   = { "REST A FINGER ON THE GLASS", "FOR A FEW SECONDS. A FISH", "THAT TRUSTS YOU SWIMS OVER", "AND STAYS. FEED FIRST: A", "HUNGRY FISH WON'T COME.", NULL };
-static const char *const TIP_GROW[]   = { "FISH GROW WITH TIME,", "SLOWER WHEN THE TANK IS", "IN SLEEP MODE.", NULL };
-static const char *const TIP_CHANGE[] = { "FISH PERSONALITIES WILL", "NATURALLY DRIFT AS THEY", "INTERACT WITH THE WORLD.", NULL };   /* Strato: intentionally vague */
-static const char *const TIP_GRASS[]  = { "GRASS REGROWS ON ITS OWN,", "FASTEST WHILE THE TANK", "SLEEPS.", NULL };
-static const char *const TIP_GLASS[]  = { "DRAG A FINGER ACROSS THE", "GLASS TO WIPE IT CLEAN.", "UNLOCKABLE CRITTERS CAN", "HELP KEEP IT CLEAN.", NULL };   /* Strato's words */
+static const char *const TIP_TRUST_EN[]  = { "REST A FINGER ON THE GLASS", "AND KEEP IT STILL. EVERY", "FISH EARNS TRUST WHILE IT", "RESTS THERE. 3 QUICK TAPS", "SCARE THEM AND COST TRUST.", NULL };
+static const char *const TIP_TRUST_ES[]  = { "APOYA UN DEDO EN EL VIDRIO", "SIN MOVERLO. CADA PEZ GANA", "CONFIANZA MIENTRAS ESTÉ", "AHÍ. 3 TOQUES RÁPIDOS LOS", "ASUSTAN Y BAJAN CONFIANZA.", NULL };
+static const char *const TIP_FEED_EN[]   = { "TAP THE WATER AT THE TOP", "OF THE TANK TO DROP FOOD.", "A FEEDING COUNTS AS A MEAL", "ONCE A FISH EATS FROM IT.", NULL };
+static const char *const TIP_FEED_ES[]   = { "TOCA EL AGUA EN LO ALTO DE", "LA PECERA PARA DAR COMIDA.", "CUENTA COMO UNA COMIDA", "SI UN PEZ COME DE ELLA.", NULL };
+static const char *const TIP_HOLD_EN[]   = { "REST A FINGER ON THE GLASS", "FOR A FEW SECONDS. A FISH", "THAT TRUSTS YOU SWIMS OVER", "AND STAYS. FEED FIRST: A", "HUNGRY FISH WON'T COME.", NULL };
+static const char *const TIP_HOLD_ES[]   = { "APOYA UN DEDO EN EL VIDRIO", "UNOS SEGUNDOS. UN PEZ QUE", "CONFÍA EN TI VIENE Y SE", "QUEDA. DALES COMIDA ANTES:", "CON HAMBRE NO SE ACERCAN.", NULL };
+static const char *const TIP_GROW_EN[]   = { "FISH GROW WITH TIME,", "SLOWER WHEN THE TANK IS", "IN SLEEP MODE.", NULL };
+static const char *const TIP_GROW_ES[]   = { "LOS PECES CRECEN CON EL", "TIEMPO, MÁS DESPACIO SI LA", "PECERA ESTÁ EN MODO SUEÑO.", NULL };
+static const char *const TIP_CHANGE_EN[] = { "FISH PERSONALITIES WILL", "NATURALLY DRIFT AS THEY", "INTERACT WITH THE WORLD.", NULL };
+static const char *const TIP_CHANGE_ES[] = { "LA PERSONALIDAD DE LOS", "PECES CAMBIA POCO A POCO", "AL INTERACTUAR CON EL", "MUNDO.", NULL };   /* Strato: intentionally vague */
+static const char *const TIP_GRASS_EN[]  = { "GRASS REGROWS ON ITS OWN,", "FASTEST WHILE THE TANK", "SLEEPS.", NULL };
+static const char *const TIP_GRASS_ES[]  = { "LA HIERBA VUELVE A CRECER", "SOLA, MÁS RÁPIDO MIENTRAS", "LA PECERA DUERME.", NULL };
+static const char *const TIP_GLASS_EN[]  = { "DRAG A FINGER ACROSS THE", "GLASS TO WIPE IT CLEAN.", "UNLOCKABLE CRITTERS CAN", "HELP KEEP IT CLEAN.", NULL };
+static const char *const TIP_GLASS_ES[]  = { "ARRASTRA UN DEDO POR EL", "VIDRIO PARA LIMPIARLO. LAS", "CRIATURAS DESBLOQUEABLES", "AYUDAN A MANTENERLO LIMPIO", NULL };   /* Strato's words */
 const char *const *progression_fry_tip(int kind) {
+    bool es = pt_lang == LANG_ES;
     switch (kind) {
-    case FRY_REQ_TRUST:  return TIP_TRUST;
-    case FRY_REQ_FEED:   return TIP_FEED;
-    case FRY_REQ_HOLD:   return TIP_HOLD;
-    case FRY_REQ_GROW:   return TIP_GROW;
-    case FRY_REQ_CHANGE: return TIP_CHANGE;
-    case FRY_REQ_GLASS:  return TIP_GLASS;
-    default:             return TIP_GRASS;
+    case FRY_REQ_TRUST:  return es ? TIP_TRUST_ES : TIP_TRUST_EN;
+    case FRY_REQ_FEED:   return es ? TIP_FEED_ES : TIP_FEED_EN;
+    case FRY_REQ_HOLD:   return es ? TIP_HOLD_ES : TIP_HOLD_EN;
+    case FRY_REQ_GROW:   return es ? TIP_GROW_ES : TIP_GROW_EN;
+    case FRY_REQ_CHANGE: return es ? TIP_CHANGE_ES : TIP_CHANGE_EN;
+    case FRY_REQ_GLASS:  return es ? TIP_GLASS_ES : TIP_GLASS_EN;
+    default:             return es ? TIP_GRASS_ES : TIP_GRASS_EN;
     }
 }
 
 /* the checklist, in words. No %f: the device's printf may be the nano one. */
-static const char *const STAGE_WORDS[4] = { "A FRY", "A JUVENILE", "AN ADULT", "AN ELDER" };
+static const char *const STAGE_WORDS_EN[4] = { "A FRY", "A JUVENILE", "AN ADULT", "AN ELDER" };
+static const char *const STAGE_WORDS_ES[4] = { "UN ALEVÍN", "UN JUVENIL", "UN ADULTO", "UN PEZ MAYOR" };
 int progression_next_fry(const tank_t *t, fry_req_t out[FRY_REQ_MAX], bool *staged) {
     if (staged) *staged = s_arrival_pending;
     if (t->n_fish >= POP_CAP || t->n_fish >= N_FISH_MAX || t->n_fish < 2) return 0;
@@ -551,48 +591,48 @@ int progression_next_fry(const tank_t *t, fry_req_t out[FRY_REQ_MAX], bool *stag
         int have = (int)g[i].have, need = (int)g[i].need;
         switch (g[i].kind) {
         case FRY_REQ_TRUST:
-            snprintf(r->title, sizeof r->title, "TRUST");
-            snprintf(r->words, sizeof r->words, "ALL FISH MUST HAVE TRUST");
-            snprintf(r->words2, sizeof r->words2, "OF AT LEAST %d OUT OF 10", need);
-            if (r->met) snprintf(r->progress, sizeof r->progress, "EVERY FISH DOES");
+            snprintf(r->title, sizeof r->title, TR("TRUST", "CONFIANZA"));
+            snprintf(r->words, sizeof r->words, TR("ALL FISH MUST HAVE TRUST", "CADA PEZ DEBE TENER UNA"));
+            snprintf(r->words2, sizeof r->words2, TR("OF AT LEAST %d OUT OF 10", "CONFIANZA DE %d/10 O MÁS"), need);
+            if (r->met) snprintf(r->progress, sizeof r->progress, TR("EVERY FISH DOES", "TODOS LA TIENEN"));
             else { int tenths = (int)(g[i].have * 10 + 0.5f);
-                   snprintf(r->progress, sizeof r->progress, "LOWEST NOW %d.%d", tenths / 10, tenths % 10); }
+                   snprintf(r->progress, sizeof r->progress, TR("LOWEST NOW %d.%d", "LA MÁS BAJA: %d.%d"), tenths / 10, tenths % 10); }
             break;
         case FRY_REQ_FEED:
-            snprintf(r->title, sizeof r->title, "MEALS");
-            snprintf(r->words, sizeof r->words, "FEED THE FISH AT LEAST");
-            snprintf(r->words2, sizeof r->words2, "%d TIMES IN ALL", need);
-            if (r->met) snprintf(r->progress, sizeof r->progress, "DONE");
-            else snprintf(r->progress, sizeof r->progress, "%d OF %d SO FAR", have, need);
+            snprintf(r->title, sizeof r->title, TR("MEALS", "COMIDAS"));
+            snprintf(r->words, sizeof r->words, TR("FEED THE FISH AT LEAST", "DALES DE COMER A LOS PECES"));
+            snprintf(r->words2, sizeof r->words2, TR("%d TIMES IN ALL", "AL MENOS %d VECES EN TOTAL"), need);
+            if (r->met) snprintf(r->progress, sizeof r->progress, TR("DONE", "LISTO"));
+            else snprintf(r->progress, sizeof r->progress, TR("%d OF %d SO FAR", "%d DE %d HASTA AHORA"), have, need);
             break;
         case FRY_REQ_HOLD:
-            snprintf(r->title, sizeof r->title, "HOLD");
-            snprintf(r->words, sizeof r->words, "REST A FINGER ON THE GLASS");
-            snprintf(r->words2, sizeof r->words2, "UNTIL A FISH SWIMS TO IT");
-            snprintf(r->progress, sizeof r->progress, r->met ? "DONE" : "NOT YET");
+            snprintf(r->title, sizeof r->title, TR("HOLD", "MANTÉN"));
+            snprintf(r->words, sizeof r->words, TR("REST A FINGER ON THE GLASS", "APOYA UN DEDO EN EL VIDRIO"));
+            snprintf(r->words2, sizeof r->words2, TR("UNTIL A FISH SWIMS TO IT", "HASTA QUE UN PEZ LLEGUE"));
+            snprintf(r->progress, sizeof r->progress, r->met ? TR("DONE", "LISTO") : TR("NOT YET", "AÚN NO"));
             break;
         case FRY_REQ_GROW: {
             const fish_t *f = &t->fish[t->n_fish - 1];
-            snprintf(r->title, sizeof r->title, "GROW");
-            snprintf(r->words, sizeof r->words, "THE YOUNGEST FISH MUST");
-            snprintf(r->words2, sizeof r->words2, need >= STAGE_ADULT_AGE ? "GROW INTO AN ADULT" : "GROW INTO A JUVENILE");
-            snprintf(r->progress, sizeof r->progress, "%s IS %s", f->name, STAGE_WORDS[f->stage & 3]);
+            snprintf(r->title, sizeof r->title, TR("GROW", "CRECER"));
+            snprintf(r->words, sizeof r->words, TR("THE YOUNGEST FISH MUST", "EL PEZ MÁS JOVEN DEBE"));
+            snprintf(r->words2, sizeof r->words2, need >= STAGE_ADULT_AGE ? TR("GROW INTO AN ADULT", "LLEGAR A ADULTO") : TR("GROW INTO A JUVENILE", "LLEGAR A JUVENIL"));
+            snprintf(r->progress, sizeof r->progress, TR("%s IS %s", "%s ES %s"), f->name, (pt_lang == LANG_ES ? STAGE_WORDS_ES : STAGE_WORDS_EN)[f->stage & 3]);
             break; }
         case FRY_REQ_CHANGE: {
             const fish_t *f = &t->fish[t->n_fish - 1];
-            snprintf(r->title, sizeof r->title, "CHANGE");
-            snprintf(r->words, sizeof r->words, "%s'S PERSONALITY", f->name);
-            snprintf(r->words2, sizeof r->words2, "MUST START TO SHIFT");
-            if (r->met) snprintf(r->progress, sizeof r->progress, "DONE");
-            else snprintf(r->progress, sizeof r->progress, "%d%% THERE", (int)(r->frac * 100 + 0.5f));
+            snprintf(r->title, sizeof r->title, TR("CHANGE", "CAMBIO"));
+            snprintf(r->words, sizeof r->words, TR("%s'S PERSONALITY", "LA PERSONALIDAD DE %s"), f->name);
+            snprintf(r->words2, sizeof r->words2, TR("MUST START TO SHIFT", "DEBE EMPEZAR A CAMBIAR"));
+            if (r->met) snprintf(r->progress, sizeof r->progress, TR("DONE", "LISTO"));
+            else snprintf(r->progress, sizeof r->progress, TR("%d%% THERE", "VA EN %d%%"), (int)(r->frac * 100 + 0.5f));
             break; }
         case FRY_REQ_GLASS: {
             int pct = (int)(g[i].have * 100 + 0.5f), limit = (int)(ALGAE_DIRTY * 100 + 0.5f);
-            snprintf(r->title, sizeof r->title, "GLASS");
-            snprintf(r->words, sizeof r->words, "NO MORE THAN %d%%", limit);          /* Strato's words, 2026-09-16 */
-            snprintf(r->words2, sizeof r->words2, "ALGAE COVERAGE");
-            if (r->met) snprintf(r->progress, sizeof r->progress, "CURRENTLY CLEAN ENOUGH");
-            else snprintf(r->progress, sizeof r->progress, "%d%% COVERED NOW", pct);
+            snprintf(r->title, sizeof r->title, TR("GLASS", "VIDRIO"));
+            snprintf(r->words, sizeof r->words, TR("NO MORE THAN %d%%", "NO MÁS DE UN %d%% DEL"), limit);          /* Strato's words, 2026-09-16 */
+            snprintf(r->words2, sizeof r->words2, TR("ALGAE COVERAGE", "VIDRIO CON ALGAS"));
+            if (r->met) snprintf(r->progress, sizeof r->progress, TR("CURRENTLY CLEAN ENOUGH", "YA ESTÁ BASTANTE LIMPIO"));
+            else snprintf(r->progress, sizeof r->progress, TR("%d%% COVERED NOW", "%d%% CUBIERTO AHORA"), pct);
             break; }
         }
     }
@@ -604,11 +644,11 @@ int progression_next_fry(const tank_t *t, fry_req_t out[FRY_REQ_MAX], bool *stag
         for (int b = 0; b < VEG_BEDS; b++) if (t->veg_growth[b] > best) best = t->veg_growth[b];
         r->kind = FRY_REQ_GRASS; r->met = tank_nursery_bed(t) >= 0;
         r->frac = r->met ? 1.0f : best / VEG_NURSERY;
-        snprintf(r->title, sizeof r->title, "GRASS");
-        snprintf(r->words, sizeof r->words, "ONE GRASS BED MUST GROW");
-        snprintf(r->words2, sizeof r->words2, "TALL ENOUGH TO HIDE IN");
-        if (r->met) snprintf(r->progress, sizeof r->progress, "A NURSERY BED IS READY");
-        else snprintf(r->progress, sizeof r->progress, "TALLEST BED %d%% THERE", (int)(r->frac * 100 + 0.5f));
+        snprintf(r->title, sizeof r->title, TR("GRASS", "HIERBA"));
+        snprintf(r->words, sizeof r->words, TR("ONE GRASS BED MUST GROW", "UN LECHO DE HIERBA DEBE"));
+        snprintf(r->words2, sizeof r->words2, TR("TALL ENOUGH TO HIDE IN", "CRECER PARA DAR ESCONDITE"));
+        if (r->met) snprintf(r->progress, sizeof r->progress, TR("A NURSERY BED IS READY", "YA HAY UN CRIADERO LISTO"));
+        else snprintf(r->progress, sizeof r->progress, TR("TALLEST BED %d%% THERE", "EL MÁS ALTO VA EN %d%%"), (int)(r->frac * 100 + 0.5f));
     }
     return n;
 }
@@ -643,7 +683,9 @@ void progression_fresh(tank_t *t) {
 
 void progression_reset(tank_t *t, uint32_t seed) {
     persist_port_erase();
+    uint8_t lang = t->lang;                   /* starting over keeps the keeper's language */
     tank_init(t, seed);
+    t->lang = lang;
     progression_fresh(t);
     progression_save(t);
 }
@@ -700,6 +742,7 @@ static bool load_save(tank_t *t, int64_t *saved_unix) {
     t->light_manual_off = !t->light_auto && sv.light_manual_off != 0;
     t->light_tip_seen = sv.light_tip_seen != 0;
     tank_screen_set(t, sv.screen_turned != 0);
+    pt_lang = t->lang = sv.lang < LANG_N ? sv.lang : LANG_EN;
     t->light_override = false; t->light_on = true;   /* never restored (2026-09-15): a saved
                                                       * override once froze a tank in permanent day */
     t->feed_spot_x = sv.feed_spot_x; t->player_feedings = sv.player_feedings;
@@ -929,7 +972,7 @@ bool progression_save(tank_t *t) {
     /* light_override / light_on stay zero in the save (2026-09-15) */
     sv.light_idle_s = (uint16_t)t->light_idle_s; sv.light_auto = t->light_auto; sv.light_manual_off = t->light_manual_off;
     sv.light_tip_seen = t->light_tip_seen;
-    sv.screen_turned = t->screen_turned;
+    sv.screen_turned = t->screen_turned; sv.lang = t->lang;
     sv.arrival_pending = s_arrival_pending; sv.n_fish = (uint8_t)t->n_fish;
     sv.feed_spot_x = t->feed_spot_x; sv.player_feedings = t->player_feedings;
     sv.hold_approaches = t->hold_approaches; sv.tank_ms_bits = t->tank_ms_bits;

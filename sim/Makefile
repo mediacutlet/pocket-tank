@@ -20,6 +20,10 @@ ifdef ROUND
 BUILD   := build-round
 OUT     := fishsim-round
 ROUNDF  := -DTANK_ROUND
+else ifdef SQUARE
+BUILD   := build-square
+OUT     := fishsim-square
+ROUNDF  := -DTANK_SQUARE
 else ifdef WATCH
 BUILD   := build-watch
 OUT     := fishsim-watch

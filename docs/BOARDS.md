@@ -11,9 +11,10 @@ read before a flash.
 | Waveshare 1.8 AMOLED (the tank, the reference) | 448 x 368, round corners | default | `make` -> `fishsim` | `tools/flash.sh` (preflight; build dir `fw-build`) | port, `TANK_PORT=` with several on USB |
 | Waveshare 1.75C (the bowl) | 466 circle | `TANK_ROUND` | `make ROUND=1` -> `fishsim-round` | `tools/flash_round.sh` (`fw-build-175c`) | its USB serial (`ROUND_SERIAL`, tools/boards.local.sh) |
 | Waveshare 2.06 (the watch) | 410 x 502 portrait, 100 px corners | `TANK_WATCH` | `make WATCH=1` -> `fishsim-watch` | `tools/flash_watch.sh` (`fw-build-206`) | its USB serial (`WATCH_SERIAL`, tools/boards.local.sh) |
+| Waveshare 2.16 (the square) | 480 x 480 square, turns all four ways | `TANK_SQUARE` (+ `BOARD_SQ216`) | `make SQUARE=1` -> `fishsim-square` | `tools/flash_sq216.sh` (`fw-build-216`) | its USB serial (`SQ216_SERIAL`), or the only Espressif board on USB |
 
 Each board's own traps are in its doc (board-amoled-1.75c.md,
-board-amoled-2.06-watch.md).
+board-amoled-2.06-watch.md, board-amoled-2.16.md).
 
 ## What is shared, and where a board may differ
 

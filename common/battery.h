@@ -24,8 +24,15 @@ enum { BAT_ON_BATTERY = 0,      /* no cable */
 /* until this cell has been measured: the 2026-09-14 batlog (4 fish, 60%
  * brightness, awake: 96% -> 52% in an hour) and the 09-11 charge at 100 mA
  * (17% -> 100% in under an hour) */
+#ifdef BOARD_SQ216                      /* the 2.16 (2026-10-04): Waveshare's 1000 mAh cell, charged at 400 mA, the
+                                         * tank awake ~90 mA (the 1.8's 88 on a bigger panel) - the 1.8's numbers said
+                                         * "2 h left" of a cell that has 10. A start only: the gauge's own rates take over */
+#define BAT_DRAIN_DEFAULT  9.0f         /* ~90 mA of 1000 mAh */
+#define BAT_CHARGE_DEFAULT 28.0f        /* ~310 mA net into it, the taper allowed for */
+#else
 #define BAT_DRAIN_DEFAULT  44.0f        /* gauge % per hour, screen on */
 #define BAT_CHARGE_DEFAULT 80.0f        /* gauge % per hour on the cable */
+#endif
 #define BAT_POPUP_S        6            /* the pill shows itself this long when the cable goes in */
 
 typedef struct {                        /* persisted by the platform (a blob; the magic says it is ours) */

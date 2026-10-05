@@ -22,6 +22,9 @@ void display_port_deep_standby(void) { }
 void display_port_deep_sleep_bus(void) { }
 bool board_has_expander(void) { return true; }
 bool board_is_watch(void) { return false; }
+bool board_is_sq216(void) { return false; }
+void display_port_set_rotation(int quarter) { (void)quarter; }
+int  board_round_panel(void) { return 466; }
 int  board_pwr_sense_pin(void) { return -1; }
 void display_port_frame_origin(int *px, int *py) { *px = 0; *py = 0; }
 void display_port_set_view(int view) { (void)view; }

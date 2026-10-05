@@ -45,6 +45,11 @@ static int s_up_sign = -1;   /* the round 1.75C, 2026-10-01 (Strato holding it u
 static const char *TAG = "imu";
 static i2c_master_dev_handle_t s_dev;
 static bool s_inverted;
+/* the 2.16's square (2026-10-04): all four ways up, not two. The quarter
+ * turn clockwise the picture needs; the side axis X, its sign set so that
+ * +1 g there means "turn clockwise" (SIDE_SIGN, measured on the bench) */
+#define SIDE_SIGN  1                 /* bench 2026-10-04: keys to the left, X = +16.2k - the picture turns clockwise */
+static int s_rot, s_rot_force = -1, s_rot_streak, s_rot_cand;
 static int s_streak;              /* consecutive polls voting for a flip */
 static int64_t s_next_us;
 static int16_t s_prev[3]; static bool s_have_prev;
@@ -101,7 +106,10 @@ bool imu_port_init(i2c_master_bus_handle_t bus) {
         s_dev = NULL; return false;
     }
     if (!imu_reset_config()) { ESP_LOGW(TAG, "QMI8658 config failed"); s_dev = NULL; return false; }
-    if (board_is_round()) { s_up_axis = 0; s_up_sign = 1; }
+    /* the 2.16, 2026-10-04: upright is keys on top, and held so the picture stood on its head
+       with +Y - so -Y (the silkscreen's arrow is the back's view); the 1.75C's +X never moves there */
+    if (board_is_sq216()) { s_up_axis = 1; s_up_sign = -1; }
+    else if (board_is_round()) { s_up_axis = 0; s_up_sign = 1; }
     /* the watch, 2026-10-02 (propped on the desk, the tank right side up): g = [13100 900 -9400] -
        the panel's long axis is X, its foot +X. Nothing reads it: on a wrist the live flip never
        runs (main.c), the way up is settings SCREEN (tank.h) */
@@ -154,6 +162,19 @@ void imu_port_poll(int64_t now_us) {
         return;
     }
     s_bad = 0;
+    if (board_is_sq216() && !RAILED(a[0])) {         /* the square: whichever in-screen axis carries gravity, either way */
+        int u = a[IMU_UP_AXIS] * IMU_UP_SIGN, w = a[0] * SIDE_SIGN, au = u < 0 ? -u : u, aw = w < 0 ? -w : w;
+        int cand = -1;
+        if (au > aw + 2500 && au > FLIP_THRESH) cand = u > 0 ? 0 : 2;          /* a margin: no flapping at 45 degrees */
+        else if (aw > au + 2500 && aw > FLIP_THRESH) cand = w > 0 ? 1 : 3;
+        if (cand < 0 || cand == s_rot) { s_rot_streak = 0; return; }        /* flat, in between, or already so: hold */
+        if (cand != s_rot_cand) { s_rot_cand = cand; s_rot_streak = 0; }
+        if (++s_rot_streak >= FLIP_HOLD_POLLS) {
+            s_rot = cand; s_rot_streak = 0; s_inverted = s_rot == 2;
+            ESP_LOGI(TAG, "orientation: %d quarter turn(s) clockwise (g=[%d %d %d])", s_rot, a[0], a[1], a[2]);
+        }
+        return;
+    }
     int v = a[IMU_UP_AXIS] * IMU_UP_SIGN;
     /* the other IN-SCREEN axis (Z is out of the glass): the up-axis must
      * carry more of gravity than it, or we are sideways/flat - hold state.
@@ -174,6 +195,8 @@ void imu_port_poll(int64_t now_us) {
 }
 
 bool imu_port_inverted(void) { return s_inverted; }
+int  imu_port_rotation(void) { return s_rot_force >= 0 ? s_rot_force : s_rot; }
+void imu_port_force_rotation(int quarter) { s_rot_force = quarter < 0 ? -1 : quarter & 3; }
 void imu_port_last(int16_t out[3], int *motion) { for (int i = 0; i < 3; i++) out[i] = s_last[i]; if (motion) *motion = s_motion; }
 bool imu_port_handled(void) { return s_handled_us && esp_timer_get_time() - s_handled_us < IMU_MOTION_HOLD_US; }
 bool imu_port_moving(void) { return s_moved_us && esp_timer_get_time() - s_moved_us < IMU_MOTION_HOLD_US; }

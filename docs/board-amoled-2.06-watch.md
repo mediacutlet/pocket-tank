@@ -47,8 +47,8 @@ its own world, 410 wide and 502 tall (common/tank.h):
   a wrist the arm swings through every angle, so the IMU's live flip is off
   in this build (main.c). But a watch can be worn either way around -
   buttons toward the hand or the elbow - and the second way shows the tank
-  upside down. Settings has a fourth row on this build only, **SCREEN:
-  NORMAL / TURNED** (tank.h `tank_screen_*`, saved in the save's tail at
+  upside down. Settings has a row on this build only, **SCREEN:
+  NORMAL / TURNED** (where the other boards have ROTATION, 0.3.2) (tank.h `tank_screen_*`, saved in the save's tail at
   1672). The settings page uses the glass above and below the PAGE box for
   it (its own `SET_*` block in render.h). Motion still keeps the codec warm
   and, with LIGHTS OUT on AUTO, the light on - on a wrist that is all day;

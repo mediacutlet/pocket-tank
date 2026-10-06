@@ -3587,6 +3587,7 @@ static void set_arrow(ctx_t *c, int x, int y, bool right, bool live) {
         rect_fill(c, px, cy - hh, 1, 2 * hh + 1, rgb);
     }
 }
+#if !TANK_WORN                                              /* (the watch has SCREEN where ROTATION is) */
 /* ROTATION's picture: a padlock inside a turning arrow - shut when the way
  * up is locked, its shackle swung open while the picture follows the tank
  * (the two differ in shape, not in color alone) */
@@ -3606,6 +3607,7 @@ static void set_lock_icon(ctx_t *c, int cx, int cy, bool locked, uint32_t rgb) {
     rect_fill(c, cx - 4, top, 2, cy - 1 - top, rgb);
     rect_fill(c, cx + 2, top, 2, locked ? cy - 1 - top : 4, rgb);
 }
+#endif
 void render_settings(const tank_t *t, uint16_t *fb, int stride, int bright_pct, int volume) {
     ctx_t c = ctx_page(fb, stride);
     rect_fill(&c, -PAGE_X, -PAGE_Y, TANK_W, TANK_H, MSP_INK);

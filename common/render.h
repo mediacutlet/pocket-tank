@@ -374,7 +374,7 @@ void render_fish_portrait(uint16_t *fb, int stride, float x, float y, float size
 #define MSP_SET_X     ((PAGE_W - MSP_SET_W) / 2)
 #define MSP_SET_Y     (-PAGE_Y + 18)    /* SETTINGS: top dead centre */
 #define SHP_CLOSE_X   259               /* the shop: HOW TO EARN 97..247 beside CLOSE */
-#define SET_CLOSE_X   296               /* settings: UPDATES and CLOSE drawn in from the glass, the seconds' chevron between them */
+#define SET_CLOSE_X   296               /* settings: UPDATES and CLOSE drawn in from the glass */
 #else
 #define MSP_CLOSE_X   324               /* the CLOSE button, bottom right, inside the bezel curve; clear of the brightness row's number */
 #define MSP_CLOSE_Y   312

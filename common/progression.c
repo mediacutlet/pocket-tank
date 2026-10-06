@@ -356,8 +356,8 @@ bool progression_sell_fish(tank_t *t, int fish) {
     if (!progression_fish_sellable(t, fish)) return false;
     int worth = progression_fish_value(t, fish);
     if (!tank_remove_fish(t, fish)) return false;
-    for (int i = fish; i < t->n_fish; i++) s_age[i] = s_age[i + 1];   /* the clocks move down with their fish */
-    s_age[t->n_fish] = 0;
+    for (int i = fish; i < t->n_fish; i++) { s_age[i] = s_age[i + 1]; s_starve_s[i] = s_starve_s[i + 1]; }   /* the clocks move down with their fish */
+    s_age[t->n_fish] = 0; s_starve_s[t->n_fish] = 0;
     /* the slot it leaves is earned again by care, not handed back: a fry
        already on its way is called off, and the next one waits for
        SELL_FRY_MEALS more meals (care_gates) - every other gate was met long

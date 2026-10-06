@@ -56,6 +56,12 @@ elder 8 h; lights-off pauses aging), size = stage scale × meal bonus; silent.*
   ~5-6 min awake, the tank's trickle is hunger-gated and per-second, so an
   untended awake tank hovers between fed and peckish and **ravenous begging
   is the after-sleep / long-absence event only**. `--selftest-hunger`.
+- *AUTO FEED (0.3.2, settings, saved in the save's spare byte at 1674)*: OFF
+  stops the tank's own trickle and the two pellets a give-up used to drop -
+  feeding is the keeper's alone. Nobody dies of it: the fish beg once, give
+  up, and go hungry quietly until the keeper feeds. A fish starving (hunger
+  8.5+) in a lit tank for more than 5 min loses a point of trust per 20 min,
+  down to a floor of 2 (`STARVE_*`, progression.c); dark, the count holds.
 
 ## Trait drift
 
@@ -177,10 +183,12 @@ was before.
   desk goes dark and the fish sleep; a pick-up or a touch lights it.
   A setup page or prompt holds
   the light on (`hold_light`); the director's `light` / `auto` are the only
-  override, never saved. The settings page (LIGHTS OUT) has the idle time on
-  one swipeable number (`light_idle_s`, default 15, floor 5) and AUTO /
-  MANUAL (the default): MANUAL is the double-tap (`light_manual_off`,
-  saved); AUTO (`light_auto`) is the idle rule.
+  override, never saved. The settings page's LIGHTS OUT is one row since
+  0.3.2: a value between two arrows, DOUBLE-TAP (MANUAL, the default:
+  `light_manual_off`, saved) and then AUTO (`light_auto`, the idle rule)
+  after 5 s, 15 s, 30 s, 1, 3, 5, 10 or 30 min still (`LIGHT_IDLE_CHOICES`,
+  `light_idle_s`; until 0.3.2 a swipeable number 5..999 s - a save from
+  then keeps its seconds and shows as the nearest choice).
 - Light off → fish retreat to the **seaweed/reef corner** and enter visible
   sleep mode. Obvious, readable behavior.
 - Doubles as a **stasis/pause mode**: light off ≈ pausing the tank without

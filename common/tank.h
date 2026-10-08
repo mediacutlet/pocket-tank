@@ -29,6 +29,14 @@
 #define TANK_W 410
 #define TANK_H 502
 #endif
+#ifdef CONFIG_POCKET_TANK_320X240
+/* a 320 x 240 landscape tank (this fork): the part every 320 x 240 board shares -
+ * the 2.8" CYD (ES3C28P) and the Waveshare ESP32-S3-Touch-LCD-2. Their Kconfig
+ * board choices each select it, tankcore's CMakeLists hands it to every
+ * component, and the sim's make 320X240=1 defines it. A plain rectangle (CYD.md) */
+#define TANK_W 320
+#define TANK_H 240
+#endif
 /* a tank WORN on a wrist (2026-10-02): the picture's way up is the keeper's
  * setting (settings SCREEN), never the live IMU's - the arm swings through
  * every angle (tank_screen_*) */
@@ -39,6 +47,8 @@
 #endif
 #ifndef TANK_W                  /* a build may override both (-DTANK_W=480 -DTANK_H=480: a square panel) */
 #define TANK_W 448
+#endif
+#ifndef TANK_H
 #define TANK_H 368
 #endif
 

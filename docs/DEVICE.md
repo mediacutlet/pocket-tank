@@ -12,7 +12,9 @@ reset the chip before anyone read the log.
 1. **Flash only through `tools/flash.sh`** (`--model` for the model partition
    too). It runs `tools/preflight.py` first, which archives `batlog` + `state`
    to `docs/batlog/<date_time>.txt`, and refuses to flash without the archive.
-   Commit the archive with the flash.
+   Commit the archive with the flash. **The 2.8" CYD is the exception:** it is
+   flashed with `tools/build_cyd.sh` ([CYD.md](../CYD.md)). It has no fuel gauge, so
+   there is no battery log to archive, and this table is about the AMOLED tank.
 2. **Any morning after a night on battery: `tools/preflight.py` first**, before
    the director, before a flash, before anything. Then update the table below.
 3. **The log itself now survives resets** (batlog.c: RTC_NOINIT + magic + crc;
@@ -49,6 +51,47 @@ reset the chip before anyone read the log.
    tank.c (the 09-11 pass cut asks 55% by calming the signature; the boredom
    band of 2026-09-14 added ~2 asks/min/fish while idle).
 3. Record results in this table and in docs/stats.md; close the row.
+
+## The CYD right now (the 2.8" ES3C28P, a separate board)
+
+- **Firmware:** v0.3.3 alpha, build `866b7361227d` - main with PR #2 (the
+  Waveshare Touch-LCD-2, CONFIG_POCKET_TANK_WST_320X240) merged in and the
+  dark made every 320x240 board's; the CYD's code is the same machine code
+  as before it, and main's tip (`0a0cc7c`) differs only in
+  tools/build_cyd.sh. App only, flashed 2026-10-08 with `tools/build_cyd.sh`
+  over the tank saved by v0.3.3. SLEEP is on LIGHT, the build's default -
+  nothing chosen in settings yet - so the CYD goes dark and never
+  deep-sleeps ([CYD.md](../CYD.md), *Sleep*). `-O2` throughout, assertions
+  on, log level INFO - what upstream ships; no bring-up instrumentation. The
+  model partition is the one flashed 2026-09-29 at the full reset. Its
+  saved data before each flash is in `~/src/dooing/pocket-tank-cyd-backup/`
+  (`nvs_before_*`).
+- **IMU:** an MPU-6050 (GY-521-style) on the I2C socket, SDA IO16 / SCL IO15,
+  0x68, **held flat against the back, pins toward the top edge** - not yet
+  soldered. Both `POCKET_TANK_IMU_QMI8658` and `_MPU6050` are on; the
+  QMI8658C is on order. Face down sleeps the tank, as the SLEEP row allows
+  (NEVER would ignore it).
+- **Verified on it, 2026-09-30:** the flip both ways, flat and sideways hold,
+  a pick-up reads MOVING, face down sleeps and face up or BOOT wakes in every
+  order ([CYD.md](../CYD.md), *The IMU*).
+- **Verified on it, 2026-10-08:** a clean boot; the director's `deepsleep 15`
+  and `deepsleep 8` went dark in lightsleep - awake between looks, a USB
+  host being attached - and lit by the timer on the second; the tank's clock
+  went from 85 s to 101 s across the 15 s dark, so it counted once. **Not
+  yet:** a touch, a pick-up and face up waking it, the waking tap doing
+  nothing, and a dark on the cell, where it really light-sleeps.
+- **The SLEEP-row build, 2026-10-08:** a clean boot (0 errors, 23-25 fps),
+  the boot line `sleep mode: lightsleep (the build's default, nothing
+  chosen in settings)`, the tank's save loaded, touch and the MPU-6050 up.
+  On the glass (LM, 2026-10-08): "wakeup and sleep works". **Not yet:** a
+  dark on the cell, the one place LIGHT really light-sleeps.
+- **The PR #2 build, 2026-10-08:** a clean boot (0 errors, 25 fps), the
+  panel up through the shared SPI port at 40 MHz, the FT6336 and the
+  MPU-6050 up, the tank's save loaded. **Not yet:** LM's look at the glass -
+  the picture, touch at the edges, the flip, face down and a touch waking
+  the dark.
+- **Nothing in flight.** No battery log on this board (no fuel gauge), so no
+  preflight; a flash resets nothing that is being measured.
 
 ## Firmware on the tank right now
 

@@ -22,3 +22,18 @@ endif()
 if(CONFIG_POCKET_TANK_WATCH)   # the watch's 410 x 502 portrait tank
     target_compile_definitions(${COMPONENT_LIB} PUBLIC TANK_WATCH)
 endif()
+# a 320 x 240 board (this fork). common/ is shared with the simulator and does
+# not include sdkconfig.h, so the Kconfig symbols are handed on under their own
+# names: POCKET_TANK_320X240, the part every 320 x 240 board shares (the sim
+# defines the same one, make 320X240=1), and the board's own, which only
+# common/version.h asks - to name the board (PT_BOARD). The value is
+# sdkconfig.h's own 1: a macro defined twice with the same body is no error.
+if(CONFIG_POCKET_TANK_320X240)
+    target_compile_definitions(${COMPONENT_LIB} PUBLIC CONFIG_POCKET_TANK_320X240=1)
+endif()
+if(CONFIG_POCKET_TANK_CYD_320X240)
+    target_compile_definitions(${COMPONENT_LIB} PUBLIC CONFIG_POCKET_TANK_CYD_320X240=1)
+endif()
+if(CONFIG_POCKET_TANK_WST_320X240)
+    target_compile_definitions(${COMPONENT_LIB} PUBLIC CONFIG_POCKET_TANK_WST_320X240=1)
+endif()

@@ -1,0 +1,10 @@
+# (this fork, 2026-10-08) The 320x240 boards' old names, formatted as ESP-IDF's
+# own rename files are: CONFIG_OLD_NAME CONFIG_NEW_NAME. kconfgen reads this
+# file when it loads an sdkconfig and carries an old name across to the new
+# one. Without it, an sdkconfig written before the rename - a build directory
+# configured on the CYD's old symbol, or one built from pull request #2 on the
+# Touch-LCD-2's - lost its board whenever the board's own defaults file was not
+# in that build: the choice fell back to its default, the AMOLED 1.8, and the
+# image built clean and drove the wrong pins.
+CONFIG_POCKET_TANK_BOARD_CYD_320X240    CONFIG_POCKET_TANK_CYD_320X240
+CONFIG_POCKET_TANK_BOARD_TLCD2          CONFIG_POCKET_TANK_WST_320X240

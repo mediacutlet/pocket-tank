@@ -16,6 +16,9 @@ SDL_LIBS   := $(shell sdl2-config --libs)
 # `make ROUND=1`: the round 466 px bowl (the Waveshare 1.75C's world) as
 # ./fishsim-round, built beside the rectangle's in build-round/.
 # `make WATCH=1`: the watch's 410 x 502 portrait tank (the Waveshare 2.06) as ./fishsim-watch
+# `make 320X240=1` (this fork): the 320 x 240 tank every 320 x 240 board shares -
+# the CYD, the Touch-LCD-2 (CYD.md) - as ./fishsim-320x240. It defines the
+# firmware's own CONFIG_POCKET_TANK_320X240, so common/ tests one symbol.
 ifdef ROUND
 BUILD   := build-round
 OUT     := fishsim-round
@@ -24,6 +27,10 @@ else ifdef WATCH
 BUILD   := build-watch
 OUT     := fishsim-watch
 ROUNDF  := -DTANK_WATCH
+else ifdef 320X240
+BUILD   := build-320x240
+OUT     := fishsim-320x240
+ROUNDF  := -DCONFIG_POCKET_TANK_320X240=1
 else
 BUILD   := build
 OUT     := fishsim
@@ -32,7 +39,7 @@ endif
 
 CFLAGS  := $(ROUNDF) -O2 -std=c11 $(ARCH) -I. -I../common -I../common/llm -DLV_CONF_INCLUDE_SIMPLE -DSOUNDS_BIN='"../assets/sounds/sounds.bin"' -DPT_VERSION='"$(shell git describe --always --dirty --exclude='*' 2>/dev/null || echo sim)"' $(SDL_CFLAGS) \
            -Wall -Wextra -Wno-unused-parameter -MMD -MP
-LDFLAGS := $(ARCH) $(SDL_LIBS) -lm
+LDFLAGS := $(ARCH) $(SDL_LIBS) -lm -lpthread
 
 APP_SRCS  := main.c advisor_llm.c persist_port_sim.c net_port_sim.c ../common/tank.c ../common/update.c ../common/advisor.c ../common/render.c ../common/icons.c ../common/progression.c ../common/setup.c ../common/audio.c ../common/notice.c ../common/sounds.c ../common/battery.c ../common/llm/q4_model.c ../common/llm/word_tok.c ../common/llm/advisor_core.c
 
@@ -53,7 +60,8 @@ endif
 
 # `make check` tests the rectangle; `make ROUND=1 check` / `make WATCH=1 check`
 # the same selftests in that board's world; `make check-all` all three - the
-# gate for anything in common/ (docs/BOARDS.md)
+# gate for anything in common/ (docs/BOARDS.md) - and, in this fork, the
+# 320 x 240 boards' (`make 320X240=1 check`) as the fourth
 check: $(OUT)
 	@set -e; for test in $(SELFTESTS); do echo "RUN $(OUT) $$test"; ./$(OUT) "$$test"; done
 
@@ -61,6 +69,7 @@ check-all:
 	$(MAKE) check
 	$(MAKE) ROUND=1 check
 	$(MAKE) WATCH=1 check
+	$(MAKE) 320X240=1 check
 
 check-nomodel:
 	$(MAKE) NOMODEL=1 check
@@ -78,7 +87,7 @@ $(BUILD)/%.o: %.c
 	$(CC) $(CFLAGS) -c $< -o $@
 
 clean:
-	rm -rf build build-round build-watch fishsim fishsim-round fishsim-watch
+	rm -rf build build-round build-watch build-320x240 fishsim fishsim-round fishsim-watch fishsim-320x240
 
 -include $(OBJS:.o=.d)
 

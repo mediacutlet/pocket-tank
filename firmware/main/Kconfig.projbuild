@@ -1,4 +1,41 @@
 menu "pocket-tank"
+    choice POCKET_TANK_BOARD
+        prompt "Board"
+        default POCKET_TANK_BOARD_AMOLED18
+        help
+            Which board the firmware is built for. Selects the pins, the tank
+            size (common/tank.h) and which display / touch ports can be used.
+            (this fork) Each 320x240 board selects POCKET_TANK_320X240, the
+            part they share; its own entry carries what is its alone.
+        config POCKET_TANK_BOARD_AMOLED18
+            bool "Waveshare ESP32-S3-Touch-AMOLED-1.8 (448x368)"
+        config POCKET_TANK_CYD_320X240
+            bool "CYD at 320x240: the 2.8in ESP32-S3 ES3C28P, ILI9341 + FT6336"
+            select POCKET_TANK_320X240
+        config POCKET_TANK_WST_320X240
+            bool "Waveshare ESP32-S3-Touch-LCD-2 at 320x240: ST7789T3 + CST816D"
+            select POCKET_TANK_320X240
+    endchoice
+    config POCKET_TANK_320X240
+        bool
+        help
+            The 320x240 layout every 320x240 board shares (this fork,
+            2026-10-08): common/tank.h's 320x240 tank and the pages laid out
+            for it, touch already landscape from the driver with no finger
+            bias, the settings page's compact rows, no update channel (OTA
+            hidden), the CYD's old saves read back, the algae paced for its
+            300 cells, and the sleep modes that go dark (screen, lightsleep)
+            with the settings page's SLEEP row. Not chosen by hand: the board
+            entries above select it, and tankcore's CMakeLists hands it to
+            common/.
+    config POCKET_TANK_DISPLAY_ILI9341
+        bool "Drive the CYD's ILI9341 over SPI, backlight PWM on GPIO45"
+        depends on POCKET_TANK_CYD_320X240
+        default n
+    config POCKET_TANK_DISPLAY_ST7789
+        bool "Drive the Touch-LCD-2's ST7789T3 over SPI, backlight PWM"
+        depends on POCKET_TANK_WST_320X240
+        default n
     config POCKET_TANK_DISPLAY_SH8601
         bool "Drive the Waveshare 1.8in AMOLED (SH8601 / CO5300 over QSPI)"
         default n
@@ -31,8 +68,145 @@ menu "pocket-tank"
     config POCKET_TANK_AUDIO_ES8311
         bool "Play the sound bank through the ES8311 codec + NS4150B amp (I2S)"
         default n
+        depends on !POCKET_TANK_WST_320X240
         help
             Enable for the real board (docs/AUDIO.md). Off = stub audio port: cues compile, nothing plays.
+            (this fork, 2026-10-08) Not offered on the Touch-LCD-2, which has
+            no codec: the port would drive the AMOLED's I2S pins there, and
+            its word select, GPIO45, is that board's LCD chip select.
+    config POCKET_TANK_IMU_QMI8658
+        bool "Look for a QMI8658 IMU (I2C 0x6B / 0x6A)"
+        default y
+        help
+            The AMOLED board's IMU, the Touch-LCD-2's, and the part the CYD
+            is waiting for.
+            Probed first at boot; the screen's 180-degree flip and the
+            handling detector run on whichever enabled IMU answers.
+    config POCKET_TANK_IMU_QMI8658_UP_AXIS
+        int "QMI8658: the axis along the screen's up (0=X 1=Y 2=Z)"
+        range 0 2
+        default 1
+        depends on POCKET_TANK_IMU_QMI8658
+        help
+            The default is the AMOLED board's, calibrated 2026-08-28. A
+            QMI8658 mounted elsewhere is a bench fact: hold the board right
+            side up and run the director's `imu`.
+    config POCKET_TANK_IMU_QMI8658_UP_NEGATIVE
+        bool "QMI8658: that axis reads negative when held right side up"
+        default y
+        depends on POCKET_TANK_IMU_QMI8658
+    config POCKET_TANK_IMU_QMI8658_OUT_AXIS
+        int "QMI8658: the axis out of the glass (0=X 1=Y 2=Z)"
+        range 0 2
+        default 2
+        depends on POCKET_TANK_IMU_QMI8658
+    config POCKET_TANK_IMU_QMI8658_OUT_NEGATIVE
+        bool "QMI8658: that axis reads negative lying flat, screen up"
+        default n
+        depends on POCKET_TANK_IMU_QMI8658
+        help
+            Only the face-down gesture uses it. Not measured on the AMOLED,
+            which does not enable the gesture.
+    config POCKET_TANK_IMU_MPU6050
+        bool "Look for an MPU-6050 IMU (I2C 0x68 / 0x69)"
+        default y if POCKET_TANK_CYD_320X240
+        default n
+        help
+            The CYD has no IMU of its own; an MPU-6050 breakout on its I2C
+            socket stands in (CYD.md). Probed after the QMI8658, so a
+            board carrying both uses the QMI8658.
+    config POCKET_TANK_IMU_MPU6050_UP_AXIS
+        int "MPU-6050: the axis along the screen's up (0=X 1=Y 2=Z)"
+        range 0 2
+        default 1
+        depends on POCKET_TANK_IMU_MPU6050
+        help
+            A bench fact, because the breakout is mounted by hand: hold the
+            board right side up and run the director's `imu`; the axis
+            carrying about 16000 counts is this one.
+    config POCKET_TANK_IMU_MPU6050_UP_NEGATIVE
+        bool "MPU-6050: that axis reads negative when held right side up"
+        default n
+        depends on POCKET_TANK_IMU_MPU6050
+    config POCKET_TANK_IMU_MPU6050_OUT_AXIS
+        int "MPU-6050: the axis out of the glass (0=X 1=Y 2=Z)"
+        range 0 2
+        default 2
+        depends on POCKET_TANK_IMU_MPU6050
+        help
+            The axis that carries gravity when the board lies flat on its
+            back. The flip ignores it: lying flat holds the last orientation.
+    config POCKET_TANK_IMU_MPU6050_OUT_NEGATIVE
+        bool "MPU-6050: that axis reads negative lying flat, screen up"
+        default n
+        depends on POCKET_TANK_IMU_MPU6050
+        help
+            Only the face-down gesture uses it: lying screen down reads the
+            other sign.
+    config POCKET_TANK_IMU_AUTO_FLIP
+        bool "The IMU turns the picture over when the board is turned over"
+        default y
+        depends on (POCKET_TANK_IMU_QMI8658 || POCKET_TANK_IMU_MPU6050) && !POCKET_TANK_IMU_FACE_DOWN_SLEEP
+        help
+            Off: the IMU only senses handling (the tank light, the codec's
+            warm-up), and the settings page's SCREEN row alone says which
+            way up the picture is. The face-down gesture's builds always
+            let the IMU turn the picture.
+    config POCKET_TANK_IMU_FACE_DOWN_SLEEP
+        bool "Face down sleeps the tank, face up wakes it"
+        default y if POCKET_TANK_CYD_320X240
+        default n
+        depends on POCKET_TANK_IMU_QMI8658 || POCKET_TANK_IMU_MPU6050
+        help
+            Screen down and still for 2 s is a short press of the sleep key;
+            turned face up, the tank wakes in place (in the deepsleep mode,
+            only within its 20-minute grace). What the gesture does follows
+            the sleep mode - on the 320x240 boards the settings page's SLEEP
+            row, whose NEVER ignores it as it does every other way into sleep.
+            Once an IMU answers, the compact settings page's SCREEN row is
+            ROTATION (the IMU turns the picture itself).
+    choice POCKET_TANK_SLEEP_MODE
+        prompt "Sleep mode: what the sleep key, face down and the director's sleeps do"
+        default POCKET_TANK_SLEEP_DEEP
+        help
+            Every way into sleep goes through this: BOOT's short press (no
+            PMIC), the PWR key (short and long), the face-down gesture, and
+            the director's deepsleep and poweroff. The modes that go dark
+            (screen, lightsleep) save the tank, turn the backlight and the
+            sound off and stop drawing; a touch or a pick-up or tilt (face
+            up instead, after a face-down sleep), BOOT, the PWR key, or the
+            director's timer lights it again where it was. The touch that
+            wakes it does nothing in the tank. Made for the CYD, whose case
+            covers BOOT, and offered on the 320x240 boards (this fork,
+            2026-10-08: the Touch-LCD-2's too, its CST816D's INT armed as a
+            light-sleep wake as the CYD's FT6336's is): the AMOLED's panel
+            sleep holds its touch controller in reset and cuts the panel's
+            rails, so its dark could not wake on a touch, and cycling those
+            rails beside an awake IMU is what railed its X and Z on
+            2026-08-31.
+            On the 320x240 boards, none, screen and lightsleep are only the
+            factory default: the settings page's SLEEP row (NEVER / SCREEN /
+            LIGHT) changes the mode at run time, and the choice is kept in
+            NVS ("tank"/"sleep"). deepsleep is a build choice only, with no
+            row.
+        config POCKET_TANK_SLEEP_NONE
+            bool "none: never goes dark; every way into sleep is ignored, with a log line"
+        config POCKET_TANK_SLEEP_SCREEN
+            bool "screen: dark, the CPU running"
+            depends on POCKET_TANK_320X240
+        config POCKET_TANK_SLEEP_LIGHT
+            bool "lightsleep: dark, light-sleeping between looks; never deep sleep"
+            depends on POCKET_TANK_320X240
+            help
+                While a USB host is attached the chip stays awake instead,
+                as in screen: light sleep takes the USB port down.
+        config POCKET_TANK_SLEEP_DEEP
+            bool "deepsleep: the 20-minute grace, then deep sleep or the PMIC power-off"
+            help
+                As the tank has always slept: within the grace BOOT, the
+                PWR key or face up wakes it in place; after it only BOOT,
+                the PWR key or the director's timer does, with a boot.
+    endchoice
     config POCKET_TANK_NO_PIE
         bool "Disable the PIE SIMD inference kernel (scalar dot products)"
         default n

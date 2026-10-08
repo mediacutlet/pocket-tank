@@ -453,6 +453,18 @@ void tank_init(tank_t *t, uint32_t seed) {
                                        * glass to the cap, so every morning looked the
                                        * same; now a night lands near ALGAE_DIRTY) */
 #define ALGAE_COVER_CAP     0.30f     /* growth stops claiming new cells here */
+#ifdef CONFIG_POCKET_TANK_320X240
+/* (this fork) the steps above were tuned on the 1.8's 28 x 23 = 644 cells; the
+ * CYD's glass is 20 x 15 = 300. A step claims or thickens one cell, so at the
+ * same pace per step its film covered the glass at twice the share an hour, and
+ * a 7 h night filmed it to the cap - every morning the same, the defect the
+ * 2026-09-23 retune fixed on the 1.8. The same pace PER CELL instead: one step
+ * per 644 / 300 of the time, so a night lands near ALGAE_DIRTY here too. */
+#undef  ALGAE_STEP_AWAKE_S
+#define ALGAE_STEP_AWAKE_S  (240.0f * 644 / ALGAE_CELLS)
+#undef  ALGAE_STEP_SLEEP_S
+#define ALGAE_STEP_SLEEP_S  (180.0f * 644 / ALGAE_CELLS)
+#endif
 #define WIPE_RADIUS      20.0f  /* squeegee half-width around the drag path */
 #define WIPE_ENGAGE_PX   18.0f  /* stroke travel before a drag starts wiping
                                  * (a rolly fingertip tap stays under this) */

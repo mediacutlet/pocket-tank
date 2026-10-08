@@ -6,6 +6,7 @@
 
 #include <stddef.h>
 #include "tank.h"
+#include "ui.h"
 #include "battery.h"
 
 /* fb is TANK_W x TANK_H, RGB565, stride in PIXELS (usually TANK_W). */
@@ -16,8 +17,18 @@
  * helpers below (render_text, render_rect, ...) take PAGE coordinates; the
  * tap tests take the frame's, as the touch ports report them. In the
  * rectangle the two are the same thing. */
+#ifdef CONFIG_POCKET_TANK_320X240
+/* this fork, a 320 x 240 board's: its pages are the design SCALED (ui.h's UI(), 240 / 368),
+ * so the page is UI(448) x UI(368), centred - glass x 14..306. The layouts that use the
+ * whole glass instead (the milestones page, the shop, settings: the CYD block at the end
+ * of this file) reach past it on both sides. */
+#define PAGE_W 292
+#define PAGE_H 240
+#else
 #define PAGE_W 448
 #define PAGE_H 368
+#endif
+_Static_assert(PAGE_H == UI_PAGE_H, "ui.h scales the pages to PAGE_H");
 #define PAGE_X ((TANK_W - PAGE_W) / 2)
 #define PAGE_Y ((TANK_H - PAGE_H) / 2)
 #ifdef TANK_ROUND               /* the bowl's circle cuts the page's corners: a few buttons are drawn in from the glass */
@@ -99,12 +110,23 @@ void render_stats_card(const tank_t *t, int fish_idx, uint16_t *fb, int stride);
 #elif defined(TANK_WATCH)       /* the watch: in from its round corner */
 #define RENDER_CARD_X 36
 #define RENDER_CARD_Y 36
+#elif defined(CONFIG_POCKET_TANK_320X240)
+/* this fork, the CYD's 240 px: the card's pixel-art icons (24 px needs, 16 px trait
+ * poles) cannot shrink, so it goes to two columns instead of one - the needs down the
+ * left, the traits and MORE down the right - and the toolbox fits under it (164..234) */
+#define RENDER_CARD_X 6
+#define RENDER_CARD_Y 6
 #else
 #define RENDER_CARD_X 14
 #define RENDER_CARD_Y 8
 #endif
+#ifdef CONFIG_POCKET_TANK_320X240
+#define RENDER_CARD_W 224
+#define RENDER_CARD_H 144
+#else
 #define RENDER_CARD_W 124
 #define RENDER_CARD_H 258       /* 228 + the MORE button strip (2026-09-16) */
+#endif
 /* the card's tap hit box (touch ports): the card itself plus slop, most of
  * it BELOW the MORE button - fingers aiming at a button by the foot land
  * low and wide (Strato, 2026-09-16: "I'm not tapping it reliably"). Since
@@ -128,6 +150,11 @@ void render_set_card_cache(uint16_t *buf);
 #define RENDER_TOOLS_Y (RENDER_CARD_Y + RENDER_CARD_H + RENDER_TOOLS_GAP)
 #define RENDER_TOOLS_W RENDER_CARD_W
 #define RENDER_TOOLS_H 70
+/* (this fork) The card and the toolbox are copied into the frame row by row
+ * with no clipping: they have to lie inside the tank, or they write past the
+ * end of the framebuffer. */
+_Static_assert(RENDER_CARD_Y + RENDER_CARD_H <= TANK_H && RENDER_CARD_X + RENDER_CARD_W <= TANK_W &&
+               RENDER_TOOLS_Y + RENDER_TOOLS_H <= TANK_H, "the stats card and the toolbox must fit inside the tank");
 int  render_tools_hit(float x, float y);
 /* With a tool in hand and no fish card up, a chip at the top left says so:
  * the tool and DONE. A tap on it (render_tool_chip_hit) puts the tool back
@@ -263,15 +290,15 @@ void render_sd_toast(const tank_t *t, uint16_t *fb, int stride);
  * render_confirm_hit maps a tap in tank coordinates to a button (+1 YES,
  * -1 NO, 0 neither) so the device's touch port and the sim's mouse share
  * the geometry. */
-#define RENDER_CONFIRM_X     56
-#define RENDER_CONFIRM_Y     76
-#define RENDER_CONFIRM_W     336
-#define RENDER_CONFIRM_H     216
-#define RENDER_CONFIRM_BTN_W 132
-#define RENDER_CONFIRM_BTN_H 56
-#define RENDER_CONFIRM_BTN_Y (RENDER_CONFIRM_Y + 112)
-#define RENDER_CONFIRM_NO_X  (RENDER_CONFIRM_X + 24)
-#define RENDER_CONFIRM_YES_X (RENDER_CONFIRM_X + RENDER_CONFIRM_W - 24 - RENDER_CONFIRM_BTN_W)
+#define RENDER_CONFIRM_X     UI(56)
+#define RENDER_CONFIRM_Y     UI(76)
+#define RENDER_CONFIRM_W     UI(336)
+#define RENDER_CONFIRM_H     UI(216)
+#define RENDER_CONFIRM_BTN_W UI(132)
+#define RENDER_CONFIRM_BTN_H UI(56)
+#define RENDER_CONFIRM_BTN_Y (RENDER_CONFIRM_Y + UI(112))
+#define RENDER_CONFIRM_NO_X  (RENDER_CONFIRM_X + UI(24))
+#define RENDER_CONFIRM_YES_X (RENDER_CONFIRM_X + RENDER_CONFIRM_W - UI(24) - RENDER_CONFIRM_BTN_W)
 void render_confirm_reset(uint16_t *fb, int stride, float frac);
 int  render_confirm_hit(float x, float y);
 
@@ -304,7 +331,33 @@ enum { SET_TAP_NONE = 0, SET_TAP_CLOSE = 1, SET_TAP_BRIGHT = 2, SET_TAP_VOLUME =
        SET_TAP_SCREEN = 7,      /* a worn tank's SCREEN row (2026-10-02): *value 1 = TURNED, already applied and marked
                                    for the save - the platform only logs it (the picture turns on the next frame) */
        SET_TAP_FEED = 8,        /* AUTO FEED (0.3.2): *value 1 = ON; applied and marked for the save */
-       SET_TAP_ROTATE = 9 };    /* ROTATION (0.3.2): *value 1 = locked; applied and marked for the save */
+       SET_TAP_ROTATE = 9,      /* ROTATION (0.3.2): *value 1 = locked; applied and marked for the save */
+       SET_TAP_FLIP = 10,       /* this fork, a 320x240 board with no IMU turning the picture: SCREEN UPRIGHT / FLIPPED (below) */
+       SET_TAP_SLEEP = 11 };    /* this fork, a 320x240 board not built for deepsleep: SLEEP NEVER / SCREEN / LIGHT (below) */
+/* (this fork) the platforms test these in if-chains, not a switch, so two
+   equal values would compile without a word: the fork's stay past upstream's */
+_Static_assert(SET_TAP_FLIP > SET_TAP_ROTATE && SET_TAP_FLIP > SET_TAP_SCREEN && SET_TAP_FLIP > SET_TAP_UPDATES && SET_TAP_SLEEP > SET_TAP_FLIP,
+               "the fork's settings taps must not reuse upstream's numbers");
+/* The 320x240 boards' own rows (this fork; no other board draws them). With
+ * no IMU to turn the picture - the CYD without its breakout, the Touch-LCD-2,
+ * whose IMU senses handling only - the row where the others have ROTATION is
+ * SCREEN, UPRIGHT / FLIPPED: SET_TAP_FLIP carries *value 1 = FLIPPED; the
+ * platform turns the display and touch, keeps the choice, and says what it
+ * is here so the row shows it. */
+void render_settings_set_flip(bool flipped);
+/* Once an IMU answers, it turns the picture itself: that row is upstream's
+ * ROTATION. The platform says whether an IMU answered. The choice is made at
+ * run time, where upstream picks SCREEN or ROTATION by the board (TANK_WORN). */
+void render_settings_set_imu(bool imu);
+/* Under it on a 320x240 board, IMU or not, the SLEEP row (2026-10-08): what every way into sleep
+ * does - BOOT's short press, the face-down gesture, the PWR key, the
+ * director's sleeps. NEVER ignores them all, SCREEN goes dark with the chip
+ * awake, LIGHT goes dark and light-sleeps between its looks at the glass.
+ * SET_TAP_SLEEP carries *value = the segment, SET_SLEEP_*; the platform
+ * applies it, keeps it, and says what it is here. -1 draws no row: a build
+ * for deepsleep, which is a build choice only and has none to offer. */
+enum { SET_SLEEP_NEVER = 0, SET_SLEEP_SCREEN = 1, SET_SLEEP_LIGHT = 2 };   /* the row's order, left to right; the firmware stores these numbers */
+void render_settings_set_sleep(int choice);
 void render_settings(const tank_t *t, uint16_t *fb, int stride, int bright_pct, int volume);
 int  render_settings_tap(float x, float y, int *value);
 int  render_settings_touch(tank_t *t, float x, float y, bool down, int *value);
@@ -337,12 +390,12 @@ void render_fish_portrait(uint16_t *fb, int stride, float x, float y, float size
  * carrying the rectangle's pixels. PAGE coordinates unless a line says the
  * frame's; render.c has the words that go with each page. ---- */
 /* the snail's and the shrimp school's cards: centered on the glass (the frame's coordinates) */
-#define SNAIL_CARD_W 336
-#define SNAIL_CARD_H 176
-#define SHRIMP_CARD_W 336
-#define SHRIMP_CARD_H 190
-#define URCHIN_CARD_W 336
-#define URCHIN_CARD_H 194
+#define SNAIL_CARD_W UI(336)
+#define SNAIL_CARD_H UI(176)
+#define SHRIMP_CARD_W UI(336)
+#define SHRIMP_CARD_H UI(190)
+#define URCHIN_CARD_W UI(336)
+#define URCHIN_CARD_H UI(194)
 /* the milestones page (the bowl has its own rows and buttons: render.c) */
 #ifdef TANK_ROUND
 #define MSP_ROW_Y0    56
@@ -494,6 +547,205 @@ void render_fish_portrait(uint16_t *fb, int stride, float x, float y, float size
 #define SET_CLOSE_X   242
 #else
 #define SET_UPD_X     (PAGE_BOWL ? 60 : 32)    /* the UPDATES button, bottom left (2026-09-30); in from the glass on the bowl */
+#endif
+
+/* ---- this fork: names the layouts above leave as literals in render.c,
+ * so the CYD's block below can move them. On every other board they are
+ * the literals they replace. ---- */
+#define MSP_NAME_X    92             /* a row's name; the growth strip, the ticks and the population strip 4 px in */
+#define SHP_ROW_X     32             /* a shop row's art (the rows' own column: render.c) */
+#define SHP_TEXT_X    76             /* ... and its name and price */
+#define SHP_BTN_DY    ((SHP_ROW_ICON - SHP_BTN_H) / 2)   /* a row's button, centred on its art */
+#define MSP_RULE_X0   24             /* the milestones' and the shop's dividers run from here ... */
+#define MSP_RULE_X1   (PAGE_W - 24)  /* ... to here */
+#define MSP_HIT_X0    20             /* a row's taps start here: the milestones' portraits and names, the shop's rows */
+#define MSP_TANK_BADGE 4             /* the tank row's badges and page arrow: their top, under MSP_TANK_Y */
+
+/* ---- this fork: a 320 x 240 board, the CYD or the Touch-LCD-2 (CONFIG_POCKET_TANK_320X240). The modals, the
+ * notices, the prompts and the setup flow are the design scaled (ui.h), on a
+ * 292 x 240 page centred on the glass. These three pages cannot be: seven
+ * rows of 32 px badges do not fit 240 px at any pitch, and the shop's and
+ * settings' rows would come out too small to tap. They keep the layouts the
+ * fork drew for this glass (2026-09-26/28, checked on the board), across the
+ * whole of it - no curved bezel to keep clear of - so their columns are glass
+ * x, put on the page by CYD_GLASS_X. The upstream names are redefined here
+ * rather than branched above, so upstream's own lines stay as written. ---- */
+#ifdef CONFIG_POCKET_TANK_320X240
+#define CYD_GLASS_X(x) ((x) - PAGE_X)   /* a column measured on the glass, as a page x */
+/* the milestones page: 24 px badges (the generated copies, tools/gen_icons.py)
+   on 28 px rows, the three buttons spread across the whole foot */
+#undef  MSP_ROW_Y0
+#define MSP_ROW_Y0    3
+#undef  MSP_ROW_H
+#define MSP_ROW_H     28
+#undef  MSP_TANK_Y
+#define MSP_TANK_Y    (MSP_ROW_Y0 + N_FISH_MAX * MSP_ROW_H + 7)
+#undef  MSP_ROW_MID
+#define MSP_ROW_MID   13             /* in a row: the portrait's centre ... */
+#undef  MSP_ROW_STRIP
+#define MSP_ROW_STRIP 20             /* ... the growth strip / the fry's ticks ... */
+#undef  MSP_ROW_BADGE
+#define MSP_ROW_BADGE 2              /* ... the badges' top ... */
+#undef  MSP_ROW_BAR
+#define MSP_ROW_BAR   (MSP_ROW_BADGE + MSP_ICON + 2)   /* ... the bar under a gate still owed */
+#undef  MSP_BADGE_X0
+#define MSP_BADGE_X0  CYD_GLASS_X(112)
+#undef  MSP_BADGE_DX
+#define MSP_BADGE_DX  30
+#undef  MSP_ICON
+#define MSP_ICON      24
+#undef  MSP_FISH_X
+#define MSP_FISH_X    CYD_GLASS_X(34)   /* the fish portraits' centre (and the sand dollar's) */
+#undef  MSP_NAME_X
+#define MSP_NAME_X    CYD_GLASS_X(60)
+#undef  MSP_SD_X
+#define MSP_SD_X      (MSP_FISH_X - MSP_ICON / 2)
+#undef  MSP_CLOSE_X
+#define MSP_CLOSE_X   CYD_GLASS_X(216)
+#undef  MSP_CLOSE_Y
+#define MSP_CLOSE_Y   (MSP_TANK_Y + MSP_ROW_H + 8)
+#undef  MSP_CLOSE_W
+#define MSP_CLOSE_W   96
+#undef  MSP_CLOSE_H
+#define MSP_CLOSE_H   22
+#undef  MSP_SET_X
+#define MSP_SET_X     CYD_GLASS_X(8)
+#undef  MSP_SET_W
+#define MSP_SET_W     96
+#undef  MSP_UPG_X
+#define MSP_UPG_X     CYD_GLASS_X(112)
+#undef  MSP_UPG_W
+#define MSP_UPG_W     96
+#undef  MSP_TPG_X
+#define MSP_TPG_X     CYD_GLASS_X(292)  /* the tank row's page arrow: glass x 296..312, right of the sixth badge */
+#undef  MSP_TANK_BADGE
+#define MSP_TANK_BADGE 2             /* as in a fish row */
+/* the dividers and the rows' left tap edge, on the glass as the columns are
+   (on the page they would start 14 px further in: glass x 30, not 16, and a
+   shop row would answer only from x 27, not 13, though its art starts at 8) */
+#undef  MSP_RULE_X0
+#define MSP_RULE_X0   CYD_GLASS_X(UI(24))            /* glass x 16 .. */
+#undef  MSP_RULE_X1
+#define MSP_RULE_X1   CYD_GLASS_X(TANK_W - UI(24))   /* .. 303 */
+#undef  MSP_HIT_X0
+#define MSP_HIT_X0    CYD_GLASS_X(UI(20))            /* glass x 13 */
+/* the modals: the design, scaled and centred on the page */
+#undef  MSP_MODAL_X
+#define MSP_MODAL_X   UI(56)
+#undef  MSP_MODAL_Y
+#define MSP_MODAL_Y   UI(100)
+#undef  MSP_MODAL_W
+#define MSP_MODAL_W   UI(336)
+#undef  MSP_MODAL_H
+#define MSP_MODAL_H   UI(156)
+#undef  MSP_ARROW_W
+#define MSP_ARROW_W   UI(40)
+#undef  MSP_ARROW_H
+#define MSP_ARROW_H   UI(32)
+#undef  MSP_ARROW_IN
+#define MSP_ARROW_IN  UI(10)
+#undef  MSP_ARROW_HIT
+#define MSP_ARROW_HIT UI(100)
+#undef  MSP_FRY_MODAL_Y
+#define MSP_FRY_MODAL_Y UI(60)
+#undef  MSP_HOW_W
+#define MSP_HOW_W     UI(100)
+#undef  MSP_HOW_H
+#define MSP_HOW_H     UI(32)
+#undef  MSP_HOW_SLOP_X
+#define MSP_HOW_SLOP_X UI(36)
+#undef  MSP_HOW_SLOP_UP
+#define MSP_HOW_SLOP_UP UI(12)
+#undef  MSP_HOW_SLOP_DN
+#define MSP_HOW_SLOP_DN UI(28)
+/* the shop: the 32 px coin for the 64 px one (the header a row shorter),
+   rows at a 38 px pitch, four to a page, the buttons from the glass's edge */
+#undef  SHP_COIN_X
+#define SHP_COIN_X    CYD_GLASS_X(8)
+#undef  SHP_COIN_Y
+#define SHP_COIN_Y    6
+#undef  SHP_HEAD_X
+#define SHP_HEAD_X    CYD_GLASS_X(50)   /* right of the coin: 8 + 32 + UI(16) */
+#undef  SHP_EARN_X
+#define SHP_EARN_X    CYD_GLASS_X(8)
+#undef  SHP_ROW_X
+#define SHP_ROW_X     CYD_GLASS_X(8)
+#undef  SHP_TEXT_X
+#define SHP_TEXT_X    CYD_GLASS_X(50)
+#undef  SHP_ROW_Y0
+#define SHP_ROW_Y0    56
+#undef  SHP_ROW_DY
+#define SHP_ROW_DY    38
+#undef  SHP_BTN_W
+#define SHP_BTN_W     76
+#undef  SHP_BTN_X
+#define SHP_BTN_X     CYD_GLASS_X(TANK_W - 8 - SHP_BTN_W)
+#undef  SHP_BTN_H
+#define SHP_BTN_H     24
+#undef  SHP_EARN_W
+#define SHP_EARN_W    96
+#undef  SHP_MODAL_X
+#define SHP_MODAL_X   UI(48)
+#undef  SHP_MODAL_W
+#define SHP_MODAL_W   UI(352)
+#undef  SHP_MODAL_Y
+#define SHP_MODAL_Y   UI(48)
+#undef  SHP_MODAL_H
+#define SHP_MODAL_H   UI(244)
+#undef  SHP_EARN_MODAL_Y
+#define SHP_EARN_MODAL_Y UI(40)
+#undef  SHP_EARN_MODAL_H
+#define SHP_EARN_MODAL_H UI(224)
+#undef  SHP_TWO_GAP
+#define SHP_TWO_GAP   UI(16)
+#undef  SHP_ARROW_W
+#define SHP_ARROW_W   30             /* UI(36) is 23: a finger's minimum instead */
+#undef  SHP_ARROW_H
+#define SHP_ARROW_H   24
+#undef  SHP_ARROW_Y
+#define SHP_ARROW_Y   (SHP_COIN_Y + UI(16))
+#undef  SHP_ARROW_X1
+#define SHP_ARROW_X1  (CYD_GLASS_X(TANK_W - UI(28)) - SHP_ARROW_W)   /* next */
+#undef  SHP_ARROW_X0
+#define SHP_ARROW_X0  (SHP_ARROW_X1 - SHP_ARROW_W - UI(8))         /* previous */
+/* settings at a 28 px pitch, which fills the glass with no slack: the title,
+   BRIGHTNESS, VOLUME, the note, LIGHTS OUT, AUTO FEED, then the row chosen at
+   run time - SCREEN with no IMU, ROTATION with one (render_settings_set_imu) -
+   SLEEP under it on every build but deepsleep (render_settings_set_sleep),
+   and the foot: CLOSE, the version line beside it. No UPDATES: a 320x240 board has no update channel (CYD.md). */
+#undef  SET_TITLE_Y
+#define SET_TITLE_Y   6
+#undef  SET_ROW1_Y
+#define SET_ROW1_Y    34             /* BRIGHTNESS */
+#undef  SET_ROW2_Y
+#define SET_ROW2_Y    62             /* VOLUME */
+#undef  SET_NOTE_Y
+#define SET_NOTE_Y    83             /* "FISH ARE QUIET AT NIGHT" */
+#undef  SET_ROW3_Y
+#define SET_ROW3_Y    104            /* LIGHTS OUT */
+#undef  SET_ROW4_Y
+#define SET_ROW4_Y    132            /* AUTO FEED */
+#undef  SET_ROW5_Y
+#define SET_ROW5_Y    160            /* SCREEN (no IMU) or ROTATION (an IMU) */
+#define SET_ROW6_Y    188            /* SLEEP (not on a deepsleep build) */
+#undef  SET_LABEL_X
+#define SET_LABEL_X   CYD_GLASS_X(8)
+#undef  SET_SEG_X
+#define SET_SEG_X     CYD_GLASS_X(118)
+#undef  SET_SEG_W
+#define SET_SEG_W     62
+#undef  SET_SEG_DX
+#define SET_SEG_DX    66
+#undef  SET_SEG_H
+#define SET_SEG_H     24
+#undef  SET_SEG_Y
+#define SET_SEG_Y(row) ((row) - 8)   /* the segment sits on the label's line */
+#undef  SET_ARW_W
+#define SET_ARW_W     UI(40)
+#undef  SET_ROT_WORD_X
+#define SET_ROT_WORD_X (SET_SEG_X + SET_SEG_W + UI(14))
+_Static_assert(MSP_CLOSE_Y + MSP_CLOSE_H <= TANK_H && SET_SEG_Y(SET_ROW6_Y) + SET_SEG_H < MSP_CLOSE_Y,
+               "the 320x240 pages must fit on the glass");
 #endif
 
 #endif

@@ -684,6 +684,25 @@ static bool load_save(tank_t *t, int64_t *saved_unix) {
     size_t got = 0;
     bool loaded = persist_port_load(&sv, sizeof sv, &got) && got >= SAVE_CORE_SIZE && got <= sizeof sv;
     if (!loaded || sv.magic != SAVE_MAGIC || sv.n_fish < 2 || sv.n_fish > N_FISH_MAX) return false;
+#ifdef CONFIG_POCKET_TANK_320X240
+    /* (this fork) a save the CYD wrote before v0.3.3: it kept only this
+     * board's own algae cells (20 x 15 = 300, at 460..760), not the 644 every
+     * board keeps now, so everything after the grid sat 344 bytes early. Those
+     * saves are 1312, 1320 or 1328 bytes (the CYD began at the reef cluster's
+     * 1656 - 344), lengths no other build ever wrote: the AMOLED's run 1304,
+     * 1408, ... So a length in that span is the old CYD layout, and its tail
+     * goes back past the full grid; the cells past the CYD's 300 read as clean
+     * glass. Without this, trims, frond heights, names, looks, decor and the
+     * shrimp would load into the wrong fields without a word. It can go once
+     * the CYD has saved in this layout (the -cyd fixture in sim/testdata/saves). */
+    if (got >= 1312 && got <= 1328) {
+        const size_t old_end = offsetof(save_t, algae) + ALGAE_CELLS, new_end = offsetof(save_t, trims);   /* 760, 1104 */
+        _Static_assert(ALGAE_CELLS == 300, "the old CYD layout kept 300 algae cells");
+        memmove((uint8_t *)&sv + new_end, (uint8_t *)&sv + old_end, got - old_end);
+        memset((uint8_t *)&sv + old_end, 0, new_end - old_end);
+        got += new_end - old_end;
+    }
+#endif
     if (got == SAVE_PRE_BUBBLE_SIZE) {         /* the first public installer's layout: see SAVE_PRE_BUBBLE_SIZE */
         memmove(&sv.ms_seen, &sv.bubble_x, sizeof sv.ms_seen + sizeof sv.tank_ms_seen);
         sv.bubble_x = 0;                       /* = the default column */

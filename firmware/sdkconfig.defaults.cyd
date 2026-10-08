@@ -1,0 +1,28 @@
+# The 2.8" ESP32-S3 CYD (ES3C28P): layered over sdkconfig.defaults by
+# tools/build_cyd.sh. 16 MB flash and 8 MB octal PSRAM, as the AMOLED board.
+CONFIG_POCKET_TANK_CYD_320X240=y
+CONFIG_POCKET_TANK_DISPLAY_SH8601=n
+CONFIG_POCKET_TANK_DISPLAY_ILI9341=y
+CONFIG_POCKET_TANK_TOUCH_FT3168=y
+# The same ES8311 as the AMOLED board, on the CYD's own pins (board_pins.h).
+CONFIG_POCKET_TANK_AUDIO_ES8311=y
+# The IMUs, each probed at boot if enabled, the QMI8658 first: the QMI8658C
+# the CYD is waiting for, and the MPU-6050 standing in for it on the I2C
+# socket (SDA IO16, SCL IO15). Axes per CYD.md.
+CONFIG_POCKET_TANK_IMU_QMI8658=y
+CONFIG_POCKET_TANK_IMU_MPU6050=y
+# The MPU-6050 flat against the CYD's back, its pins toward the top edge:
+# measured 2026-09-30, upright = X at -0.95 g, flat on its back = Z at -0.79 g
+# (this breakout's Z reads ~0.2 g light; the flip never uses Z).
+CONFIG_POCKET_TANK_IMU_MPU6050_UP_AXIS=0
+CONFIG_POCKET_TANK_IMU_MPU6050_UP_NEGATIVE=y
+CONFIG_POCKET_TANK_IMU_MPU6050_OUT_AXIS=2
+CONFIG_POCKET_TANK_IMU_MPU6050_OUT_NEGATIVE=y
+# Face down for 2 s sleeps the tank, face up wakes it (unless the SLEEP row
+# says NEVER).
+CONFIG_POCKET_TANK_IMU_FACE_DOWN_SLEEP=y
+# Sleep goes dark and light-sleeps, and never deep: in its case BOOT, the
+# only key deep sleep hears, cannot be reached. A touch or a pick-up wakes it.
+# Only the factory default (2026-10-08): the settings page's SLEEP row
+# (NEVER / SCREEN / LIGHT) changes it at run time, kept in NVS (tank/sleep).
+CONFIG_POCKET_TANK_SLEEP_LIGHT=y

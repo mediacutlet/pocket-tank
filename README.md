@@ -1,5 +1,21 @@
 # pocket-tank 🐟
 
+> **This fork** runs the tank on the 2.8-inch ES3C28P "cheap yellow display"
+> (CYD) as well as on upstream's three Waveshare boards. What it changes
+> against upstream:
+>
+> - a fourth board, `CONFIG_POCKET_TANK_CYD_320X240`: a 320 x 240 tank, built and flashed with `tools/build_cyd.sh`
+> - every page laid out for a 240 px glass: a two-column stats card, 24 px badges, a full-width shop and settings page
+> - two settings rows of the 320 x 240 boards' own: SCREEN (ROTATION once an IMU answers) and SLEEP (NEVER / SCREEN / LIGHT)
+> - two sleep modes that never deep-sleep, screen and lightsleep, on the 320 x 240 boards: the glass goes dark and wakes on a touch, a pick-up or BOOT
+> - an MPU-6050 beside the QMI8658, probed at boot; on the CYD an IMU breakout on its I2C socket, and face down sleeps the tank
+> - on the CYD, no updates over Wi-Fi, no battery page, no PWR key and no clock chip
+> - the simulator's fourth world, `make -C sim 320X240=1`, and `make -C sim check-all` across all four
+> - a second 320 x 240 board, `CONFIG_POCKET_TANK_WST_320X240`: the Waveshare ESP32-S3-Touch-LCD-2 (adampog's), sharing `CONFIG_POCKET_TANK_320X240` with the CYD - the pages, the SLEEP row and the dark
+>
+> Using it, building and flashing it, and syncing the fork with upstream:
+> **[CYD.md](CYD.md)**.
+
 **A tiny language model keeps a fish tank alive on an $8 chip.**
 The ESP32-S3 board, with screen and battery used in this project is actually around $35.
 

@@ -48,6 +48,14 @@
 #elif defined(TANK_WATCH)
 #define PT_BOARD         "watch206"
 #define PT_BOARD_NAME    "ESP32-S3-Touch-AMOLED-2.06"
+#elif defined(CONFIG_POCKET_TANK_WST_320X240)
+/* (this fork) the Waveshare ESP32-S3-Touch-LCD-2, the second 320 x 240 board (2026-10-08) */
+#define PT_BOARD         "wst_320x240"
+#define PT_BOARD_NAME    "ESP32-S3-Touch-LCD-2"
+#elif defined(CONFIG_POCKET_TANK_320X240)
+/* (this fork) the CYD, and the sim's 320 x 240 world, which names no board */
+#define PT_BOARD         "cyd_320x240"
+#define PT_BOARD_NAME    "ES3C28P"
 #else
 #define PT_BOARD         "amoled18"
 #define PT_BOARD_NAME    "ESP32-S3-Touch-AMOLED-1.8"

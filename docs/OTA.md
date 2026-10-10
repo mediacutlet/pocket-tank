@@ -33,7 +33,7 @@ list below:
   and a refused try keep the text. A refused password offers TRY AGAIN first
   (five connect attempts, growing pauses); the saved network is kept.
 - **The test channel** needs build-named files and a cache-busting manifest
-  name (`manifest-<build>.json`): pocketank.com's proxy cache serves the old
+  name (`manifest-<build>.json`): the public site's proxy cache serves the old
   `manifest.json` (and `latest.json` is 403 there, by name).
 - **Never log the typed field**: on the saved-network path it is the passphrase.
 - **Untested still**: the public repo's own first run of the pipeline (the
@@ -290,7 +290,7 @@ whatever was last pushed. So the OTA files do not ride it.
 - **Strato's test channel.** A release marked pre-release is reachable by its
   own URL. The director gets `ota url <manifest>` so his tank checks that
   one; an OTA is tested end to end before anyone else can see it.
-- **pocketank.com** keeps `/updates/` for humans (the changelog entry is
+- **The public site** keeps `/updates/` for humans (the changelog entry is
   written anyway, per release) and links the release. `site/` stays dev-only.
 
 ### The manifest
@@ -376,7 +376,7 @@ land in the same NVS store the wizard uses.
 Two things to re-check when it lands: the vendored dialog edit in
 `make_installer.py` (never_erase) was made against a device that does NOT
 speak Improv, and ESP Web Tools changes its post-install flow for one that
-does; and the installer's copy (stratobuilds.com, pocketank.com/install)
+does; and the installer's hosted copy
 gains one sentence about Wi-Fi.
 
 ## Testing
@@ -394,7 +394,7 @@ gains one sentence about Wi-Fi.
 
 Hidden SSIDs; WPA2-Enterprise; captive-portal networks; more than one saved
 network; scheduled or automatic checks (the radio is on only when asked;
-people learn of updates from pocketank.com, the same as today); Improv over
+people learn of updates from the public site, the same as today); Improv over
 BLE; a phone-in-the-middle access point portal (the tank has a screen; the
 door stays open for screenless boards); NVS encryption.
 

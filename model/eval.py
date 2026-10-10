@@ -8,6 +8,12 @@ student/teacher agreement (top-line distillation metric).
 
   python3 eval.py --count 20                 # student only, prints a table
   python3 eval.py --count 50 --teacher       # adds gemma4:26b agreement
+  python3 eval.py --schema 5 --teacher --count 400 --run-bin ./runq4 \
+      --model-bin out/model_q4_v5j.bin --tok-bin out/tokenizer_v5j.bin   # + per-species agreement
+
+With --schema 5 the agreement is also broken down per species (the v5
+acceptance is >= 72% overall AND for every species); --min-per-species makes
+the sampler keep going until every species has that many states.
 """
 
 import argparse
@@ -42,9 +48,15 @@ def main():
     ap.add_argument("--run-bin", default=os.path.join(HERE, "runw"))
     ap.add_argument("--model-bin", default=os.path.join(HERE, "out", "model.bin"))
     ap.add_argument("--tok-bin", default=os.path.join(HERE, "out", "tokenizer.bin"))
-    ap.add_argument("--schema", type=int, choices=(2, 3, 4), default=2, help="state line schema of the model under test")
+    ap.add_argument("--schema", type=int, choices=(2, 3, 4, 5), default=2, help="state line schema of the model under test")
+    ap.add_argument("--teacher-kind", choices=("ollama", "rules"), default="ollama",
+                    help="rules = gen_traces' rule policy (smoke tests of the pipeline only)")
+    ap.add_argument("--min-per-species", type=int, default=0,
+                    help="v5: keep sampling past --count until every species has this many states")
+    ap.add_argument("--accept", type=float, default=72.0, help="agreement bar, percent (overall and per species)")
     args = ap.parse_args()
     gt.SCHEMA = args.schema
+    gt.TEACHER = args.teacher_kind
 
     for p in (args.run_bin, args.model_bin, args.tok_bin):
         if not os.path.exists(p):
@@ -56,29 +68,58 @@ def main():
         tank.tick()
 
     agree = valid = 0
-    for i in range(args.count):
+    per = {}                                   # species -> [states, agreements]
+    i = 0
+    while i < args.count or (args.schema >= 5 and args.min_per_species and
+                             (len(per) < len(gt.SPECIES) or min(v[0] for v in per.values()) < args.min_per_species)):
+        if i >= max(args.count, 1) * 20:
+            break                              # never loop forever on a sampler that misses a species
+        if args.schema >= 5 and i and i % 60 == 0:
+            tank = gt.Tank(rng)                # a new population: every species gets its turn
+            for _ in range(200):
+                tank.tick()
         for _ in range(40):
             tank.tick()
         fish = tank.fish[i % len(tank.fish)]
         if rng.random() < 0.45:
             tank.perturb(fish)
         state = gt.encode(tank, fish)
+        sp = fish.species if args.schema >= 5 else "fish"
+        if args.schema >= 5 and args.min_per_species and i >= args.count and per.get(sp, [0])[0] >= args.min_per_species:
+            i += 1
+            continue                           # past --count: only the species still short
         s_goal = student_goal(args.run_bin, args.model_bin, args.tok_bin, state)
+        per.setdefault(sp, [0, 0])
+        per[sp][0] += 1
         if not s_goal.startswith("<"):
             valid += 1
         line = f"[{i+1:3d}] {s_goal:28s}"
         if args.teacher:
-            t_goal = gt.ask_ollama(args.host, args.model, state, 30) or "<teacher failed>"
+            t_goal = gt.ask_teacher(args.host, args.model, state, 30) or "<teacher failed>"
             hit = s_goal.split()[0] == t_goal.split()[0]
             agree += hit
+            per[sp][1] += hit
             line += f" teacher: {t_goal:28s} {'MATCH' if hit else 'diff'}"
         print(line + f"  | {state}")
         if not s_goal.startswith("<"):
             fish.goal = s_goal.split()[0]
+        i += 1
 
-    print(f"\nvalid output: {valid}/{args.count}")
+    n = sum(v[0] for v in per.values())
+    print(f"\nvalid output: {valid}/{n}")
     if args.teacher:
-        print(f"goal agreement with teacher: {agree}/{args.count} ({100*agree/args.count:.0f}%)")
+        ok = 100 * agree / max(1, n) >= args.accept
+        print(f"goal agreement with teacher: {agree}/{n} ({100*agree/max(1, n):.0f}%)  {'OK' if ok else 'BELOW'} {args.accept:.0f}%")
+        if args.schema >= 5:
+            print("per species:")
+            for s in gt.SPECIES_TOKENS:
+                m, a = per.get(s, [0, 0])
+                pct = 100 * a / m if m else float("nan")
+                good = m and pct >= args.accept
+                ok = ok and bool(good)
+                print(f"  {s:9s} {a:4d}/{m:<4d} {pct:5.1f}%  {'OK' if good else 'BELOW' if m else 'NO STATES'}")
+            print(f"v5 acceptance (>= {args.accept:.0f}% overall and per species): {'PASS' if ok else 'FAIL'}")
+            sys.exit(0 if ok else 1)
 
 
 if __name__ == "__main__":

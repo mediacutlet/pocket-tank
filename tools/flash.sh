@@ -17,7 +17,7 @@
 # tank boots ota_0 again) and, with --model, the model trailer (docs/OTA.md).
 set -euo pipefail
 cd "$(dirname "$0")/.."
-BUILD=${TANK_BUILD:-~/.cache/pocket-tank/fw-build}   # another checkout (a worktree) builds in its own dir
+BUILD=${TANK_BUILD:-~/.cache/aqua-pets/fw-build}   # another checkout (a worktree) builds in its own dir
 PORTS=$(compgen -G '/dev/cu.usbmodem*' | sort || true)
 [ -n "$PORTS" ] || { echo "flash: no /dev/cu.usbmodem* - wake the tank (BOOT) first"; exit 1; }
 # several boards on USB: never guess (preflight also refuses a port whose

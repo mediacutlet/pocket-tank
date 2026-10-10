@@ -5,14 +5,14 @@
  * Time is fed by the sim (net_sim_advance(dt) once a frame; a selftest feeds
  * seconds at a time), so a test walks the flow deterministically.
  *
- *   the store       POCKET_TANK_WIFI (a file: ssid on line 1, password on 2),
- *                   else ~/.cache/pocket-tank/wifi.txt
+ *   the store       AQUA_PETS_WIFI (a file: ssid on line 1, password on 2),
+ *                   else ~/.cache/aqua-pets/wifi.txt
  *   the scan        nine networks in 1.2 s, two pages' worth; "Ghost" is out
  *                   of range on connect, a password starting "wrong" is refused
- *   the check       POCKET_TANK_FAKE_UPDATE: "0.9.9" (default: an update is
+ *   the check       AQUA_PETS_FAKE_UPDATE: "0.9.9" (default: an update is
  *                   offered), "none" (up to date), "cable" (needs the cable),
  *                   "fail" (no answer), or any release number
- *   the install     6 s of progress; POCKET_TANK_FAKE_UPDATE=downloadfail
+ *   the install     6 s of progress; AQUA_PETS_FAKE_UPDATE=downloadfail
  *                   stops it at 40% */
 #include "update.h"
 #include "version.h"
@@ -22,8 +22,8 @@
 
 static const char *creds_path(void) {
     static char p[512];
-    if (getenv("POCKET_TANK_WIFI")) return getenv("POCKET_TANK_WIFI");
-    snprintf(p, sizeof p, "%s/.cache/pocket-tank/wifi.txt", getenv("HOME") ? getenv("HOME") : ".");
+    if (getenv("AQUA_PETS_WIFI")) return getenv("AQUA_PETS_WIFI");
+    snprintf(p, sizeof p, "%s/.cache/aqua-pets/wifi.txt", getenv("HOME") ? getenv("HOME") : ".");
     return p;
 }
 static void chomp(char *s) { size_t n = strlen(s); while (n && (s[n - 1] == '\n' || s[n - 1] == '\r')) s[--n] = 0; }
@@ -61,7 +61,7 @@ static const net_ap_t FAKE_APS[] = {
 void net_sim_advance(float dt) {                     /* the sim's clock */
     if (s_state != NET_BUSY) return;
     s_t += dt;
-    const char *fake = getenv("POCKET_TANK_FAKE_UPDATE");
+    const char *fake = getenv("AQUA_PETS_FAKE_UPDATE");
     switch (s_op) {
     case OP_SCAN:    if (s_t >= 1.2f) s_state = NET_DONE; break;
     case OP_CONNECT:

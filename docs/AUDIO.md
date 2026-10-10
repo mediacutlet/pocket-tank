@@ -1,6 +1,6 @@
 # Audio — requirements (draft, 2026-09-15)
 
-Beeps and boops for the pocket tank: keeper feedback (a tap landed, food
+Beeps and boops for Aqua Pets: keeper feedback (a tap landed, food
 dropped, the light flipped) and a few fish moments (a pellet eaten, a spook,
 a birth). Sounds are feedback, never behavior: the advisor still owns every
 decision and no sound ever changes what a fish does.
@@ -12,7 +12,7 @@ bank embedded, QEMU with the stub). The codec bring-up sequence is written
 from the ES8311 user guide and the Espressif driver, unverified on the
 bench: the first flash is the test. `docs/HANDOFF.md` has the bench list.
 Volume + mute: the settings page (2026-09-15 night; from the milestones
-page's SETTINGS button) - BRIGHTNESS 30/60/100 and VOLUME OFF/QUIET/NORMAL
+page's SETTINGS button) - BRIGHTNESS 10 .. 100 by tens between two arrows (since 2026-10-10; four segments before) and VOLUME OFF/QUIET/NORMAL
 as segment buttons; director `snd off|quiet|normal` still works.
 
 ## 1. What to hand over (sound files)
@@ -224,6 +224,29 @@ void audio_port_sleep(void);                          // amp low, codec down, AL
   button opens it), by the director (`snd off|quiet|normal`), or the sim's
   V key. Picking QUIET or NORMAL plays the confirm cue at that level. Director: `snd <id>`, `snd off`,
   `snd list` for b-roll; the existing `codec` dump stays.
+- **The about page's jingle (2026-10-10):** the one long sound, and it is
+  not in the bank - a 30 s clip would be 960 KB of flash. `audio_jingle(on)`
+  (device: `audio_port_jingle`) runs a small synthesiser inside the mixer:
+  twelve bars of 4/4 at 96 BPM (a 16th is exactly 2500 samples, so the loop
+  is 480,000 samples = 30.000 s and wraps on a sample) - a kalimba-like
+  arpeggio through the bar's chord, a hummed sine melody with vibrato, a
+  soft root-and-fifth pad, bubble chirps - under a slow amplitude wobble
+  (seven a loop, so it is periodic too) and a one-pole low-pass. Everything
+  sits above the speaker's ~600 Hz floor (octaves 5 and 6). Notes still
+  ringing at the wrap carry over, so the seam is silent; the sequencer just
+  starts its next bar. Fades in over 0.1 s and out over 0.4 s, follows the
+  VOLUME setting and the master level, counts as a live voice (the codec
+  stays up while it plays; `audio_stop_all` / a sleep ends it). Since that
+  night each theme has its own tune on the same four voices (`J_SONGS`, a
+  `jsong_t` each: the 16th's sample count - an integer, so every loop still
+  wraps on a sample -, chords, arpeggio figure with rests, melody, chirps,
+  pluck timbre and decay, pad level, vibrato, wobble, low-pass): Original the
+  kalimba at 96 BPM (30 s), Quiet Lagoon a slow Lydian lullaby on a muffled
+  marimba at 72 (40 s), Tidepool Club a perky steel-pan tune at 120 (24 s),
+  Blackwater sparse D-minor bells over a fuller pad at 60 (48 s). The tune is
+  chosen from the active theme when the jingle starts from silence. Starts when
+  the settings page's ABOUT page opens (`SET_TAP_ABOUT`, value 1) and stops
+  when it closes (value 0).
 - **Sim parity:** `sim/` gets the same `audio_port.h` on SDL2 audio
   (`SDL_QueueAudio`, 16 kHz s16). Same bank, same mixer code in `common/`
   so pitch and cooldown behave identically on the desk and on the device.

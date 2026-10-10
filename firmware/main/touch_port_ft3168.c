@@ -4,7 +4,7 @@
  * roll and this panel is 322 ppi); held > 300 ms = hold; a drag down from
  * the top edge = feed at that x; every touched frame streams to
  * tank_touch_drag (a moving stroke wipes algae; a horizontal slash through
- * a canopy trims it). Fish taps hit-test 38 px against the press-time fish
+ * a canopy trims it). Fish taps hit-test each creature's own reach (tank_fish_hit_r) against the press-time fish
  * snapshot AND the current position - fish move during a tap. While the stats
  * card is up, a tap anywhere on empty glass dismisses it (hunting the same
  * fish again to close it was the old, cumbersome way) and does nothing else.
@@ -465,11 +465,12 @@ void touch_port_poll(tank_t *t) {
     if (s_set && !s_cf && !su) {                             /* the settings page owns the glass: segments, the seconds wheel, CLOSE */
         int v = 0, r = render_settings_touch(t, tx, ty, touched, &v);
         if (r) ESP_LOGI(TAG, "settings: %s %d", r == SET_TAP_CLOSE ? "CLOSE" : r == SET_TAP_BRIGHT ? "brightness" : r == SET_TAP_VOLUME ? "volume"
-                                                  : r == SET_TAP_LIGHT ? "lights out" : r == SET_TAP_SCREEN ? "screen (1 = turned)"
-                                                  : r == SET_TAP_FEED ? "auto feed (1 = on)" : r == SET_TAP_ROTATE ? "rotation (1 = locked)" : "idle seconds", v);
+                                                  : r == SET_TAP_THEME ? "theme" : r == SET_TAP_LIGHT ? "lights out" : r == SET_TAP_SCREEN ? "screen (1 = turned)"
+                                                  : r == SET_TAP_FEED ? "auto feed (1 = on)" : r == SET_TAP_ROTATE ? "rotation (1 = locked)" : r == SET_TAP_ABOUT ? "about (1 = up)" : r == SET_TAP_RESET ? "reset" : "idle seconds", v);
         if (r == SET_TAP_CLOSE) { s_set = false; s_ms = true; s_back = true; }   /* back to the milestones page (2026-09-16); the release is spent */
         else if (r == SET_TAP_UPDATES) { s_set = false; s_upd = true; s_back = true; ESP_LOGI(TAG, "updates page up"); }
-        else if (r == SET_TAP_BRIGHT || r == SET_TAP_VOLUME || r == SET_TAP_LIGHT || r == SET_TAP_IDLE || r == SET_TAP_FEED || r == SET_TAP_ROTATE) { s_set_what = r; s_set_val = v; }
+        else if (r == SET_TAP_RESET) { s_set = false; s_back = true; touch_port_confirm_open(); ESP_LOGI(TAG, "settings: RESET - the confirm prompt is up (NO / YES, it times out)"); }
+        else if (r == SET_TAP_BRIGHT || r == SET_TAP_VOLUME || r == SET_TAP_LIGHT || r == SET_TAP_IDLE || r == SET_TAP_FEED || r == SET_TAP_ROTATE || r == SET_TAP_ABOUT) { s_set_what = r; s_set_val = v; }
     }
     if (s_upd && !s_cf && !su) {                             /* the UPDATES page: CHECK (main restarts), FORGET, CLOSE */
         int r = updates_page_touch(tx, ty, touched);
@@ -595,19 +596,31 @@ void touch_port_poll(tank_t *t) {
                 ESP_LOGI(TAG, "card tap at %.0f,%.0f -> milestones", s_px, s_py);         under its MORE button) = milestones page */
                 s_ms = true; goto released;
             }
-            /* fish first; only an empty tap reaches the water. 38 px radius
-               (a fingertip on this 322 ppi panel covers ~60 px) against BOTH
-               the press-time snapshot and the current position - whichever is
-               closer - so a fish that moved mid-tap still registers. */
-            int best = -1; float bd = 38 * 38;
+            /* fish first; only an empty tap reaches the water. Each creature's
+               own reach (tank_fish_hit_r: its species' hit_r at its size, 38 px
+               for an adult classic fish, never under TANK_HIT_MIN_R - a
+               fingertip on this 322 ppi panel covers ~60 px; a hammerhead's is
+               ~90) against BOTH the press-time snapshot and the current
+               position - whichever is closer - so a fish that moved mid-tap
+               still registers. The nearest by its own reach wins. */
+            int best = -1; float bd = 1.0f;
             for (int i = 0; i < t->n_fish; i++) {
                 float ax = s_fx[i] - s_px, ay = s_fy[i] - s_py;
                 float bx = t->fish[i].x - s_px, by = t->fish[i].y - s_py;
                 float d2a = ax * ax + ay * ay, d2b = bx * bx + by * by;
-                float d2 = d2a < d2b ? d2a : d2b;
+                float r = tank_fish_hit_r(&t->fish[i]);
+                float d2 = (d2a < d2b ? d2a : d2b) / (r * r);
                 if (d2 < bd) { bd = d2; best = i; }
             }
-            if (best >= 0) { s_sel = (best == s_sel) ? -1 : best; s_sel_us = now; }
+            if (best >= 0) {
+                /* two quick taps on the same creature (2026-10-10): its trick - the puffer puffs, the squid
+                   and the octopus ink - and the card stays down; any other creature: the card up, then down */
+                static int s_poke_fish = -1; static int64_t s_poke_us;
+                bool again = best == s_poke_fish && now - s_poke_us < 500000;
+                s_poke_fish = best; s_poke_us = now;
+                if (again && tank_poke(t, best)) { s_sel = -1; s_poke_fish = -1; ESP_LOGI(TAG, "%s double-tapped: its trick", t->fish[best].name); }
+                else { s_sel = (best == s_sel) ? -1 : best; s_sel_us = now; }
+            }
             else if (tank_snail_hit(t, s_px, s_py)) {   /* the snail: its card (2026-09-16), the fish first */
                 s_sel = s_sel == RENDER_CARD_SNAIL ? -1 : RENDER_CARD_SNAIL; s_sel_us = now;
                 ESP_LOGI(TAG, "snail tapped: card %s (%d spots grazed)", s_sel >= 0 ? "up" : "down", (int)t->snail_grazed); }
@@ -626,7 +639,7 @@ void touch_port_poll(tank_t *t) {
             else tank_touch_tap(t, s_px, s_py);
         }
         else if (s_ms && !s_back && fabsf(dx) >= 40 && fabsf(dx) > 2 * fabsf(dy)) {   /* sideways along the TANK row: its page (2026-09-30) */
-            if (render_milestones_swipe(t, s_px, s_py, dx)) ESP_LOGI(TAG, "page swipe %.0f px on the tank row", dx);
+            if (render_milestones_swipe(t, s_px, s_py, dx)) ESP_LOGI(TAG, "page swipe %.0f px (the tank row or the fish rows)", dx);
         }
         else if (!s_ms && t->tool == TOOL_HAND && s_py - tank_glass_top(s_px) < 60 && dy >= 40) tank_feed(t, s_lx, 3);  /* drag down from the top = feed (not with a tool in hand) */
     }
@@ -658,6 +671,7 @@ bool touch_port_confirm_answer(int ans) {
     return true;
 }
 bool  touch_port_confirm_up(void)   { return s_cf; }
+bool  touch_port_down(void)         { return s_down; }
 float touch_port_confirm_frac(void) {
     if (!s_cf) return 0;
     float f = 1.0f - (esp_timer_get_time() - s_cf_us) / (float)CONFIRM_TIMEOUT_US;

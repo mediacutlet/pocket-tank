@@ -60,9 +60,9 @@ pixel instead of a name - fix that instead.
 
    | step | command (from the project root) | what it proves |
    |---|---|---|
-   | the checks | `make -C pocket-tank/sim check-all` | every selftest on all three worlds |
-   | the pictures | `pocket-tank/tools/board_sheet.py --selftest-card` (or `--snapshot 20`) | the same page on three glasses, side by side, cut to each glass |
-   | the firmware | `pocket-tank/tools/flash.sh` builds the 1.8; `flash_round.sh --build-only`, `flash_watch.sh --build-only` | it compiles for each board; compare `.bss` with the last flashed build (internal RAM is ~23 KB) |
+   | the checks | `make -C aqua-pets/sim check-all` | every selftest on all three worlds |
+   | the pictures | `aqua-pets/tools/board_sheet.py --selftest-card` (or `--snapshot 20`) | the same page on three glasses, side by side, cut to each glass |
+   | the firmware | `aqua-pets/tools/flash.sh` builds the 1.8; `flash_round.sh --build-only`, `flash_watch.sh --build-only` | it compiles for each board; compare `.bss` with the last flashed build (internal RAM is ~23 KB) |
    | the glass | flash the 1.8 first (it is the reference and has the preflight), then the other two | Strato's finger |
 
    The handoff entry for a feature says where each board stands: checked /
@@ -79,12 +79,12 @@ the bowl and the watch ship in 0.3.0; nothing public until the release):
 | the board's id | `common/version.h` `PT_BOARD`: `amoled18`, `round175c`, `watch206` (from `TANK_ROUND` / `TANK_WATCH`) |
 | the image | a board marker right after the app descriptor (`net_port_esp.c` `pt_board_marker`, at `PT_BOARD_MARKER_OFFSET` 0x120; kept by `-u pt_board_marker` in firmware/main/CMakeLists.txt). `tools/pt_boards.py` reads it back from a `.bin` |
 | over the air | each board fetches `latest-<PT_BOARD>.json`; `common/update.c` refuses a manifest whose `board` is another (WRONG BOARD, never offered); the download reads the marker back from the slot at its first 4 KB and aborts on another board's (`NET_ERR_BOARD`) - all three share the signing key, so the signature alone would let a bowl install the 1.8's image |
-| the release | `.github/workflows/release.yml` builds `firmware/build`, `build-round`, `build-watch`; `make_ota_manifest.py` names both files from the image's marker (`latest-<board>.json`, `pocket_tank-v<rel>-<board>.bin`) |
+| the release | `.github/workflows/release.yml` builds `firmware/build`, `build-round`, `build-watch`; `make_ota_manifest.py` names both files from the image's marker (`latest-<board>.json`, `aqua_pets-v<rel>-<board>.bin`) |
 | the installer | `installer.yml` builds the three; `make_installer.py --build-dir <1.8> --board-build <round> --board-build <watch>`: the 1.8 keeps `manifest.json` / `manifest-erase.json`, the others `manifest-<board>[-erase].json`; a board's file that differs from the 1.8's is `<name>-<board>.bin`. The page shows a "Pick your board" step when it carries more than one |
-| pocketank.com/install | `tools/build_site.py` offers a board only once its manifest is LIVE on GitHub Pages - the public resync is the release, so a site publish before it shows the 1.8 alone |
+| the public installer page | `tools/build_site.py` offers a board only once its manifest is LIVE on GitHub Pages - the public resync is the release, so a site publish before it shows the 1.8 alone |
 
 Nothing reaches the public before the release: the dev repo is private, the
-workflows publish only from `mediacutlet/pocket-tank`, the site gates on the
+workflows publish only from `fiatminimalist/aqua-pets`, the site gates on the
 live manifests, and the 0.3.0 changelog entry is a `"draft"`. The resync must
 carry `tools/pt_boards.py`. A cable install of the wrong board's image is not
 caught on the board (the page's picker is the guard); it boots blank and the

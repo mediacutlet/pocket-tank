@@ -11,12 +11,12 @@
  * (16 int8 MACs per ee.vmulas.s8.accx); everywhere else a scalar loop.
  * Both paths dot an UNPACKED int8 weight group against int8 activations —
  * the group is unpacked once and reused across every token of a batch.
- * Define POCKET_TANK_NO_PIE to force the scalar path (e.g. a QEMU build
+ * Define AQUA_PETS_NO_PIE to force the scalar path (e.g. a QEMU build
  * without PIE emulation). Requires gs == 64 and 16-byte aligned buffers. */
 #ifdef ESP_PLATFORM
 #include "sdkconfig.h"
 #endif
-#if defined(CONFIG_IDF_TARGET_ESP32S3) && !defined(POCKET_TANK_NO_PIE)
+#if defined(CONFIG_IDF_TARGET_ESP32S3) && !defined(AQUA_PETS_NO_PIE)
 #define Q4_PIE 1
 static inline int32_t dot_i8_64(const int8_t *w, const int8_t *x) {
     int32_t acc;

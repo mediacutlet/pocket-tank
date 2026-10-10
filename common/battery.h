@@ -10,8 +10,8 @@
  * in NVS (its own "bat" namespace - a tank reset leaves it); the sim feeds
  * it a pretend cell. Every number is gauge percent: the AXP2101 has no
  * current sense, so rates are % per hour, measured off the gauge itself. */
-#ifndef POCKET_TANK_BATTERY_H
-#define POCKET_TANK_BATTERY_H
+#ifndef AQUA_PETS_BATTERY_H
+#define AQUA_PETS_BATTERY_H
 #include <stdbool.h>
 #include <stdint.h>
 

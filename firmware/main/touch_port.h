@@ -24,6 +24,7 @@ void touch_port_set_inverted(bool inverted);   /* mirror coords when the screen 
 void touch_port_confirm_open(void);
 bool touch_port_confirm_answer(int ans);       /* +1 yes / -1 no; false = no prompt up */
 bool touch_port_confirm_up(void);
+bool touch_port_down(void);                    /* a finger is on the glass right now (the night's frame rate, main.c) */
 float touch_port_confirm_frac(void);           /* time left before it gives up, 1 -> 0 */
 int  touch_port_confirm_take(void);            /* +1 / -1 once, then 0 */
 bool touch_port_pressed_since(int64_t us);     /* a finger is down and landed after `us` */

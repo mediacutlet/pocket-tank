@@ -4,20 +4,24 @@ Plug the board in, open a page, click Install: the same "flash it from the
 browser" flow ESPHome and Home Assistant use ([ESP Web
 Tools](https://esphome.github.io/esp-web-tools/), Apache-2.0, vendored under
 `vendor/`). Chrome or Edge on a desktop; it uses Web Serial, which Safari
-and Firefox don't have.
+and Firefox don't have. Chrome on Android works too (2026-10-10): it has WebUSB
+but no Web Serial, so the page installs Google's web-serial-polyfill (vendored under
+`vendor/web-serial-polyfill/`, Apache-2.0) as `navigator.serial` only when Web Serial
+is missing, and ESP Web Tools runs unchanged over the board's USB CDC interface.
+`?polyfill=1` forces it on a desktop for testing. iOS has neither API.
 
 ## Build the upload folder
 
 ```
-idf.py -B ~/.cache/pocket-tank/fw-build build     # in firmware/ (or any -B dir)
+idf.py -B ~/.cache/aqua-pets/fw-build build     # in firmware/ (or any -B dir)
 tools/make_installer.py                            # -> installer/dist/
 python3 -m http.server -d installer/dist 8765      # local check at http://localhost:8765
 ```
 
-The page follows stratobuilds.com's design (the `#f8f8f8` page, white /
-`#222` / lavender cards at 10px, Inter Tight and Roboto Mono from Google
-Fonts, the red button). When only the page changed, re-uploading
-`index.html` is enough - the binaries and `vendor/` are untouched.
+The local theme installer uses a cream and lagoon-green layout with previews of
+Original, Quiet Lagoon and Tidepool Club. It requires an explicit board choice
+before enabling Install, and validates the selected manifest. ESP Web Tools and
+all artwork are served locally, with no external runtime dependencies.
 
 `installer/dist/` is the whole thing: `index.html`, `manifest.json`,
 `manifest-erase.json`, `firmware/*.bin` (bootloader, partition table, app,
@@ -79,12 +83,12 @@ tail reads as its defaults when the newer build returns). What guards it:
 with ESP-IDF v5.4.1 on every push to `main` that touches `firmware/`,
 `common/`, `model/out/`, `installer/` or the assembler, runs
 `tools/make_installer.py`, and deploys the folder to
-**https://mediacutlet.github.io/pocket-tank/**. Pages serves HTTPS with
+**https://aquapets.com/install/**. Pages serves HTTPS with
 `Access-Control-Allow-Origin: *`, so the copy on stratobuilds.com points
 its button at that manifest:
 
 ```
-tools/make_installer.py --manifest-url https://mediacutlet.github.io/pocket-tank/manifest.json --out /tmp/site
+tools/make_installer.py --manifest-url https://aquapets.com/install/manifest.json --out /tmp/site
 ```
 
 and that `index.html` PLUS its `vendor/esp-web-tools-<tag>/` folder live on
@@ -92,18 +96,26 @@ the site - the never-erase patch is in the vendor's dialog bundle. An old
 `vendor/` next to the new manifest erased every install without asking
 (the 09-11 upload, found 2026-09-18), and the host serves `.js` with a
 year's max-age, so the folder name now carries the patched dialog's hash.
-One command builds, uploads over ssh (host `stratobuilds`), purges
-SiteGround's dynamic cache and checks the live URL:
-
-```
-pocket-tank/tools/publish_site_installer.sh
-```
-
-Run it whenever the page, the vendored ESP Web Tools or the patch changes.
+(The old one-command upload to stratobuilds.com, `tools/publish_site_installer.sh`,
+was retired on 2026-10-04 and removed on 2026-10-10.)
 The page fetches the manifest on load and shows the version and build date of what it will actually flash,
 so pushing to the public repo is the whole release step: no upload, no
 cache purge. (Manual failure mode: the Actions run is red - `gh run list
---repo mediacutlet/pocket-tank`.)
+--repo fiatminimalist/aqua-pets`.)
+
+## Android, and the local server's certificate (2026-10-10)
+
+Chrome on Android installs through WebUSB (the vendored web-serial-polyfill) and
+shows a USB chooser on Install - but Chrome refuses every permission prompt on a
+page it opened through a certificate warning, so a self-signed server must be
+TRUSTED by the phone first. The local `serve.py` now presents a CA certificate
+whose Subject Alternative Names are the machine's addresses (192.168.88.216,
+100.66.66.66, 127.0.0.1, flux, localhost; regenerate it with openssl and a SAN
+config if the addresses change) and serves it at `/aqua-pets-installer.crt`. The
+page's Android section links it with the install steps (Settings → Security →
+Install a certificate → CA certificate) and has a **Test USB access** button that
+runs the chooser alone and says in words what happened. A public HTTPS host with
+a real certificate needs none of this.
 
 ## Host it
 
@@ -112,21 +124,21 @@ Web Serial needs a secure context, so the page must be on **HTTPS** (or
 fetchable from the page's origin (or send CORS headers).
 
 **stratobuilds.com (WordPress behind Cloudflare):** upload `installer/dist/`
-as a folder next to WordPress, e.g. `public_html/pocket-tank/`, and link
-`https://stratobuilds.com/pocket-tank/`. Being a plain folder it is outside
+as a folder next to WordPress, e.g. `public_html/aqua-pets/`, and link
+`https://stratobuilds.com/aqua-pets/`. Being a plain folder it is outside
 WordPress, so themes, caching and security plugins don't touch it. Things to
 check once:
 
-- Open the page, the button must say *Install Pocket Tank*, not the red
+- Open the page, the button must say *Install Aqua Pets*, not the red
   unsupported text. If it never appears, Cloudflare's Rocket Loader is
-  rewriting the module script: exclude `/pocket-tank/*` from it (a
+  rewriting the module script: exclude `/aqua-pets/*` from it (a
   Configuration Rule), or turn it off.
 - In the browser's network tab `manifest.json` and `firmware/*.bin` must be
   200. A 403 on `.bin` means the host blocks the type: the `.htaccess` in the
   folder adds it for Apache/LiteSpeed; on nginx add
   `types { application/octet-stream bin; }`.
 - Cloudflare caches `.bin` and `.js` by default. After uploading a new build,
-  purge `/pocket-tank/*` (the manifest carries the version, so a stale
+  purge `/aqua-pets/*` (the manifest carries the version, so a stale
   cache shows an old version string on the page).
 
 **GitHub Pages** (the public repo) is the other easy option: push `dist/` to
@@ -139,7 +151,7 @@ while the binaries stay on GitHub.
 ## What the user sees
 
 Click → the browser's port picker (`USB JTAG/serial debug unit`) → *Install
-Pocket Tank* → "Do you want to install Pocket Tank <version>?" → a progress
+Aqua Pets* → "Do you want to install Aqua Pets <version>?" → a progress
 bar over the four parts → *Installation complete*, and the board resets into
 the tank: fresh on a blank board, the same tank on one that had it. The
 "start over" button adds the erase question (tick *Erase device*). The page's
@@ -155,3 +167,30 @@ the real board with `esptool.py write_flash` (the exact operation ESP Web
 Tools performs, from the same files), and the tank booted; the page, manifest
 and vendor bundle were checked from a local server. The browser's own port
 picker is a native dialog, so the click-through itself is a human test.
+
+## Local theme build (2026-10-09)
+
+Built all three boards with the cached `espressif/idf:v5.4.1` image. Build outputs
+are in `~/.cache/aquapets-idf/build/{amoled18,round175c,watch206}`. Assemble with:
+
+```sh
+python3 tools/make_installer.py \
+  --build-dir ~/.cache/aquapets-idf/build/amoled18 \
+  --board-build ~/.cache/aquapets-idf/build/round175c \
+  --board-build ~/.cache/aquapets-idf/build/watch206
+```
+
+The existing server at `~/.cache/aquapets-installer/serve.py` serves
+`installer/dist` on `0.0.0.0:8765` (HTTP) and `0.0.0.0:8766` (HTTPS).
+Use `https://100.66.66.66:8766` over Tailscale or
+`https://192.168.88.216:8766` on the LAN. HTTPS uses the machine's existing
+self-signed certificate; the client must accept/trust that certificate.
+An alternative is `ssh -N -L 8765:127.0.0.1:8765 alvin@100.66.66.66`, then
+`http://localhost:8765` on the client. Plain remote HTTP cannot use Web Serial.
+
+The artifact set was checked for valid RSA signatures, correct board markers,
+partition fit and NVS preservation. All three signed apps are 2,428,928 bytes,
+leaving 192,512 bytes in each app slot. The local build is `jelly-d226e71952`;
+it adds the approved jellyfish to Original, Quiet Lagoon and Tidepool Club, with pulsing movement, growth, feeding and breeding. Buy it on Upgrades page 5 for 10 sand dollars. The approved Living Lagoon artwork and other creature behaviours are retained. `installer/dist/SHA256SUMS`
+records the served binary hashes. These checks do not claim a physical flash
+or device boot; the USB selection and flashing are performed by the user.

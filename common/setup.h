@@ -49,8 +49,8 @@
  * the tank redraws live, so the fish and the grass show the choice at
  * once; DONE saves. A translucent stripe marks the piece's footprint, a
  * chevron at its foot. */
-#ifndef POCKET_TANK_SETUP_H
-#define POCKET_TANK_SETUP_H
+#ifndef AQUA_PETS_SETUP_H
+#define AQUA_PETS_SETUP_H
 #include "tank.h"
 #include "render.h"            /* PAGE_*: the page the layout below is on */
 #include <stdint.h>

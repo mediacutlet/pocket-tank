@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""director.py - send a scenario command to the pocket-tank over USB serial
+"""director.py - send a scenario command to an Aqua Pets tank over USB serial
 and print what the tank says back. The firmware's director console
 (firmware/main/director.c) reads lines on the same port the log uses.
 

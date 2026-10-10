@@ -13,12 +13,12 @@ export PATH="$HOME/.espressif/tools/qemu-xtensa/$QEMU_VER/qemu/bin:$PATH"
 B="${B:-build}"
 MODEL="../model/out/model_q4.bin"
 # image on the local SSD: QEMU needs file locking, which AFP shares refuse
-mkdir -p "$HOME/.cache/pocket-tank"
-IMG="$HOME/.cache/pocket-tank/flash_qemu_$B.bin"
+mkdir -p "$HOME/.cache/aqua-pets"
+IMG="$HOME/.cache/aqua-pets/flash_qemu_$B.bin"
 esptool.py --chip esp32s3 merge_bin --fill-flash-size 16MB -o "$IMG" \
   0x0      $B/bootloader/bootloader.bin \
   0x8000   $B/partition_table/partition-table.bin \
-  0x10000  $B/pocket_tank.bin \
+  0x10000  $B/aqua_pets.bin \
   0x290000 "$MODEL" >/dev/null
 ls -la "$IMG" | awk '{print "flash image:", $5, "bytes"}'
 if [ "$B" = "build_qemu" ]; then PSRAM="-m 4M"; else PSRAM="-m 8M -global driver=ssi_psram,property=is_octal,value=true"; fi

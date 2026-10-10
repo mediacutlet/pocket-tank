@@ -1,10 +1,10 @@
-menu "pocket-tank"
-    config POCKET_TANK_DISPLAY_SH8601
+menu "Aqua Pets"
+    config AQUA_PETS_DISPLAY_SH8601
         bool "Drive the Waveshare 1.8in AMOLED (SH8601 / CO5300 over QSPI)"
         default n
         help
             Enable for the real board. Off = stub display port (QEMU / compile-only).
-    config POCKET_TANK_ROUND
+    config AQUA_PETS_ROUND
         bool "The ROUND build: a 466 px bowl for the Waveshare ESP32-S3-Touch-AMOLED-1.75C"
         default n
         help
@@ -14,10 +14,10 @@ menu "pocket-tank"
             that image shows nothing on a 1.8. Build it with
             SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.round" into its
             own build directory and sdkconfig (docs/board-amoled-1.75c.md).
-    config POCKET_TANK_WATCH
+    config AQUA_PETS_WATCH
         bool "The WATCH build: a 410x502 PORTRAIT tank for the Waveshare ESP32-S3-Touch-AMOLED-2.06"
         default n
-        depends on !POCKET_TANK_ROUND
+        depends on !AQUA_PETS_ROUND
         help
             On = TANK_WATCH: a tall tank the way a watch is worn, with the
             round corners of its glass; that image shows nothing on the
@@ -25,15 +25,15 @@ menu "pocket-tank"
             watch, on its side and centred in the glass. Build it with
             SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.watch" into its
             own build directory and sdkconfig (docs/board-amoled-2.06-watch.md).
-    config POCKET_TANK_TOUCH_FT3168
+    config AQUA_PETS_TOUCH_FT3168
         bool "Read the FT3168 capacitive touch (taps / holds)"
         default n
-    config POCKET_TANK_AUDIO_ES8311
+    config AQUA_PETS_AUDIO_ES8311
         bool "Play the sound bank through the ES8311 codec + NS4150B amp (I2S)"
         default n
         help
             Enable for the real board (docs/AUDIO.md). Off = stub audio port: cues compile, nothing plays.
-    config POCKET_TANK_NO_PIE
+    config AQUA_PETS_NO_PIE
         bool "Disable the PIE SIMD inference kernel (scalar dot products)"
         default n
         help

@@ -15,7 +15,7 @@ packed nibbles (weight 2i -> low nibble, 2i+1 -> high nibble, value q+8 in
 Size for the 14.3M student at GS=64: ~7.6 MB (fits the 5-8 MB flash target).
 Reader: model/runq4.c (Mac) and firmware/components/llm (ESP32).
 
-  ~/.venvs/pocket-tank/bin/python export_q4.py out/model_q4.bin --checkpoint out/ckpt_v2w.pt
+  ~/.venvs/aquapets/bin/python export_q4.py out/model_q4.bin --checkpoint out/ckpt_v2w.pt
 """
 import argparse, os, struct, sys
 import numpy as np
@@ -65,6 +65,12 @@ def main():
 
     p = model.params
     hidden = model.layers[0].feed_forward.w1.weight.shape[0]
+    # the device engine (common/llm/q4_model.c model_layout_valid) refuses a model
+    # whose dim or FFN hidden dim is not a multiple of the group size - say so
+    # here, not as a "bad model" at boot (dim 384 -> hidden 1024 is fine; a toy
+    # dim 128 -> hidden 352 is not)
+    if p.dim % gs or hidden % gs:
+        sys.exit(f"dim {p.dim} / hidden {hidden} not multiples of {gs}: q4_model.c would refuse this model")
     n_kv = p.n_heads if p.n_kv_heads is None else p.n_kv_heads
     with open(a.filepath, "wb") as f:
         f.write(struct.pack("I", 0x616B3432))

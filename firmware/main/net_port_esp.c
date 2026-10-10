@@ -54,7 +54,7 @@
 static const char *TAG = "net";
 #define WIFI_NVS_NS   "wifi"
 #ifndef OTA_MANIFEST_URL
-#define OTA_MANIFEST_URL "https://github.com/mediacutlet/pocket-tank/releases/latest/download/latest-" PT_BOARD ".json"
+#define OTA_MANIFEST_URL "https://aquapets.com/install/latest-" PT_BOARD ".json"
 #endif
 /* the board marker: in .rodata_custom_desc, which the linker places right
  * after esp_app_desc_t - a fixed offset in the image (PT_BOARD_MARKER_OFFSET;

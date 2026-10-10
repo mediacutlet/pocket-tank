@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Trace generator for the pocket-tank advisor model.
+"""Trace generator for the Aqua Pets advisor model.
 
 Runs a minimal headless tank sim, encodes per-fish state per schema.md (DRAFT),
 asks Ollama (gemma4:26b, structured output) for a goal, and appends
@@ -13,7 +13,14 @@ Stdlib only. Schema v2 is FROZEN (see schema.md); `--schema 3` emits the v3 line
 the shadow - the predator left the game on 2026-09-13 - and adds `bored 0-9`,
 how stale the fish's current activity is, so the teacher can push a fish out of
 a rut (the bubble-column and follow-the-friend loops Strato saw on the device).
-Keep this encoder in exact sync with common/llm/advisor_core.c.
+`--schema 5` (2026-10-05, docs/species.md) adds `species <word>` after `stage`:
+tanks of 2-10 creatures of ten species (the classic fish ~1/3), each rolled
+inside its species' trait ranges and living its species' situations (the
+anglerfish on the floor, the seahorse in the grass, the eel rising for air).
+`--teacher rules` labels with a small rule policy instead of Ollama - a
+pipeline smoke test, never training data for a model that ships.
+Keep this encoder in exact sync with common/llm/advisor_core.c
+(sim: ./fishsim --selftest-encoder + model/encoder_agree.py).
 """
 
 import argparse
@@ -39,6 +46,31 @@ GOALS_V4 = [g for g in GOALS if g != "flee_shadow"]   # no shadow, nothing to fl
 LEISURE = ["visit_bubbles", "follow_friend", "explore", "dart_play", "inspect_reef"]
 # boredom dynamics, per sim tick (~a frame); mirrors common/tank.c BORED_*
 BORED_PER_TICK, BORED_NEW_GOAL, BORED_NEW_ZONE, BORED_RELIEF_PER_TICK = 0.08, 4.0, 1.5, 0.15
+
+
+TEACHER = "ollama"  # set by --teacher; "rules" = rules_goal() (smoke tests only)
+
+# v5: the species, in common/tank.h species_t order. The numbers mirror
+# common/tank.c SPECIES[] (bold lo/hi, social lo/hi, curiosity, lazy, speed_k);
+# habitat is where the sim keeps it (docs/species.md "How they move").
+#   token     bold        social      cur  lazy speed habitat
+SPECIES = {
+    "fish":     (0.10, 0.90, 0.10, 0.90, 5.5, 0.3, 1.00, "open"),
+    "seahorse": (0.08, 0.35, 0.50, 0.85, 4.0, 0.7, 0.35, "grass"),
+    "octopus":  (0.40, 0.80, 0.05, 0.25, 8.5, 0.4, 0.55, "floor"),
+    "puffer":   (0.25, 0.60, 0.20, 0.50, 7.0, 0.5, 0.45, "open"),
+    "angler":   (0.50, 0.80, 0.05, 0.20, 2.5, 0.9, 0.30, "floor"),
+    "eel":      (0.60, 0.90, 0.10, 0.30, 4.5, 0.6, 0.70, "air"),
+    "shark":    (0.80, 0.95, 0.50, 0.80, 5.0, 0.1, 0.95, "cruise"),
+    "squid":    (0.30, 0.60, 0.70, 0.95, 6.0, 0.3, 0.65, "school"),
+    "crab":     (0.40, 0.80, 0.20, 0.50, 6.5, 0.5, 0.50, "floor"),
+    "lobster":  (0.50, 0.85, 0.05, 0.25, 5.5, 0.6, 0.40, "floor"),
+    "jellyfish": (0.10, 0.40, 0.40, 0.75, 5.0, 0.7, 0.40, "drift"),   # appended 2026-10-09 (vocab id 65)
+}
+SPECIES_TOKENS = list(SPECIES)
+FISH_SHARE = 1 / 3          # the classic fish's share of v5 creatures (the old behaviour stays the anchor)
+FOCUS, FOCUS_SHARE = None, 0.0   # --focus: a species added later gets a run of its own (the jellyfish, 2026-10-09)
+FLOOR_Y = TANK_H - 55       # floor walkers keep below this (the C tank's floor band)
 
 
 def goals():
@@ -107,7 +139,10 @@ SYSTEM_PROMPT_V4 = (
     "roams the open water; a timid fish (0-2) startles easily, prefers the reef's "
     "safety, and does not dart: dart_play is only ever chosen by a fish with bold 5 "
     "or more and energy to burn - a fish with bold 0-3 never picks it, however "
-    "energetic. social: only a very social fish (7-9) follows "
+    "energetic. Play is a bold fish's nature: a content bold fish (7-9) with energy "
+    "7 or more picks dart_play often - roughly one choice in four, about as often "
+    "as it explores and more often than it follows a friend; a bold 5-6 fish with "
+    "energy to burn darts now and then. social: only a very social fish (7-9) follows "
     "friends now and then; below that, following a friend is rare - friends are "
     "usually nearby in a small tank, so mere proximity is never a reason. stage: "
     "fry stay near friends and the reef and are easily scared; juv are playful "
@@ -139,8 +174,77 @@ SYSTEM_PROMPT_V4 = (
 )
 
 
+# v5 (2026-10-05, docs/species.md): the v4 prompt VERBATIM (it is the classic
+# fish's DNA - the personality cliffs and the boredom rules live in it) plus one
+# species paragraph: each species' real-life temperament and what each goal
+# means for its body. The goal set and the JSON reply are unchanged. Check with
+# `prompt_check.py --schema 5` (the per-species panel) before any overnight run.
+SPECIES_PROMPT_V5 = (
+    " species: the creature this line is about. Everything above describes the "
+    "classic aquarium fish (species fish) and holds for every species; each other "
+    "species shades it with its real-life temperament (what a goal means for its "
+    "body is in brackets). "
+    "seahorse: a weak, slow swimmer that spends much of its day anchored by its tail "
+    "to the grass near the reef - it rests often and long (rest = clinging to a "
+    "frond), inspects the reef and grass close by, likes to stay near its partner, "
+    "and does not dart; explore is a slow drift. "
+    "octopus: the most curious creature in the tank and a loner - it inspects the "
+    "reef and explores the floor and rocks (crawling on its arms) far more than it "
+    "visits the bubbles, rarely follows anyone, rests hidden in a den, and its "
+    "dart_play is a jet-propelled burst. "
+    "puffer: a slow, inquisitive hoverer - explore and inspect_reef are its "
+    "favourites, it pokes at everything; it sprints poorly, so dart_play is rare. "
+    "angler: an ambush hunter that barely moves - it rests (lying in wait on the "
+    "floor, its lure glowing) most of the time, by day as well as night; food that "
+    "comes near is struck at (seek_food) even at moderate hunger; it seldom "
+    "explores and almost never darts, visits the bubbles or follows. "
+    "eel: an electric eel, a calm floor hunter - by day it rests stretched along "
+    "the bottom a good deal, at night it explores and hunts more than it sleeps; it "
+    "rarely follows; rising to the surface to breathe air is its own reflex, not "
+    "a goal. "
+    "shark: a hammerhead pup that must keep swimming - it patrols: explore is its "
+    "main activity, rest (a slow patrol lap) is chosen only when it is tired or at "
+    "night, it ignores the bubbles, and a social hammerhead cruises alongside "
+    "another (follow_friend) when one is in view. "
+    "squid: a schooling animal - with a friend in view it follows (follow_friend) "
+    "much more often than a fish would; it hovers in open water, darts in jet "
+    "pulses when energetic, and rests by hovering still. "
+    "crab: a curious scavenger that walks the floor sideways - it seeks food "
+    "eagerly (whenever food exists and hunger is 4 or more), explores by walking "
+    "the floor and rocks, inspects the reef, visits the bubbles by standing at the "
+    "column's foot, and its dart_play is a sideways scuttle. "
+    "lobster: territorial, solitary and NOCTURNAL - for a lobster the night rule "
+    "above is reversed. With time day a lobster rests in its den (choose rest) "
+    "unless it is hungry or very bored; with time night it is awake and active: "
+    "it explores the floor and rocks or seeks food, and chooses rest only when its "
+    "energy is very low. It never follows a friend; its dart_play is a backward "
+    "tail-flip, rare. "
+    "jellyfish: a gentle drifter with hardly a will of its own - whatever its "
+    "energy, its default is a slow drift through the open water (explore) or "
+    "hanging still in mid-water (rest): choose one of those two for a jellyfish "
+    "unless hunger, boredom or the night rule says otherwise. It cannot sprint, "
+    "so it never darts; the reef holds little for it (inspect_reef is rare). The "
+    "one pull it cannot resist is the bubble column's current: with bubble near, "
+    "visit_bubbles is a frequent choice for a jellyfish (about a third of the "
+    "time), with bubble mid or far it never goes; it follows a friend only when it is strongly "
+    "social (social 7 or more) and the friend is near, and then gently. Food "
+    "drifting by is eaten like anyone's. "
+    "A species' temperament never overrides hunger (a starving creature with food "
+    "in view seeks food) or boredom (a bored creature still changes pastime), and "
+    "its bold / social / curiosity numbers already lean its species' way. "
+    "Night: the lobster's day and night are reversed as described (it rests by "
+    "day, it is active at night), and the eel hunts at night; for species fish and "
+    "every other species the night rule above holds exactly as written: at night "
+    "it rests, bored or not. For species fish nothing in this paragraph applies: "
+    "a content fish still spreads its time evenly and no pastime, the reef "
+    "included, dominates."
+)
+SYSTEM_PROMPT_V5 = SYSTEM_PROMPT_V4 + SPECIES_PROMPT_V5
+
+
 def system_prompt():
-    return SYSTEM_PROMPT_V4 if SCHEMA >= 4 else SYSTEM_PROMPT_V3 if SCHEMA >= 3 else SYSTEM_PROMPT
+    return (SYSTEM_PROMPT_V5 if SCHEMA >= 5 else SYSTEM_PROMPT_V4 if SCHEMA >= 4
+            else SYSTEM_PROMPT_V3 if SCHEMA >= 3 else SYSTEM_PROMPT)
 
 
 def output_schema():
@@ -160,9 +264,43 @@ OUTPUT_SCHEMA = output_schema()     # v2/v3 shape (kept for importers); v4 calle
 STAGES = ["fry", "juv", "adult", "elder"]
 
 
+def trait9(v):
+    """a 0..1 trait as the C encoder prints it: (int)(v * 9 + 0.5)"""
+    return max(0, min(9, int(v * 9 + 0.5)))
+
+
+def species_curiosity(species, rng):
+    """the curiosity drive starts at the species' value (tank_set_species) and
+    drifts; the C encoder prints (int)v clamped 0..9"""
+    return max(0, min(9, int(rng.gauss(SPECIES[species][4], 1.5))))
+
+
+_species_bag = []
+
+
+def species_mix(rng, n):
+    """a v5 tank's creatures: the shop sells a species as a PAIR and breeding is
+    within a species, so creatures come in twos; the classic fish ~1/3"""
+    out = []
+    while len(out) < n:
+        if rng.random() < FISH_SHARE:
+            sp = "fish"
+        elif FOCUS and rng.random() < FOCUS_SHARE:
+            sp = FOCUS                  # the focus run: the newcomer takes most of the new-species places
+        else:                       # the new species from a shuffled bag: equal shares, not luck's
+            if not _species_bag:
+                _species_bag.extend(SPECIES_TOKENS[1:])
+                rng.shuffle(_species_bag)
+            sp = _species_bag.pop()
+        out += [sp] * min(2, n - len(out))
+    rng.shuffle(out)
+    return out
+
+
 class Fish:
-    def __init__(self, name, rng):
+    def __init__(self, name, rng, species="fish"):
         self.name = name
+        self.species = species      # v5 only (the v2-v4 encoders never read it; v2-v4 tanks are all fish)
         self.x = rng.uniform(40, TANK_W - 40)
         self.y = rng.uniform(40, TANK_H - 40)
         self.heading = rng.uniform(0, 2 * math.pi)
@@ -176,6 +314,25 @@ class Fish:
         self.bored = rng.uniform(0, 3)   # v4 only (ignored by the v2/v3 encoders)
         self.zone_last = None
         self.speed = rng.uniform(1.0, 2.2)
+        self.air = 0                # eel: ticks until it rises for air
+        if species != "fish":       # (the classic fish draws exactly what v4 drew: same seeds, same tanks)
+            sp = SPECIES[species]
+            self.speed *= sp[6]
+            self.energy = max(0, min(9, self.energy + 1 - round(sp[5] * 3)))   # lazy species run lower
+            self.curiosity = species_curiosity(species, rng)
+            self.air = rng.randint(300, 3000)
+            if sp[7] in ("floor", "air"):
+                self.y = rng.uniform(FLOOR_Y, TANK_H - 8)
+
+    def reroll_species_identity(self, rng):
+        """v5: bold / social rolled inside the species' range, widened by 0.1 as
+        a newborn's inheritance can reach (tank.c), on the C encoder's
+        (int)(v * 9 + 0.5) scale; stage and trust as the fish's."""
+        b0, b1, s0, s1 = SPECIES[self.species][:4]
+        self.bold = trait9(rng.uniform(max(0.0, b0 - 0.1), min(1.0, b1 + 0.1)))
+        self.social = trait9(rng.uniform(max(0.0, s0 - 0.1), min(1.0, s1 + 0.1)))
+        self.stage = rng.choices(STAGES, weights=[15, 20, 50, 15])[0]
+        self.trust = rng.randint(0, 9)
 
     def set_goal(self, goal):
         """the reflex/advisor layer changed the goal: a genuinely new one relieves
@@ -189,6 +346,8 @@ class Fish:
     def reroll_identity(self, rng):
         """v2 identity: uniform traits, stage weighted toward adult so the
         student sees every personality but the common case dominates."""
+        if self.species != "fish":
+            return self.reroll_species_identity(rng)
         self.bold = rng.randint(0, 9)
         self.social = rng.randint(0, 9)
         self.stage = rng.choices(STAGES, weights=[15, 20, 50, 15])[0]
@@ -200,9 +359,13 @@ class Tank:
 
     def __init__(self, rng, n_fish=None):
         self.rng = rng
-        if n_fish is None:
-            n_fish = rng.randint(2, 6) if SCHEMA >= 3 else 4     # v3: the population varies
-        self.fish = [Fish(n, rng) for n in FISH_NAMES[:n_fish]]
+        if SCHEMA >= 5:                                          # v5: up to N_FISH_MAX 10, ten species
+            n_fish = n_fish or rng.randint(2, 10)
+            self.fish = [Fish(f"c{i}", rng, sp) for i, sp in enumerate(species_mix(rng, n_fish))]
+        else:
+            if n_fish is None:
+                n_fish = rng.randint(2, 6) if SCHEMA >= 3 else 4     # v3: the population varies
+            self.fish = [Fish(n, rng) for n in FISH_NAMES[:n_fish]]
         self.food = []          # [x, y] pellets, sink slowly
         self.shadow = None      # [x, y] or None
         self.bubble = (TANK_W * 0.8, TANK_H * 0.5)
@@ -274,16 +437,45 @@ class Tank:
             leisure = f.goal in LEISURE or (f.goal == "rest" and not self.night)
             f.bored = min(9.0, f.bored + BORED_PER_TICK) if leisure \
                 else max(0.0, f.bored - BORED_RELIEF_PER_TICK)
+            if SCHEMA >= 5 and f.species != "fish":
+                self._species_tick(f)
             z = zone(f)
             if z != f.zone_last:
                 if f.zone_last is not None:
                     f.bored = max(0.0, f.bored - BORED_NEW_ZONE)
                 f.zone_last = z
 
+    def _species_tick(self, f):
+        """v5: put each animal where it lives (docs/species.md "How they move").
+        Positions and drives only - the teacher still makes every decision."""
+        rng = self.rng
+        hab = SPECIES[f.species][7]
+        if hab == "floor" and not (f.species == "octopus" and f.goal == "dart_play"):
+            f.y = max(f.y, FLOOR_Y)             # walkers and the ambusher keep to the floor and rocks
+        elif hab == "air":                      # the eel: a gulp at the surface every 1-2 minutes
+            f.air -= 1
+            if f.air <= 0:
+                f.heading = -math.pi / 2
+                f.y = max(5.0, f.y - 3.0)
+                if f.y <= 12:
+                    f.air = rng.randint(1500, 3000)
+            elif f.y < FLOOR_Y:
+                f.y += 1.0                      # then it sinks back to lie along the floor
+        if f.species in ("lobster", "eel") and self.night and rng.random() < 0.01:
+            f.energy = min(9, f.energy + 1)     # the night hunters wake at night
+        if hab == "cruise":
+            f.speed = max(f.speed, 1.6)         # the hammerhead never stops (ram breathing)
+        if rng.random() < 0.02:                 # curiosity drifts, but back toward the species' own
+            base = SPECIES[f.species][4]
+            f.curiosity += 1 if f.curiosity < base - 0.5 else -1 if f.curiosity > base + 0.5 else 0
+            f.curiosity = max(0, min(9, f.curiosity))
+
     def _steer(self, f):
         rng = self.rng
         target = None
-        if f.goal == "seek_food" and self.food:
+        if SCHEMA >= 5 and f.goal == "rest" and f.species in ("seahorse", "octopus", "lobster"):
+            target = self.reef                  # its frond / its den
+        elif f.goal == "seek_food" and self.food:
             target = min(self.food, key=lambda p: dist(f, p))
         elif f.goal == "visit_bubbles":
             target = self.bubble
@@ -314,6 +506,10 @@ class Tank:
             "sated", "sated", "social", "playful", "famine", "curious",
             "persona", "persona",   # v2: resample identity to sweep trait space
         ]
+        if SCHEMA >= 5 and f.species != "fish":
+            # v5: the species' own situations (its habitat, the squid's school,
+            # the night hunters' night), on top of everything a fish gets
+            cases += ["habitat", "habitat", "habitat", "school"]
         if SCHEMA >= 4:
             # v4: no shadow cases; a fish in a RUT (bored 4-9 on a pastime, the
             # loops Strato saw), a fish that has just started something (fresh),
@@ -325,7 +521,9 @@ class Tank:
             # lone fish (friend none, 17/28K in v2 data - the v2 model breaks on it)
             cases += ["shadow_calm", "shadow_calm", "lonely"]
         case = rng.choice(cases)
-        if case == "persona":
+        if case in ("habitat", "school"):
+            self._habitat(f, case)
+        elif case == "persona":
             f.reroll_identity(rng)
         elif case == "bored":
             f.bored = rng.randint(4, 9)
@@ -399,6 +597,57 @@ class Tank:
             f.y = max(5, min(TANK_H - 5, f.y))
 
 
+    def _habitat(self, f, case):
+        """v5: a species' signature situation (docs/species.md)"""
+        rng = self.rng
+        sp = f.species
+        others = [o for o in self.fish if o is not f]
+        if case == "school" and others:
+            # a companion close by: a squid's school, a seahorse's partner, two hammerheads cruising
+            mates = [o for o in others if o.species == sp] or others
+            o = rng.choice(mates)
+            o.x = max(5, min(TANK_W - 5, f.x + rng.uniform(-80, 80)))
+            o.y = max(5, min(TANK_H - 5, f.y + rng.uniform(-50, 50)))
+            f.hunger = rng.randint(0, 4)
+            return
+        if sp == "seahorse":                        # in the grass by the reef, clinging or browsing
+            f.x = self.reef[0] + rng.uniform(-60, 60); f.y = self.reef[1] + rng.uniform(-50, 20)
+        elif sp in ("angler", "crab", "lobster", "octopus"):
+            f.y = rng.uniform(FLOOR_Y, TANK_H - 8)  # the floor and the rocks
+            if rng.random() < 0.35:                 # food drifting down near it (the ambush, the scavenge)
+                self.food.append([max(5, min(TANK_W - 5, f.x + rng.uniform(-60, 60))),
+                                  max(5.0, f.y - rng.uniform(0, 50))])
+                f.hunger = rng.randint(2, 7)
+            if sp == "octopus" and rng.random() < 0.5:   # by the reef, its puzzle box
+                f.x = self.reef[0] + rng.uniform(-70, 90)
+        elif sp == "eel":
+            if rng.random() < 0.4:                  # rising for air / just back from it
+                f.y = rng.uniform(8, 60)
+            else:
+                f.y = rng.uniform(FLOOR_Y, TANK_H - 8)
+                f.energy = rng.randint(2, 7)
+        elif sp == "shark":                         # patrolling the open water
+            f.x = rng.uniform(80, TANK_W - 80); f.y = rng.uniform(60, TANK_H - 100)
+            f.energy = rng.randint(4, 9)
+        elif sp == "squid":                         # hovering in open water
+            f.x = rng.uniform(80, TANK_W - 80); f.y = rng.uniform(50, TANK_H - 120)
+        elif sp == "puffer":                        # nosing about the reef or the bubbles
+            spot = rng.choice([self.reef, self.bubble])
+            f.x = max(5, min(TANK_W - 5, spot[0] + rng.uniform(-90, 90)))
+            f.y = max(5, min(TANK_H - 5, spot[1] + rng.uniform(-60, 60)))
+        elif sp == "jellyfish":                     # drifting in the open water, often in the bubbles' current
+            if rng.random() < 0.35:
+                f.x = max(5, min(TANK_W - 5, self.bubble[0] + rng.uniform(-70, 70)))
+                f.y = max(5, min(TANK_H - 5, self.bubble[1] + rng.uniform(-80, 80)))
+            else:
+                f.x = rng.uniform(60, TANK_W - 60); f.y = rng.uniform(40, TANK_H - 110)
+            f.energy = rng.randint(3, 9)
+        f.x = max(5, min(TANK_W - 5, f.x)); f.y = max(5, min(TANK_H - 5, f.y))
+        if sp in ("lobster", "eel") and rng.random() < 0.4:
+            self.night = True                       # the night hunters' hours
+            self.night_until = self.tick_n + rng.randint(40, 160)
+
+
 def dist(f, other):
     ox, oy = (other.x, other.y) if isinstance(other, Fish) else (other[0], other[1])
     return math.hypot(f.x - ox, f.y - oy)
@@ -447,10 +696,46 @@ def wall_field(f):
     return "clear"
 
 
+# v5: the line as named fields, in order (schema.md v5). render_v5 / parse_v5 are
+# the encoder's one source of truth for the field order; encoder_agree.py checks
+# the C encoder's lines against them.
+V5_FIELDS = ["zone", "hunger", "energy", "stress", "curiosity", "bold", "social", "stage", "species",
+             "trust", "bored", "food", "friend", "bubble", "reef", "wall", "last", "time"]
+
+
+def render_v5(d):
+    return " ".join(f"{k} {d[k]}" for k in V5_FIELDS)
+
+
+def parse_v5(line):
+    """split a v5 line into its fields (values may be two words: `near 3`);
+    raises ValueError if the keys are not exactly V5_FIELDS in order"""
+    words = line.split()
+    keys, vals, i = [], {}, 0
+    for k in V5_FIELDS:
+        if i >= len(words) or words[i] != k:
+            raise ValueError(f"expected `{k}` at word {i} of: {line}")
+        j = i + 1
+        while j < len(words) and words[j] not in V5_FIELDS:
+            j += 1
+        vals[k] = " ".join(words[i + 1:j])
+        keys.append(k)
+        i = j
+    if i != len(words):
+        raise ValueError(f"trailing words in: {line}")
+    return vals
+
+
 def encode(tank, f):
     nearest_food = min(tank.food, key=lambda p: dist(f, p)) if tank.food else None
     friend = min((o for o in tank.fish if o is not f), key=lambda o: dist(f, o))
     friend_s = sighting(f, friend)
+    if SCHEMA >= 5:
+        return render_v5(dict(
+            zone=zone(f), hunger=f.hunger, energy=f.energy, stress=f.stress, curiosity=f.curiosity,
+            bold=f.bold, social=f.social, stage=f.stage, species=f.species, trust=f.trust, bored=int(f.bored),
+            food=sighting(f, nearest_food), friend=friend_s, bubble=sighting(f, tank.bubble),
+            reef=sighting(f, tank.reef), wall=wall_field(f), last=f.goal, time="night" if tank.night else "day"))
     if SCHEMA >= 4:
         return (
             f"zone {zone(f)} "
@@ -480,6 +765,93 @@ def encode(tank, f):
     )
 
 
+def num_ctx():
+    """Ollama's context window for a call. v2-v4 ran at 512 (unchanged here: their
+    datasets were labelled that way). The v5 prompt alone is ~1,400 tokens, and
+    a window smaller than the prompt makes Ollama cut the prompt's middle -
+    the species paragraph would silently vanish - so v5 asks for 2048."""
+    return 2048 if SCHEMA >= 5 else 512
+
+
+_ctx_warned = False
+MAX_PROMPT_TOKENS = 0       # the largest prompt_eval_count seen (prompt_check prints it)
+
+
+def _check_context(reply):
+    """warn (once) when the prompt filled the window: the teacher saw a truncated prompt"""
+    global _ctx_warned, MAX_PROMPT_TOKENS
+    n = reply.get("prompt_eval_count")
+    if isinstance(n, int):
+        MAX_PROMPT_TOKENS = max(MAX_PROMPT_TOKENS, n)
+    if isinstance(n, int) and n >= num_ctx() - 16 and not _ctx_warned:
+        _ctx_warned = True
+        print(f"[warn] the prompt used {n} of num_ctx {num_ctx()} tokens: Ollama may have "
+              f"truncated the system prompt", file=sys.stderr)
+
+
+def rules_goal(state, rng):
+    """--teacher rules: a small rule policy over the state line, for smoke-testing
+    the pipeline without Ollama. It knows the v4 rules (hunger, night, stress,
+    boredom, the social and bold cliffs) and a sketch of each species'
+    temperament - enough that a student trained on it has something per-species
+    to learn and eval has something to agree with. NEVER train a shipped model on it."""
+    w = state.split()
+    v = {}
+    for i, k in enumerate(w[:-1]):
+        if k in ("hunger", "energy", "stress", "curiosity", "bold", "social", "trust", "bored"):
+            v[k] = int(w[i + 1])
+        elif k in ("stage", "species", "last", "time", "food", "friend", "bubble", "reef"):
+            v[k] = w[i + 1]                       # a sighting keeps its distance word: none|near|mid|far
+    sp, night = v.get("species", "fish"), v.get("time") == "night"
+    hunger, energy, stress, bored = v.get("hunger", 0), v.get("energy", 5), v.get("stress", 0), v.get("bored", 0)
+    food, friend, last = v.get("food", "none"), v.get("friend", "none"), v.get("last", "explore")
+    hungry_at = {"crab": 4, "angler": 5}.get(sp, 6)
+    if food != "none" and (hunger >= hungry_at or (sp == "angler" and food == "near" and hunger >= 3)):
+        return f"seek_food urgency {min(9, hunger + (1 if food == 'near' else 0))}"
+    if night and sp in ("lobster", "eel") and energy >= 3:
+        return f"{rng.choice(['explore', 'explore', 'inspect_reef'])} urgency 4"
+    if night or energy <= 1:
+        return "explore urgency 2" if sp == "shark" and energy > 1 else "rest urgency 3"
+    if stress >= 7:
+        return "rest urgency 6" if sp in ("seahorse", "octopus", "lobster") else "inspect_reef urgency 6"
+    weights = {"explore": 3, "visit_bubbles": 2, "inspect_reef": 2, "rest": 1, "dart_play": 0, "follow_friend": 0}
+    weights.update({
+        "seahorse": {"rest": 4, "inspect_reef": 3, "visit_bubbles": 1, "explore": 1},
+        "octopus": {"inspect_reef": 5, "explore": 4, "visit_bubbles": 0, "rest": 1},
+        "puffer": {"explore": 4, "inspect_reef": 4, "visit_bubbles": 1},
+        "angler": {"rest": 7, "explore": 1, "visit_bubbles": 0, "inspect_reef": 1},
+        "eel": {"rest": 4, "explore": 2, "visit_bubbles": 0, "inspect_reef": 1},
+        "shark": {"explore": 7, "visit_bubbles": 0, "inspect_reef": 1, "rest": 0},
+        "squid": {"explore": 2, "visit_bubbles": 1, "inspect_reef": 1},
+        "crab": {"explore": 4, "inspect_reef": 3, "visit_bubbles": 1},
+        "lobster": {"rest": 6, "explore": 1, "visit_bubbles": 0, "inspect_reef": 1},
+        "jellyfish": {"explore": 4, "rest": 3, "visit_bubbles": 2, "inspect_reef": 0},
+    }.get(sp, {}))
+    if friend != "none" and sp not in ("lobster", "octopus", "angler"):
+        weights["follow_friend"] = 6 if sp == "squid" else 3 if v.get("social", 0) >= 7 else 0
+    if v.get("bold", 0) >= 5 and energy >= 6 and sp not in ("seahorse", "angler", "jellyfish"):
+        weights["dart_play"] = 2
+    if bored >= 7 and last in weights:
+        weights[last] = 0
+        if last != "explore":
+            weights["explore"] += 4
+    elif bored <= 2 and weights.get(last, 0) > 0:
+        weights[last] += 3                        # the fresh creature keeps its pastime
+    cand = [(g, x) for g, x in weights.items() if x > 0] or [("explore", 1)]
+    g = rng.choices([c[0] for c in cand], weights=[c[1] for c in cand])[0]
+    return f"{g} urgency {max(1, min(9, energy // 2 + (2 if g == 'dart_play' else 0)))}"
+
+
+_rules_rng = random.Random(5)
+
+
+def ask_teacher(host, model, state, timeout):
+    """the configured teacher: Ollama (the real one) or the --teacher rules stand-in"""
+    if TEACHER == "rules":
+        return rules_goal(state, _rules_rng)
+    return ask_ollama(host, model, state, timeout)
+
+
 def ask_ollama(host, model, state, timeout):
     body = json.dumps({
         "model": model,
@@ -491,7 +863,7 @@ def ask_ollama(host, model, state, timeout):
         "stream": False,
         "think": False,
         "keep_alive": "5m",
-        "options": {"temperature": 0.7, "num_predict": 48, "num_ctx": 512},
+        "options": {"temperature": 0.7, "num_predict": 48, "num_ctx": num_ctx()},
     }).encode()
     # Transport is curl, not urllib. Root cause found 2026-08-21: Little Snitch
     # had a per-process rule allowing this app's Python only to pypi.org /
@@ -504,7 +876,9 @@ def ask_ollama(host, model, state, timeout):
         input=body, capture_output=True, timeout=timeout + 10)
     if proc.returncode != 0 or not proc.stdout:
         raise OSError(f"curl failed rc={proc.returncode}")
-    content = json.loads(proc.stdout)["message"]["content"]
+    reply = json.loads(proc.stdout)
+    _check_context(reply)
+    content = reply["message"]["content"]
     obj = json.loads(content)
     goal = obj["goal"] if obj.get("goal") in goals() else None
     if goal is None:
@@ -527,14 +901,28 @@ def main():
     ap.add_argument("--timeout", type=float, default=30.0, help="per-request timeout, seconds")
     ap.add_argument("--max-minutes", type=float, default=None,
                     help="hard wall-clock cap; stop cleanly when exceeded")
-    ap.add_argument("--schema", type=int, choices=(2, 3, 4), default=2,
-                    help="state-line schema: 2 = frozen, 3 = shipped (no names, trust, 2-6 fish), "
-                         "4 = next cycle (no shadow, + bored)")
-    ap.add_argument("--repopulate", type=int, default=250,
+    ap.add_argument("--schema", type=int, choices=(2, 3, 4, 5), default=2,
+                    help="state-line schema: 2 = frozen, 3 = (no names, trust, 2-6 fish), "
+                         "4 = shipped (no shadow, + bored), 5 = next cycle (+ species, ten species)")
+    ap.add_argument("--teacher", choices=("ollama", "rules"), default="ollama",
+                    help="rules = a rule policy instead of Ollama (pipeline smoke tests only)")
+    ap.add_argument("--fish-share", type=float, default=None,
+                    help="v5: the classic fish's share of creatures (default 1/3; the old data is all fish)")
+    ap.add_argument("--focus", default=None, choices=SPECIES_TOKENS[1:],
+                    help="v5: a species that takes --focus-share of the new-species places (a newcomer's own run)")
+    ap.add_argument("--focus-share", type=float, default=0.8)
+    ap.add_argument("--repopulate", type=int, default=None,
                     help="v3: rebuild the tank with a new random population every N samples")
     args = ap.parse_args()
-    global SCHEMA
+    if args.repopulate is None:     # v5: shorter runs of a tank - ten species to see
+        args.repopulate = 60 if args.schema >= 5 else 250
+    global SCHEMA, TEACHER, FISH_SHARE, FOCUS, FOCUS_SHARE
     SCHEMA = args.schema
+    TEACHER = args.teacher
+    if args.fish_share is not None:
+        FISH_SHARE = args.fish_share
+    if args.focus:
+        FOCUS, FOCUS_SHARE = args.focus, args.focus_share
     deadline = time.time() + args.max_minutes * 60 if args.max_minutes else None
 
     rng = random.Random(args.seed)
@@ -572,7 +960,7 @@ def main():
                 continue
 
             try:
-                goal = ask_ollama(args.host, args.model, state, args.timeout)
+                goal = ask_teacher(args.host, args.model, state, args.timeout)
             except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, KeyError, OSError) as e:
                 failures += 1
                 print(f"[warn] {type(e).__name__}: {e}", file=sys.stderr)

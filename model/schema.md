@@ -1,7 +1,8 @@
 # State & Goal Schema — v2, FROZEN
 
-**Status: v4 SHIPS (2026-09-15, see the v4 section at the bottom); v3 and v2 remain
-readable by their kept artifacts.** (v1 approved 2026-08-19; v2 personality/stage
+**Status: v5 SHIPS (2026-10-07, model v5m; model v5j 2026-10-09 adds the jellyfish word; the species - the v5 section at the bottom,
+docs/retrain-v5.md, docs/stats.md); v4, v3 and v2 remain readable by their kept
+artifacts.** (v1 approved 2026-08-19; v2 personality/stage
 fields approved 2026-08-20 for the progression layer — see `docs/progression.md`.) The tokenizer and
 all training data depend on this exact encoding. Do not change field order,
 vocabulary, or value ranges without regenerating every trace and retraining.
@@ -153,7 +154,7 @@ zone 2 hunger 7 energy 5 stress 2 curiosity 8 bold 4 social 6 stage adult trust 
 
 Goal output unchanged. v2 data converts mechanically to the v3 line (drop `fish
 <name>` and the friend name, insert `trust 5`): the shipped v3m model trains on
-v2-converted + v3 (`POCKET_SCHEMA=3 train.py`). **v3 is now the encoding the sim
+v2-converted + v3 (`AQUA_PETS_SCHEMA=3 train.py`). **v3 is now the encoding the sim
 and firmware emit** (`common/llm/advisor_core.c`, selected by the ` trust` token in
 the loaded tokenizer); v2 remains readable by the v2 artifacts kept in model/out
 (`*_v2.bin`).
@@ -203,3 +204,50 @@ shadow field removed, every pair with a shadow IN VIEW or a flee label dropped
 (28,247 of the 51,162 v2+v3 pairs survive), `bored 0-2` inserted - those labels
 were made under "keep the last goal while it makes sense", the fresh-fish rule.
 Bored 3-9 behaviour comes only from v4 teacher data. Runbook: docs/retrain-v4.md.
+
+---
+
+## v5 — SHIPPED 2026-10-07 (model v5m; v5j 2026-10-09 with the jellyfish; species; docs/species.md)
+
+One change. Encoders: `gen_traces.py --schema 5` (`render_v5` / `parse_v5`, the
+field list `V5_FIELDS`) and `common/llm/advisor_core.c` (selected automatically
+when the loaded tokenizer contains ` species`). Tokenizer: `train_tokenizer.py
+--schema 5` → vocab **65**: the v4 54 + `species` + ten species words, APPENDED
+(ids 0..53 are v4's, so a v5 tokenizer read against a v4 model's 54 ids is
+exactly the v4 vocab and the advisor stays v4).
+
+1. **`species <word>`** inserted after `stage` (the traits read together):
+   `SPECIES[f->species].token` - `fish` (the classic fish) `seahorse octopus
+   puffer angler eel shark squid crab lobster`. Why: nine creatures joined the
+   fish (2026-10-05); each has a real animal's temperament (the anglerfish
+   lies in wait, the hammerhead never stops, the lobster wakes at night) that
+   no trait number carries.
+
+```
+zone <1-6> hunger <0-9> energy <0-9> stress <0-9> curiosity <0-9>
+bold <0-9> social <0-9> stage fry|juv|adult|elder species <species> trust <0-9> bored <0-9>
+food <dist> <clock>|none friend <dist> <clock>|none
+bubble <dist> <clock>|none reef <dist> <clock>|none wall <dist> <clock>|clear
+last <goal> time day|night
+```
+
+Example:
+
+```
+zone 5 hunger 2 energy 7 stress 0 curiosity 3 bold 6 social 1 stage adult species angler trust 5 bored 1 food none friend mid 3 bubble far 10 reef mid 7 wall near 6 last rest time day
+```
+
+**2026-10-09, the jellyfish:** one more species word, `jellyfish`, APPENDED as
+id 65 (vocab 66; `train_tokenizer.py --schema 5` writes it). The line, the
+field order and every other id are unchanged. The C advisor sends `species
+jellyfish` only when the loaded tokenizer has the word (v5m's 65-word vocab
+hears `species fish` for it), so a tokenizer may again go out before its model.
+
+At most 41 words (v4: 39): a prompt of 43 tokens with `->` and BOS, 46 with
+the reply, of the 64-position KV cache. `friend` is still the nearest other
+creature of any species. Goal output unchanged. Old data converts mechanically
+(`convert_to_v5.py`): every older label was about the classic fish, so it gains
+`species fish` (v2 / v3 lines go through `convert_to_v4.to_v4` first). The C
+and Python lines are checked against each other by `./fishsim
+--selftest-encoder <v5 tokenizer> | model/encoder_agree.py` (in CI). Runbook:
+docs/retrain-v5.md.

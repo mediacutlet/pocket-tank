@@ -52,7 +52,7 @@ Ollama, which also has gemma4:26b (Strato, 2026-09-14; loads in ~12 s): pass
 locally.
 
 ```bash
-cd "/Volumes/Local/Projects/LLM Fish Tank/pocket-tank/model"
+cd "/Volumes/Local/Projects/LLM Fish Tank/aqua-pets/model"
 python3 gen_traces.py --count 5 --dry-run --schema 4 --seed 1       # v4 lines print, no network
 python3 train_tokenizer.py --schema 4                                # out/tokenizer_v4.bin, vocab 54
 curl -s http://192.168.0.139:11434/api/tags | grep -o gemma4:26b    # teacher reachable
@@ -108,7 +108,7 @@ Logs: out/prompt_check_v4_try1.log, _try2.log, _try3.log.
 ## 1-4. The night (unattended)
 
 ```bash
-cd "/Volumes/Local/Projects/LLM Fish Tank/pocket-tank/model"
+cd "/Volumes/Local/Projects/LLM Fish Tank/aqua-pets/model"
 nohup ./run_v4_overnight.sh > /dev/null 2>&1 &
 tail -f out/v4_overnight.log
 ```
@@ -153,12 +153,12 @@ That is the intended cycle (a pastime for ~a minute, then off somewhere new).
 ## 5. Ship it (sim + firmware) - manual
 
 ```bash
-cd "/Volumes/Local/Projects/LLM Fish Tank/pocket-tank/model"
+cd "/Volumes/Local/Projects/LLM Fish Tank/aqua-pets/model"
 cp out/model_q4_v4m.bin out/model_q4.bin
 cp out/tokenizer_v4.bin out/tokenizer.bin
 cp out/tokenizer_v4.bin ../firmware/main/tokenizer.bin
 cd ../sim && make && ./fishsim --selftest-llm            # prints "schema v4, sampled decoding"
-cd ../firmware && . ~/esp/esp-idf/export.sh && idf.py -B ~/.cache/pocket-tank/fw-build build
+cd ../firmware && . ~/esp/esp-idf/export.sh && idf.py -B ~/.cache/aqua-pets/fw-build build
 ```
 Then the model partition flash (the 7.56 MB q4 file, as for v3m), docs/stats.md
 (v4 table), schema.md (promote v4 to FROZEN), HANDOFF.md.

@@ -14,8 +14,8 @@
  * No I/O, no floats-to-strings, no OS calls: this file and tank.c compile
  * unchanged for the LVGL PC sim and the ESP32-S3 firmware.
  */
-#ifndef POCKET_TANK_TANK_H
-#define POCKET_TANK_TANK_H
+#ifndef AQUA_PETS_TANK_H
+#define AQUA_PETS_TANK_H
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -78,12 +78,14 @@ float tank_glass_x1(float y);
 float tank_glass_top(float x);                         /* the glass above x (0 in the rectangle) */
 void  tank_glass_clamp(float *x, float *y, float m);   /* (x,y) brought to at least m px inside the glass and above the bottom */
 
-#define N_FISH_MAX 6            /* array bound; the live count is tank_t.n_fish */
+#define N_FISH_MAX 25           /* array bound; the live count is tank_t.n_fish (6 until the species,
+                                 * 2026-10-05, then 10; 25 since 2026-10-07: fish 7..N_FISH_MAX save in
+                                 * their own tail, progression.c - the tail grows with this number) */
 #define N_FISH_START 2          /* a new tank: two contrasting adults */
 #define N_TRAINED_NAMES 4       /* name tokens the v2 model was trained on */
 #define FISH_NAME_MAX 7         /* the keeper's name for a fish (first-run setup) */
 #define LOOK_N 8                /* body / accent swatches the keeper can pick from */
-#define MAX_FOOD   8
+#define MAX_FOOD   16           /* 2026-10-10: five portions at a time (five surface taps of three pellets), a slot to spare for the trickle; 8 before (two and a half taps) */
 #define MAX_BUBBLE 24
 
 /* upkeep: the vegetation beds keep growing - up toward the surface and out,
@@ -188,6 +190,50 @@ extern const char *const GOAL_NAMES[GOAL_COUNT];   /* schema.md lowercase names 
 typedef enum { STAGE_FRY, STAGE_JUV, STAGE_ADULT, STAGE_ELDER } stage_t;
 extern const char *const STAGE_NAMES[4];           /* schema.md v2 stage tokens */
 extern const char *const TRAINED_NAMES[N_TRAINED_NAMES]; /* mira bolt kelp nori */
+
+/* ---- species (2026-10-05, docs/species.md) ----
+ * The classic fish and nine creatures that breed like it. The model picks
+ * every creature's goal (schema 5 also hears its species); the species
+ * decides how the goal is carried out (its locomotion, its own spots) and
+ * how it looks (render.c). SP_FISH is 0, so every older save reads as fish. */
+typedef enum { SP_FISH, SP_SEAHORSE, SP_OCTOPUS, SP_PUFFER, SP_ANGLER, SP_EEL, SP_SHARK, SP_SQUID,
+               SP_CRAB, SP_LOBSTER,     /* the floor's two (2026-10-05, the same day) */
+               SP_JELLYFISH,           /* appended: persisted species IDs never move */
+               SP_SWORDFISH,           /* 2026-10-10 night: a fast open-water cruiser with a bill */
+               SP_COUNT } species_t;
+#define SP_VARIANTS 4            /* designs a species (fish_t.variant) */
+#define SP_MUTATE_P 0.04f        /* a classic fish's fry hatching as a new species */
+/* how a species moves (docs/species.md "How they move") */
+typedef enum {
+    LOCO_FIN,        /* the classic fish: committed U-turns, a tail beat */
+    LOCO_UPRIGHT,    /* seahorse: upright, slow, vertical, anchors its tail */
+    LOCO_JET,        /* octopus / squid: pulsed jets, mantle first; the octopus crawls the floor */
+    LOCO_HOVER,      /* pufferfish: sculls, stops, turns on the spot, backs up */
+    LOCO_AMBUSH,     /* anglerfish: still and low, short fast lunges */
+    LOCO_UNDULATE,   /* electric eel: a travelling wave, swims backward, breathes air */
+    LOCO_CRUISE,     /* hammerhead: never stops, wide turns, the head sweeps */
+    LOCO_SIDEWALK,   /* crab: walks the floor SIDEWAYS on its legs, climbs rock, scuttles off when startled */
+    LOCO_WALK        /* lobster: walks the floor head first, a backward tail-flip to escape */
+} loco_t;
+typedef struct { const char *name; uint32_t color, fin, accent; } sp_variant_t;
+typedef struct {
+    const char  *name;            /* the card's / shop's word, upper case */
+    const char  *token;           /* schema-5 word: fish seahorse octopus puffer angler eel shark squid crab lobster */
+    const char  *names[4];        /* a newborn's default names (<= FISH_NAME_MAX) */
+    sp_variant_t var[SP_VARIANTS];
+    float size_lo, size_hi;       /* base size (1.0 = the classic fish's ~42 px) */
+    float bold_lo, bold_hi, soc_lo, soc_hi;
+    float curiosity, lazy, turn_rate;
+    loco_t loco;
+    float speed_k;                /* cruise speed x (the goal's speed) */
+    float burst_k;                /* dart / startle speed x */
+    float vert_k;                 /* climb preference: the classic fish's 0.72 flattens climbs; > 1 favours them */
+    float min_speed;              /* never slower (the hammerhead's ram breathing); 0 = can stop */
+    float hit_r;                  /* tap radius at size 1, px */
+    bool  big;                    /* the small ones keep their distance (SP_AVOID_R) */
+} species_def_t;
+extern const species_def_t SPECIES[SP_COUNT];
+#define SP_AVOID_R 70.0f          /* px at size 1: a small creature's berth around a big one */
 
 typedef struct {
     goal_id_t id;
@@ -302,7 +348,59 @@ typedef struct {
      * parent_b's, bold / sociable the pair's average with a nudge. -1 = one
      * of the founding pair (or an older save). Saved per fish. */
     int8_t parent_a, parent_b;
+    /* species (2026-10-05): what it is and which of the species' designs
+     * (saved, in fish_save_t's spare bytes); the rest is live state for the
+     * species' own motion and looks, not saved.
+     *
+     * THE CONVENTION (2026-10-05, the motion pass), for every species:
+     *  - (x, y) is the middle of the body; heading is the direction of
+     *    TRAVEL, always (atan2 of the velocity on the glass).
+     *  - facing / yaw say which way the HEAD points (+1 right), and may
+     *    disagree with the travel: a creature whose heading lies on the far
+     *    side of its facing is going BACKWARD (tank_fish_backward) - the
+     *    eel, the puffer and the squid backing a little, the lobster's
+     *    tail-flip, and every JET: an octopus or a squid jetting
+     *    (tank_fish_jetting) travels mantle first, its arms - its "head" for
+     *    facing - trailing, so facing is opposite the travel the whole jet.
+     *  - the body's axis is the heading taken on the facing side (the climb
+     *    or dive of the travel, the head where facing says); tank_fish_head
+     *    is where the mouth is, tank_body_half_len half the length the motion
+     *    keeps inside the glass (the eel 1.6 x a fish's for its size).
+     *  - the seahorse is upright (its axis vertical, the snout on the facing
+     *    side at the top); the crab is drawn face-on to the viewer - facing is
+     *    only the side it is walking toward (its legs' ripple), yaw eases to 0.
+     *  - jet is a phase 0..1 that wraps: the jet pulse (thrust while < 0.3,
+     *    then the glide), the octopus's / squid's fin or arm ripple between
+     *    jets, the eel's body wave, the seahorse's dorsal flutter, the
+     *    puffer's sculling, the crab's leg ripple (by distance walked), the
+     *    shark's tail beat, the angler's fin walk; the LOBSTER's only during a
+     *    tail-flip (sp_mode SPM_FLIP): each stroke runs 0..1, the abdomen
+     *    curled under while > 0.5, 0 when it walks.
+     *  - puff: the pufferfish's inflation; the CRAB's claws-up threat (0..1). */
+    uint8_t species;        /* species_t */
+    uint8_t variant;        /* 0..SP_VARIANTS-1 */
+    float  puff;            /* pufferfish: 0 flat .. 1 a spiny ball; crab: its claws raised 0..1 */
+    float  ink;             /* octopus / squid: seconds the ink cloud has left */
+    float  jet;             /* a phase 0..1 (see THE CONVENTION above) */
+    float  camo;            /* octopus: 0 its own colours .. 1 the colour it sits on */
+    uint32_t camo_rgb;      /* ... that colour */
+    float  air_s;           /* eel: seconds until it needs a gulp of air; <= 0 = on the trip up for it
+                             * (the seconds of the trip so far, negative), reset to 60..120 back down */
+    float  spark;           /* eel: seconds of a startle's spark left */
+    float  lure;            /* anglerfish: lure glow 0..1 */
+    int8_t anchor;          /* seahorse: the frond its tail holds (bed * 16 + frond), -1 = none; anchored,
+                             * the tail grips the stem at (x + facing * 5 * size, y + 10 * size) */
+    uint8_t sp_mode;        /* the species' reflex in play (SPM_*): a jet, the eel's breath, the crab's claws, the flip */
+    float  sp_t;            /* its timer (and the walkers' stop-and-go, the seahorse's snick, the angler's lunge) */
+    float flourish_wait, surface_s; /* transient: idle event countdown; positive rise/float, negative return */
+    uint16_t flourish_cycle;       /* staggered events; never persisted */
+    float  sp_x;            /* the anglerfish's home spot along the floor (-1 = not yet) */
+    /* tossed by a shake (2026-10-10, tank_shake): seconds left tumbling, the throw's velocity
+       (px/s, damped), the spin (rad/s). Steering is off while it lasts. Not saved. */
+    float toss, toss_vx, toss_vy, toss_spin;
 } fish_t;
+/* fish_t.sp_mode (not saved) */
+enum { SPM_NONE, SPM_JET, SPM_CLING, SPM_RISE, SPM_GULP, SPM_SINK, SPM_CLAWS, SPM_SCUTTLE, SPM_FLIP, SPM_LUNGE };
 
 /* a pellet: it sinks ~43 s from the surface to the floor, then RESTS there
  * FOOD_FLOOR_S before it dissolves (2026-09-29, for the shrimp school - every
@@ -365,6 +463,7 @@ typedef struct tank {
     bool     light_manual_off;     /* MANUAL: the keeper's last double-tap left it off (saved) */
     bool     light_tip_seen;       /* a double-tap has turned the light off once: its notice (notice.h
                                     * NOTICE_LIGHTS_OUT) came up then, and never again (saved) */
+    uint8_t  theme;                /* theme_id_t: presentation only; persisted in an append-only tail */
     bool     screen_turned;        /* a worn tank (TANK_WORN): settings SCREEN = TURNED (saved) */
     bool     orient_lock;          /* settings ROTATION = locked (0.3.2, saved): the picture keeps the way up it
                                     * had when the keeper locked it, however the tank is turned (tank_orient) */
@@ -496,6 +595,35 @@ typedef struct tank {
     uint8_t  cluster_scheme;
     float    cluster_growth;       /* CLUSTER_START..CLUSTER_FULL; 0..1 = it fills out, 1..FULL = the tentacles come */
     float    cluster_acc;          /* awake seconds pooled, as coral_acc */
+    /* the shipwreck (2026-10-10, item 7): a small sunken boat on the floor with holes the
+     * creatures swim through, an anchor on its chain, a bobbing frogman trailing a mist of
+     * bubbles. Its centre x (<= 0 = the default) and depth, BACK or FRONT. Both saved. */
+    float    wreck_x;
+    uint8_t  wreck_z;
+    /* the frogman (2026-10-10, item 8; he hung from the wreck's stern before): a little diver
+       who floats SIDEWAYS, horizontal, drifting across the water from glass to glass, turning
+       at each end, easing to a new lane now and then, waving at times. His suit is the
+       theme's (render.c). Only the bit is saved: a load puts him mid-tank. */
+    float    frog_x, frog_y;
+    float    frog_yaw;             /* -1 facing left .. 1 facing right; thin through a turn */
+    int8_t   frog_dir;             /* the way he is going */
+    float    frog_lane;            /* the y he eases toward */
+    float    frog_lane_t;          /* seconds until he picks another lane */
+    float    frog_toss, frog_vx, frog_vy;   /* tossed by a shake (tank_shake): seconds left, the throw */
+    /* the submarine (2026-10-10 night, item 9): a little sub that cruises the water from glass to
+       glass like the frogman, propeller turning, bubbles streaming from the stern - and every
+       SUB_CRUISE_LO..HI s it stops, a periscope rises, scans, and sinks before it goes on. The
+       hull is the theme's (render.c). Only the bit is saved: a load puts it mid-tank. */
+    float    sub_x, sub_y;
+    float    sub_yaw;              /* -1 facing left .. 1 facing right */
+    int8_t   sub_dir;
+    float    sub_lane, sub_lane_t;
+    float    sub_v;                /* px/s along its heading: eases to SUB_SPEED, or to 0 for a stop */
+    float    sub_stop;             /* seconds left of a stop (0 = cruising) */
+    float    sub_next;             /* seconds until the next stop */
+    float    sub_peri;             /* the periscope: 0 down .. 1 up */
+    float    sub_look;             /* seconds the periscope has been up (it scans on this) */
+    float    sub_toss, sub_vx, sub_vy;
     /* the shrimp school (SD_ITEM_SHRIMP, see SHRIMP_*): how many (saved), the
      * pellets eaten toward the next one (0..SHRIMP_PER_JOIN, saved), the seconds
      * before another may join (saved), each shrimp's motion (not saved: a load
@@ -768,6 +896,58 @@ float tank_randf(tank_t *t, float lo, float hi);
 /* roster preset count (6) and a preset's display name, for UI */
 int   tank_roster_count(void);
 const char *tank_roster_name(int preset);
+/* species (docs/species.md). tank_make_fish is the classic fish;
+ * tank_set_species turns slot into a species' creature in place - its
+ * design, size range, temperament constants and default name - keeping the
+ * bold / sociable it has (a load re-applies it). tank_add_species_pair
+ * brings two juveniles of a species (the shop), -1 when there is no room
+ * for both. tank_species_n counts a species' living members. */
+const species_def_t *tank_species(const fish_t *f);
+void  tank_set_species(tank_t *t, int slot, int species, int variant);
+int   tank_add_species_pair(tank_t *t, int species);
+int   tank_add_species_n(tank_t *t, int species, int n);   /* n juveniles of a species (the shop sells one, 2026-10-07); the first's slot or -1 */
+int   tank_species_n(const tank_t *t, int species);
+/* a tap's reach around a creature (the touch ports, the sim): its species'
+ * hit_r at its size, never under a fingertip's TANK_HIT_MIN_R */
+#define TANK_HIT_MIN_R 32.0f
+float tank_fish_hit_r(const fish_t *f);
+bool  tank_poke(tank_t *t, int idx);        /* a double tap on creature idx: its trick (puff, ink); false = it has none */
+void  tank_wreck_place(tank_t *t);           /* the shipwreck bought: its default spot (item 7) */
+void  tank_frogman_place(tank_t *t);         /* the frogman bought (or loaded): mid-tank, heading right (item 8) */
+void  tank_sub_place(tank_t *t);             /* the submarine bought (or loaded): mid-tank, heading left (item 9) */
+/* a hard shake of the device (2026-10-10; the IMU's shake detector, the sim's 1 key): every
+ * creature is thrown - a random velocity and spin, tumbling off the glass, the species'
+ * startle reactions on the way (the puffer puffs, the squid and octopus ink, the crab's
+ * claws), the shrimp scatter, the frogman tumbles - and settles back over TOSS_S seconds
+ * (the throw damps out, steering returns). strength ~1 for a hard shake. Stress rises, a
+ * little trust goes. */
+void  tank_shake(tank_t *t, float strength);
+#define TOSS_S 3.2f
+bool  tank_frogman_hit(const tank_t *t, float x, float y);   /* within a fingertip of him */
+bool  tank_sub_hit(const tank_t *t, float x, float y);       /* within a fingertip of the sub */
+#define FROG_SPEED     9.0f                  /* px/s across the tank */
+#define FROG_MARGIN    (DECOR_MARGIN + 24)   /* he turns this far from the glass */
+#define FROG_LANE_LO   (TANK_H * 0.07f)      /* the water he drifts in: all of it (2026-10-10 night, Alvin: "float freely */
+#define FROG_LANE_HI   (TANK_BOT - 46)       /*   anywhere in the tank"; a mid-water band before), the sand and the surface kept */
+#define SUB_SPEED      13.0f                 /* px/s, cruising */
+#define SUB_MARGIN     (DECOR_MARGIN + 30)
+#define SUB_LANE_LO    (TANK_H * 0.07f)      /* the whole water column, like the frogman's (2026-10-10 night) */
+#define SUB_LANE_HI    (TANK_BOT - 50)
+#define SUB_STOP_S     8.0f                  /* a stop: the periscope up for the middle six seconds */
+#define SUB_CRUISE_LO  22.0f                 /* seconds of cruising between stops */
+#define SUB_CRUISE_HI  40.0f
+float tank_species_size(const fish_t *f);   /* its base size: from its personality, so a load gets the same */
+/* the species' motion, for the renderer and the tests (see THE CONVENTION in
+ * fish_t). tank_ground_y: the top of what a floor walker stands on at x -
+ * the sand line, or the reef cluster's rock where it is placed (the crab,
+ * the lobster, the octopus crawl it; their middle stands tank_walk_off above
+ * it). */
+float tank_body_half_len(const fish_t *f);
+void  tank_fish_head(const fish_t *f, float *hx, float *hy);
+bool  tank_fish_backward(const fish_t *f);
+bool  tank_fish_jetting(const fish_t *f);
+float tank_ground_y(const tank_t *t, float x);
+float tank_walk_off(const fish_t *f);
 /* the keeper's say over a fish's identity (first-run setup, 2026-09-13; the
  * birth flow names an arrival, 2026-09-14). tank_set_name copies up to FISH_NAME_MAX
  * chars (empty = back to the preset's name); tank_set_look sets the body and
@@ -792,7 +972,23 @@ void  tank_set_bubble_x(tank_t *t, float x);
  * (progression_buy) and tank.c gives them their place. A bought thing is in
  * the tank for good. */
 enum { SD_ITEM_PLANT = 1u << 0, SD_ITEM_SNAIL = 1u << 1, SD_ITEM_CASTLE = 1u << 2, SD_ITEM_CORAL = 1u << 3, SD_ITEM_CLUSTER = 1u << 4, SD_ITEM_SHRIMP = 1u << 5,
-       SD_ITEM_URCHIN = 1u << 6, SD_ITEM_COUNT = 7 };
+       SD_ITEM_URCHIN = 1u << 6,
+       /* the species (2026-10-05, docs/species.md): one juvenile a purchase (2026-10-07;
+          a pair before), in species order (item SD_ITEM_SP_FIRST + species - 1). The
+          bit means the species is in the tank (progression_species_sync); it never
+          locks the item - a creature sells whenever there is a free place. */
+       SD_ITEM_SP_SEAHORSE = 1u << 7, SD_ITEM_SP_OCTOPUS = 1u << 8, SD_ITEM_SP_PUFFER = 1u << 9, SD_ITEM_SP_ANGLER = 1u << 10,
+       SD_ITEM_SP_EEL = 1u << 11, SD_ITEM_SP_SHARK = 1u << 12, SD_ITEM_SP_SQUID = 1u << 13, SD_ITEM_SP_CRAB = 1u << 14,
+       SD_ITEM_SP_LOBSTER = 1u << 15, SD_ITEM_SP_JELLYFISH = 1u << 16,
+       SD_ITEM_WRECK = 1u << 17,   /* the shipwreck (2026-10-10): item index 7, after the urchin - a thing, before the species */
+       SD_ITEM_FROGMAN = 1u << 18, /* the frogman (2026-10-10, later that day): item index 8, a resident like the snail */
+       SD_ITEM_SUB = 1u << 19,     /* the submarine (2026-10-10, that night): item index 9, a resident that cruises the water */
+       SD_ITEM_SP_SWORDFISH = 1u << 20,   /* the swordfish (2026-10-10 night): the last species item */
+       SD_ITEM_COUNT = 21 };
+#define SD_ITEM_SP_FIRST 10        /* the item index of the first species (the seahorse) */
+#define SD_ITEM_WRECK_IDX 7        /* the shipwreck's item index */
+#define SD_ITEM_FROGMAN_IDX 8      /* the frogman's item index */
+#define SD_ITEM_SUB_IDX 9          /* the submarine's item index */
 /* per-fish paid bits (sd_paid_fish) */
 enum { SD_PAID_JUV = 1u << 0, SD_PAID_ADULT = 1u << 1, SD_PAID_ELDER = 1u << 2, SD_PAID_TRUST = 1u << 3 };
 #define PX_PER_INCH 24.0f          /* the tank reads as ~15 in tall; a fish ~1.7 in */
@@ -851,6 +1047,10 @@ enum { DECOR_Z_BACK = 0, DECOR_Z_MIDDLE = 1, DECOR_Z_FRONT = 2, DECOR_Z_N = 3 };
  * (the keep behind them, the gate wall and the front towers over them). */
 #define CASTLE_HALF_W   92
 #define CASTLE_X_DEFAULT TANK_FLOOR_X(300.0f)
+/* the shipwreck (2026-10-10): ~128 px wide, ~80 tall at the mast, item 7; BEHIND or IN
+ * FRONT like the castle; the holes in its hull are see-through, the fish pass behind them */
+#define WRECK_HALF_W    64
+#define WRECK_X_DEFAULT TANK_FLOOR_X(130.0f)
 /* the coral (2026-09-23, Strato's coral-single.png, drawn procedurally in
  * render.c): a branching fan ~60 px wide and ~90 tall on the floor, item 3.
  * All three depths; the default is AMONG - nestled in the reef bed's grass,

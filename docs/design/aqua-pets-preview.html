@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Aqua Pets · Three little worlds</title><link rel="stylesheet" href="preview.css"></head>
+<body>
+<header class="masthead"><a class="wordmark" href="aqua-pets-preview.html">◒ aqua pets</a><span>DESIGN STUDY / 02 <b>Made for the glass.</b></span></header>
+<main>
+<section class="intro"><div class="kicker">Three directions. One living world.</div><h1>Small screen. <br><em>Big personality.</em></h1><p>A pendant-first rethink of your aquarium. Bigger touch targets, fewer things at once, and a familiar roll of the letters.</p></section>
+<section class="directions" aria-label="Choose a look and feel"></section>
+<section class="workbench">
+<aside><div class="kicker">Explore a screen</div><nav id="screen-nav" aria-label="Game screens"></nav><div class="direction-note"><span id="direction-number">01</span><h2 id="direction-title"></h2><p id="direction-copy"></p><div id="swatches"></div></div></aside>
+<div class="preview-column">
+<div class="preview-controls"><div class="segmented" aria-label="Device"><button data-device="round" aria-pressed="true">Pendant</button><button data-device="classic" aria-pressed="false">Original</button><button data-device="watch" aria-pressed="false">Watch</button></div><label class="zoom-label">Preview scale <select id="zoom"><option value="fit">Enlarged</option><option value="pixels">1:1 pixels</option><option value="physical">Physical estimate</option></select></label></div>
+<div class="preview-well"><div id="shell"><div id="game" class="game round lagoon"><canvas id="world" aria-hidden="true"></canvas><div id="game-ui"></div><div id="safe-guide" aria-hidden="true"></div><div id="toast" role="status" aria-live="polite"></div></div></div></div>
+<div class="below-preview"><span id="device-caption"></span><label><input id="guides" type="checkbox"> Show safe area</label></div>
+<p id="scale-note" class="scale-note">Enlarged for review. Use 1:1 pixels to inspect native rendering.</p>
+</div>
+</section>
+<section class="device-notes"><div><span class="kicker">Built around the real displays</span><h2>A little less on screen.<br>A lot easier to touch.</h2></div><div><b>01 / Inside the circle</b><p>The pendant uses a centered 320 × 304 px safe rectangle. Every corner stays at least 12 px inside the circular edge.</p></div><div><b>02 / Familiar letter wheel</b><p>Seven 44 px letter slots. Swipe or use the arrows. No keyboard, no tiny text fields. Your pet stays in view.</p></div><div><b>03 / Art at native pixels</b><p>Ten species and seven habitat assets, rasterized at native resolution. Pixel sizes adjust to preserve their physical footprint across devices.</p></div></section>
+<footer><span>HTML concept · temporary sample state · no firmware changes</span><span>Physical size is an estimate; validate on the actual displays before implementation.</span></footer>
+</main>
+<script src="preview.js"></script>
+</body></html>

@@ -9,7 +9,7 @@ picked the same goal as the teacher on fresh, never-trained-on situations
 
 | | Teacher | Student (ships) |
 |---|---|---|
-| Model | gemma4:26b | pocket-tank 14.3M (dim 384, 8 layers, 8 heads) |
+| Model | gemma4:26b | Aqua Pets 14.3M (dim 384, 8 layers, 8 heads) |
 | Parameters | ~26,000,000,000 | 14,300,000 (≈1,818× fewer) |
 | Size | ~18 GB (Q4_K_M) | 57 MB fp32 → 15.2 MB int8 → **7.56 MB 4-bit** (ships) |
 | Runs on | Mac Mini M4 Pro GPU | ESP32-S3 ($8–10 chip), from flash, no network |
@@ -236,3 +236,122 @@ follow_friend 23%, inspect_reef 17%, rest 15%, visit_bubbles 14%, seek_food
 **10%**, a 3-fish cluster anywhere 18%; **4.0 distinct zones per
 fish-minute**, longest one-goal stretch 103 s, mean bored 3.3; 63 goal
 changes (29 torn), 119 asks, 0 survival overrides in 300 s.
+
+## Schema v5 data cycle (species) — 2026-10-06/07
+
+Teacher gemma4:26b (Q4_K_M, the same blob `001e5dafc3c7`) on two machines: a
+private Ollama 0.35.1 on the training box (Ryzen 9 9950X3D, CPU only) and a
+second box on the LAN (GTX 1070 8 GB + i7-13700K, Windows). No older labels
+were mixed in (the v2-v4 traces were not at hand): the classic fish's share
+was raised to 40% instead (`--fish-share 0.4`).
+
+Gate (`prompt_check.py --schema 5`, run 4): every check but the content
+attractor (max single goal 0.55 vs < 0.45), accepted to start.
+
+Labels: 45,021 raw, **45,011 clean** (10 exact duplicates), 7 files, ~2,350/h
+on the CPU teacher, ~2,700/h on the 1070 box. Per species: fish 17,446
+(38.8%), angler 3,310, seahorse 3,302, crab 3,259, puffer 3,232, eel 3,011,
+octopus 3,004, lobster 2,850, shark 2,842, squid 2,755. seek_food 45% overall
+(the fold flags it): the new species' tanks sampled hungry states more often
+(60% of their states at hunger >= 5 vs 34% for the fish); at equal hunger the
+rate matches (hunger < 5: 18% vs 16%; >= 5: 76% vs 66%).
+
+**The dart fix.** The first student (v5m-a, 7,000 iters CPU, val 0.710)
+passed the acceptance at 88% but bold fish had all but stopped playing:
+probe P(dart) bold 0->9 0.01->0.02 (v4m 0.03->0.20). The teacher's own labels
+were the cause: on real states a content bold 7-9 fish darted 6%. The identity
+paragraph gained one sentence ("Play is a bold fish's nature ... roughly one
+choice in four"); a version that also said "unless bored after a dart" broke
+bored-0 bubbles (0.23), so it was cut. Only the states the sentence is about
+were relabelled (`relabel_subset.py`: species fish, bold 7-9, energy >= 6,
+hunger <= 4, stress <= 3, day - 1,459 states): content bold 7-9 dart 7% ->
+12%, bold 9 + energy 8+ 15% -> 26%; bored, social, last-dart and bubbles rows
+unchanged. The 726 content rows of that set train 3x (`out/v5f_train.jsonl`,
+46,463 rows).
+
+**v5m (shipped = the dart-fix run, `model_q4_v5f.bin`):** 14.19M, dim 384, 8
+layers, 7,000 iters on CPU in ~75 min (0.61 s/iter), best val 0.718; q4 7.56
+MB, sha256 325b34fb...
+
+| | v5m-a (first) | **v5m (shipped)** |
+|---|---|---|
+| teacher agreement, 400+ states (eval.py, seed 777) | 88% | **84%** |
+| per species (min .. max) | 82.9 .. 92.1% | **78.1% (fish) .. 93.3% (eel)** |
+| real states: bold 9 energetic content, P(dart) (teacher 30%) | 11% | **31%** |
+| real states: bold 7-9 content, P(dart) (teacher 15%) | 4% | **18%** |
+| real states: social 8-9 / 0-1 content, P(follow) (teacher 84 / 12%) | 89 / 15% | **86 / 18%** |
+| real states: starving squid (hunger 8-9) (teacher 81%) | 86% | **86%** |
+| probe: starving, min over 18 fish identities | 0.98 | **0.93** |
+| probe: bored 0 -> 9 at the bubbles, P(bubbles) | 0.02 -> 0.00 | **0.87 -> 0.00** |
+| sim, 5 min, 10 fish: survival overrides | 0 | **0** |
+| sim, 5 min: landmark time / zones per fish-minute / dart share | 26% / 2.5 / 0% | **28% / 2.2 / 1%** |
+
+Known corner: the probe's one synthetic starving squid (social 7, a friend
+mid 3, food near 12) gets follow_friend from v5m where the teacher says
+seek_food 20/20; on 80 real starving-squid states v5m seeks food 86-94%. The
+probe's synthetic personality panel also reads low (P(follow) social 0->9
+0.00->0.12) while real states keep the full cliff (above) - judge on the real
+states.
+
+## The jellyfish, v5j — 2026-10-09
+
+The tenth creature after the first nine shipped: one new tokenizer word
+(`jellyfish`, id 65, vocab 66), one new sentence in the teacher prompt, a
+jellyfish-focused labelling run folded onto the shipped v5f training set, one
+retrain. Nothing else in the schema moved; a tank still on a 65-word tokenizer
+hears a jellyfish as `fish` (`advisor_core_species_word`).
+
+**The teacher gate (`prompt_check.py --schema 5`, 854 calls, gemma4:26b on the
+GTX 1070 box, ~20 min a run) took three sentences:**
+
+| jellyfish sentence | P(dart \| energetic) | P(rest+explore \| content) | P(bubbles \| bubble near) |
+|---|---|---|---|
+| 1: "visits the bubbles more than a fish would ... a social one with a friend near follows" | 0.00 | **0.13** (bubbles 53%, follow 33%) | 0.60 |
+| 2: "rest or explore is the default ... bubbles only when near, and even then only sometimes" | 0.00 | 0.90 | **0.00** |
+| 3 (kept): "... with bubble near visit_bubbles is a frequent choice (about a third of the time), mid or far never; follows only at social 7+" | 0.00 | 0.67 | 0.87 |
+
+The teacher reads a soft licence ("more than a fish would") as the default
+and a soft limit ("only sometimes") as never; it wants proportions. The other
+checks stayed in their usual noise band (lobster day rest 0.10-0.23 on n=30,
+as in every v5 gate).
+
+**Labels:** `gen_traces.py --schema 5 --focus jellyfish --focus-share 0.8
+--fish-share 0.25`, 6,000 states in 91 min on two teachers at once (3 workers
+on the 1070 box at 45 states/min, 2 on the local CPU teacher at 39/min);
+5,998 kept, 3,805 of them jellyfish. What the teacher said about the
+jellyfish, on the real habitat states:
+
+| jellyfish states | n | teacher's goals |
+|---|---|---|
+| content, day (hunger ≤ 4) | 1,093 | explore 62%, seek_food 17%, bubbles 12%, follow 6% |
+| ... with the bubble column near | 165 | **bubbles 55%**, explore 23% |
+| ... bubble mid / far | 928 | explore 70%, bubbles 4% |
+| ... social ≥ 7, friend near | 159 | explore 49%, follow 21% |
+| night (hunger ≤ 6) | 506 | rest 93% |
+| starving (hunger ≥ 8) | 1,514 | seek_food 87%, rest 12% |
+| dart_play, anywhere | 3,805 | **0** |
+
+**v5j (shipped, `model_q4_v5j.bin`):** v5f_train + the jellyfish run = 52,461
+rows; 14.19M, dim 384, 8 layers, 7,000 iters on CPU in 65 min (0.56 s/iter),
+best val 0.717 (v5m 0.718); q4 7.56 MB (7,560,088 B), sha256 55533ac5...
+
+| | v5m (shipped 10-07) | **v5j** |
+|---|---|---|
+| teacher agreement, 448 states (eval.py, seed 777) | 84% | **83%** |
+| per species (min .. max) | 78.1% (fish) .. 93.3% (eel) | **72.3% (lobster) .. 93.3% (angler)**; fish 80.6%, jellyfish **91.9%** (n=37) |
+| probe, content jellyfish, day | — | explore 0.83, rest 0.12, bubbles 0.03, dart 0.00 |
+| probe, jellyfish night / starving / friend near | — | rest 1.00 / seek_food 0.99 / follow 0.38 |
+| probe: starving, min over 18 fish identities | 0.93 | **0.77** (one timid identity; sampled, P(not seek_food) 0.00 at T 0.5-1.0) |
+| probe: bored 0 -> 9 at the bubbles, P(bubbles) | 0.87 -> 0.00 | **0.60 -> 0.00** |
+| 800 real states: greedy == teacher / in top-2 | — | 88% / 98% |
+| sim, 60 s, 12 fish (`--selftest-llm`): survival overrides | 0 | **0** |
+
+Lobster slipped to 72.3% on 47 states (the gate's lobster-day rest also read
+low that evening; the lobster's probe still rests by day 0.83 and wakes at
+night 0.04). The classic fish's probes are unchanged in shape: the bold cliff
+at 7, social 0 -> 9 follow 0.01 -> 0.28, night rest 1.00.
+
+**Sim:** the jellyfish gait test (`--selftest-species`): explore 60 s at
+28-44 pulses, speed < 0.6 x fish, ≤ 2% ground time; rest 7-15 pulses hanging
+at 0.35-0.75 of the depth; a spook gives ≥ 3 hurried pulses in 4 s, no ink,
+spark or puff. All 42 selftests pass on the three boards with v5j loaded.

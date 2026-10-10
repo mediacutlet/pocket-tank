@@ -1,0 +1,845 @@
+{
+  "pixel_and_font_bytes": 331320,
+  "icons": [
+    {
+      "theme": "quiet-lagoon",
+      "file": "icon_bold.svg",
+      "width": 16,
+      "height": 16,
+      "bytes": 768,
+      "sha256": "daf7883fb77aabcb24906a8d378719e6f579f424c903280a1c6bc4cbec3289ca"
+    },
+    {
+      "theme": "quiet-lagoon",
+      "file": "icon_cautious.svg",
+      "width": 16,
+      "height": 16,
+      "bytes": 768,
+      "sha256": "64a7e5ef49e4dd33faf525702d3617a5d8c32aeb93901a0d261411a69ab8d17a"
+    },
+    {
+      "theme": "quiet-lagoon",
+      "file": "icon_curiosity.svg",
+      "width": 24,
+      "height": 24,
+      "bytes": 1728,
+      "sha256": "daf7883fb77aabcb24906a8d378719e6f579f424c903280a1c6bc4cbec3289ca"
+    },
+    {
+      "theme": "quiet-lagoon",
+      "file": "icon_curious.svg",
+      "width": 16,
+      "height": 16,
+      "bytes": 768,
+      "sha256": "daf7883fb77aabcb24906a8d378719e6f579f424c903280a1c6bc4cbec3289ca"
+    },
+    {
+      "theme": "quiet-lagoon",
+      "file": "icon_energy.svg",
+      "width": 24,
+      "height": 24,
+      "bytes": 1728,
+      "sha256": "b17e31555034bb9b2e34963a8770753532c0528ece618744f8aa909faf1d933a"
+    },
+    {
+      "theme": "quiet-lagoon",
+      "file": "icon_hunger.svg",
+      "width": 24,
+      "height": 24,
+      "bytes": 1728,
+      "sha256": "10b98f645ad188e20a10f6b44bf286158e8f0f62c7fe76396eeb642afb36171e"
+    },
+    {
+      "theme": "quiet-lagoon",
+      "file": "icon_shy.svg",
+      "width": 16,
+      "height": 16,
+      "bytes": 768,
+      "sha256": "1429c01fa4b3053501b8f2ff7788ba1af9562bdff022f6f01af27a2310112150"
+    },
+    {
+      "theme": "quiet-lagoon",
+      "file": "icon_social.svg",
+      "width": 16,
+      "height": 16,
+      "bytes": 768,
+      "sha256": "fd6d4acbe92bf5fdb1e160d9cf6b31e7f0080244926d7affe874f2088e3d3860"
+    },
+    {
+      "theme": "quiet-lagoon",
+      "file": "icon_solo.svg",
+      "width": 16,
+      "height": 16,
+      "bytes": 768,
+      "sha256": "fd6d4acbe92bf5fdb1e160d9cf6b31e7f0080244926d7affe874f2088e3d3860"
+    },
+    {
+      "theme": "quiet-lagoon",
+      "file": "icon_stress.svg",
+      "width": 24,
+      "height": 24,
+      "bytes": 1728,
+      "sha256": "b17e31555034bb9b2e34963a8770753532c0528ece618744f8aa909faf1d933a"
+    },
+    {
+      "theme": "quiet-lagoon",
+      "file": "icon_trust.svg",
+      "width": 24,
+      "height": 24,
+      "bytes": 1728,
+      "sha256": "64a7e5ef49e4dd33faf525702d3617a5d8c32aeb93901a0d261411a69ab8d17a"
+    },
+    {
+      "theme": "quiet-lagoon",
+      "file": "icon_unknown-16.svg",
+      "width": 16,
+      "height": 16,
+      "bytes": 768,
+      "sha256": "7ac9afac29686bd1130c189f9d25c2bbc3188192e880cc6f088345d1fdae915d"
+    },
+    {
+      "theme": "quiet-lagoon",
+      "file": "icon_unknown-24.svg",
+      "width": 24,
+      "height": 24,
+      "bytes": 1728,
+      "sha256": "7ac9afac29686bd1130c189f9d25c2bbc3188192e880cc6f088345d1fdae915d"
+    },
+    {
+      "theme": "quiet-lagoon",
+      "file": "ms_first_bubbles.svg",
+      "width": 32,
+      "height": 32,
+      "bytes": 3072,
+      "sha256": "13894d825c70dd66ec4b5feac745e27b96ecf0ac0836e426408f1ca130b2b071"
+    },
+    {
+      "theme": "quiet-lagoon",
+      "file": "ms_first_dart.svg",
+      "width": 32,
+      "height": 32,
+      "bytes": 3072,
+      "sha256": "daf7883fb77aabcb24906a8d378719e6f579f424c903280a1c6bc4cbec3289ca"
+    },
+    {
+      "theme": "quiet-lagoon",
+      "file": "ms_first_feeding.svg",
+      "width": 32,
+      "height": 32,
+      "bytes": 3072,
+      "sha256": "10b98f645ad188e20a10f6b44bf286158e8f0f62c7fe76396eeb642afb36171e"
+    },
+    {
+      "theme": "quiet-lagoon",
+      "file": "ms_first_follow.svg",
+      "width": 32,
+      "height": 32,
+      "bytes": 3072,
+      "sha256": "fd6d4acbe92bf5fdb1e160d9cf6b31e7f0080244926d7affe874f2088e3d3860"
+    },
+    {
+      "theme": "quiet-lagoon",
+      "file": "ms_first_glass_cleaning.svg",
+      "width": 32,
+      "height": 32,
+      "bytes": 3072,
+      "sha256": "5a4c41229a20cbebaa0128a25c1940bcb46ec026b9c41d754e44be07d8294f6d"
+    },
+    {
+      "theme": "quiet-lagoon",
+      "file": "ms_first_hold_approach.svg",
+      "width": 32,
+      "height": 32,
+      "bytes": 3072,
+      "sha256": "64a7e5ef49e4dd33faf525702d3617a5d8c32aeb93901a0d261411a69ab8d17a"
+    },
+    {
+      "theme": "quiet-lagoon",
+      "file": "ms_first_meal.svg",
+      "width": 32,
+      "height": 32,
+      "bytes": 3072,
+      "sha256": "10b98f645ad188e20a10f6b44bf286158e8f0f62c7fe76396eeb642afb36171e"
+    },
+    {
+      "theme": "quiet-lagoon",
+      "file": "ms_first_play_session.svg",
+      "width": 32,
+      "height": 32,
+      "bytes": 3072,
+      "sha256": "daf7883fb77aabcb24906a8d378719e6f579f424c903280a1c6bc4cbec3289ca"
+    },
+    {
+      "theme": "quiet-lagoon",
+      "file": "ms_first_quiet_night.svg",
+      "width": 32,
+      "height": 32,
+      "bytes": 3072,
+      "sha256": "ebe4a466675cd44f30be0a77b5f5269fb5371f4a24720a2816e3d03397ee9888"
+    },
+    {
+      "theme": "quiet-lagoon",
+      "file": "ms_first_reef.svg",
+      "width": 32,
+      "height": 32,
+      "bytes": 3072,
+      "sha256": "1429c01fa4b3053501b8f2ff7788ba1af9562bdff022f6f01af27a2310112150"
+    },
+    {
+      "theme": "quiet-lagoon",
+      "file": "ms_first_seagrass.svg",
+      "width": 32,
+      "height": 32,
+      "bytes": 3072,
+      "sha256": "1429c01fa4b3053501b8f2ff7788ba1af9562bdff022f6f01af27a2310112150"
+    },
+    {
+      "theme": "quiet-lagoon",
+      "file": "ms_first_trimming.svg",
+      "width": 32,
+      "height": 32,
+      "bytes": 3072,
+      "sha256": "9b61d73cfe7dee1089d16fd0acef390505aadf4724f56320a30909ef4458eba0"
+    },
+    {
+      "theme": "quiet-lagoon",
+      "file": "ms_full_school.svg",
+      "width": 32,
+      "height": 32,
+      "bytes": 3072,
+      "sha256": "fd6d4acbe92bf5fdb1e160d9cf6b31e7f0080244926d7affe874f2088e3d3860"
+    },
+    {
+      "theme": "quiet-lagoon",
+      "file": "ms_sand_dollar.svg",
+      "width": 32,
+      "height": 32,
+      "bytes": 3072,
+      "sha256": "5fe09634d2eddc440516bd20084cb3e89b741d6c0c570fa77678052c01ac995c"
+    },
+    {
+      "theme": "quiet-lagoon",
+      "file": "ms_tank_changed_someone.svg",
+      "width": 32,
+      "height": 32,
+      "bytes": 3072,
+      "sha256": "64a7e5ef49e4dd33faf525702d3617a5d8c32aeb93901a0d261411a69ab8d17a"
+    },
+    {
+      "theme": "quiet-lagoon",
+      "file": "shop_angler.svg",
+      "width": 32,
+      "height": 32,
+      "bytes": 3072,
+      "sha256": "6fdc2636a693fae754b06fbacf2377d880e9cdb806bae574f9149a96dc64afda"
+    },
+    {
+      "theme": "quiet-lagoon",
+      "file": "shop_castle.svg",
+      "width": 32,
+      "height": 32,
+      "bytes": 3072,
+      "sha256": "8ccf6beb22b7cc106b5e9aff9e2710f819385237fafb7706873a3e34d67f3efe"
+    },
+    {
+      "theme": "quiet-lagoon",
+      "file": "shop_cluster.svg",
+      "width": 32,
+      "height": 32,
+      "bytes": 3072,
+      "sha256": "657b7cad99f888a35ed97b76f0b4e419528ee5b2b4b73e7cf75659c60f6bee08"
+    },
+    {
+      "theme": "quiet-lagoon",
+      "file": "shop_coral.svg",
+      "width": 32,
+      "height": 32,
+      "bytes": 3072,
+      "sha256": "20f7b60f50a79606114dd4c947ab924e20f405fcd11702159cd67d2ee8392cdb"
+    },
+    {
+      "theme": "quiet-lagoon",
+      "file": "shop_crab.svg",
+      "width": 32,
+      "height": 32,
+      "bytes": 3072,
+      "sha256": "27b20326331179d4b8e55df11b8f9a41f03cb2cb70920a2b1886160b2b47582e"
+    },
+    {
+      "theme": "quiet-lagoon",
+      "file": "shop_eel.svg",
+      "width": 32,
+      "height": 32,
+      "bytes": 3072,
+      "sha256": "f0053c036c553603ffe3850a28eee0d162241e41f6897b3e50e05472d6b7e86c"
+    },
+    {
+      "theme": "quiet-lagoon",
+      "file": "shop_lobster.svg",
+      "width": 32,
+      "height": 32,
+      "bytes": 3072,
+      "sha256": "76d3f126f1e51a736c044fac6f02ef572c96d15ef03b3d1c21d81ff5cfd847c1"
+    },
+    {
+      "theme": "quiet-lagoon",
+      "file": "shop_octopus.svg",
+      "width": 32,
+      "height": 32,
+      "bytes": 3072,
+      "sha256": "8243b17612d5725be72613fb445da7dc5d8183302448a9aae176c05c8610dffb"
+    },
+    {
+      "theme": "quiet-lagoon",
+      "file": "shop_plant.svg",
+      "width": 32,
+      "height": 32,
+      "bytes": 3072,
+      "sha256": "b161271319cf32ad39adf47a384174661d68cbc030925d4695c5d558ad8e0e6c"
+    },
+    {
+      "theme": "quiet-lagoon",
+      "file": "shop_puffer.svg",
+      "width": 32,
+      "height": 32,
+      "bytes": 3072,
+      "sha256": "aab406bf2ba0e0d146c9cd7ff67a92ff1c96a2b98ed1202872b3b845acef8abe"
+    },
+    {
+      "theme": "quiet-lagoon",
+      "file": "shop_sand_dollar_16.svg",
+      "width": 16,
+      "height": 16,
+      "bytes": 768,
+      "sha256": "5fe09634d2eddc440516bd20084cb3e89b741d6c0c570fa77678052c01ac995c"
+    },
+    {
+      "theme": "quiet-lagoon",
+      "file": "shop_sand_dollar_64.svg",
+      "width": 64,
+      "height": 64,
+      "bytes": 12288,
+      "sha256": "5fe09634d2eddc440516bd20084cb3e89b741d6c0c570fa77678052c01ac995c"
+    },
+    {
+      "theme": "quiet-lagoon",
+      "file": "shop_seahorse.svg",
+      "width": 32,
+      "height": 32,
+      "bytes": 3072,
+      "sha256": "1e1eda0bdc425dafafb7e3cd0b40185a65bf295daa6469a9b7782530246fafd1"
+    },
+    {
+      "theme": "quiet-lagoon",
+      "file": "shop_shark.svg",
+      "width": 32,
+      "height": 32,
+      "bytes": 3072,
+      "sha256": "fffd0078fb07a1effb1f096cfbd57c3d6a613468b446d832874f36c70678bdca"
+    },
+    {
+      "theme": "quiet-lagoon",
+      "file": "shop_shrimp.svg",
+      "width": 32,
+      "height": 32,
+      "bytes": 3072,
+      "sha256": "806d68c962cd0dba024a40456f051c4d238e48f4f275622c65593b3d7ec03e82"
+    },
+    {
+      "theme": "quiet-lagoon",
+      "file": "shop_snail.svg",
+      "width": 32,
+      "height": 32,
+      "bytes": 3072,
+      "sha256": "8ef243d6bbf250ee5fea235da1d3dc469d1a67a8dafbe0be94365a070a3ca693"
+    },
+    {
+      "theme": "quiet-lagoon",
+      "file": "shop_squid.svg",
+      "width": 32,
+      "height": 32,
+      "bytes": 3072,
+      "sha256": "0dc04acc2a53cfa016a9bd71cdaca88b21068b4226933a0c69f0937231dafe76"
+    },
+    {
+      "theme": "quiet-lagoon",
+      "file": "shop_swordfish.svg",
+      "width": 32,
+      "height": 32,
+      "bytes": 3072,
+      "sha256": "868ecc8305e8c6e7a264231c2b151aa60a67562ab2e727347c8371e5229ca043"
+    },
+    {
+      "theme": "quiet-lagoon",
+      "file": "shop_urchin.svg",
+      "width": 32,
+      "height": 32,
+      "bytes": 3072,
+      "sha256": "12dabd3cbaa739ef452b500f06460bf8927ca5f63172989a6208c9f9d024702f"
+    },
+    {
+      "theme": "quiet-lagoon",
+      "file": "snail_glass.svg",
+      "width": 24,
+      "height": 24,
+      "bytes": 1728,
+      "sha256": "2fdf1719ef1de8598b45a691cc5a1d443bdc0312f88d148083d7b552d7e345d6"
+    },
+    {
+      "theme": "quiet-lagoon",
+      "file": "snail_upright.svg",
+      "width": 32,
+      "height": 32,
+      "bytes": 3072,
+      "sha256": "8ef243d6bbf250ee5fea235da1d3dc469d1a67a8dafbe0be94365a070a3ca693"
+    },
+    {
+      "theme": "quiet-lagoon",
+      "file": "tool_scissors.svg",
+      "width": 24,
+      "height": 24,
+      "bytes": 1728,
+      "sha256": "9b61d73cfe7dee1089d16fd0acef390505aadf4724f56320a30909ef4458eba0"
+    },
+    {
+      "theme": "quiet-lagoon",
+      "file": "tool_sponge.svg",
+      "width": 24,
+      "height": 24,
+      "bytes": 1728,
+      "sha256": "5a4c41229a20cbebaa0128a25c1940bcb46ec026b9c41d754e44be07d8294f6d"
+    },
+    {
+      "theme": "quiet-lagoon",
+      "file": "fish.svg",
+      "width": 48,
+      "height": 40,
+      "bytes": 5760,
+      "sha256": "296618ec8df329cee528bece7ed87c8bda6b7e12d5e29edce8389e20300c539c"
+    },
+    {
+      "theme": "tidepool-club",
+      "file": "icon_bold.svg",
+      "width": 16,
+      "height": 16,
+      "bytes": 768,
+      "sha256": "35a4d9f2db7a71504487b0a2b8cfc9c5d1ecfd89babf39f4f155c4ef71af2f88"
+    },
+    {
+      "theme": "tidepool-club",
+      "file": "icon_cautious.svg",
+      "width": 16,
+      "height": 16,
+      "bytes": 768,
+      "sha256": "750c07320459b99dcb6bbaf0e5192dbdf457b7bfd8d517bf5dc7dc60ab94ce4b"
+    },
+    {
+      "theme": "tidepool-club",
+      "file": "icon_curiosity.svg",
+      "width": 24,
+      "height": 24,
+      "bytes": 1728,
+      "sha256": "35a4d9f2db7a71504487b0a2b8cfc9c5d1ecfd89babf39f4f155c4ef71af2f88"
+    },
+    {
+      "theme": "tidepool-club",
+      "file": "icon_curious.svg",
+      "width": 16,
+      "height": 16,
+      "bytes": 768,
+      "sha256": "35a4d9f2db7a71504487b0a2b8cfc9c5d1ecfd89babf39f4f155c4ef71af2f88"
+    },
+    {
+      "theme": "tidepool-club",
+      "file": "icon_energy.svg",
+      "width": 24,
+      "height": 24,
+      "bytes": 1728,
+      "sha256": "1fadf9c220af1548b51bd675f0059df15d6b31992bdd6c1a435986a88d833ee6"
+    },
+    {
+      "theme": "tidepool-club",
+      "file": "icon_hunger.svg",
+      "width": 24,
+      "height": 24,
+      "bytes": 1728,
+      "sha256": "ee3ac5ca1ff0640b518ade3e77faadcfb787ba911a8f68d3312f0fca4c2d4121"
+    },
+    {
+      "theme": "tidepool-club",
+      "file": "icon_shy.svg",
+      "width": 16,
+      "height": 16,
+      "bytes": 768,
+      "sha256": "c48191b6d1563a16733ac8d190352135d88b66a51f6e82a28437f8ecf5a39b59"
+    },
+    {
+      "theme": "tidepool-club",
+      "file": "icon_social.svg",
+      "width": 16,
+      "height": 16,
+      "bytes": 768,
+      "sha256": "5f93960bef75b24f11fddd97bca649e9e59d68676d90c713c2657e38e53fa951"
+    },
+    {
+      "theme": "tidepool-club",
+      "file": "icon_solo.svg",
+      "width": 16,
+      "height": 16,
+      "bytes": 768,
+      "sha256": "5f93960bef75b24f11fddd97bca649e9e59d68676d90c713c2657e38e53fa951"
+    },
+    {
+      "theme": "tidepool-club",
+      "file": "icon_stress.svg",
+      "width": 24,
+      "height": 24,
+      "bytes": 1728,
+      "sha256": "1fadf9c220af1548b51bd675f0059df15d6b31992bdd6c1a435986a88d833ee6"
+    },
+    {
+      "theme": "tidepool-club",
+      "file": "icon_trust.svg",
+      "width": 24,
+      "height": 24,
+      "bytes": 1728,
+      "sha256": "750c07320459b99dcb6bbaf0e5192dbdf457b7bfd8d517bf5dc7dc60ab94ce4b"
+    },
+    {
+      "theme": "tidepool-club",
+      "file": "icon_unknown-16.svg",
+      "width": 16,
+      "height": 16,
+      "bytes": 768,
+      "sha256": "ead8691c713189e0a467a67018e88c9bc193f5a77e342c2388c356ad24516739"
+    },
+    {
+      "theme": "tidepool-club",
+      "file": "icon_unknown-24.svg",
+      "width": 24,
+      "height": 24,
+      "bytes": 1728,
+      "sha256": "ead8691c713189e0a467a67018e88c9bc193f5a77e342c2388c356ad24516739"
+    },
+    {
+      "theme": "tidepool-club",
+      "file": "ms_first_bubbles.svg",
+      "width": 32,
+      "height": 32,
+      "bytes": 3072,
+      "sha256": "f4daa472f3cd7223b700b9b47e3872643997ebd1bb2d0501282e701dddd99b0c"
+    },
+    {
+      "theme": "tidepool-club",
+      "file": "ms_first_dart.svg",
+      "width": 32,
+      "height": 32,
+      "bytes": 3072,
+      "sha256": "35a4d9f2db7a71504487b0a2b8cfc9c5d1ecfd89babf39f4f155c4ef71af2f88"
+    },
+    {
+      "theme": "tidepool-club",
+      "file": "ms_first_feeding.svg",
+      "width": 32,
+      "height": 32,
+      "bytes": 3072,
+      "sha256": "ee3ac5ca1ff0640b518ade3e77faadcfb787ba911a8f68d3312f0fca4c2d4121"
+    },
+    {
+      "theme": "tidepool-club",
+      "file": "ms_first_follow.svg",
+      "width": 32,
+      "height": 32,
+      "bytes": 3072,
+      "sha256": "5f93960bef75b24f11fddd97bca649e9e59d68676d90c713c2657e38e53fa951"
+    },
+    {
+      "theme": "tidepool-club",
+      "file": "ms_first_glass_cleaning.svg",
+      "width": 32,
+      "height": 32,
+      "bytes": 3072,
+      "sha256": "241abba31599e0e871fc441ed193c8193433626e280288993a5b34616bfa3852"
+    },
+    {
+      "theme": "tidepool-club",
+      "file": "ms_first_hold_approach.svg",
+      "width": 32,
+      "height": 32,
+      "bytes": 3072,
+      "sha256": "750c07320459b99dcb6bbaf0e5192dbdf457b7bfd8d517bf5dc7dc60ab94ce4b"
+    },
+    {
+      "theme": "tidepool-club",
+      "file": "ms_first_meal.svg",
+      "width": 32,
+      "height": 32,
+      "bytes": 3072,
+      "sha256": "ee3ac5ca1ff0640b518ade3e77faadcfb787ba911a8f68d3312f0fca4c2d4121"
+    },
+    {
+      "theme": "tidepool-club",
+      "file": "ms_first_play_session.svg",
+      "width": 32,
+      "height": 32,
+      "bytes": 3072,
+      "sha256": "35a4d9f2db7a71504487b0a2b8cfc9c5d1ecfd89babf39f4f155c4ef71af2f88"
+    },
+    {
+      "theme": "tidepool-club",
+      "file": "ms_first_quiet_night.svg",
+      "width": 32,
+      "height": 32,
+      "bytes": 3072,
+      "sha256": "d3ee9a90f6d2a71b31384d2a5a04578b2f14181a32d7e62598e6ade250486622"
+    },
+    {
+      "theme": "tidepool-club",
+      "file": "ms_first_reef.svg",
+      "width": 32,
+      "height": 32,
+      "bytes": 3072,
+      "sha256": "c48191b6d1563a16733ac8d190352135d88b66a51f6e82a28437f8ecf5a39b59"
+    },
+    {
+      "theme": "tidepool-club",
+      "file": "ms_first_seagrass.svg",
+      "width": 32,
+      "height": 32,
+      "bytes": 3072,
+      "sha256": "c48191b6d1563a16733ac8d190352135d88b66a51f6e82a28437f8ecf5a39b59"
+    },
+    {
+      "theme": "tidepool-club",
+      "file": "ms_first_trimming.svg",
+      "width": 32,
+      "height": 32,
+      "bytes": 3072,
+      "sha256": "a4e9ebb0de20aed2b059554ae2acfa2da5a3a5fbe592aecf2a71a6dd6a512d4e"
+    },
+    {
+      "theme": "tidepool-club",
+      "file": "ms_full_school.svg",
+      "width": 32,
+      "height": 32,
+      "bytes": 3072,
+      "sha256": "5f93960bef75b24f11fddd97bca649e9e59d68676d90c713c2657e38e53fa951"
+    },
+    {
+      "theme": "tidepool-club",
+      "file": "ms_sand_dollar.svg",
+      "width": 32,
+      "height": 32,
+      "bytes": 3072,
+      "sha256": "2cdd200a3498cfcdc74e8b244de59fcd40589eaacf6f75ffbdc6bed4810ae37c"
+    },
+    {
+      "theme": "tidepool-club",
+      "file": "ms_tank_changed_someone.svg",
+      "width": 32,
+      "height": 32,
+      "bytes": 3072,
+      "sha256": "750c07320459b99dcb6bbaf0e5192dbdf457b7bfd8d517bf5dc7dc60ab94ce4b"
+    },
+    {
+      "theme": "tidepool-club",
+      "file": "shop_angler.svg",
+      "width": 32,
+      "height": 32,
+      "bytes": 3072,
+      "sha256": "c460b9281abaa45d2411320cc3f375516c836f864e753d568d803cfbb113b1da"
+    },
+    {
+      "theme": "tidepool-club",
+      "file": "shop_castle.svg",
+      "width": 32,
+      "height": 32,
+      "bytes": 3072,
+      "sha256": "11a4ac2d8978e6822287cc843e09abfef31ba7b999df4944c130270af51d7246"
+    },
+    {
+      "theme": "tidepool-club",
+      "file": "shop_cluster.svg",
+      "width": 32,
+      "height": 32,
+      "bytes": 3072,
+      "sha256": "172c7fabb31b0d7924464984f5c5db82ce42656e07e4fb57c6d0b03ff7ec5d20"
+    },
+    {
+      "theme": "tidepool-club",
+      "file": "shop_coral.svg",
+      "width": 32,
+      "height": 32,
+      "bytes": 3072,
+      "sha256": "b2fa855a15b58389e27aa2990b6e499455d4ebb765244474ad38ec97648a3071"
+    },
+    {
+      "theme": "tidepool-club",
+      "file": "shop_crab.svg",
+      "width": 32,
+      "height": 32,
+      "bytes": 3072,
+      "sha256": "7d254f8dc6896e0e92c5b7bf8265ebcc695a77d4a42a7a3337a60952422b09fc"
+    },
+    {
+      "theme": "tidepool-club",
+      "file": "shop_eel.svg",
+      "width": 32,
+      "height": 32,
+      "bytes": 3072,
+      "sha256": "62307f868325da7985bf1e1d55da0a80a74fc256fde3ead4c4db03f172fd1cbc"
+    },
+    {
+      "theme": "tidepool-club",
+      "file": "shop_lobster.svg",
+      "width": 32,
+      "height": 32,
+      "bytes": 3072,
+      "sha256": "12bbd70407a40c14cac5d9e61a3d98b6a461940a302d2afd7bde526531ce48ae"
+    },
+    {
+      "theme": "tidepool-club",
+      "file": "shop_octopus.svg",
+      "width": 32,
+      "height": 32,
+      "bytes": 3072,
+      "sha256": "19305b9261a98b94e39e524d0a81df64d021384a987f80afc94b2ffa27cfe012"
+    },
+    {
+      "theme": "tidepool-club",
+      "file": "shop_plant.svg",
+      "width": 32,
+      "height": 32,
+      "bytes": 3072,
+      "sha256": "4be85c363ed176e40a67cbd5842c61ba2c7fa3e8ff89e7639d3215bf4803fd4f"
+    },
+    {
+      "theme": "tidepool-club",
+      "file": "shop_puffer.svg",
+      "width": 32,
+      "height": 32,
+      "bytes": 3072,
+      "sha256": "25ef9c32e56ed039d58ee33d217eb1cb785c01558a29693c8cafed27db2fb1fc"
+    },
+    {
+      "theme": "tidepool-club",
+      "file": "shop_sand_dollar_16.svg",
+      "width": 16,
+      "height": 16,
+      "bytes": 768,
+      "sha256": "2cdd200a3498cfcdc74e8b244de59fcd40589eaacf6f75ffbdc6bed4810ae37c"
+    },
+    {
+      "theme": "tidepool-club",
+      "file": "shop_sand_dollar_64.svg",
+      "width": 64,
+      "height": 64,
+      "bytes": 12288,
+      "sha256": "2cdd200a3498cfcdc74e8b244de59fcd40589eaacf6f75ffbdc6bed4810ae37c"
+    },
+    {
+      "theme": "tidepool-club",
+      "file": "shop_seahorse.svg",
+      "width": 32,
+      "height": 32,
+      "bytes": 3072,
+      "sha256": "c313f519a77830e283583355eecec3a223431d25d72652b3e68d6e69b5284dc7"
+    },
+    {
+      "theme": "tidepool-club",
+      "file": "shop_shark.svg",
+      "width": 32,
+      "height": 32,
+      "bytes": 3072,
+      "sha256": "eb2eab485c2f642deaeb318292b74d39b1f96370ac3ef3d98bd1d4db177105e7"
+    },
+    {
+      "theme": "tidepool-club",
+      "file": "shop_shrimp.svg",
+      "width": 32,
+      "height": 32,
+      "bytes": 3072,
+      "sha256": "c0f58f4f6fd42d6823cba822f1c03fc21fdfde78d2e5718269d8512f9a42b1c7"
+    },
+    {
+      "theme": "tidepool-club",
+      "file": "shop_snail.svg",
+      "width": 32,
+      "height": 32,
+      "bytes": 3072,
+      "sha256": "1a3c9cb2562fe02173eced1af9217678619f6e419060556f91575b36a7e36cd6"
+    },
+    {
+      "theme": "tidepool-club",
+      "file": "shop_squid.svg",
+      "width": 32,
+      "height": 32,
+      "bytes": 3072,
+      "sha256": "aae6e52612155e74827cc0aa395401029ebb8a34fc06632ce8ed77663ca94186"
+    },
+    {
+      "theme": "tidepool-club",
+      "file": "shop_swordfish.svg",
+      "width": 32,
+      "height": 32,
+      "bytes": 3072,
+      "sha256": "24ba9fab3d4c13f8bc0b4f267b61d9f2db374246e6b79d70c8ee857c9a5aea4e"
+    },
+    {
+      "theme": "tidepool-club",
+      "file": "shop_urchin.svg",
+      "width": 32,
+      "height": 32,
+      "bytes": 3072,
+      "sha256": "6c264677a7bb5f52e2592f21ec2662fe2fa217f93e3cf19cfa5b24038302429c"
+    },
+    {
+      "theme": "tidepool-club",
+      "file": "snail_glass.svg",
+      "width": 24,
+      "height": 24,
+      "bytes": 1728,
+      "sha256": "1a3c9cb2562fe02173eced1af9217678619f6e419060556f91575b36a7e36cd6"
+    },
+    {
+      "theme": "tidepool-club",
+      "file": "snail_upright.svg",
+      "width": 32,
+      "height": 32,
+      "bytes": 3072,
+      "sha256": "1a3c9cb2562fe02173eced1af9217678619f6e419060556f91575b36a7e36cd6"
+    },
+    {
+      "theme": "tidepool-club",
+      "file": "tool_scissors.svg",
+      "width": 24,
+      "height": 24,
+      "bytes": 1728,
+      "sha256": "a4e9ebb0de20aed2b059554ae2acfa2da5a3a5fbe592aecf2a71a6dd6a512d4e"
+    },
+    {
+      "theme": "tidepool-club",
+      "file": "tool_sponge.svg",
+      "width": 24,
+      "height": 24,
+      "bytes": 1728,
+      "sha256": "241abba31599e0e871fc441ed193c8193433626e280288993a5b34616bfa3852"
+    },
+    {
+      "theme": "tidepool-club",
+      "file": "fish.svg",
+      "width": 48,
+      "height": 40,
+      "bytes": 5760,
+      "sha256": "d1b17d561339945c708b4501a546149445b4413957a3a9faf3f37e8c2aeb7e82"
+    },
+    {
+      "theme": "blackwater",
+      "file": "fish.svg",
+      "width": 48,
+      "height": 40,
+      "bytes": 5760,
+      "sha256": "18e4e7c0ed3aec3ac3d47c6061f534019261d6810ce6af178ad42a842f7cfd5a"
+    }
+  ]
+}

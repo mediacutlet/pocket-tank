@@ -1,4 +1,4 @@
-/* word_tok.h — pocket-tank word tokenizer (model/train_tokenizer.py), C side.
+/* word_tok.h — Aqua Pets word tokenizer (model/train_tokenizer.py), C side.
  * tokenizer.bin: int32 max_len, then vocab_size x { float score, int32 len, bytes }.
  * ids 0..2 are <unk>/BOS/EOS; ids >= 3 are lexicon words stored with a leading space. */
 #ifndef WORD_TOK_H

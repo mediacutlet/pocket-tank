@@ -194,6 +194,13 @@ void audio_port_play(int cue, int pitch_q8) {
     xSemaphoreGive(s_mx);
     if (started) xTaskNotifyGive(s_task);
 }
+void audio_port_jingle(bool on) {
+    if (!s_ok) return;
+    xSemaphoreTake(s_mx, portMAX_DELAY);
+    audio_jingle(on);
+    xSemaphoreGive(s_mx);
+    if (on) xTaskNotifyGive(s_task);
+}
 void audio_port_prewarm(void) {
     if (!s_ok) return;
     s_quiet_since = 0;                          /* activity: the idle clock restarts */

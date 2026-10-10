@@ -1,4 +1,4 @@
-/* main.c — pocket-tank firmware entry (ESP32-S3).
+/* main.c — Aqua Pets firmware entry (ESP32-S3).
  *   core 0: tank reflex layer + render at 60 fps, frames to the display port
  *   core 1: LLM advisor (q4_model over the mmap'd flash model partition)
  * Boot: assert the PSRAM plan, mmap the model partition, start both loops.
@@ -68,7 +68,7 @@ static bool s_rtc;                         /* an RTC chip answered: the wall clo
 #define PWR_SENSE ((gpio_num_t)board_pwr_sense_pin())   /* the round board and the watch: a line that is high while the PWR key is down */
 static bool pwr_sensed(void) { return board_pwr_sense_pin() >= 0; }
 static bool pwr_sense_down(void) { return pwr_sensed() && gpio_get_level(PWR_SENSE); }
-#ifdef CONFIG_POCKET_TANK_DISPLAY_SH8601
+#ifdef CONFIG_AQUA_PETS_DISPLAY_SH8601
 extern i2c_master_bus_handle_t board_i2c_bus(void);
 #else
 static i2c_master_bus_handle_t board_i2c_bus(void) { return NULL; }
@@ -78,7 +78,7 @@ static i2c_master_bus_handle_t board_i2c_bus(void) { return NULL; }
 extern const uint8_t tokenizer_bin_start[] asm("_binary_tokenizer_bin_start");
 extern const uint8_t tokenizer_bin_end[]   asm("_binary_tokenizer_bin_end");
 
-static const char *TAG = "pocket-tank";
+static const char *TAG = "aqua-pets";
 static tank_t tank;
 static uint16_t *fb[PLAN_FB_COUNT];
 static bool llm_ok = false;
@@ -592,6 +592,15 @@ static void start_tank_task(void *arg) {
         ESP_LOGE(TAG, "THE TANK TASK COULD NOT START: no internal RAM for its stack");
 }
 #define FRAME_MIN_MS 40                      /* the frame rate's ceiling: 25 fps (see the loop's foot) */
+/* the night (2026-10-10, the battery pass): lights out used to keep the full 25 fps and never
+   sleep - a tank left on the desk burned the cell at awake rates all night. Now: the frame rate
+   drops to 10 fps while the light is out and no finger is on the glass (the fish sleep, the panel
+   is dim; the bubbles still rise), and after NIGHT_OFF_S of darkness with nothing handling the
+   tank - no touch, no motion - it takes the same sleep the PWR key does (the grace, then the
+   power-off / deep sleep; the PWR key brings it back and the night is lived through at that
+   boot). Not while a cable is charging it, and not while a page is up. */
+#define NIGHT_FRAME_MS 100
+#define NIGHT_OFF_S    (2 * 3600)
 static void tank_task(void *arg) {
     (void)arg;
     int64_t last = esp_timer_get_time(); int cur = 0;
@@ -611,6 +620,7 @@ static void tank_task(void *arg) {
         imu_port_poll(now);
         if (imu_port_moving()) audio_port_prewarm();   /* in a hand: the codec stays warm (docs/AUDIO.md) */
         if (imu_port_handled()) tank_handled(&tank);   /* ... and the light stays on (two polls of motion: a bump on the desk is not a pick-up) */
+        if (imu_port_shaken() && !tank.ui_cover) { tank_shake(&tank, 1.0f); ESP_LOGI(TAG, "shaken: the creatures are tossed"); }   /* (2026-10-10) */
         bool inv = tank_orient(&tank, imu_port_inverted());   /* the live flip, or the way up settings' ROTATION locked (0.3.2) */
 #ifdef TANK_WATCH
         inv = tank_screen_turned(&tank);  /* worn on a wrist the live flip never runs (the arm swings through every angle):
@@ -629,7 +639,8 @@ static void tank_task(void *arg) {
           else if (w == SET_TAP_LIGHT) ESP_LOGI(TAG, "settings: lights out %s", v ? "AUTO (the idle rule)" : "MANUAL (double-tap the glass)");
           else if (w == SET_TAP_IDLE) ESP_LOGI(TAG, "settings: lights out after %d s still", v);
           else if (w == SET_TAP_FEED) ESP_LOGI(TAG, "settings: auto feed %s", v ? "ON" : "OFF (the keeper feeds; a starving fish loses trust)");
-          else if (w == SET_TAP_ROTATE) ESP_LOGI(TAG, "settings: rotation %s", v ? (tank.orient_inv ? "LOCKED (turned over)" : "LOCKED (upright)") : "unlocked (the picture follows the tank)"); }
+          else if (w == SET_TAP_ROTATE) ESP_LOGI(TAG, "settings: rotation %s", v ? (tank.orient_inv ? "LOCKED (turned over)" : "LOCKED (upright)") : "unlocked (the picture follows the tank)");
+          else if (w == SET_TAP_ABOUT) { audio_port_jingle(v != 0); ESP_LOGI(TAG, "settings: about page %s", v ? "up (the jingle plays)" : "closed"); } }
         if (touch_port_take_update() == UPD_TAP_CHECK) request_update();   /* the updates page's CHECK: save, restart into update mode */
         { int r = touch_port_take_shop();                               /* the shop's UNLOCK / MOVE / SELL */
           if (r >= SHOP_TAP_SELL) {                                     /* sold back: the refund, the piece gone, the row for sale again */
@@ -649,6 +660,11 @@ static void tank_task(void *arg) {
                       ESP_LOGI(TAG, "shop: placement page up for the %s", SD_ITEMS[item].name); } }
               else ESP_LOGI(TAG, "shop: %s refused (balance %d, price %d)", SD_ITEMS[item].name, (int)tank.sd_balance, SD_ITEMS[item].price); } }
         brightness_apply(tank.night);
+        if (tank.night && !tank.ui_cover && !touch_port_down() && tank.idle_s > (float)NIGHT_OFF_S && !s_bat_chg) {
+            ESP_LOGI(TAG, "night: %d h dark and untouched - sleeping as the PWR key would", NIGHT_OFF_S / 3600);
+            enter_sleep();                      /* returns only for a wake within the grace */
+            tank_handled(&tank);                /* the wake was a hand: the idle clock restarts */
+        }
         { static int64_t last_bat; if (now - last_bat > 5LL * 60 * 1000000) {   /* battery log: awake sample every 5 min */
             batlog_add(battery_pct(), battery_port_vbat_mv(), display_port_brightness(), false, last_bat ? "" : "boot"); last_bat = now; } }
         int64_t pf_tick = esp_timer_get_time(); polls_us += pf_tick - now;
@@ -786,7 +802,8 @@ static void tank_task(void *arg) {
            3.93 s (~40 ms a decision per frame a second; the bigger glasses pay more). Strato: decisions
            past 4 s are too slow, so a light tank no longer spends the model's time on frames past 25.
            Always yield >= 1 tick. */
-        int rest = (int)((FRAME_MIN_MS * 1000 - (esp_timer_get_time() - now)) / 1000);
+        int frame_ms = tank.night && !tank.ui_cover && !touch_port_down() ? NIGHT_FRAME_MS : FRAME_MIN_MS;
+        int rest = (int)((frame_ms * 1000 - (esp_timer_get_time() - now)) / 1000);
         slept_from = esp_timer_get_time(); tail_us += slept_from - pf_tail;
         vTaskDelay(pdMS_TO_TICKS(rest < 1 ? 1 : rest));
     }
@@ -854,7 +871,7 @@ void device_provision_request(void) {
 }
 
 void app_main(void) {
-    ESP_LOGI(TAG, "pocket-tank v%s %s (build %s) for %s boot%s", PT_RELEASE, PT_RELEASE_STAGE, version_port_string(), PT_BOARD,
+    ESP_LOGI(TAG, "Aqua Pets v%s %s (build %s) for %s boot%s", PT_RELEASE, PT_RELEASE_STAGE, version_port_string(), PT_BOARD,
              esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_EXT0 || esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_EXT1 ? " (woken by button)" : "");
     gpio_config_t btn = { .pin_bit_mask = 1ULL << BTN_SLEEP, .mode = GPIO_MODE_INPUT,
                           .pull_up_en = GPIO_PULLUP_ENABLE };

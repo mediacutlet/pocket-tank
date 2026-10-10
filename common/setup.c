@@ -51,8 +51,27 @@ static int  first_page(void) { return s_rename ? SETUP_PG_RENAME : s_place ? SET
 static bool nav_on_top(void) { return (page_is_name() && s_kbd != SETUP_KBD_GRID) || page_is_look() || s_page == SETUP_PG_BUBBLES || s_page == SETUP_PG_PLACE; }
 static int  place_y(void) { return s_item == 3 ? SETUP_PLACE_CORAL_Y : s_item == 4 ? SETUP_PLACE_CLUSTER_Y : SETUP_PLACE_Y; }   /* where the drag zone starts */
 static const char *fish_name(const tank_t *t, int i) { return i >= 0 && i < t->n_fish ? t->fish[i].name : "?"; }
+/* Modern wheel coordinates share the native device's safe settings rectangle. */
+static void wheel_bounds(int *x, int *y, int *w, int *h) {
+    render_settings_bounds(x, y, w, h); *x -= PAGE_X; *y -= PAGE_Y;
+}
 static void stage(tank_t *t);
 static void tidy_name(tank_t *t, int fish);
+/* the species' words (2026-10-05): what a creature is called on these pages
+   - "FRY" for the classic fish, else its species ("SEAHORSE") - with its article */
+static bool is_species(const fish_t *f) { return f->species > SP_FISH && f->species < SP_COUNT; }
+static const char *kind_word(const fish_t *f) { return is_species(f) ? SPECIES[f->species].name : "FRY"; }
+static const char *article(const char *w) { return strchr("AEIOU", w[0]) ? "AN" : "A"; }
+/* a surprise: hatched as a species its parents are not (SP_MUTATE_P) */
+static bool is_mutant(const tank_t *t, const fish_t *f) {
+    return f->parent_a >= 0 && f->parent_a < t->n_fish && t->fish[f->parent_a].species != f->species;
+}
+static void name_caption(char *out, size_t n, const tank_t *t) {
+    const fish_t *f = &t->fish[page_fish()];
+    if (s_rename) snprintf(out, n, is_species(f) ? "RENAME YOUR %s" : "RENAME YOUR FISH", kind_word(f));
+    else if (s_birth) snprintf(out, n, "NAME THE NEW %s", kind_word(f));
+    else snprintf(out, n, page_fish() == 0 ? "NAME THE FIRST FISH" : "NAME THE SECOND FISH");
+}
 
 void setup_begin(tank_t *t) {
     if (t->n_fish < 2) { progression_setup_done(t); s_active = false; return; }   /* nothing to name */
@@ -111,6 +130,10 @@ static void stage(tank_t *t) {                          /* who is on stage, and 
     if (s_active && (page_is_name() || page_is_look())) {
         t->stage_fish = (int8_t)page_fish(); t->stage_x = SETUP_STAGE_X;
         t->stage_y = page_is_name() ? SETUP_STAGE_NAME_Y : SETUP_STAGE_LOOK_Y;
+        if (t->theme && page_is_name() && !s_kbd) {
+            int x,y,w,h; wheel_bounds(&x,&y,&w,&h);
+            t->stage_y = PAGE_Y + y + 65;
+        }
     } else t->stage_fish = -1;
 }
 void setup_cancel(tank_t *t) {
@@ -254,6 +277,19 @@ static int nearest_slot(float x) {
 int setup_hit(float x, float y) {
     if (!s_active) return 0;
     x -= PAGE_X; y -= PAGE_Y;                           /* the page's own coordinates (render.h) */
+    if (theme_active() && page_is_name() && !s_kbd) {
+        int bx,by,bw,bh; wheel_bounds(&bx,&by,&bw,&bh);
+        int sy=by+137, foot=by+bh-44;
+        if (in_box(x,y,bx,foot,112,44,0)) return SETUP_HIT_BACK;
+        if (in_box(x,y,bx+bw-112,foot,112,44,0)) return SETUP_HIT_NEXT;
+        if (x < SETUP_SLOT_X-7 || x > SETUP_SLOT_X+6*SETUP_SLOT_PX+SETUP_SLOT_W+7) return 0;
+        if (y>=sy-10 && y<sy+SETUP_SLOT_H+16) return SETUP_HIT_SLOT0+nearest_slot(x);
+        float cx=SETUP_SLOT_X+s_slot*SETUP_SLOT_PX+SETUP_SLOT_W*0.5f;
+        if (fabsf(x-cx)>22) return 0;
+        if (y>=sy-54 && y<sy-10) return SETUP_HIT_UP;
+        if (y>=sy+SETUP_SLOT_H+16 && y<sy+SETUP_SLOT_H+60) return SETUP_HIT_DOWN;
+        return 0;
+    }
     const int m = 10;                                   /* a fingertip's slop, as on the reset prompt */
     if (page_one_button())
         return in_box(x, y, SETUP_MID_X, SETUP_BTN_Y, SETUP_BTN_W, SETUP_BTN_H, m) ? SETUP_HIT_NEXT : 0;
@@ -370,8 +406,14 @@ void setup_activate(tank_t *t, int id) {
         else if (id == SETUP_HIT_DOWN) spin(f, -1);
         return;
     }
-    if (page_is_look() && id >= SETUP_HIT_BODY0 && id < SETUP_HIT_BODY0 + LOOK_N)
-        tank_set_look(t, page_fish(), LOOK_BODY[id - SETUP_HIT_BODY0], 0);   /* the accent stays its secret */
+    if (page_is_look() && id >= SETUP_HIT_BODY0 && id < SETUP_HIT_BODY0 + LOOK_N) {
+        fish_t *lf = &t->fish[page_fish()];
+        if (is_species(lf)) {                           /* a species' creature: one of its four designs, whole */
+            int v = id - SETUP_HIT_BODY0;
+            if (v < SP_VARIANTS) { lf->variant = (uint8_t)v;
+                                   tank_set_look(t, page_fish(), SPECIES[lf->species].var[v].color, SPECIES[lf->species].var[v].accent); }
+        } else tank_set_look(t, page_fish(), LOOK_BODY[id - SETUP_HIT_BODY0], 0);   /* the accent stays its secret */
+    }
 }
 
 void setup_touch(tank_t *t, float x, float y, bool down) {
@@ -486,6 +528,14 @@ static void cluster_glyph(uint16_t *fb, int stride, int cx, int y_bot, const clu
     coral_glyph(fb, stride, cx - 9, y_bot - 4, sc->coral);
     render_rect(fb, stride, cx - 4, y_bot - 12, 12, 8, sc->brain); render_rect(fb, stride, cx - 2, y_bot - 14, 8, 2, sc->brain);
 }
+/* a little shipwreck for its depth tiles (2026-10-10): a tilted hull with two holes, a mast stump */
+static void wreck_glyph(uint16_t *fb, int stride, int cx, int y_bot) {
+    const uint32_t wood = 0x6b4e35, dark = 0x3a2a1c, hole = 0x0b1a22;
+    for (int i = 0; i < 12; i++) render_rect(fb, stride, cx - 20 + i * 3 + (i < 2 ? 2 - i : 0), y_bot - 14 + (i > 9 ? i - 9 : 0), 3, 12 - (i < 2 ? 2 - i : 0) - (i > 9 ? i - 9 : 0), wood);
+    render_rect(fb, stride, cx - 18, y_bot - 15, 36, 1, dark); render_rect(fb, stride, cx - 16, y_bot - 9, 32, 1, dark);
+    render_rect(fb, stride, cx - 11, y_bot - 11, 5, 5, hole); render_rect(fb, stride, cx + 5, y_bot - 12, 6, 6, hole);
+    render_rect(fb, stride, cx - 1, y_bot - 28, 2, 14, dark); render_rect(fb, stride, cx - 5, y_bot - 24, 10, 1, dark);
+}
 static void castle_glyph(uint16_t *fb, int stride, int cx, int y_bot, uint32_t wall, uint32_t roof) {
     const uint32_t tower = 0x87795f, dark = 0x0b1a22, trim = 0xc25f38;
     render_rect(fb, stride, cx - 14, y_bot - 14, 29, 15, wall);
@@ -508,6 +558,12 @@ static void depth_tile(const tank_t *t, uint16_t *fb, int stride, int x, int y, 
     const int cx = x + w / 2, cy = y + h / 2, lh = h - 6, yb = y + h - 3;
     const uint32_t la = 0x8dbb48, lb = 0x6c9d38;
     const fish_t *who = t->n_fish > 0 ? &t->fish[0] : NULL;
+    if (item == SD_ITEM_WRECK_IDX) {                    /* the wreck: as the castle's, behind or in front of the leaves */
+        if (z == DECOR_Z_BACK) wreck_glyph(fb, stride, cx, yb);
+        leaf_glyph(fb, stride, cx - 14, yb, lh, la); leaf_glyph(fb, stride, cx + 15, yb, lh, lb);
+        if (z != DECOR_Z_BACK) wreck_glyph(fb, stride, cx, yb);
+        return;
+    }
     if (item == 2) {
         if (z == DECOR_Z_BACK) castle_glyph(fb, stride, cx, yb, 0xa99b7b, 0xc4a95e);
         leaf_glyph(fb, stride, cx - 14, yb, lh, la); leaf_glyph(fb, stride, cx + 15, yb, lh, lb);
@@ -550,6 +606,7 @@ static void panel(uint16_t *fb, int stride) {
 }
 
 void render_setup(const tank_t *t, uint16_t *fb, int stride, float clock) {
+    render_use_theme(t->theme);
     if (!s_active) return;
     const int CX = PAGE_W / 2;
     const int FLOOR = TANK_BOT - 16 - PAGE_Y;           /* the tank's sand line, in the page's coordinates */
@@ -639,12 +696,13 @@ void render_setup(const tank_t *t, uint16_t *fb, int stride, float clock) {
                 render_rect_edge(fb, stride, x, SETUP_COL_Y, SETUP_COL_W, SETUP_COL_H, on ? C_TEXT : C_DIM);
                 if (on) render_rect_edge(fb, stride, x + 1, SETUP_COL_Y + 1, SETUP_COL_W - 2, SETUP_COL_H - 2, C_TEXT);
             }
-        } else text_c(fb, stride, CX, SETUP_DEPTH_HINT_Y, 2, C_CAPT, s_item == 2 ? castle_hint[z] : hint[z]);
+        } else text_c(fb, stride, CX, SETUP_DEPTH_HINT_Y, 2, C_CAPT, s_item == 2 || s_item == SD_ITEM_WRECK_IDX ? castle_hint[z] : hint[z]);
         float x0 = tank_decor_x(t, s_item) - tank_decor_half_w(s_item) - 10, x1 = tank_decor_x(t, s_item) + tank_decor_half_w(s_item) + 10, top = TANK_BOT - 16 - 40;
         if (s_item == 0) tank_veg_bed(t, 3, NULL, NULL, &top, NULL);   /* the leaves' reach */
         if (s_item == 2) top = TANK_BOT - 16 - 146;                    /* the tallest spire */
         if (s_item == 3) top = TANK_BOT - 14 + DECOR_SINK - 92;        /* the coral's top tip */
         if (s_item == 4) top = TANK_BOT - 14 + DECOR_SINK - 120;       /* the cluster's tallest tube */
+        if (s_item == SD_ITEM_WRECK_IDX) top = TANK_BOT - 14 + DECOR_SINK - 84;   /* the wreck's mast */
         x0 -= PAGE_X; x1 -= PAGE_X; top -= PAGE_Y;                     /* the piece is in the tank; the stripe is drawn on the page */
         int sy = (int)top - 8; if (sy < place_y()) sy = place_y();
         render_rect_blend(fb, stride, (int)x0, sy, (int)(x1 - x0), FLOOR - sy + 4, C_EDGE, 46);
@@ -657,8 +715,10 @@ void render_setup(const tank_t *t, uint16_t *fb, int stride, float clock) {
         const fish_t *f = &t->fish[page_fish()];
         bool grid = s_kbd == SETUP_KBD_GRID;
         panel(fb, stride);
-        text_c(fb, stride, CX, SETUP_Y + (grid ? 12 : 7), 2, C_CAPT, s_rename ? "RENAME YOUR FISH" : s_birth ? "NAME THE NEW FRY" : page_fish() == 0 ? "NAME THE FIRST FISH" : "NAME THE SECOND FISH");
-        if (grid) render_fish_preview(fb, stride, SETUP_X + 88, SETUP_Y + 72, 2.0f, f->color, f->fin, f->accent, clock);
+        char ncap[40]; name_caption(ncap, sizeof ncap, t);
+        text_c(fb, stride, CX, SETUP_Y + (grid ? 12 : 7), 2, C_CAPT, ncap);
+        if (grid) render_creature_preview(fb, stride, SETUP_X + 88, SETUP_Y + 72, 2.0f * 22 / fmaxf(22, render_species_half_len(f->species)),
+                                          f->species, f->variant, f->color, f->fin, f->accent, clock);   /* an eel fits the box (2026-10-05) */
         const int SL = 22, NX = grid ? SETUP_X + 160 : CX - FISH_NAME_MAX * SL / 2 + 2, NY = grid ? SETUP_Y + 58 : SETUP_TOP_BTN_Y + (SETUP_BTN_H - 28) / 2;
         int n = name_len(f);
         for (int i = 0; i < FISH_NAME_MAX; i++) {
@@ -691,43 +751,58 @@ void render_setup(const tank_t *t, uint16_t *fb, int stride, float clock) {
            colour, its name spans the middle in that colour, the active slot
            bright with the chevrons, the rest dimmed; slots past the first
            blank are just faint underlines */
+        int bx=0,by=0,bw=0,bh=0; wheel_bounds(&bx,&by,&bw,&bh);
+        int sy=theme_active() ? by+137 : SETUP_SLOT_Y;
         const fish_t *f = &t->fish[page_fish()];
-        fish_ring(fb, stride, f, 17 * f->size + 6, f->color);
-        render_rect_blend(fb, stride, -PAGE_X, SETUP_SLOT_Y - SETUP_ARROW_GAP - 2, TANK_W, SETUP_SLOT_H + 2 * SETUP_ARROW_GAP + 36, C_PANEL, 150);
-        text_c(fb, stride, CX, SETUP_Y + 7, 2, C_CAPT, s_rename ? "RENAME YOUR FISH" : s_birth ? "NAME THE NEW FRY" : page_fish() == 0 ? "NAME THE FIRST FISH" : "NAME THE SECOND FISH");
-        nav(fb, stride, true, s_rename ? "DONE" : "NEXT", s_rename);
+        fish_ring(fb, stride, f, render_fish_ring_r(f) + 6, f->color);
+        render_rect_blend(fb, stride, -PAGE_X, sy - SETUP_ARROW_GAP - 2, TANK_W, SETUP_SLOT_H + 2 * SETUP_ARROW_GAP + 36, C_PANEL, 150);
+        char ncap[40]; name_caption(ncap, sizeof ncap, t);
+        if (theme_active()) {
+            text_c(fb,stride,CX,by+4,2,C_CAPT,"NAME YOUR PET");
+            render_button(fb,stride,bx,by+bh-44,112,44,C_KEY,C_DIM,s_rename?"CANCEL":"BACK",2);
+            render_button(fb,stride,bx+bw-112,by+bh-44,112,44,C_GO,C_GO_E,s_rename?"DONE":"NEXT",2);
+        } else {
+            text_c(fb,stride,CX,SETUP_Y+7,2,C_CAPT,ncap);
+            nav(fb,stride,true,s_rename?"DONE":"NEXT",s_rename);
+        }
         int n = name_len(f);
         if (s_slot > n) s_slot = n;
         for (int i = 0; i < FISH_NAME_MAX; i++) {
             int x = SETUP_SLOT_X + i * SETUP_SLOT_PX;
             bool on = i == s_slot, reach = i <= n;
-            uint32_t col = on ? f->color : reach ? dim(f->color, 55) : C_DIM;
+            uint32_t col = theme_active() ? (on ? C_TEXT : reach ? C_EDGE : C_DIM) : on ? f->color : reach ? dim(f->color, 55) : C_DIM;
             int v = slot_val(f, i);
-            if (v) { char ch[2] = { (char)('A' + v - 1), 0 }; render_text(fb, stride, x, SETUP_SLOT_Y, SETUP_SLOT_SCALE, col, ch); }
-            render_rect(fb, stride, x, SETUP_SLOT_Y + SETUP_SLOT_H + 8, SETUP_SLOT_W, 4,
+            if (v) { char ch[2] = { (char)('A' + v - 1), 0 }; render_text(fb, stride, x, sy, SETUP_SLOT_SCALE, col, ch); }
+            render_rect(fb, stride, x, sy + SETUP_SLOT_H + 8, SETUP_SLOT_W, 4,
                         on && !v && ((int)(clock * 2) & 1) ? C_TEXT : col);
             if (on) {
-                chevron(fb, stride, x + SETUP_SLOT_W / 2, SETUP_SLOT_Y - SETUP_ARROW_GAP, true, C_EDGE);
-                chevron(fb, stride, x + SETUP_SLOT_W / 2, SETUP_SLOT_Y + SETUP_SLOT_H + SETUP_ARROW_GAP + 4, false, C_EDGE);
+                chevron(fb, stride, x + SETUP_SLOT_W / 2, sy - SETUP_ARROW_GAP, true, C_EDGE);
+                chevron(fb, stride, x + SETUP_SLOT_W / 2, sy + SETUP_SLOT_H + SETUP_ARROW_GAP + 4, false, C_EDGE);
             }
         }
-        text_c(fb, stride, CX, SETUP_SLOT_Y + SETUP_SLOT_H + 96, 2, C_CAPT, "SWIPE A LETTER UP OR DOWN");
-        dots(fb, stride, PAGE_H - 14);
+        if (theme_active()) text_c(fb,stride,CX,by+238,2,C_CAPT,"SWIPE TO ROLL");
+        else { text_c(fb,stride,CX,sy+SETUP_SLOT_H+96,2,C_CAPT,"SWIPE A LETTER UP OR DOWN"); dots(fb,stride,PAGE_H-14); }
     } else if (page_is_look()) {
         /* straight on the tank again: the ringed FRY is the preview (no
            grown-up look - that is the surprise); a row of body swatches; the
            accent a "?" that its first growth spurt answers */
         const fish_t *f = &t->fish[page_fish()];
-        fish_ring(fb, stride, f, 17 * f->size + 6, f->color);
+        fish_ring(fb, stride, f, render_fish_ring_r(f) + 6, f->color);
         render_rect_blend(fb, stride, -PAGE_X, SETUP_SW_Y - 30, TANK_W, SETUP_ACC_Y + SETUP_SW_H + 16 - (SETUP_SW_Y - 30), C_PANEL, 110);
         char cap[FISH_NAME_MAX + 16]; snprintf(cap, sizeof cap, "A COLOR FOR %s", f->name);
         text_c(fb, stride, CX, SETUP_Y + 7, 2, C_CAPT, cap);
         nav(fb, stride, true, "NEXT", false);
-        render_text(fb, stride, SETUP_SW_X + 2, SETUP_SW_Y - 20, 2, C_CAPT, "BODY");
-        for (int i = 0; i < SETUP_SW_N; i++) {
+        /* (a species' creature - never one of the founding pair today, but a
+           director's tank may stage one - picks among its species' four
+           designs instead: the body swatches are the designs' bodies, and a
+           design brings its own markings) */
+        bool sp = is_species(f);
+        render_text(fb, stride, SETUP_SW_X + 2, SETUP_SW_Y - 20, 2, C_CAPT, sp ? "DESIGN" : "BODY");
+        for (int i = 0; i < (sp ? SP_VARIANTS : SETUP_SW_N); i++) {
             int x = SETUP_SW_X + i * SETUP_SW_PX;
-            bool on = LOOK_BODY[i] == f->color;
-            render_rect(fb, stride, x, SETUP_SW_Y, SETUP_SW_W, SETUP_SW_H, LOOK_BODY[i]);
+            uint32_t body = sp ? SPECIES[f->species].var[i].color : LOOK_BODY[i];
+            bool on = sp ? f->variant == i : LOOK_BODY[i] == f->color;
+            render_rect(fb, stride, x, SETUP_SW_Y, SETUP_SW_W, SETUP_SW_H, body);
             render_rect_edge(fb, stride, x, SETUP_SW_Y, SETUP_SW_W, SETUP_SW_H, on ? C_TEXT : C_DIM);
             if (on) render_rect_edge(fb, stride, x + 1, SETUP_SW_Y + 1, SETUP_SW_W - 2, SETUP_SW_H - 2, C_TEXT);
         }
@@ -743,15 +818,23 @@ void render_setup(const tank_t *t, uint16_t *fb, int stride, float clock) {
            wherever it hatched (no stage - it stays in the grass it was born
            in), its parents are named, one button leads on */
         const fish_t *f = &t->fish[page_fish()];
-        float r = 17 * f->size + 6 + 3 * sinf(clock * 3);          /* a ring that breathes */
+        float r = render_fish_ring_r(f) + 6 + 3 * sinf(clock * 3);          /* a ring that breathes */
         fish_ring(fb, stride, f, r, f->color);
         fish_ring(fb, stride, f, r + 8, C_EDGE);
         render_rect_blend(fb, stride, -PAGE_X, 92, TANK_W, 116, C_PANEL, 150);
-        text_c(fb, stride, CX, 104, 3, C_TEXT, "A NEW FRY!");
-        char l1[FISH_NAME_MAX * 2 + 24];
+        /* (2026-10-05) a species' newborn is named for what it is - "A NEW
+           SEAHORSE!" - and a surprise (a classic pair's fry hatched as a
+           species, SP_MUTATE_P) gets its own announcement */
+        char head[40], l1[FISH_NAME_MAX * 2 + 24], l2[40];
+        bool mutant = is_mutant(t, f);
+        if (mutant) snprintf(head, sizeof head, "A SURPRISE!");
+        else snprintf(head, sizeof head, "A NEW %s!", kind_word(f));
+        text_c(fb, stride, CX, 104, 3, C_TEXT, head);
         snprintf(l1, sizeof l1, "BORN TO %s AND %s", fish_name(t, f->parent_a), fish_name(t, f->parent_b));
         text_c(fb, stride, CX, 140, 2, C_CAPT, l1);
-        text_c(fb, stride, CX, 162, 2, C_CAPT, "DOWN IN THE GRASS.");
+        if (mutant) snprintf(l2, sizeof l2, "AS %s %s!", article(kind_word(f)), kind_word(f));
+        else snprintf(l2, sizeof l2, "DOWN IN THE GRASS.");
+        text_c(fb, stride, CX, 162, 2, C_CAPT, l2);
         text_c(fb, stride, CX, 184, 2, C_CAPT, "GO AND SAY HELLO.");
         render_button(fb, stride, SETUP_MID_X, SETUP_BTN_Y, SETUP_BTN_W, SETUP_BTN_H, C_GO, C_GO_E, "MEET IT", 2);
         dots(fb, stride, PAGE_H - 14);
@@ -769,7 +852,9 @@ void render_setup(const tank_t *t, uint16_t *fb, int stride, float clock) {
         text_c(fb, stride, CX, SETUP_Y + 20, 3, C_TEXT, f->name);
         float ps = f->size * 2.0f;                                   /* a portrait, twice life size (a fry) ... */
         if (ps > 1.2f) ps = 1.2f;                                    /* ... but a juvenile's ring must clear the name */
-        render_ring(fb, stride, CX, SETUP_FAM_PORTRAIT_Y, 17 * ps + 6, f->color);
+        float ru = render_fish_ring_r(f) / f->size;                  /* a long creature (an eel) to the same ring (2026-10-05) */
+        if (ps * ru > 1.2f * 17) ps = 1.2f * 17 / ru;
+        render_ring(fb, stride, CX, SETUP_FAM_PORTRAIT_Y, ru * ps + 6, f->color);
         render_fish_portrait(fb, stride, CX, SETUP_FAM_PORTRAIT_Y, ps, f, clock);
         int y = SETUP_FAM_ROW_Y, vx = SETUP_FAM_VALUE_X;
         render_text(fb, stride, SETUP_FAM_LABEL_X, y, 2, C_CAPT, "BODY");

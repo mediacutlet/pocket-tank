@@ -45,7 +45,7 @@ jobs:
           if [ -n "$OTA_SIGNING_KEY" ]; then
             printf '%s\n' "$OTA_SIGNING_KEY" > firmware/keys/ota_signing_key.pem
             echo "signing with the project's key"
-          elif [ "${{ github.repository }}" = "mediacutlet/pocket-tank" ]; then
+          elif [ "${{ github.repository }}" = "fiatminimalist/aqua-pets" ]; then
             echo "no OTA_SIGNING_KEY secret on the public repo: an unsigned cable build could never update itself"; exit 1
           else
             openssl genrsa -out firmware/keys/ota_signing_key.pem 3072 2> /dev/null
@@ -77,20 +77,20 @@ jobs:
       # owns the Pages site. Anywhere else (the dev repo ignores model/out/*)
       # the job stops here, a compile check of the firmware.
       - name: Assemble the installer
-        if: github.repository == 'mediacutlet/pocket-tank'
+        if: github.repository == 'fiatminimalist/aqua-pets'
         run: |
           python3 tools/make_installer.py --build-dir firmware/build \
             --board-build firmware/build-round --board-build firmware/build-watch --out installer/dist
           touch installer/dist/.nojekyll
           ls -la installer/dist installer/dist/firmware
       - uses: actions/upload-pages-artifact@v3
-        if: github.repository == 'mediacutlet/pocket-tank'
+        if: github.repository == 'fiatminimalist/aqua-pets'
         with:
           path: installer/dist
 
   deploy:
     needs: build
-    if: github.repository == 'mediacutlet/pocket-tank'
+    if: github.repository == 'fiatminimalist/aqua-pets'
     runs-on: ubuntu-latest
     environment:
       name: github-pages

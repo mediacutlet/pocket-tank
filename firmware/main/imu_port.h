@@ -17,6 +17,9 @@ bool imu_port_moving(void);
  * show on two consecutive polls (500 ms) - a pick-up does, a knock on the
  * desk or a mug set down beside it is one spike. */
 bool imu_port_handled(void);
+/* a hard shake (2026-10-10): true once per shake (SHAKE_COUNT jolts over SHAKE_THRESH on consecutive polls); main
+ * tosses the tank's creatures (tank_shake) */
+bool imu_port_shaken(void);
 int  imu_port_motion(void);                       /* last poll's movement, counts (director / tuning) */
 void imu_port_last(int16_t out[3], int *motion);  /* the last poll's raw sample + its movement (director `imu`) */
 /* drowse bracket: quiesce the accel before the panel/touch rails cut (a

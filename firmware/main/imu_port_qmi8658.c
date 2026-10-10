@@ -40,6 +40,15 @@ static int s_up_sign = -1;   /* the round 1.75C, 2026-10-01 (Strato holding it u
  * (250 ms apart). A table reads a few tens of counts of noise; a hand
  * holding still a few hundred; a pick-up thousands. */
 #define MOTION_THRESH      220    /* ~0.013 g */
+/* a hard shake (2026-10-10): the change across one 250 ms poll, every axis, values clamped at
+   the +-2 g rails (a shake pegs an axis for a poll; the permanently railed axes of 08-31 give
+   no change at all): over SHAKE_THRESH counts (~1.8 g of change) is one JOLT; SHAKE_COUNT jolts on
+   consecutive polls - 0.75 s of hard shaking, a knock or a drop never - is a shake (Alvin,
+   2026-10-10 evening: "less sensitive, only if it is shaken 5 times in a row", then later that
+   night "reduce from 5 to 3"); one per cooldown */
+#define SHAKE_THRESH       30000
+#define SHAKE_COUNT        3
+#define SHAKE_COOLDOWN_US  2500000
 #define IMU_MOTION_HOLD_US 1000000
 
 static const char *TAG = "imu";
@@ -50,6 +59,8 @@ static int64_t s_next_us;
 static int16_t s_prev[3]; static bool s_have_prev;
 static int64_t s_moved_us; static int s_motion; static int16_t s_last[3];
 static int64_t s_handled_us; static bool s_prev_moved;   /* two polls in a row over the threshold */
+static int64_t s_shake_us; static bool s_shake_pending;   /* the last shake, and one not yet taken */
+static int s_shake_run;                                    /* jolts on consecutive polls so far */
 
 static bool wr8(uint8_t reg, uint8_t val) {
     uint8_t buf[2] = { reg, val };
@@ -129,6 +140,11 @@ void imu_port_poll(int64_t now_us) {
             int d = a[i] - s_prev[i]; m += d < 0 ? -d : d;
         }
         s_motion = m;
+        { int sh = 0;                                      /* the shake metric: every axis, clamped at the rails */
+          for (int i = 0; i < 3; i++) { int c = a[i] < -32000 ? -32000 : a[i] > 32000 ? 32000 : a[i], p = s_prev[i] < -32000 ? -32000 : s_prev[i] > 32000 ? 32000 : s_prev[i];
+              int d = c - p; sh += d < 0 ? -d : d; }
+          if (sh > SHAKE_THRESH) { if (++s_shake_run >= SHAKE_COUNT && now_us - s_shake_us > SHAKE_COOLDOWN_US) { s_shake_us = now_us; s_shake_pending = true; s_shake_run = 0; ESP_LOGI(TAG, "shake: %d jolts in a row (the last %d counts)", SHAKE_COUNT, sh); } }
+          else s_shake_run = 0; }
         bool moved = m > MOTION_THRESH;
         if (moved) s_moved_us = now_us;
         if (moved && s_prev_moved) s_handled_us = now_us;
@@ -175,6 +191,7 @@ void imu_port_poll(int64_t now_us) {
 
 bool imu_port_inverted(void) { return s_inverted; }
 void imu_port_last(int16_t out[3], int *motion) { for (int i = 0; i < 3; i++) out[i] = s_last[i]; if (motion) *motion = s_motion; }
+bool imu_port_shaken(void) { bool s = s_shake_pending; s_shake_pending = false; return s; }
 bool imu_port_handled(void) { return s_handled_us && esp_timer_get_time() - s_handled_us < IMU_MOTION_HOLD_US; }
 bool imu_port_moving(void) { return s_moved_us && esp_timer_get_time() - s_moved_us < IMU_MOTION_HOLD_US; }
 int  imu_port_motion(void) { return s_motion; }

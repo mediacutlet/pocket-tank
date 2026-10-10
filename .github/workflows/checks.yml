@@ -24,6 +24,13 @@ jobs:
           # the dev repo does not track model/out; the public one does (the LLM selftest needs it)
           if [ -f model/out/model_q4.bin ]; then make -C sim -j"$(nproc)" check-all
           else echo "no model in this checkout: the LLM selftest is skipped"; make -C sim -j"$(nproc)" NOMODEL=1 check-all; fi
+      - name: Schema-5 encoder agreement (C vs gen_traces.py)
+        run: |
+          # the next model's line (docs/retrain-v5.md): the sim's encoder with a v5
+          # tokenizer must write exactly what gen_traces.py trains on
+          set -o pipefail
+          python3 model/train_tokenizer.py --schema 5 --out "$RUNNER_TEMP/tok5.bin"
+          cd sim && ./fishsim --selftest-encoder "$RUNNER_TEMP/tok5.bin" | python3 ../model/encoder_agree.py
       - name: Test the audio mixer
         working-directory: firmware/host_test
         run: |
@@ -37,6 +44,6 @@ jobs:
           cc -O2 -std=c11 -Wall -Wextra -Werror -I../../common/llm \
             -o q4_host q4_host.c ../../common/llm/q4_model.c ../../common/llm/word_tok.c -lm
           ./q4_host ../../model/out/model_q4.bin ../../model/out/tokenizer.bin \
-            "zone 2 hunger 7 energy 5 stress 2 curiosity 8 bold 4 social 6 stage adult trust 6 bored 3 food near 12 friend mid 3 bubble mid 10 reef far 7 wall clear last explore time day ->"
+            "zone 2 hunger 7 energy 5 stress 2 curiosity 8 bold 4 social 6 stage adult species fish trust 6 bored 3 food near 12 friend mid 3 bubble mid 10 reef far 7 wall clear last explore time day ->"
       - name: Check Python syntax
         run: python3 -m compileall -q tools model

@@ -1,4 +1,6 @@
-# pocket-tank 🐟
+# Aqua Pets 🐟
+
+*Aqua Pets was called pocket-tank until 0.4; since 2026-10-10 the build's internal names (`CONFIG_AQUA_PETS_*`, `aqua_pets.bin`, the tools' cache paths) carry the new name too. The save format and the NVS keys are unchanged, so tanks already out there keep their saves.*
 
 **A tiny language model keeps a fish tank alive on an $8 chip.**
 The ESP32-S3 board, with screen and battery used in this project is actually around $35.
@@ -26,12 +28,13 @@ wall clear last explore time day  ->  seek_food urgency 8
 
 This repo is the complete project: the trained model, the distillation
 pipeline that made it, a PC simulator, and the firmware for a real board.
-Got the board? **[Install it from your browser](https://pocketank.com/install/)**,
-no toolchain needed.
+Got the board? **Install it from your browser** with the installer page in
+`installer/` (see `installer/README.md`), no toolchain needed.
 
 The current release is **v0.3.3** (alpha); the settings page shows the one
 on your tank. What changed in each release:
-**[pocketank.com/updates](https://pocketank.com/updates/)**.
+the commit history (`git log`) and the release notes on the repository's
+releases page.
 
 It runs on three Waveshare boards: the 1.8-inch original, the round
 1.75-inch **pendant**, where the tank fills the whole circle like a little
@@ -64,12 +67,12 @@ over Wi-Fi, so the cable is only for the first install.
 
 | | Teacher | Student (what ships) |
 |---|---|---|
-| Model | gemma4:26b | pocket-tank 14.3M (dim 384, 8 layers, 8 heads) |
-| Parameters | ~26,000,000,000 | 14,300,000, about 1,818× fewer |
+| Model | gemma4:26b | Aqua Pets 14.2M (dim 384, 8 layers, 8 heads) |
+| Parameters | ~26,000,000,000 | 14,190,000, about 1,832× fewer |
 | Size | ~18 GB (Q4_K_M) | 57 MB fp32 → **7.56 MB 4-bit** |
-| Vocabulary | ~262K tokens | **54 tokens** (a closed schema lexicon) |
+| Vocabulary | ~262K tokens | **65 tokens** (a closed schema lexicon, ten of them species) |
 | Runs on | A desktop GPU | ESP32-S3, from flash, no network |
-| Agreement | | 72% picks the teacher's goal (the teacher agrees with *itself* 82%) |
+| Agreement | | 84% picks the teacher's goal, every species above 78% (the teacher agrees with *itself* 82%) |
 
 On the real board a decision takes about 3.7 s at 12 tokens per second, with
 the tank rendering at 25 to 30 fps alongside it on the other core. Trained on
@@ -86,7 +89,7 @@ into both the simulator and the firmware:
   never blocks on the model.
 - **LLM advisor** (`llm/`). A llama2.c-style 4-bit inference engine, a
   word-level tokenizer, and one shared state encoder. Fish are re-asked only
-  when their situation meaningfully changes, so four to six fish share one
+  when their situation meaningfully changes, so up to 25 creatures share one
   brain without anyone starving for a turn. The model runs on the second core
   of the ESP32-S3 with SIMD dot products and quantized activations in
   internal SRAM; the weights are memory-mapped from flash and never copied.
@@ -152,7 +155,8 @@ or not, and at a quarter speed while the tank sleeps; a stage reached in
 the night is the morning's surprise.
 
 **Arrivals.** Take good care of the pair and the tank earns more fish, up to
-five, one at a time. Each arrival has conditions (trust, feedings, a fish
+25 creatures, one at a time (the gates get harder as the tank fills: more
+meals, more trust). Each arrival has conditions (trust, feedings, a fish
 grown up, a hold-approach) and the tank *tells* you when it's close: the two
 most trusting adults dive into the sea grass and circle low through it.
 Once every condition is met, the pair goes down into the grass within half
@@ -292,6 +296,51 @@ fish swim through the arch, tucked behind the jambs as they pass. The
 fish do not know it is there. They find the arch by chance, which is most
 of the charm.
 
+**The wreck.** The eighth thing in the shop (200, 2026-10-10; WRECK in the shop since that night, SHIPWRECK before) is a small
+sunken boat lying on the sand, drawn from geometry like the castle, and a
+different boat in each theme (later that day): Original a planked hull tilted
+up toward the bow, a broken mast with a yard and a rag of sail, a cabin with a
+porthole, an anchor on the sand before the bow with its chain up to the prow;
+Quiet Lagoon an old sailing ship listing on the sand, its stern sunk low with
+the planks gone so the ribs show, the bow risen with a bowsprit, a tilted mast
+broken off short with a yard and a rag of sail, a deckhouse, an anchor off the
+bow; Tidepool Club a cheerful little tug sitting upright -
+cream topsides, a red boot stripe, a teal bottom, a wheelhouse with lit windows,
+an orange funnel, a pennant on the mast, a life ring on the side and an anchor
+hung off the bow; Blackwater (2026-10-10) a bare-aluminium fighter plane on the
+sand, nose up a little, one wing down on the sand with a big roundel and the
+far wing rising behind, a red-and-white tail, a three-blade propeller, a yellow
+band aft, the open cockpit and a torn rear fuselage for its holes (redrawn that
+night so it reads as a plane at a glance: outlined pieces, a silver skin). Every hull has two big holes (the tug's are brass-rimmed
+portholes): IN FRONT, the fish pass behind the hull and show through them,
+swimming in and out; BEHIND it is a backdrop in the weeds. The octopus, crab
+and lobster den under its holes when there is no reef.
+
+**The frogman.** The ninth thing (120, 2026-10-10; that morning he hung on a
+line from the wreck's stern) is a little diver who floats sideways, horizontal,
+drifting across the water from glass to glass at a walking pace, turning at
+each end (he thins through the turn, as a fish does), easing to a new lane now
+and then - anywhere from just under the surface to just above the sand since
+2026-10-10 night (a mid-water band before) - bobbing on the water's lift, a mist of fine bubbles rising from his
+mask. His arm reaches forward, and every 23 s it goes up and waves. He wears
+the theme's suit: a yellow-and-black banded wetsuit with red fins in Original,
+turquoise with coral bands and violet fins in Quiet Lagoon, hot pink with lime
+bands and cyan fins in Tidepool Club, black neoprene with high-vis amber bands
+and fins and an aluminium tank in Blackwater. A resident like the snail: bought once,
+never placed or sold.
+
+**The submarine.** The tenth thing (60, 2026-10-10 night) is a little sub
+that cruises the water from glass to glass, anywhere between the surface and
+the sand, propeller turning behind it
+and a stream of bubbles from the stern, easing to a new lane now and then; every
+22-40 s it eases to a halt, a periscope rises from the tower, its head turns to
+look each way, and it sinks before the sub goes on. The hull is the theme's:
+the yellow sub with black trim in Original, a moss-green navy boat with brass in
+Quiet Lagoon, a red-and-white toy with a cyan tower in Tidepool Club, a grey
+steel boat with a black waterline and rust in Blackwater. A resident like the
+frogman - and the two never collide: a lane picked near the other's is pushed
+clear, and when they close nearly level each eases off to the far side.
+
 **The coral.** The fourth thing in the shop (100) is a branching coral,
 drawn from a little skeleton of rounded branches on a chunky pixel grid:
 a dark rim on the shaded side, a lit edge toward the light, pale tips,
@@ -362,6 +411,25 @@ sells. You get 20% of the price back, the piece leaves the tank, and it is
 in the shop again at full price. The snail and the shrimp are not for
 sale; they are permanent residents.
 
+**New species.** Nine creatures join the classic fish, each a juvenile
+in the shop at 10 sand dollars, bought one at a time (two of a kind breed):
+seahorses, octopuses, pufferfish, anglerfish, electric eels, hammerheads,
+squid, crabs and lobsters. Each comes in four designs, has its own
+temperament, and moves like the real animal: the seahorse holds the grass by
+its tail, the octopus takes the colour of its den, the pufferfish puffs up,
+the anglerfish's lure glows, the eel rises for air, the hammerhead never
+stops, the crab walks sideways. They breed within their kind: the best
+grown pair of one species courts and the fry is theirs, and now and then a
+classic pair's fry hatches as something else entirely, a surprise. A newcomer
+needs a free place in the tank (the shop says NO ROOM otherwise), and the
+tank holds up to 25 creatures. The milestones
+page pages its rows past six; the card names the species and the design.
+The whole design is in [docs/species.md](docs/species.md).
+
+![The ten species, one design each](docs/media/sim-species.png)
+![At night: the anglerfish's lure, the firefly squid, the eel's spark, the sleepers](docs/media/sim-species-night.png)
+![The shop's species page: each creature shown as itself, 10 sand dollars](docs/media/sim-shop-species.png)
+
 ![The shop](docs/media/sim-shop.png)
 ![Unlocking the snail](docs/media/sim-shop-modal.png)
 ![The sword plant and the snail on the glass, a +5 just earned](docs/media/sim-tank-shop.png)
@@ -386,7 +454,9 @@ sale; they are permanent residents.
 ![Placing the reef cluster: the LOOK row](docs/media/sim-place-cluster.png)
 ![SELL armed in the castle's modal](docs/media/sim-shop-sell.png)
 
-**The light.** Two quick taps on the glass turn the tank light off and on;
+**The light.** Two quick taps on the glass turn the tank light off and on
+(two quick taps on a creature are its own business: a pufferfish puffs up,
+a squid or an octopus squirts ink; the light stays as it was);
 in the dark the fish rest and the palette dims. The first time a double-tap
 turns the light off, a small LIGHTS OUT notice says what happened and how
 to turn it back on, once per tank. The settings page has a
@@ -415,6 +485,58 @@ charging, about how long it will last (or how long until it is full), how
 long ago it was unplugged, the screen-on time since, and how long a full
 charge lasts. The tank learns those times from its own battery as you use
 it.
+
+**Four themes.** Settings → SETTINGS / THEMES picks the look: Original, Quiet
+Lagoon, Tidepool Club, and since 2026-10-10 Blackwater - the realistic one.
+Near-black water over dark volcanic sand, and the creatures drawn as the real
+animals (countershading, rayed fins, real eyes, scales, suckers, shells) in
+vivid colours lifted from the ones you chose, so they stand off the dark water;
+the castle slot holds a sunken Mayan step pyramid in pale limestone, the wreck
+slot a silver fighter plane, and the reef cluster is a sea fan, tube sponges, a
+staghorn coral and an anemone on basalt (all three redrawn that night to read
+at a glance against the dark water). (A moving caustic light lived in it for a few hours that night and was
+taken out again.) docs/THEMES.md has the details.
+
+**One settings page.** Since 2026-10-10 every theme uses the same settings
+layout - the rows of segments and arrows, the foot of UPDATES / ABOUT / RESET /
+CLOSE - drawn in the theme's own colours and font; only the theme picker (from
+the SETTINGS / THEMES title) keeps its tiles. RESET starts the tank over: it
+opens the same NO / YES prompt as the BOOT-and-tap chord, with its timeout, so a
+stray tap wipes nothing.
+
+**About.** The settings page has an ABOUT button (2026-10-10): the game's name, who makes it
+(Softworkz Pte Ltd), the release and the build id, the theme's creature moving
+above them (a fish crossing in Original, a seahorse drifting in Quiet Lagoon, a
+crab scuttling along the foot and raising its claws in Tidepool Club, a moon
+jelly pulsing up the side in Blackwater) and bubbles rising - and an underwater
+jingle that loops while the page is up, synthesised on the device
+(`common/audio.c`: twelve bars of an arpeggio, a hummed melody, a soft pad and
+bubble chirps under a slow wobble and a low-pass; nothing in the sound bank), a
+different tune per theme since the same night: a kalimba at 96 BPM, a slow
+Lydian lullaby at 72, a perky steel-pan tune at 120, sparse minor-key bells at
+60. It follows the
+VOLUME setting. BACK returns to the settings.
+
+**A hard shake (2026-10-10).** Shake the tank hard and every creature is
+tossed: thrown with a random velocity and spin, tumbling off the glass, the
+floor and the surface, the species reacting on the way (the pufferfish puffs,
+the squid and the octopus ink, the crab raises its claws), the shrimp
+scattering, the frogman thrown too. Over about three seconds the throw damps
+out and they settle back to their own ways, a little stressed, a little less
+trusting. The accelerometer counts jolts of about 1.8 g of change per poll and wants
+three of them in a row (five at first; cut to three later that night), about
+three quarters of a second of hard shaking, so a knock or a drop never counts;
+once every 2.5 s at most. The sim's 1 key does
+the same.
+
+**The night and the battery (2026-10-10).** Lights out used to keep the full
+25 fps and never sleep, so a tank forgotten on the desk burned its cell at awake
+rates all night. Now the frame rate drops to 10 fps while the light is out and
+no finger is on the glass, and after two hours of darkness with nothing handling
+the tank (no touch, no motion; not while a cable is charging it, not while a page
+is up) it takes the same sleep the PWR key does: the grace, then the power-off or
+deep sleep. The PWR key brings it back and the night is lived through at that
+boot, as after any sleep.
 
 **Updates over Wi-Fi.** The settings page has an UPDATES button. Tap CHECK
 FOR UPDATES and the tank pauses, turns its radio on and looks for a newer
@@ -492,8 +614,8 @@ window, with the shipped model as the brain. Needs SDL2 and LVGL v9 (cloned
 in-tree):
 
 ```bash
-git clone https://github.com/mediacutlet/pocket-tank.git
-cd pocket-tank
+git clone <this repository> aqua-pets
+cd aqua-pets
 git clone --depth 1 --branch v9.2.2 https://github.com/lvgl/lvgl.git sim/lvgl
 brew install sdl2        # macOS; apt install libsdl2-dev on Linux
 cd sim && make && ./fishsim
@@ -514,7 +636,8 @@ algae, and stroke sideways through a bed to trim it. Keys: **F** feed at the
 mouse, **N** light, **A** auto light, **H** handle the tank (moving the
 mouse over the window counts too), **L** switch
 between the rule stub and the LLM brain, **U** overlays, **M** milestones,
-**4** the shop, **D** fifty sand dollars to try it, **W** the shrimp school
+**4** the shop, **D** fifty sand dollars to try it, **5** a pair of the
+next species (free, for a look), **W** the shrimp school
 (again adds one),
 **X** the reset prompt, **S** the first-run setup (or drops a birth's pages), **R** force an arrival
 (the birth flow opens), **Z** jump through seven
@@ -554,10 +677,11 @@ touch ports are stubs in the QEMU overlay; decisions go to the log.
 
 ## Install from your browser
 
-The easy way onto a board: **https://pocketank.com/install/**.
+The easy way onto a board: the browser installer page (`installer/`, hosted
+over HTTPS - `installer/README.md` says how).
 Plug the Waveshare board into your computer, open the page in Chrome or Edge,
-pick your board (the 1.8, the pendant or the watch), click *Install Pocket
-Tank*, pick the port, and watch the bar fill. Then the page asks for your
+pick your board (the 1.8, the pendant or the watch), click *Install Aqua
+Pets*, pick the port, and watch the bar fill. Then the page asks for your
 Wi-Fi: the tank's screen stays dark while it lists the networks it can see,
 you pick yours and type the password, and the tank connects to check it
 before it starts. That is what lets it update itself later; you can skip
@@ -644,14 +768,14 @@ built or tested here, and they may lag behind this repo:
   **ESP32-P4-WIFI6-Touch-LCD-4B** (4-inch 720×720 MIPI-DSI panel, GT911
   touch, ES8311 audio) in [their fork](https://github.com/knoopx/pocket-tank).
   It needs ESP-IDF 5.5.
-  [Pull request #5](https://github.com/mediacutlet/pocket-tank/pull/5) has
+  Upstream pull request #5 has
   the details.
 - [lmoiseichuk](https://github.com/lmoiseichuk) ported it to the 2.8-inch
   **ES3C28P "cheap yellow display"** (ESP32-S3, 320×240 ILI9341 IPS panel,
   FT6336 touch, ES8311 audio), with every page laid out for the smaller
   screen, in
   [their fork](https://github.com/lmoiseichuk/pocket-tank-cyd/tree/feature/cyd_ES3C28P).
-  [Pull request #10](https://github.com/mediacutlet/pocket-tank/pull/10) has
+  Upstream pull request #10 has
   the details.
 
 ## Train your own
@@ -706,6 +830,8 @@ seven-minute prompt check before an overnight run is always worth it.
   evidence behind it
 - [docs/retrain-v3.md](docs/retrain-v3.md) — the schema v3 retrain runbook
 - [docs/retrain-v4.md](docs/retrain-v4.md) — the schema v4 (boredom) retrain runbook and its numbers
+- [docs/retrain-v5.md](docs/retrain-v5.md) — the schema v5 (species) retrain runbook; the numbers are in docs/stats.md
+- [docs/species.md](docs/species.md) — the ten species: the shop, breeding, designs, how each one moves
 - [docs/DEVICE.md](docs/DEVICE.md) — what is in flight on the device, and the flash rule
 - [docs/BOARDS.md](docs/BOARDS.md) — the three boards: what is shared, where one may differ, how a release keeps each to its own image
 - [docs/board-amoled-1.75c.md](docs/board-amoled-1.75c.md) — the pendant's bring-up notes
@@ -717,7 +843,7 @@ seven-minute prompt check before an overnight run is always worth it.
 
 ## Status
 
-- ✅ Model: schema v4 (boredom, no shadow), 14.3M student, 4-bit export, evaluated
+- ✅ Model: schema v5 (species, boredom, no shadow), 14.2M student, 4-bit export, evaluated
 - ✅ Simulator: the full tank with progression, self-tests, snapshots
 - ✅ Firmware: running on the real board at 25 to 30 fps and 3.7 s per
   decision, with touch, auto-rotation, a battery gauge and log (tap the
@@ -740,11 +866,13 @@ seven-minute prompt check before an overnight run is always worth it.
   and touch) puts a tank left on the desk to sleep; the double-tap by
   default
 - ✅ Sand dollars: care earns points, the shop spends them; a sword plant,
-  an algae-grazing snail and a swim-through castle to start; what you buy you place yourself,
+  an algae-grazing snail, a swim-through castle, a sunken wreck (a different boat in each theme), a drifting frogman and a cruising submarine with a periscope; eleven species besides the fish, the swordfish the latest (2026-10-10 night); what you buy you place yourself,
+  (four themes: Original, Quiet Lagoon, Tidepool Club and the realistic
+  Blackwater)
   where along the floor and whether it stands behind, among or in front
   of the fish
-- ✅ Browser installer: one click from Chrome or Edge, at
-  pocketank.com/install, with a board to pick; a cable update is the same click
+- ✅ Browser installer: one click from Chrome or Edge, from the hosted
+  installer page, with a board to pick; a cable update is the same click
   and never erases a tank
 - ✅ v0.2.0 (alpha), the first numbered release: fish that turn like fish,
   the fish's name on its card, a shrimp school that eats what falls and
@@ -753,8 +881,13 @@ seven-minute prompt check before an overnight run is always worth it.
   updates over Wi-Fi with signed, per-board images, a sea urchin that keeps
   the grass down, a snail that cleans overnight, a sponge and scissors, and
   fish you can rename or sell
-- 🚧 Next: more to unlock: new fish species, more plants, corals, and more
-  tank maintenance critters
+- ✅ New species: seahorses, octopuses, pufferfish, anglerfish,
+  electric eels, hammerheads, squid, crabs and lobsters, one at a time from
+  the shop, breeding within their kind, up to 25 creatures a tank, and a
+  model (v5j) that knows each one's species, the jellyfish included
+  ([docs/species.md](docs/species.md))
+- 🚧 Next: more to unlock: more plants, corals, and more tank maintenance
+  critters
 - 🚧 Next: more achievements and milestones
 
 ## The video series

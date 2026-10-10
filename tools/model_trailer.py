@@ -45,7 +45,7 @@ def main():
     a = argparse.ArgumentParser()
     a.add_argument("--model", default=os.path.join(ROOT, "model", "out", "model_q4.bin"))
     a.add_argument("--out", default=None, help="default: <build dir>/model_trailer.bin")
-    a.add_argument("--build-dir", default=os.path.expanduser("~/.cache/pocket-tank/fw-build"))
+    a.add_argument("--build-dir", default=os.path.expanduser("~/.cache/aqua-pets/fw-build"))
     a.add_argument("--tag", default=None, help="default: PT_MODEL_TAG from common/version.h")
     a.add_argument("--check", action="store_true", help="refuse if common/version.h disagrees with the model file")
     a = a.parse_args()

@@ -44,7 +44,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from pt_boards import BOARDS, board_of_image, name_of, build_of_image
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DEFAULT_BUILD = os.path.expanduser("~/.cache/pocket-tank/fw-build")
+DEFAULT_BUILD = os.path.expanduser("~/.cache/aqua-pets/fw-build")
 
 # ESP Web Tools (10.4.0) has no manifest option for "install without erasing"
 # on a device that does not speak Improv: with new_install_prompt_erase the
@@ -70,14 +70,15 @@ DIALOG_EDITS = [
     # dialog itself: the tank reports the manifest's own version string - director.c)
     ('<div slot="headline">Connected to ${this._info.name}</div>', 1,
      '<div slot="headline">${this._isSameVersion?"Your tank is up to date":"Connected to "+this._info.name}</div>'),
-    # the link the tank hands the page is the update log, not a device
-    ('<div slot="headline">Visit Device</div>', 2, '<div slot="headline">See what\'s new</div>'),
+    # the dialog's "Visit Device" item (the link the tank hands the page; it read "See what's new"
+    # until 2026-10-10, when Alvin had it removed): never shown, in the menu or after an install
+    ('void 0===this._client.nextUrl?"":', 2, '!0?"":'),
     # a tank on this version got an "Erase User Data" item in the menu (an ERASING reinstall): this
     # page's button never erases - the "start over" button below it is the only way to a wipe
     ('this._isSameVersion?s`', 1, '!1?s`'),
     # connecting to a board: the dialog gave it 1.5 s to answer Improv, and the connect RESETS the
     # board - a tank answers ~0.7 s after the reset, but when the reset lands late the tank showed
-    # as an unknown device ("Install Pocket Tank" on a tank that has it). 4 s; the dialog asks
+    # as an unknown device ("Install Aqua Pets" on a tank that has it). 4 s; the dialog asks
     # again every second inside it. A board without Improv waits those 4 s once, at connect.
     (':1e4:1500;this._info=await t.initialize(i)', 1, ':1e4:4e3;this._info=await t.initialize(i)'),
     # the Wi-Fi form says what Wi-Fi is for, and what the tank does not do with it (Strato, 2026-10-04)
@@ -205,7 +206,7 @@ def main():
         fa = json.load(open(fa_path))
         parts = []
         for key, pub in (("bootloader", "bootloader.bin"), ("partition-table", "partition-table.bin"),
-                         ("app", "pocket_tank.bin"), ("otadata", "ota_data_initial.bin")):
+                         ("app", "aqua_pets.bin"), ("otadata", "ota_data_initial.bin")):
             if key not in fa:
                 sys.exit(f"{fa_path}: no '{key}' - the build has no OTA layout (firmware/partitions.csv)")
             ent = fa[key]
@@ -231,7 +232,7 @@ def main():
     builds = {}                                   # board id -> parts, from each image's own marker
     for d in [a.build_dir] + a.board_build:
         parts = build_parts(d)
-        board = board_of_image(next(src for _, src, pub in parts if pub == "pocket_tank.bin"))
+        board = board_of_image(next(src for _, src, pub in parts if pub == "aqua_pets.bin"))
         if board in builds:
             sys.exit(f"{d}: a second build for {board}")
         builds[board] = parts
@@ -239,7 +240,7 @@ def main():
         sys.exit("no 1.8 build: manifest.json (the name every install page points at) is the 1.8's")
     order = [b[0] for b in BOARDS if b[0] in builds]
 
-    app18 = next(src for _, src, pub in builds["amoled18"] if pub == "pocket_tank.bin")
+    app18 = next(src for _, src, pub in builds["amoled18"] if pub == "aqua_pets.bin")
     version = a.version or release_version(build_of_image(app18))   # the page's line: the 1.8's
     date = datetime.date.today().isoformat()
     out = a.out
@@ -259,6 +260,9 @@ def main():
     board_files = {b: [(off, publish(src, pub, b), src) for off, src, pub in builds[b]] for b in order}
     total = sum(os.path.getsize(src) for _, _, src in board_files["amoled18"])
     shutil.copytree(os.path.join(ROOT, "installer", "vendor"), os.path.join(out, "vendor"))
+    media = os.path.join(ROOT, "installer", "media")        # the page's own pictures (2026-10-07: the species)
+    if os.path.isdir(media):
+        shutil.copytree(media, os.path.join(out, "media"))
     dialog, tag = patch_dialog(os.path.join(out, "vendor", "esp-web-tools"))
     # The bundle's file names are content hashes of the PRISTINE vendor, and
     # hosts serve .js with a year's max-age: a patched dialog under the old
@@ -273,8 +277,8 @@ def main():
         build = {"chipFamily": "ESP32-S3",
                  "parts": [{"path": f"firmware/{pub}", "offset": off} for off, pub, _ in board_files[b]]}
         manifest = {
-            "name": "Pocket Tank",
-            "version": a.version or release_version(build_of_image(next(src for _, _, src in board_files[b] if os.path.basename(src) == "pocket_tank.bin"))),
+            "name": "Aqua Pets",
+            "version": a.version or release_version(build_of_image(next(src for _, _, src in board_files[b] if os.path.basename(src) == "aqua_pets.bin"))),
             "built": date,                       # read by the page (ESP Web Tools ignores extra keys)
             "board": b, "board_name": name_of(b),
             "new_install_prompt_erase": False,
@@ -284,7 +288,7 @@ def main():
         }
         stem = "manifest" if b == "amoled18" else f"manifest-{b}"
         json.dump(manifest, open(os.path.join(out, f"{stem}.json"), "w"), indent=2)
-        erase = dict(manifest, name="Pocket Tank (fresh)", new_install_prompt_erase=True)
+        erase = dict(manifest, name="Aqua Pets (fresh)", new_install_prompt_erase=True)
         del erase["never_erase"]                 # the "start over" button: the dialog asks, checkbox off by default
         json.dump(erase, open(os.path.join(out, f"{stem}-erase.json"), "w"), indent=2)
         page_boards.append({"id": b, "name": name_of(b),

@@ -32,7 +32,7 @@ swapping the two model files.
 ## 0. Preflight (5 min, no Ollama load)
 
 ```bash
-cd "/Volumes/Local/Projects/LLM Fish Tank/pocket-tank/model"
+cd "/Volumes/Local/Projects/LLM Fish Tank/aqua-pets/model"
 python3 gen_traces.py --count 5 --dry-run --schema 3 --seed 1     # v3 lines print, no network
 python3 train_tokenizer.py --schema 3                              # out/tokenizer_v3.bin, vocab 54
 curl -s http://localhost:11434/api/tags | head -c 300          # Ollama reachable, gemma4:26b listed
@@ -44,7 +44,7 @@ Run each in its own terminal (or `&`); `--max-minutes` stops them cleanly.
 v2 ran ~36–51 decisions/min with 2–3 workers → expect ~20K pairs in 8 h.
 
 ```bash
-cd "/Volumes/Local/Projects/LLM Fish Tank/pocket-tank/model"
+cd "/Volumes/Local/Projects/LLM Fish Tank/aqua-pets/model"
 python3 gen_traces.py --schema 3 --count 12000 --max-minutes 480 --seed 31 --out out/v3_traces_a.jsonl
 python3 gen_traces.py --schema 3 --count 12000 --max-minutes 480 --seed 32 --out out/v3_traces_b.jsonl
 python3 gen_traces.py --schema 3 --count 12000 --max-minutes 480 --seed 33 --out out/v3_traces_c.jsonl
@@ -68,14 +68,14 @@ python3 train_tokenizer.py --schema 3 --verify "out/v3_clean.jsonl"     # closed
 ## 3. Train (~30 min on the Mac, MPS) + export 4-bit + probe
 
 ```bash
-POCKET_SCHEMA=3 ~/.venvs/pocket-tank/bin/python train.py --data "out/v3_clean.jsonl" \
+AQUA_PETS_SCHEMA=3 ~/.venvs/aquapets/bin/python train.py --data "out/v3_clean.jsonl" \
   --dim 384 --n-layers 8 --n-heads 8 --max-seq-len 64 --batch 64 --iters 4000 --lr 6e-4 --out out/ckpt_v3.pt
-~/.venvs/pocket-tank/bin/python export_q4.py out/model_q4_v3.bin --checkpoint out/ckpt_v3.pt
-~/.venvs/pocket-tank/bin/python probe_dist.py --schema 3            # distribution probe (see below)
+~/.venvs/aquapets/bin/python export_q4.py out/model_q4_v3.bin --checkpoint out/ckpt_v3.pt
+~/.venvs/aquapets/bin/python probe_dist.py --schema 3            # distribution probe (see below)
 python3 eval.py --schema 3 --count 60 --teacher --host http://localhost:11434 \
   --model-bin out/model_v3.bin --tok-bin out/tokenizer_v3.bin       # agreement vs teacher (needs fp32 export too)
 ```
-(For eval's fp32 path: `~/.venvs/pocket-tank/bin/python llama2.c/export.py out/model_v3.bin --checkpoint out/ckpt_v3.pt`.)
+(For eval's fp32 path: `~/.venvs/aquapets/bin/python llama2.c/export.py out/model_v3.bin --checkpoint out/ckpt_v3.pt`.)
 
 Acceptance (compare with v2 in docs/stats.md):
 - teacher agreement ≥ 72% (v2: 75%, ceiling 82%)

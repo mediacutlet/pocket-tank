@@ -16,6 +16,7 @@
 bool audio_port_init(i2c_master_bus_handle_t bus);   /* false = no codec / no bank: every call a no-op */
 void audio_port_play(int cue, int pitch_q8);          /* SND_*, AUDIO_PITCH_ONE = native */
 void audio_port_stop(int cue);                        /* fade a loop out */
+void audio_port_jingle(bool on);                      /* the about page's 30 s loop (audio_jingle): on brings the codec up */
 /* the finger is down: bring the codec + amp up NOW so the cue the release
  * turns into (a card, a feed, a light) plays the instant it is asked for -
  * the cold-start settle hides under the finger's own dwell */

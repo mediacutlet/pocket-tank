@@ -1,5 +1,5 @@
 /* persist_port_sim.c — sim implementation of the progression ports:
- * ~/.cache/pocket-tank/tank.sav + wall clock. */
+ * ~/.cache/aqua-pets/tank.sav + wall clock. */
 #include "progression.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -8,11 +8,11 @@
 #include <errno.h>
 #include <sys/stat.h>
 
-/* POCKET_TANK_SAVE overrides the save path (selftests use a scratch file) */
+/* AQUA_PETS_SAVE overrides the save path (selftests use a scratch file) */
 static const char *path(void) {
     static char p[512];
-    if (getenv("POCKET_TANK_SAVE")) return getenv("POCKET_TANK_SAVE");
-    snprintf(p, sizeof p, "%s/.cache/pocket-tank/tank.sav", getenv("HOME") ? getenv("HOME") : ".");
+    if (getenv("AQUA_PETS_SAVE")) return getenv("AQUA_PETS_SAVE");
+    snprintf(p, sizeof p, "%s/.cache/aqua-pets/tank.sav", getenv("HOME") ? getenv("HOME") : ".");
     return p;
 }
 bool persist_port_load(void *buf, size_t max, size_t *got) {

@@ -7,7 +7,8 @@
 
 static q4_model_t *g_model;
 static word_tok_t  g_tok;
-static int   g_schema;                /* 2 | 3 | 4 */
+static int   g_schema;                /* 2 | 3 | 4 | 5 */
+static bool  g_sp_known[SP_COUNT];    /* v5: the species words this vocab has (a later species falls back to `fish`) */
 static int   g_goal_ids[GOAL_COUNT];  /* token id of each goal word */
 static uint32_t g_rng = 0x9E3779B9u;
 static float g_last_p[GOAL_COUNT];
@@ -72,7 +73,15 @@ void advisor_core_encode(const tank_t *t, int idx, char *out, size_t n) {
     else snprintf(wall_s, sizeof wall_s, "clear");
 
     int bold9 = (int)(f->bold * 9.0f + 0.5f), soc9 = (int)(f->sociable * 9.0f + 0.5f);
-    if (g_schema >= 4)
+    if (g_schema >= 5)          /* v5 (docs/species.md): v4 + `species <word>` after stage */
+        snprintf(out, n,
+            "zone %d hunger %d energy %d stress %d curiosity %d bold %d social %d stage %s species %s trust %d bored %d "
+            "food %s friend %s bubble %s reef %s wall %s last %s time %s",
+            row * 3 + col + 1, drive9(f->hunger), drive9(f->energy), drive9(f->stress), drive9(f->curiosity),
+            bold9, soc9, STAGE_NAMES[f->stage], advisor_core_species_word(f), drive9(f->trust), drive9(f->bored),
+            food_s, friend_s, bubble_s, reef_s, wall_s,
+            GOAL_NAMES[f->goal.id], t->night ? "night" : "day");
+    else if (g_schema >= 4)
         snprintf(out, n,
             "zone %d hunger %d energy %d stress %d curiosity %d bold %d social %d stage %s trust %d bored %d "
             "food %s friend %s bubble %s reef %s wall %s last %s time %s",
@@ -99,26 +108,69 @@ void advisor_core_encode(const tank_t *t, int idx, char *out, size_t n) {
             GOAL_NAMES[f->goal.id], t->night ? "night" : "day");
 }
 
+/* the loaded vocab's schema: v3 has " trust", v4 " bored", v5 " species"
+ * (each a superset of the one before); and every goal word's id */
+static bool detect_schema(void) {
+    bool trust = false, bored = false, species = false;
+    for (int i = 0; i < GOAL_COUNT; i++) g_goal_ids[i] = -1;
+    for (int s = 0; s < SP_COUNT; s++) g_sp_known[s] = false;
+    for (int id = 0; id < g_tok.vocab_size; id++) {
+        const char *p = word_tok_piece(&g_tok, id);
+        for (int s = 0; s < SP_COUNT; s++)
+            if (p[0] == ' ' && strcmp(p + 1, SPECIES[s].token) == 0) g_sp_known[s] = true;
+        if (strcmp(p, " trust") == 0) trust = true;
+        if (strcmp(p, " bored") == 0) bored = true;      /* v4: no shadow, + bored */
+        if (strcmp(p, " species") == 0) species = true;  /* v5: + species <word> */
+        for (int g = 0; g < GOAL_COUNT; g++)
+            if (p[0] == ' ' && strcmp(p + 1, GOAL_NAMES[g]) == 0) g_goal_ids[g] = id;
+    }
+    g_schema = species && bored ? 5 : bored ? 4 : trust ? 3 : 2;
+    for (int g = 0; g < GOAL_COUNT; g++) if (g_goal_ids[g] < 0) return false;   /* not our vocab */
+    return true;
+}
+
 bool advisor_core_init(const uint8_t *model_bin, size_t model_len,
                        const uint8_t *tok_bin, size_t tok_len,
                        void *(*alloc)(size_t), uint32_t seed) {
     g_model = q4_model_open(model_bin, model_len, alloc);
     if (!g_model) return false;
     if (word_tok_init(&g_tok, tok_bin, tok_len, q4_model_config(g_model)->vocab_size) != 0) return false;
-    g_schema = 2;
-    for (int i = 0; i < GOAL_COUNT; i++) g_goal_ids[i] = -1;
-    for (int id = 0; id < g_tok.vocab_size; id++) {
-        const char *p = word_tok_piece(&g_tok, id);
-        if (strcmp(p, " trust") == 0 && g_schema < 3) g_schema = 3;
-        if (strcmp(p, " bored") == 0) g_schema = 4;      /* v4: no shadow, + bored */
-        for (int g = 0; g < GOAL_COUNT; g++)
-            if (p[0] == ' ' && strcmp(p + 1, GOAL_NAMES[g]) == 0) g_goal_ids[g] = id;
-    }
-    for (int g = 0; g < GOAL_COUNT; g++) if (g_goal_ids[g] < 0) return false;   /* not our vocab */
+    if (!detect_schema()) return false;
     if (seed) g_rng = seed;
     return true;
 }
-int advisor_core_schema(void) { return g_model ? g_schema : 0; }
+
+bool advisor_core_init_encoder(const uint8_t *tok_bin, size_t tok_len) {
+    /* no model to say the vocab size: count the tokenizer's entries */
+    size_t off = 4; int n = 0;
+    while (off + 8 <= tok_len) {
+        int32_t len; memcpy(&len, tok_bin + off + 4, 4);
+        if (len < 0 || off + 8 + (size_t)len > tok_len) return false;
+        off += 8 + (size_t)len; n++;
+    }
+    if (n == 0 || off != tok_len) return false;
+    g_model = NULL;
+    if (word_tok_init(&g_tok, tok_bin, tok_len, n) != 0) return false;
+    return detect_schema();
+}
+
+/* the species word the loaded vocab can hear: a species added after the
+ * model's vocabulary (the jellyfish, 2026-10-09, is id 65 of a 66-word
+ * tokenizer; v5m's has 65) is sent as the classic fish - its traits still
+ * shape the decision, and the reflex layer still moves it its own way */
+const char *advisor_core_species_word(const fish_t *f) {
+    int s = f->species < SP_COUNT ? f->species : SP_FISH;
+    return g_sp_known[s] ? SPECIES[s].token : SPECIES[SP_FISH].token;
+}
+
+int advisor_core_unknown_words(const char *line) {
+    if (!g_tok.vocab) return -1;
+    int toks[96]; int n = word_tok_encode(&g_tok, line, toks, 96), unk = 0;
+    for (int i = 1; i < n; i++) unk += toks[i] == 0;     /* toks[0] is BOS */
+    return unk;
+}
+
+int advisor_core_schema(void) { return g_tok.vocab ? g_schema : 0; }
 q4_model_t *advisor_core_model(void) { return g_model; }
 const q4_config_t *advisor_core_config(void) { return g_model ? q4_model_config(g_model) : NULL; }
 const float *advisor_core_last_probs(void) { return g_last_p; }

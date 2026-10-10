@@ -26,9 +26,9 @@ are skipped with a note. CUES below is the enum order and the contract
 with the firmware; a cue with no file (deferred) keeps its id and plays
 nothing.
 
-    ~/.venvs/pocket-tank/bin/python tools/make_sounds.py import \\
+    ~/.venvs/aquapets/bin/python tools/make_sounds.py import \\
         "/Volumes/Local-1/Projects/LLM Fish Tank/working-assets/sounds/exports"
-    ~/.venvs/pocket-tank/bin/python tools/make_sounds.py build
+    ~/.venvs/aquapets/bin/python tools/make_sounds.py build
 """
 import csv, math, os, re, struct, subprocess, sys, wave
 

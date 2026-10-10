@@ -1,4 +1,4 @@
-# pocket-tank PC simulator (LVGL v9 + SDL2)
+# Aqua Pets PC simulator (LVGL v9 + SDL2)
 #
 # macOS: built as x86_64 by default because the Homebrew SDL2 here is the
 # Intel build (/usr/local); the sim runs fine under Rosetta. `make ARCH=` for
@@ -34,7 +34,7 @@ CFLAGS  := $(ROUNDF) -O2 -std=c11 $(ARCH) -I. -I../common -I../common/llm -DLV_C
            -Wall -Wextra -Wno-unused-parameter -MMD -MP
 LDFLAGS := $(ARCH) $(SDL_LIBS) -lm
 
-APP_SRCS  := main.c advisor_llm.c persist_port_sim.c net_port_sim.c ../common/tank.c ../common/update.c ../common/advisor.c ../common/render.c ../common/icons.c ../common/progression.c ../common/setup.c ../common/audio.c ../common/notice.c ../common/sounds.c ../common/battery.c ../common/llm/q4_model.c ../common/llm/word_tok.c ../common/llm/advisor_core.c
+APP_SRCS  := main.c theme_test.c advisor_llm.c persist_port_sim.c net_port_sim.c ../common/tank.c ../common/update.c ../common/advisor.c ../common/render.c ../common/theme.c ../common/theme_assets.c ../common/icons.c ../common/jellyfish_assets.c ../common/wreck_assets.c ../common/frogman_assets.c ../common/sub_assets.c ../common/progression.c ../common/setup.c ../common/audio.c ../common/notice.c ../common/sounds.c ../common/battery.c ../common/llm/q4_model.c ../common/llm/word_tok.c ../common/llm/advisor_core.c
 
 LVGL_SRCS := $(shell find lvgl/src -name '*.c')
 OBJS      := $(patsubst %.c,$(BUILD)/%.o,$(filter-out ../common/%,$(APP_SRCS)) $(LVGL_SRCS)) $(patsubst ../common/%.c,$(BUILD)/common/%.o,$(filter ../common/%,$(APP_SRCS)))
@@ -42,9 +42,9 @@ OBJS      := $(patsubst %.c,$(BUILD)/%.o,$(filter-out ../common/%,$(APP_SRCS)) $
 $(OUT): $(OBJS)
 	$(CC) -o $@ $(OBJS) $(LDFLAGS)
 
-SELFTESTS := --selftest --selftest-hunger --selftest-shop --selftest-battery \
+SELFTESTS := --selftest-themes --selftest --selftest-hunger --selftest-shop --selftest-battery \
              --selftest-pop --selftest-card --selftest-sleep --selftest-tend --selftest-llm \
-             --selftest-saves --selftest-update
+             --selftest-saves --selftest-update --selftest-species --selftest-encoder
 # the dev repo does not track model/out (the public one does): NOMODEL=1 runs
 # the same checks without the LLM selftest, for a checkout with no model
 ifdef NOMODEL

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Word-level tokenizer for the pocket-tank advisor. Stdlib only.
+"""Word-level tokenizer for the Aqua Pets advisor. Stdlib only.
 
 The schema (schema.md, FROZEN v2) is a closed vocabulary of whitespace-delimited
 words, so one token per word is the natural encoding: a v2 state line is ~44
@@ -18,8 +18,9 @@ firmware will too (simpler than BPE). Training doc: <BOS> state -> goal.
 Usage: python3 train_tokenizer.py [--out out/tokenizer.bin] [--verify out/v2_clean.jsonl]
        python3 train_tokenizer.py --schema 3          # out/tokenizer_v3.bin (no names, + trust)
        python3 train_tokenizer.py --schema 4          # out/tokenizer_v4.bin (no shadow, + bored)
-The schema is chosen by --schema, or by the POCKET_SCHEMA environment variable
-when imported (train.py / probe_dist.py): POCKET_SCHEMA=3 python train.py ...
+       python3 train_tokenizer.py --schema 5          # out/tokenizer_v5.bin (+ species, 10 species words)
+The schema is chosen by --schema, or by the AQUA_PETS_SCHEMA environment variable
+when imported (train.py / probe_dist.py): AQUA_PETS_SCHEMA=3 python train.py ...
 """
 
 import argparse
@@ -31,7 +32,17 @@ import struct
 BOS_ID, EOS_ID, UNK_ID = 1, 2, 0
 SEP = " -> "
 
-SCHEMA = int(os.environ.get("POCKET_SCHEMA", "2"))
+SCHEMA = int(os.environ.get("AQUA_PETS_SCHEMA", "2"))
+
+# v5 (2026-10-05, docs/species.md): the species words, in common/tank.h
+# species_t order (SPECIES[].token). `fish` is the classic fish (the v2 line's
+# old `fish <name>` head word, reused). Appended after every v4 word, so ids
+# 0..53 keep the v4 layout and v5 adds ids 54..64: vocab 65. The jellyfish
+# (2026-10-09) is appended again as id 65: vocab 66, and a model built on the
+# 65-word vocab still reads this tokenizer's first 65 ids as its own (the C
+# advisor sends `species fish` for a word the loaded model lacks).
+SPECIES_WORDS = ["fish", "seahorse", "octopus", "puffer", "angler", "eel", "shark", "squid",
+                 "crab", "lobster", "jellyfish"]
 
 
 def lexicon_for(schema):
@@ -52,11 +63,12 @@ def lexicon_for(schema):
             + [str(i) for i in range(0, 13)]                 # drives 0-9, clock 1-12
             + ["seek_food", "flee_shadow", "visit_bubbles", "follow_friend",
                "explore", "rest", "dart_play", "inspect_reef",
-               "urgency", "->"])
+               "urgency", "->"]
+            + (["species"] + SPECIES_WORDS if schema >= 5 else []))     # v5: `species <word>` after `stage`
 
 
 def set_schema(schema):
-    """switch the module's lexicon (v2: vocab 58, v3: vocab 54)"""
+    """switch the module's lexicon (v2: vocab 58, v3/v4: vocab 54, v5: vocab 65)"""
     global SCHEMA, LEXICON, VOCAB, VOCAB_SIZE, _WORD_TO_ID
     SCHEMA = schema
     LEXICON = lexicon_for(schema)
@@ -108,7 +120,7 @@ def verify(paths):
 def main():
     ap = argparse.ArgumentParser()
     here = os.path.dirname(os.path.abspath(__file__))
-    ap.add_argument("--schema", type=int, choices=(2, 3, 4), default=SCHEMA)
+    ap.add_argument("--schema", type=int, choices=(2, 3, 4, 5), default=SCHEMA)
     ap.add_argument("--out", default=None)
     ap.add_argument("--verify", default=None)
     args = ap.parse_args()
@@ -120,6 +132,7 @@ def main():
     os.makedirs(os.path.dirname(args.out), exist_ok=True)
     write_bin(args.out)
     sample = ("fish mira zone 2 hunger 7 -> seek_food urgency 8" if args.schema == 2
+              else "zone 2 hunger 7 stage adult species octopus trust 5 -> seek_food urgency 8" if args.schema >= 5
               else "zone 2 hunger 7 trust 5 -> seek_food urgency 8")
     assert decode(encode(sample)) == sample, "round-trip failed"
     print(f"wrote {args.out}: schema v{args.schema}, vocab_size={VOCAB_SIZE}, sample = {len(encode(sample, bos=True))} tokens")

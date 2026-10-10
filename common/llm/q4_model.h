@@ -1,4 +1,4 @@
-/* q4_model.h — on-device inference for the pocket-tank student model.
+/* q4_model.h — on-device inference for the Aqua Pets student model.
  *
  * Reads the "version 3" 4-bit export (model/export_q4.py) straight from a
  * memory-mapped flash partition: weights are never copied to RAM. Forward pass

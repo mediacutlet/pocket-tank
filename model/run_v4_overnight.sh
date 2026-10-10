@@ -11,13 +11,13 @@
 #    dropped, shadow-in-view and flee pairs dropped, bored 0-2) and fold them
 #    in -> out/v4m_clean.jsonl (the v3m lesson: the personality cliffs live
 #    in the old labels; the boredom behaviour lives only in the new ones)
-# 4. train the 14M student (POCKET_SCHEMA=4) on the mix, export 4-bit + fp32,
+# 4. train the 14M student (AQUA_PETS_SCHEMA=4) on the mix, export 4-bit + fp32,
 #    probe
 # Step 5 (shipping the model into sim/firmware) is deliberately manual.
 set -u
 cd "$(dirname "$0")"
 LOG=out/v4_overnight.log
-PY=~/.venvs/pocket-tank/bin/python
+PY=~/.venvs/aquapets/bin/python
 HOST=${HOST:-http://192.168.0.139:11434}
 MINUTES=${MINUTES:-480}
 COUNT=${COUNT:-12000}
@@ -56,7 +56,7 @@ python3 train_tokenizer.py --schema 4 --verify "out/v4m_clean.jsonl" 2>&1 | tee 
 n=$(wc -l < out/v4m_clean.jsonl | tr -d ' ')
 
 log "--- train (14M, schema v4, $n pairs) ---"
-POCKET_SCHEMA=4 $PY train.py --data "out/v4m_clean.jsonl" --dim 384 --n-layers 8 --n-heads 8 \
+AQUA_PETS_SCHEMA=4 $PY train.py --data "out/v4m_clean.jsonl" --dim 384 --n-layers 8 --n-heads 8 \
     --max-seq-len 64 --batch 64 --iters 5000 --lr 6e-4 --out out/ckpt_v4m.pt 2>&1 | tail -15 | tee -a "$LOG"
 [ -f out/ckpt_v4m.pt ] || { log "ABORT: no checkpoint"; exit 1; }
 

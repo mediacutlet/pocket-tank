@@ -8,9 +8,9 @@ shape of its glass, so what the bezel hides is hidden here too. Look at the
 sheets before anything is flashed (docs/BOARDS.md): a page that is right on
 one board and cut, shifted or crowded on another shows at a glance.
 
-  pocket-tank/tools/board_sheet.py --selftest-card       # the fish card, armed, the rename page
-  pocket-tank/tools/board_sheet.py --snapshot 20         # every page the snapshot mode draws
-  pocket-tank/tools/board_sheet.py --out /tmp/x --selftest-card
+  aqua-pets/tools/board_sheet.py --selftest-card       # the fish card, armed, the rename page
+  aqua-pets/tools/board_sheet.py --snapshot 20         # every page the snapshot mode draws
+  aqua-pets/tools/board_sheet.py --out /tmp/x --selftest-card
 
 The mode is any simulator flag that takes a path prefix as its next argument
 and writes <prefix>_<name>.ppm files; anything after it is passed on. The

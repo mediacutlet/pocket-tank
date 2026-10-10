@@ -43,6 +43,14 @@ void audio_stop_all(void);
  * this block (0 = silence: the platform may power the codec down). */
 int  audio_render(int16_t *out, int n);
 bool audio_active(void);
+/* the about page's jingle (2026-10-10): a 30 s underwater loop SYNTHESISED here
+ * (12 bars at 96 BPM - an arpeggio, a hummed melody, a soft pad and bubble
+ * chirps - nothing in the bank: a 30 s clip would be 960 KB of flash). It
+ * loops seamlessly (the sequencer wraps, the ringing notes carry over), fades
+ * in over 0.1 s and out over 0.4 s, follows the volume setting and the master
+ * level, and counts as a live voice (audio_active) while it plays. */
+void audio_jingle(bool on);
+bool audio_jingle_on(void);
 const char *audio_cue_name(int cue);     /* "eat", or "?" */
 int  audio_cue_by_name(const char *s);   /* -1 if unknown */
 

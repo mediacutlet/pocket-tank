@@ -12,6 +12,7 @@ static bool s_cf; static int s_cf_ans;
 void touch_port_confirm_open(void) { s_cf = true; s_cf_ans = 0; }
 bool touch_port_confirm_answer(int ans) { if (!s_cf) return false; s_cf = false; s_cf_ans = ans > 0 ? 1 : -1; return true; }
 bool touch_port_confirm_up(void) { return s_cf; }
+bool touch_port_down(void) { return false; }
 float touch_port_confirm_frac(void) { return s_cf ? 1.0f : 0.0f; }
 int  touch_port_confirm_take(void) { int a = s_cf_ans; s_cf_ans = 0; return a; }
 bool touch_port_pressed_since(int64_t us) { (void)us; return false; }

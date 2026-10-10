@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Char-level tokenizer for the pocket-tank advisor. Stdlib only.
+"""Char-level tokenizer for the Aqua Pets advisor. Stdlib only.
 
 The schema (schema.md, FROZEN) uses a closed lowercase-ASCII vocabulary, so instead
 of sentencepiece we ship a fixed char-level vocab in llama2.c's tokenizer.bin format,

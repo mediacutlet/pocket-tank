@@ -45,7 +45,7 @@ keep = [l for l in lines if "batlog:" in l or "director:" in l]
 if not any("director:" in l for l in keep):   # another board on that port, or the tank asleep: nothing to archive, nothing to flash
     sys.exit(f"preflight: no director on {port} - not the tank, or it is asleep; refusing to continue")
 with open(path, "w") as f:
-    f.write(f"# pocket-tank preflight {stamp} on {port}\n")
+    f.write(f"# Aqua Pets preflight {stamp} on {port}\n")
     f.write("\n".join(keep) + "\n")
 n_samples = next((l for l in keep if "samples (h:mm" in l), "no samples")
 print(f"preflight: {len(keep)} lines -> {os.path.relpath(path, os.getcwd())} | {n_samples.split('batlog: ')[-1]}")

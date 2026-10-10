@@ -1,276 +1,82 @@
 <!doctype html>
 <html lang="en">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="theme-color" content="#f8f8f8">
-<title>Install Pocket Tank</title>
-<meta name="description" content="Install Pocket Tank on a Waveshare ESP32-S3-Touch-AMOLED-1.8 from your browser. Nothing to download.">
-<link rel="canonical" href="https://pocketank.com/install/">
-<link rel="icon" href="https://stratobuilds.com/wp-content/uploads/2025/06/strato-builds-favicon-64.png" sizes="64x64">
-<link rel="apple-touch-icon" href="https://stratobuilds.com/wp-content/uploads/2025/06/strato-builds-favicon-64.png">
-<!-- social sharing: the featured image (1280x720) and the card text -->
-<meta property="og:type" content="website">
-<meta property="og:site_name" content="StratoBuilds">
-<meta property="og:url" content="https://pocketank.com/install/">
-<meta property="og:title" content="Install Pocket Tank from your browser">
-<meta property="og:description" content="A tiny AI runs a fish tank on an ESP32-S3 board. Plug it in, click Install, done. Nothing to download.">
-<meta property="og:image" content="https://stratobuilds.com/wp-content/uploads/2026/09/pt-installer.jpg">
-<meta property="og:image:width" content="1280">
-<meta property="og:image:height" content="720">
-<meta property="og:image:alt" content="Pocket Tank running on the Waveshare ESP32-S3 AMOLED board">
-<meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:title" content="Install Pocket Tank from your browser">
-<meta name="twitter:description" content="A tiny AI runs a fish tank on an ESP32-S3 board. Plug it in, click Install, done. Nothing to download.">
-<meta name="twitter:image" content="https://stratobuilds.com/wp-content/uploads/2026/09/pt-installer.jpg">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600&family=Roboto+Mono:wght@500&display=swap" rel="stylesheet">
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#153f37"><meta name="robots" content="noindex">
+<title>Install Aqua Pets · Theme edition</title>
+<meta name="description" content="Install the Aqua Pets build on your rectangle, pendant or watch from Chrome or Edge on a computer, or Chrome on an Android phone, with a USB cable.">
 <style>
-  /* the stratobuilds.com system: #f8f8f8 page, white / #222 / lavender cards at
-     10px, Inter Tight text, Roboto Mono uppercase pills, the red button */
-  :root {
-    --page: #f8f8f8; --card: #ffffff; --dark: #222222; --ink: #0a0a0a; --text: #3f3f3f;
-    --muted: #666666; --lavender: #d7e0f2; --red: #ff0000; --pill: rgba(10, 10, 10, .06);
-    --pill-dark: rgba(255, 255, 255, .2); --rule: #f0f0f0;
-    --sans: "Inter Tight", Inter, system-ui, -apple-system, "Segoe UI", Roboto, Arial, Helvetica, sans-serif;
-    --mono: "Roboto Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
-  }
-  * { box-sizing: border-box; }
-  html { background: var(--page); }
-  body { margin: 0; background: var(--page); color: var(--text);
-         font: 400 17.5px/1.48 var(--sans); letter-spacing: .036em; -webkit-font-smoothing: antialiased; }
-  main { max-width: 780px; margin: 0 auto; padding: 12px 12px 40px; display: flex; flex-direction: column; gap: 10px; }
-  .card { background: var(--card); border: 1.5px solid var(--page); border-radius: 10px; padding: 22px 22px 20px; }
-  .card.dark { background: var(--dark); color: #fff; }
-  .card.lavender { background: var(--lavender); }
-  .card.header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 16px 20px; }
-  .card.header img { display: block; width: 200px; max-width: 55%; height: auto; }
-  h1, h2 { font-family: var(--sans); color: var(--ink); margin: 0 0 12px; }
-  h1 { font-size: 48px; font-weight: 500; line-height: 1; letter-spacing: -.01em; }
-  h2 { font-size: 32px; font-weight: 600; line-height: 1; letter-spacing: .01em; }
-  .dark h1, .dark h2, .dark p { color: #fff; }
-  .lede { font-size: 20px; letter-spacing: .036em; margin: 0; }
-  p { margin: 0 0 20px; }
-  p:last-child { margin-bottom: 0; }
-  .pill { display: inline-block; font: 500 11px/1 var(--mono); letter-spacing: .05em; text-transform: uppercase;
-          color: var(--ink); background: var(--pill); border-radius: 10px; padding: 8px 10px; white-space: nowrap; }
-  .dark .pill { color: #fff; background: var(--pill-dark); }
-  ol { margin: 0 0 20px; padding: 0; list-style: none; counter-reset: step; }
-  ol > li { position: relative; padding: 4px 0 4px 44px; counter-increment: step; margin-bottom: 8px; }
-  ol > li::before { content: counter(step); position: absolute; left: 0; top: 4px; width: 30px; height: 30px;
-                  border-radius: 10px; background: var(--ink); color: #fff; font: 500 12px/30px var(--mono); text-align: center; }
-  li b, p b { color: var(--ink); font-weight: 500; }
-  ol ul { margin: 8px 0 0; padding-left: 18px; }
-  ol ul li { margin-bottom: 4px; }
-  ul.how { margin: 0; padding-left: 18px; }
-  ul.how li { margin-bottom: 6px; }
-  a { color: var(--ink); text-decoration: underline; text-decoration-color: rgba(10, 10, 10, .3); text-underline-offset: 3px; }
-  a:hover { text-decoration-color: var(--ink); }
-  .dark a { color: #fff; text-decoration-color: rgba(255, 255, 255, .4); }
-  code { font: 500 .8em/1 var(--mono); background: var(--pill); border-radius: 6px; padding: 3px 7px; letter-spacing: 0; white-space: nowrap; }
-  kbd { font: 500 11px/1 var(--mono); text-transform: uppercase; letter-spacing: .05em; color: #fff; background: var(--dark);
-        border-radius: 6px; padding: 4px 7px; white-space: nowrap; }
-  .install { display: flex; flex-wrap: wrap; align-items: center; gap: 14px 16px; margin: 4px 0 16px; }
-  /* the trigger ESP Web Tools renders in its "activate" slot: the site's button */
-  esp-web-install-button button {
-    font: 500 14px/17px var(--sans); letter-spacing: .01em; color: #fff; background: var(--red);
-    border: 0; border-radius: 10px; padding: 20px 30px; cursor: pointer; transition: filter .15s;
-  }
-  esp-web-install-button button:hover { filter: brightness(.9); }
-  /* the "start over" trigger: the same slot, the dark card's color, smaller */
-  esp-web-install-button.fresh button { background: var(--dark); padding: 14px 20px; }
-  esp-web-install-button [slot="unsupported"], esp-web-install-button [slot="not-allowed"] {
-    display: inline-block; font-size: 14px; font-weight: 500; color: var(--ink); background: rgba(255, 0, 0, .08);
-    border-radius: 10px; padding: 14px 16px; max-width: 420px;
-  }
-  .meta { color: var(--muted); font-size: 14px; }
-  /* the board picker (2026-10-02): shown only when the build carries more than one board */
-  .boards { display: flex; flex-wrap: wrap; gap: 10px; margin: 4px 0 18px; }
-  .boards button { font: 500 16px/1.25 var(--sans); letter-spacing: .01em; color: var(--ink); text-align: left;
-                   background: var(--card); border: 1.5px solid var(--rule); border-radius: 10px; padding: 14px 16px;
-                   cursor: pointer; min-width: 180px; flex: 1 1 180px; }
-  .boards button small { display: block; margin-top: 4px; font: 500 10px/1.4 var(--mono); letter-spacing: .04em;
-                         text-transform: uppercase; color: var(--muted); }
-  .boards button[aria-checked="true"] { border-color: var(--ink); box-shadow: inset 0 0 0 1.5px var(--ink); }
-  .boards button[aria-checked="true"]::before { content: "\2713  "; }
-  .fine { color: var(--muted); font-size: 15px; }
-  details { border-top: 1.5px solid var(--rule); padding: 12px 0; }
-  details:last-of-type { padding-bottom: 0; }
-  summary { cursor: pointer; color: var(--ink); font-weight: 500; list-style: none; display: flex; justify-content: space-between; gap: 12px; }
-  summary::-webkit-details-marker { display: none; }
-  summary::after { content: "+"; font: 500 18px/1 var(--mono); color: var(--muted); flex: none; }
-  details[open] summary::after { content: "\2013"; }
-  details p { margin: 12px 0 4px; font-size: 16px; }
-  .foot { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 10px 20px; padding: 14px 20px;
-          font: 500 10px/1.45 var(--mono); letter-spacing: .04em; text-transform: uppercase; color: var(--muted); }
-  .foot a { color: var(--muted); text-decoration: none; }
-  .foot a:hover { color: var(--ink); }
-  .foot span + span { margin-left: 16px; }
-  @media (max-width: 560px) {
-    h1 { font-size: 36px; } h2 { font-size: 26px; } .lede { font-size: 18px; }
-    .card { padding: 18px 16px 16px; }
-  }
+:root{--paper:#f4f0e5;--ink:#263c33;--muted:#627167;--green:#215a47;--line:#d7ddcf;--cream:#fffdf5}*{box-sizing:border-box}body{margin:0;background:var(--paper);color:var(--ink);font:17px/1.65 'Trebuchet MS',sans-serif}main{max-width:1080px;margin:auto;padding:32px 28px 56px}header{display:flex;align-items:center;justify-content:space-between;gap:20px;padding:0 0 26px}.brand{font-size:24px;letter-spacing:-1px;font-weight:bold}.brand .byline{font-size:14px;letter-spacing:0;font-weight:normal;white-space:nowrap}.eyebrow,.meta{font:12px/1.7 ui-monospace,monospace;letter-spacing:.07em}.eyebrow{text-transform:uppercase}.hero{border-radius:22px;background:#153f37;color:#f5f1d9;padding:42px;margin-bottom:24px}.hero h1{font:normal clamp(38px,6vw,62px)/1.05 Georgia,serif;letter-spacing:-2px;margin:14px 0 20px}.hero p{max-width:620px;color:#d5e1cb}.themes{display:grid;grid-template-columns:repeat(3,1fr);gap:18px;margin-top:28px}.themes figure{margin:0;display:flex;align-items:center;gap:14px}.themes img{width:72px;height:72px;border-radius:50%}.themes figcaption{font-size:14px;line-height:1.4}.themes small{display:block;color:#b9ceba;font-size:12px;margin-top:4px}.layout{display:grid;grid-template-columns:minmax(0,1.6fr) minmax(0,1fr);gap:24px;align-items:start}.card{background:var(--cream);border:1px solid var(--line);border-radius:18px;padding:28px}.card+.card{margin-top:20px}h2{font:normal 29px/1.2 Georgia,serif;margin:0 0 18px;letter-spacing:-.5px}h3{font-size:17px;margin:22px 0 8px}p{margin:10px 0 18px}a{color:inherit;text-underline-offset:4px}button{font:inherit;cursor:pointer;border-radius:9px;min-height:48px}button:focus-visible,a:focus-visible,summary:focus-visible{outline:3px solid #cf8348;outline-offset:4px}.boards{display:grid;gap:10px;margin:16px 0 24px}.boards button{background:#f4f4e9;border:1px solid var(--line);color:var(--ink);text-align:left;padding:13px 16px}.boards button[aria-checked=true]{background:#e4edda;border:2px solid var(--green);padding:12px 15px}.boards button[aria-checked=true]::before{content:'✓ ';color:var(--green)}.boards small{display:block;font-size:12px;color:var(--muted);margin-top:4px}.steps{padding-left:23px}.steps li{padding-left:4px;margin:0 0 16px}.install{border-top:1px solid var(--line);padding-top:22px;margin-top:24px}button[slot=activate]{background:var(--green);color:white;border:0;padding:14px 24px;width:100%;font-weight:bold}button:disabled{opacity:.5;cursor:not-allowed}.fine{font-size:13px;color:var(--muted);line-height:1.65}.meta{display:block;color:var(--muted);margin-top:12px;overflow-wrap:anywhere}.status{border-radius:10px;padding:12px 14px;background:#e7eddd;font-size:14px}.status.warn{background:#fff0d7;color:#704723}.fresh button[slot=activate]{background:transparent;color:#924931;border:1px solid #d7bcb0;font-weight:normal}details{border-top:1px solid var(--line);padding:15px 0}summary{cursor:pointer;font-weight:bold;line-height:1.4}details p{font-size:14px;margin:12px 0 0}code,kbd{font:13px ui-monospace,monospace;background:#e8e9df;border-radius:4px;padding:2px 5px;overflow-wrap:anywhere}footer{display:flex;justify-content:space-between;gap:18px;flex-wrap:wrap;padding:26px 0 0;font-size:12px;color:var(--muted)}[hidden]{display:none!important}esp-web-install-button{display:block}noscript{display:block;padding:20px;background:#fff0d7}@media(max-width:740px){main{padding:22px 16px}.hero{padding:28px 24px}.layout{grid-template-columns:1fr}.card{padding:24px}.themes{gap:10px}.themes figure{display:block}.themes figcaption{margin-top:8px}.themes img{width:60px;height:60px}header .eyebrow{font-size:10px}}
 </style>
+<script type="module">/* Chrome on Android has WebUSB but no usable Web Serial (2026-10-10): the polyfill (vendor/web-serial-polyfill, Apache-2.0)
+   speaks to the board's USB CDC interface through WebUSB and presents it as navigator.serial, so ESP Web Tools below runs
+   unchanged. Only installed where Web Serial is missing (?polyfill=1 forces it, for testing on a desktop). */
+import {serial as polyfill, SerialPort as PolyfillPort} from "./vendor/web-serial-polyfill/serial.js";
+/* Android ALWAYS takes the polyfill (2026-10-10): newer Chrome on Android has a navigator.serial of its own, but it
+   speaks Bluetooth only - its chooser answered "no compatible devices found" to a board the WebUSB test could see */
+const android=/Android/i.test(navigator.userAgent)||navigator.userAgentData?.platform==="Android";
+if(("usb" in navigator)&&(!("serial" in navigator)||android||new URLSearchParams(location.search).has("polyfill"))){
+  /* the chooser lists EVERY USB device (2026-10-10: a phone reported "no compatible devices found" with the
+     polyfill's default class-2 filter); the port still finds the board's CDC interface by class when it opens */
+  const serial={requestPort:async()=>{const d=await navigator.usb.requestDevice({filters:[]});return new PolyfillPort(d,{});},getPorts:()=>polyfill.getPorts(),
+                addEventListener:(...a)=>polyfill.addEventListener?.(...a),removeEventListener:(...a)=>polyfill.removeEventListener?.(...a)};
+  Object.defineProperty(navigator,"serial",{value:serial,configurable:true});document.documentElement.dataset.serialPolyfill="1";}
+</script>
 <script type="module" src="{{VENDOR}}/install-button.js"></script>
 </head>
-<body>
-<main>
-  <header class="card header">
-    <a href="https://stratobuilds.com/" aria-label="StratoBuilds"><img src="https://stratobuilds.com/wp-content/uploads/2025/06/strato-builds-logo-horizontal-400x89.png" alt="StratoBuilds" width="200" height="45"></a>
-    <span class="pill">Pocket Tank &middot; Installer</span>
-  </header>
-
-  <section class="card dark">
-    <h1>Install Pocket Tank</h1>
-    <p class="lede">A tiny fish tank where a small AI decides what the fish do, all on the board. Install it from this page. Update it the same way.</p>
-  </section>
-
-  <section class="card">
-    <h2>Install</h2>
-    <div data-pick hidden>
-      <p><b>Pick your board.</b></p>
-      <div class="boards" role="radiogroup" aria-label="Your board"></div>
-    </div>
-    <ol>
-      <li><b>Plug the board into your computer.</b> Use a USB-C cable that carries data. Some cables only charge.</li>
-      <li><b>Click Install.</b> Pick <code>USB JTAG/serial debug unit</code> from the list. On Linux it may say <code>ttyACM0</code>.</li>
-      <li><b>Wait a minute or two.</b> When it says <em>Installation complete</em>, click <em>Next</em>.</li>
-      <li><b>Connect it to Wi-Fi.</b> Pick your network and type its password. The tank's screen stays dark until you finish. Now your tank can update itself, with no cable. You can also skip this and set it up later on the tank.
-        <ul>
-          <li><b>New board:</b> you get a fresh tank with two baby fish.</li>
-          <li><b>Already have a tank:</b> it comes back just as you left it.</li>
-        </ul>
-      </li>
-    </ol>
-    <div class="install">
-      <esp-web-install-button manifest="{{MANIFEST}}">
-        <button slot="activate">Install Pocket Tank</button>
-        <span slot="unsupported">This browser can't talk to USB devices. Use Chrome or Edge on a computer.</span>
-        <span slot="not-allowed">Open this page with https:// to install.</span>
-      </esp-web-install-button>
-      <span class="meta">Chrome or Edge on a computer &middot; version <code data-version>{{VERSION}}</code></span>
-    </div>
-    <p><b>Updating?</b> Use the same button. It never erases your tank: your fish, their names, badges, sand dollars and decorations all stay.</p>
-    <p class="fine">The pop-up says <em>Install</em> even when you're updating. That's normal. If the screen is dark, the tank is asleep: press <kbd>PWR</kbd> firmly to wake it first, or it won't show up in the list.</p>
-  </section>
-
-  <section class="card">
-    <h2>Start over</h2>
-    <p>To reset your tank, you don't need this page. Hold <kbd>BOOT</kbd>, tap the screen, and answer YES. You get two new baby fish.</p>
-    <p>Board not starting, or want a clean wipe? This button erases everything, then installs fresh. <b>Your tank will be gone.</b></p>
-    <div class="install">
-      <esp-web-install-button class="fresh" manifest="{{MANIFEST_ERASE}}">
-        <button slot="activate">Erase the board and install fresh</button>
-        <span slot="unsupported">This browser can't talk to USB devices. Use Chrome or Edge on a computer.</span>
-        <span slot="not-allowed">Open this page with https:// to install.</span>
-      </esp-web-install-button>
-    </div>
-    <p class="fine">In the pop-up, tick <em>Erase device</em>. If you leave it unticked, it just installs like the red button.</p>
-  </section>
-
-  <section class="card">
-    <h2>Which board?</h2>
-    <p><span class="pill">Supported</span></p>
-    <div data-supported>
-      <p><b>Waveshare ESP32-S3-Touch-AMOLED-1.8</b>, version V1 or V2. About $35 with the screen and a battery.</p>
-    </div>
-    <p class="fine">Other boards won't work yet. The installer may still run on them, but the screen will stay blank.</p>
-  </section>
-
-  <section class="card">
-    <h2>Having trouble?</h2>
-    <details>
-      <summary>My board isn't in the list</summary>
-      <p>If the screen is dark, the tank is asleep. Press <kbd>PWR</kbd> firmly to wake it, then try again.</p>
-      <p>Still missing? Hold <kbd>BOOT</kbd> while you plug in the cable. That always makes it show up.</p>
-      <p>Also try another cable, and plug straight into the computer, not a hub.</p>
-    </details>
-    <details>
-      <summary>The install fails or stops partway</summary>
-      <p>Close anything else using the board, like a serial monitor or this page in another tab. Unplug, plug back in, and click Install again.</p>
-      <p>Still failing? Hold <kbd>BOOT</kbd> while you plug in, then try again. Your tank is safe either way.</p>
-    </details>
-    <details>
-      <summary>Linux: "permission denied"</summary>
-      <p>Run <code>sudo usermod -aG dialout $USER</code>, then log out and back in. (On some systems the group is <code>uucp</code>.)</p>
-    </details>
-    <details>
-      <summary>Windows: it shows up but won't connect</summary>
-      <p>Windows 10 and 11 already have the driver. If Device Manager shows a warning on the board, install Espressif's USB driver or try another USB port.</p>
-    </details>
-    <details>
-      <summary>Back up my tank first (optional, uses a terminal)</summary>
-      <p>Updates keep your tank, but if you'd like a copy: install esptool (<code>pip install esptool</code>) and wake the tank. To save it: <code>esptool.py --chip esp32s3 read_flash 0x9000 0x6000 my-tank.bin</code>. To put it back: <code>esptool.py --chip esp32s3 write_flash 0x9000 my-tank.bin</code></p>
-    </details>
-    <details>
-      <summary>What gets installed?</summary>
-      <p>The app, the 7.5 MB AI model, and two small startup files. Your tank's save sits in a separate spot the installer never touches. Only the erase button clears it.</p>
-      <p>Everything runs on the board. Nothing is sent anywhere.</p>
-    </details>
-  </section>
-
-  <section class="card lavender">
-    <h2>After it starts</h2>
-    <p>A new tank opens with a quick setup: place the bubbles, then name your two fish and pick their colors. Then:</p>
-    <ul class="how">
-      <li><b>Feed:</b> tap the water.</li>
-      <li><b>Say hi:</b> hold a finger on the glass and they'll come over.</li>
-      <li><b>Clean:</b> drag across the glass to wipe off algae.</li>
-      <li><b>Trim:</b> swipe sideways through the grass.</li>
-      <li><b>Light:</b> double-tap the glass.</li>
-      <li><b>Sleep:</b> press <kbd>PWR</kbd>. Press it firmly again to wake.</li>
-      <li><b>Reset:</b> hold <kbd>BOOT</kbd> and tap the glass.</li>
-    </ul>
-  </section>
-
-  <footer class="card foot">
-    <div><span>&copy; 2026 StratoBuilds</span><span>Firmware <span data-version>{{VERSION}}</span></span><span>Built <span data-built>{{DATE}}</span></span></div>
-    <div><span><a href="https://github.com/mediacutlet/pocket-tank">Source on GitHub</a></span><span><a href="https://esphome.github.io/esp-web-tools/">ESP Web Tools</a></span></div>
-  </footer>
+<body><main>
+<header><span class="brand">aqua pets<span aria-hidden="true"> ·</span> <span class="byline">by Softworkz</span></span><span class="eyebrow">Your aquarium, refreshed</span></header>
+<section class="hero"><span class="eyebrow">Browser installer · Theme edition</span><h1>A new mood for<br>your little world.</h1><p>New creature designs, living habitats and little moments of surprise. Install with one USB cable, keep your fish, and choose your atmosphere.</p>
+<div class="themes"><figure><img src="media/theme-original.png" width="72" height="72" alt="Original aquarium"><figcaption>Original<small>Your familiar tank</small></figcaption></figure><figure><img src="media/theme-lagoon.png" width="72" height="72" alt="Quiet Lagoon aquarium"><figcaption>Quiet Lagoon<small>Living Lagoon design</small></figcaption></figure><figure><img src="media/theme-tidepool.png" width="72" height="72" alt="Tidepool Club aquarium"><figcaption>Tidepool Club<small>Warm, playful colour</small></figcaption></figure><figure><img src="media/theme-blackwater.png" width="72" height="72" alt="Blackwater aquarium"><figcaption>Blackwater<small>Realistic, deep dark water</small></figcaption></figure></div></section>
+<noscript>Enable JavaScript to select your board and use the USB installer.</noscript>
+<div class="layout"><section class="card" aria-labelledby="install-title"><span class="eyebrow">01 · Connect & install</span><h2 id="install-title">Bring the update aboard.</h2><p>Choose the screen on your device. Each board needs its own firmware.</p>
+<div class="boards" role="radiogroup" aria-label="Your device"></div>
+<ol class="steps"><li><b>Connect your device to this computer or phone.</b> Use a USB-C data cable (on an Android phone, a USB-C to USB-C cable or an OTG adapter). Wake it with PWR if the screen is asleep.</li><li><b>Click Install update.</b> Choose <code>USB JTAG/serial debug unit</code> (or <code>ttyACM0</code> on Linux). On Android, Chrome asks for permission to use the USB device; allow it.</li><li><b>Leave it connected until complete.</b> The installer writes approximately {{TOTAL_MB}} MB, then restarts your aquarium.</li></ol>
+<p class="status" id="connection" role="status">Checking browser support…</p>
+<div class="install"><p id="selected" class="fine" aria-live="polite">Select your device above to enable installation.</p><esp-web-install-button manifest="{{MANIFEST}}"><button slot="activate" disabled>Install update</button><span slot="unsupported">Use Chrome or Edge on a computer, or Chrome on an Android phone, with a USB connection.</span><span slot="not-allowed">Open this installer over HTTPS, or through localhost.</span></esp-web-install-button><span class="meta"><span data-version>{{VERSION}}</span><br>Built <span data-built>{{DATE}}</span></span></div>
+<p class="fine"><b>Your saved tank stays.</b> The update button does not erase your fish, names, progress or settings. A blank device starts a new aquarium.</p></section>
+<aside><section class="card"><span class="eyebrow">02 · Make it yours</span><h2>Pick your atmosphere.</h2><p>After startup, open <b>Settings → SETTINGS / THEMES</b> in Original. Choose Quiet Lagoon, Tidepool Club or Blackwater, or keep Original.</p><p class="fine">The settings page looks the same in every theme; its SETTINGS / THEMES title opens the picker. The choice is saved immediately. Meet the new jellyfish in every theme: find it on Upgrades page 5 for 10 sand dollars. Discover new creature and habitat artwork, battery graphics and menus. Watch for occasional surface visits, puffing, ink clouds and electric sparks. Pet names still use the familiar character roll.</p></section>
+<section class="card"><h2>A little help.</h2><details><summary>No device in the USB list?</summary><p>Try a data cable and another USB port. Press PWR to wake the device. If needed, unplug it, hold BOOT while reconnecting it, then try Install again.</p></details><details id="android" open><summary>Installing from an Android phone</summary><p>Chrome on Android has no Web Serial, so this page talks to the board over WebUSB instead. Connect the board with a USB-C to USB-C cable or an OTG adapter, tap Install update, then allow the USB permission Chrome asks for. The board shows up as <code>USB JTAG/serial debug unit</code>. Keep the screen awake and the cable still for the few minutes the write takes. iPhones and iPads cannot install: Safari has neither API.</p>
+<p><b>No permission prompt?</b> Chrome refuses every permission prompt, the USB chooser included, on a page it opened through a certificate warning - and it refuses downloads from such a page too. Two ways out; the first is quickest.</p>
+<p><b>Way 1 - tell Chrome the plain address is fine.</b> On the phone open <code>chrome://flags/#unsafely-treat-insecure-origin-as-secure</code>, type <code id="httporigin">http://…:8765</code> into its box, set it to <b>Enabled</b>, tap <b>Relaunch</b>, then open <a id="httplink" href="#">this installer over plain HTTP</a> (port 8765, no certificate, no warning) and install from there.</p>
+<p><b>Way 2 - trust this installer's certificate.</b> Download it over plain HTTP (a page with a warning cannot download): <a id="crtlink" href="#" download>aqua-pets-installer.crt</a>. Then on the phone open <b>Settings → Security → More security settings (or Encryption &amp; credentials) → Install a certificate → CA certificate</b>, pick the file from Downloads, and reopen this HTTPS page. The address bar must show a padlock, not a warning.</p>
+<p>Either way, try the test below before the install.</p>
+<p><button type="button" id="usbtest" style="min-height:48px;padding:12px 22px;border:0;background:var(--green);color:white;font-weight:bold;border-radius:9px;width:100%">Test USB access</button></p><p id="usbout" class="status" hidden></p></details><details><summary>Cannot connect?</summary><p>Close serial monitors and other browser tabs connected to the device. Unplug, reconnect and try again. On Linux, your account may need serial-port permissions.</p></details><details><summary>Opening this remotely</summary><p>Use HTTPS on port <b>8766</b>. This local server uses a self-signed certificate; verify the address belongs to your machine before accepting its certificate notice. HTTP on port 8765 is for viewing only, except through localhost.</p><p>Alternatively, forward the server to your computer with <code>ssh -N -L 8765:127.0.0.1:8765 alvin@100.66.66.66</code>, then open <a href="http://localhost:8765">http://localhost:8765</a>.</p></details><details><summary>Fresh installation / recovery</summary><p>This separate option can erase your saved tank. Select the correct board above first. In the dialog, only tick <b>Erase device</b> if you want to start over.</p><esp-web-install-button class="fresh" manifest="{{MANIFEST_ERASE}}"><button slot="activate" disabled>Install fresh / erase options</button><span slot="unsupported">Use Chrome or Edge on a computer, or Chrome on Android.</span><span slot="not-allowed">HTTPS or localhost is required.</span></esp-web-install-button></details></section></aside></div>
+<footer><span>Local theme build · {{VERSION}}</span></footer>
 </main>
 <script>
-  /* The boards this installer carries (make_installer.py fills it in: one
-     manifest per board). With more than one, a picker comes first and points
-     both buttons at the chosen board's manifests; the choice is remembered. */
-  const BOARDS = {{BOARDS}};
-  const LABEL = { amoled18: '1.8 inch', round175c: '1.75 inch round', watch206: '2.06 inch watch' };
-  const NOTE = { amoled18: 'version V1 or V2. About $35 with the screen and a battery', round175c: 'the pendant: a round tank that fills the whole circle', watch206: 'the watch: a tall tank you can wear' };
-  const installBtn = document.querySelector('esp-web-install-button:not(.fresh)');
-  const freshBtn = document.querySelector('esp-web-install-button.fresh');
-  /* The page may live on a different host than the firmware it installs (the
-     site's copy points at the GitHub Pages manifest): show the version and
-     build date of what the button will actually flash. */
-  async function stamp() {
-    try {
-      const m = await fetch(installBtn.getAttribute('manifest'), { cache: 'no-store' }).then(r => r.json());
-      if (m.version) document.querySelectorAll('[data-version]').forEach(e => e.textContent = m.version);
-      if (m.built) document.querySelectorAll('[data-built]').forEach(e => e.textContent = m.built);
-    } catch (e) { /* offline or blocked: the stamped values stay */ }
-  }
-  function choose(id) {
-    const b = BOARDS.find(x => x.id === id) || BOARDS[0];
-    installBtn.setAttribute('manifest', b.manifest);
-    freshBtn.setAttribute('manifest', b.erase);
-    document.querySelectorAll('.boards button').forEach(e => e.setAttribute('aria-checked', e.dataset.id === b.id));
-    try { localStorage.setItem('pt-board', b.id); } catch (e) { /* private window: not remembered */ }
-    stamp();
-  }
-  if (BOARDS.length > 1) {
-    const list = document.querySelector('.boards');
-    for (const b of BOARDS) {
-      const e = document.createElement('button');
-      e.type = 'button'; e.setAttribute('role', 'radio'); e.dataset.id = b.id;
-      e.innerHTML = `${LABEL[b.id] || b.name}<small>${b.name.replace(/^Waveshare /, '')}</small>`;
-      e.addEventListener('click', () => choose(b.id));
-      list.appendChild(e);
-    }
-    document.querySelector('[data-pick]').hidden = false;
-    document.querySelector('[data-supported]').innerHTML = BOARDS.map(b =>
-      `<p><b>Waveshare ${b.name.replace(/^Waveshare /, '')}</b>, ${NOTE[b.id] || ''}.</p>`).join('');
-    let saved = null; try { saved = localStorage.getItem('pt-board'); } catch (e) { }
-    choose(saved || BOARDS[0].id);
-  } else stamp();
-</script>
-</body>
-</html>
+const BOARDS={{BOARDS}};
+const LABEL={amoled18:'Rectangle · 1.8 inch',round175c:'Pendant · 1.75 inch round',watch206:'Watch · 2.06 inch'};
+const NOTE={amoled18:'448 × 368 · Waveshare AMOLED 1.8 V1 / V2',round175c:'466 × 466 · Waveshare AMOLED 1.75C',watch206:'410 × 502 · Waveshare AMOLED 2.06'};
+const main=document.querySelector('esp-web-install-button:not(.fresh)'),fresh=document.querySelector('.fresh'),list=document.querySelector('.boards'),status=document.querySelector('#connection');
+const supported=isSecureContext && ('serial' in navigator || 'usb' in navigator);   /* WebUSB alone: the polyfill above serves Android Chrome */
+if(!isSecureContext){status.classList.add('warn');status.replaceChildren(document.createTextNode('USB installation needs HTTPS. '));const a=document.createElement('a'),url=new URL(location.href);url.protocol='https:';url.port='8766';a.href=url.href;a.textContent='Open the secure installer ↗';status.append(a)}else if(!supported){status.classList.add('warn');status.textContent='Use Chrome or Edge on a computer, or Chrome on an Android phone, for USB installation.'}else status.textContent=('serial' in navigator?'Browser ready for USB installation. ':'Android: ready to install over USB (WebUSB). ')+'Select your device, then connect.';
+let selection=0;
+async function choose(id){
+ const b=BOARDS.find(b=>b.id===id);if(!b)return;const seq=++selection;
+ main.setAttribute('manifest',b.manifest);fresh.setAttribute('manifest',b.erase);
+ document.querySelectorAll('.boards button').forEach(e=>{e.setAttribute('aria-checked',String(e.dataset.id===id));e.tabIndex=e.dataset.id===id?0:-1});
+ document.querySelectorAll('button[slot=activate]').forEach(e=>e.disabled=true);
+ document.querySelector('#selected').textContent='Checking '+LABEL[id]+' firmware…';
+ try{const r=await fetch(b.manifest,{cache:'no-store'});if(!r.ok)throw Error('Manifest unavailable');const m=await r.json();if(m.board!==id||!m.never_erase||!m.builds?.length)throw Error('Incorrect manifest');if(seq!==selection)return;
+ document.querySelectorAll('[data-version]').forEach(e=>e.textContent=m.version);document.querySelectorAll('[data-built]').forEach(e=>e.textContent=m.built);
+ document.querySelector('#selected').textContent='Selected: '+LABEL[id]+'. Confirm this matches your physical device.';
+ document.querySelectorAll('button[slot=activate]').forEach(e=>e.disabled=!supported);
+ }catch(e){if(seq!==selection)return;document.querySelector('#selected').textContent='Firmware could not be verified. Reload the page and try again.'}
+}
+/* on Android (the polyfill is in) the Android section leads the page (2026-10-10: "there is no test button") */
+window.addEventListener('DOMContentLoaded',()=>{   /* (after the module scripts: the polyfill's marker is set by then) */
+ if(document.documentElement.dataset.serialPolyfill){const a=document.querySelector('#android'),first=document.querySelector('.layout');if(a&&first){const card=document.createElement('section');card.className='card';card.style.marginBottom='24px';card.innerHTML='<span class="eyebrow">Android</span><h2>On this phone, first.</h2>';card.appendChild(a);first.parentNode.insertBefore(card,first);}}});
+/* the plain-HTTP twin of this server (2026-10-10): the certificate download and the no-certificate way */
+{const h='http://'+location.hostname+':8765';const o=document.querySelector('#httporigin');if(o)o.textContent=h;
+ const l=document.querySelector('#httplink');if(l)l.href=h+'/';const c=document.querySelector('#crtlink');if(c)c.href=h+'/aqua-pets-installer.crt';}
+/* Android (2026-10-10): the chooser alone, apart from ESP Web Tools - its outcome in words. If this never
+   shows a chooser either, the page is not trusted (the certificate), WebUSB is off, or the cable is not OTG. */
+{const t=document.querySelector('#usbtest'),o=document.querySelector('#usbout');
+ if(t){t.addEventListener('click',async()=>{o.hidden=false;o.textContent='Asking Chrome for the USB device…';
+  if(!('usb' in navigator)){o.textContent='This browser has no WebUSB. Use Chrome on Android, or Chrome / Edge on a computer.';return}
+  if(!isSecureContext){o.textContent='Not a secure context: open the HTTPS address (port 8766).';return}
+  try{const d=await navigator.usb.requestDevice({filters:[]});o.textContent='Chrome can see: '+(d.productName||'a USB device')+' ('+d.vendorId.toString(16).padStart(4,'0')+':'+d.productId.toString(16).padStart(4,'0')+'). Install update should work now.'}
+  catch(e){o.textContent=e.name==='NotFoundError'?'Nothing picked. If the chooser said "No compatible devices found", the PHONE does not see the board at all (this test lists every USB device): the cable must carry data and the adapter must be OTG (host); plug the board in and look for Android\'s "USB device connected" notification first; try the other USB-C port on the board if it has two; a powered OTG hub helps a phone that will not power the board. If no chooser appeared at all: the page is not trusted (the certificate / flag step above).':'Chrome refused: '+e.name+' - '+e.message}});}}
+for(const [i,b] of BOARDS.entries()){const e=document.createElement('button');e.type='button';e.dataset.id=b.id;e.setAttribute('role','radio');e.setAttribute('aria-checked','false');e.tabIndex=i? -1:0;e.textContent=LABEL[b.id]||b.name;const n=document.createElement('small');n.textContent=NOTE[b.id]||b.name;e.append(n);e.onclick=()=>choose(b.id);e.onkeydown=ev=>{if(!['ArrowRight','ArrowDown','ArrowLeft','ArrowUp','Home','End'].includes(ev.key))return;ev.preventDefault();const buttons=[...list.children],next=ev.key==='Home'?0:ev.key==='End'?buttons.length-1:(i+(ev.key==='ArrowRight'||ev.key==='ArrowDown'?1:-1)+buttons.length)%buttons.length;buttons[next].focus();choose(BOARDS[next].id)};list.append(e)}
+</script></body></html>

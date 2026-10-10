@@ -1,4 +1,4 @@
-# pocket-tank partition table (16 MB flash) - two app slots for over-the-air
+# Aqua Pets partition table (16 MB flash) - two app slots for over-the-air
 # updates (docs/OTA.md). nvs holds the keeper's tank and never moves
 # (tools/make_installer.py refuses a table that moves it). The model does not
 # move either: a cable update writes the app and skips the 7.5 MB model. The

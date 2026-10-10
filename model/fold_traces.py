@@ -24,7 +24,7 @@ import train_tokenizer as tok  # noqa: E402
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("inputs", nargs="+", help="raw jsonl files or globs")
-    ap.add_argument("--schema", type=int, choices=(2, 3, 4), default=3)
+    ap.add_argument("--schema", type=int, choices=(2, 3, 4, 5), default=3)
     ap.add_argument("--out", required=True)
     args = ap.parse_args()
     tok.set_schema(args.schema)
@@ -74,6 +74,19 @@ def main():
                   and o["goal"].split()[0] == o["state"].split(" last ")[1].split()[0])
         print(f"  v4 coverage: bored 6-9 {bored} ({100 * bored / n:.1f}%); bored 7-9 that REPEAT last: {rut} "
               f"(the teacher should rarely do this)")
+    if args.schema >= 5:
+        # per species: its share and its top goals (a species whose labels look
+        # like the classic fish's is a prompt that did not reach the teacher)
+        by = {}
+        for o in kept:
+            sp = o["state"].split(" species ", 1)[1].split()[0] if " species " in o["state"] else "?"
+            by.setdefault(sp, {}).setdefault(o["goal"].split()[0], 0)
+            by[sp][o["goal"].split()[0]] += 1
+        print("  v5 species (share; top goals):")
+        for sp, d in sorted(by.items(), key=lambda kv: -sum(kv[1].values())):
+            m = sum(d.values())
+            top = ", ".join(f"{g} {100 * c / m:.0f}%" for g, c in sorted(d.items(), key=lambda kv: -kv[1])[:4])
+            print(f"    {sp:9s} {m:6d} {100 * m / n:4.1f}%   {top}")
     if args.schema >= 3:
         none = sum(1 for o in kept if " friend none " in o["state"] + " ")
         calm = sum(1 for o in kept if "shadow near" in o["state"] and any(f"stress {d}" in o["state"] for d in "0123"))

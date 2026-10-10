@@ -10,9 +10,9 @@
 #define BRIGHTNESS_H
 #include <stdbool.h>
 void brightness_init(void);              /* after nvs_flash_init */
-int  brightness_level(void);             /* 100 / 60 / 30 */
-bool brightness_set_level(int pct);      /* one of the three; saved */
-void brightness_cycle(void);             /* 100 -> 60 -> 30 -> 100; saved */
+int  brightness_level(void);             /* 10 .. 100 by tens */
+bool brightness_set_level(int pct);      /* one of the ten; saved */
+void brightness_cycle(void);             /* up a step, 100 -> 10; saved */
 void brightness_save(void);              /* re-save after an NVS erase (reset) */
 void brightness_apply(bool night);       /* once per frame: pushes a changed target to the panel */
 #endif

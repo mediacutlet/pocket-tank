@@ -1,6 +1,6 @@
 /* runq4.c - llama2.c runq.c adapted for 4-bit weights (export_q4.py, version 3).
  * Weights: packed nibbles + fp16 group scales. Activations: int8 per group
- * (unchanged from runq.c). Prompt encoding: pocket-tank word tokenizer.
+ * (unchanged from runq.c). Prompt encoding: Aqua Pets word tokenizer.
  * Derived from karpathy/llama2.c runq.c (MIT); all other logic unchanged. */
 /* Inference for Llama-2 Transformer model in pure C, int8 quantized forward pass. */
 
@@ -874,7 +874,7 @@ long time_in_ms() {
 // ----------------------------------------------------------------------------
 // generation loop
 
-/* pocket-tank word tokenizer: BOS + one id per whitespace word (vocab entries carry a leading space) */
+/* Aqua Pets word tokenizer: BOS + one id per whitespace word (vocab entries carry a leading space) */
 static void word_encode(Tokenizer *t, const char *text, int *out, int *n_out) {
     int n = 0; out[n++] = 1;
     const char *p = text;

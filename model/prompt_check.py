@@ -26,6 +26,21 @@ Panel (per schema line, identity randomized unless the case pins it):
   bored9fol  social 8, friend near, bored 9, last follow_friend (expect a change) x40
   bored0bub  content, bored 0, last visit_bubbles (expect last mostly KEPT)     x40
   nightbored night, bored 9, last rest (expect rest - boredom never wakes the tank) x30
+  v5 (--schema 5; every v4 case stays, about the classic fish (`species fish`), plus
+  one panel per species, its bold / social / curiosity rolled inside its range):
+  sp_angler   content, day (expect rest - lying in wait - high)               x30
+  sp_shark    content, day (expect explore high, rest ~0)                      x30
+  sp_squid    friend near (expect follow_friend high - the school)             x30
+  sp_octopus  content (expect inspect_reef + explore, follow ~0)               x30
+  sp_seahorse energetic (expect dart_play ~0, rest / reef high)                x30
+  sp_puffer   content (expect explore + inspect_reef)                          x30
+  sp_crab     hunger 4-5, food mid (expect seek_food - the eager scavenger)    x30
+  sp_lobster  day (expect rest - the den) / sp_lobster_n night (expect awake)  x30 / x30
+  sp_eel_n    night (expect awake more than resting)                           x30
+  sp_jelly    energetic (expect dart ~0, rest + explore) / sp_jelly_b bubbles near x30 / x30
+  sp_starving every species, hunger 9, food near (expect seek_food ~1.0)       x40
+  --teacher rules runs the panel against gen_traces' rule policy (a dry run of
+  this script, no Ollama).
 """
 import argparse
 import concurrent.futures as cf
@@ -45,10 +60,19 @@ def state(rng, schema, **pin):
              bubble=f"{rng.choice(['near','mid','far'])} {rng.randint(1,12)}",
              reef=f"{rng.choice(['mid','far'])} {rng.randint(1,12)}", wall="clear",
              last=rng.choice(["explore", "inspect_reef", "visit_bubbles", "rest"]), time="day")
+    if schema >= 5:
+        f["species"] = pin.get("species", "fish")
+        if f["species"] != "fish":         # its traits inside its species' range unless the case pins them
+            b0, b1, s0, s1 = gt.SPECIES[f["species"]][:4]
+            f["bold"] = gt.trait9(rng.uniform(max(0.0, b0 - 0.1), min(1.0, b1 + 0.1)))
+            f["social"] = gt.trait9(rng.uniform(max(0.0, s0 - 0.1), min(1.0, s1 + 0.1)))
+            f["curiosity"] = gt.species_curiosity(f["species"], rng)
     f.update(pin)
     ident = f"hunger {f['hunger']} energy {f['energy']} stress {f['stress']} curiosity {f['curiosity']} bold {f['bold']} social {f['social']} stage {f['stage']}"
     tail = (f"food {f['food']} shadow {f['shadow']} friend {f['friend']} bubble {f['bubble']} reef {f['reef']} "
             f"wall {f['wall']} last {f['last']} time {f['time']}")
+    if schema >= 5:
+        return gt.render_v5(dict(f, food=f["food"], friend=f["friend"]))
     if schema >= 4:
         return (f"zone {f['zone']} {ident} trust {f['trust']} bored {f['bored']} food {f['food']} friend {f['friend']} "
                 f"bubble {f['bubble']} reef {f['reef']} wall {f['wall']} last {f['last']} time {f['time']}")
@@ -76,6 +100,21 @@ def panel(rng, schema, n):
     if schema >= 3:
         add("trust9", 20, trust=9)
         add("trust0", 20, trust=0)
+    if schema >= 5:
+        add("sp_angler", 30, species="angler", zone=rng.randint(4, 6))
+        add("sp_shark", 30, species="shark")
+        add("sp_squid", 30, species="squid", friend=f"near {rng.randint(1,12)}")
+        add("sp_octopus", 30, species="octopus", zone=rng.randint(4, 6))
+        add("sp_seahorse", 30, species="seahorse", energy=9, hunger=rng.randint(0, 2))
+        add("sp_puffer", 30, species="puffer")
+        add("sp_crab", 30, species="crab", hunger=rng.choice([4, 5]), food=f"mid {rng.randint(1,12)}", zone=rng.randint(4, 6))
+        add("sp_lobster", 30, species="lobster", zone=rng.randint(4, 6))
+        add("sp_lobster_n", 30, species="lobster", zone=rng.randint(4, 6), time="night", last="rest", energy=rng.randint(4, 8))
+        add("sp_eel_n", 30, species="eel", zone=rng.randint(4, 6), time="night", last="rest", energy=rng.randint(4, 8))
+        add("sp_jelly", 30, species="jellyfish", energy=rng.randint(7, 9), hunger=rng.randint(0, 2), bold=rng.randint(1, 4))
+        add("sp_jelly_b", 30, species="jellyfish", bubble=f"near {rng.randint(1,12)}", hunger=rng.randint(0, 3))
+        for sp in gt.SPECIES_TOKENS:
+            add("sp_starving", 4, species=sp, hunger=9, food=f"near {rng.randint(1,12)}")
     if schema >= 4:
         add("bored9bub", 40, bored=9, last="visit_bubbles", bubble=f"near {rng.randint(1,12)}")
         add("bored9fol", 40, bored=9, last="follow_friend", social=8, friend=f"near {rng.randint(1,12)}")
@@ -86,7 +125,9 @@ def panel(rng, schema, n):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--schema", type=int, choices=(2, 3, 4), default=3)
+    ap.add_argument("--schema", type=int, choices=(2, 3, 4, 5), default=3)
+    ap.add_argument("--teacher", choices=("ollama", "rules"), default="ollama",
+                    help="rules = gen_traces' rule policy: exercises this script without Ollama")
     ap.add_argument("--host", default="http://192.168.0.139:11434")
     ap.add_argument("--model", default="gemma4:26b")
     ap.add_argument("--prompt-file", default=None, help="candidate system prompt (default: gen_traces' prompt for the schema)")
@@ -95,19 +136,22 @@ def main():
     ap.add_argument("--seed", type=int, default=11)
     args = ap.parse_args()
     gt.SCHEMA = args.schema
+    gt.TEACHER = args.teacher
     if args.prompt_file:
         txt = open(args.prompt_file).read().strip()
         gt.SYSTEM_PROMPT = txt
         gt.SYSTEM_PROMPT_V3 = txt
         gt.SYSTEM_PROMPT_V4 = txt
+        gt.SYSTEM_PROMPT_V5 = txt
     rng = random.Random(args.seed)
     P = panel(rng, args.schema, args.n)
-    print(f"{len(P)} calls to {args.model} @ {args.host} ({args.workers} workers) ...", flush=True)
+    who = "the RULE teacher (a dry run)" if args.teacher == "rules" else f"{args.model} @ {args.host}"
+    print(f"{len(P)} calls to {who} ({args.workers} workers) ...", flush=True)
 
     def ask(item):
         case, st = item
         try:
-            g = gt.ask_ollama(args.host, args.model, st, 30)
+            g = gt.ask_teacher(args.host, args.model, st, 30)
         except Exception as e:  # noqa: BLE001
             g = None
         return case, (g.split()[0] if g else None)
@@ -131,6 +175,10 @@ def main():
         return ", ".join(f"{g} {c/n:.2f}" for g, c in sorted(d.items(), key=lambda kv: -kv[1])[:3])
 
     print(f"\nfailures: {fails}")
+    if gt.MAX_PROMPT_TOKENS:
+        # a prompt that fills the window was cut by Ollama: the teacher never read all of it
+        print(f"teacher prompt: up to {gt.MAX_PROMPT_TOKENS} tokens evaluated, num_ctx {gt.num_ctx()}"
+              f"{'  <-- TRUNCATED?' if gt.MAX_PROMPT_TOKENS >= gt.num_ctx() - 16 else ''}")
     checks = [
         ("P(follow | social 9)", *rate("social9", "follow_friend"), ">= 0.40", lambda v: v >= 0.40),
         ("P(follow | social 1)", *rate("social1", "follow_friend"), "<= 0.05", lambda v: v <= 0.05),
@@ -153,6 +201,29 @@ def main():
             ("P(rest | night, bored 9, last rest)", *rate("nightbored", "rest"), ">= 0.70", lambda v: v >= 0.70),
             ("P(flee | any v4 case)", (sum(d.get("flee_shadow", 0) for d in results.values()) / max(1, sum(sum(d.values()) for d in results.values()))), sum(sum(d.values()) for d in results.values()), "== 0", lambda v: v <= 0.001),
         ]
+    if args.schema >= 5:
+        def rate2(case, *gs):
+            d = results.get(case, {}); n = sum(d.values())
+            return (sum(d.get(g, 0) for g in gs) / n if n else float("nan")), n
+        checks += [
+            ("P(rest | angler, content day)", *rate("sp_angler", "rest"), ">= 0.40", lambda v: v >= 0.40),
+            ("P(rest | shark, content day)", *rate("sp_shark", "rest"), "<= 0.10", lambda v: v <= 0.10),
+            ("P(explore | shark, content day)", *rate("sp_shark", "explore"), ">= 0.40", lambda v: v >= 0.40),
+            ("P(follow | squid, friend near)", *rate("sp_squid", "follow_friend"), ">= 0.40", lambda v: v >= 0.40),
+            ("P(reef+explore | octopus)", *rate2("sp_octopus", "inspect_reef", "explore"), ">= 0.60", lambda v: v >= 0.60),
+            ("P(follow | octopus)", *rate("sp_octopus", "follow_friend"), "<= 0.05", lambda v: v <= 0.05),
+            ("P(dart | seahorse, energetic)", *rate("sp_seahorse", "dart_play"), "<= 0.03", lambda v: v <= 0.03),
+            ("P(explore+reef | puffer)", *rate2("sp_puffer", "explore", "inspect_reef"), ">= 0.50", lambda v: v >= 0.50),
+            ("P(seek_food | crab, hunger 4-5, food mid)", *rate("sp_crab", "seek_food"), ">= 0.60", lambda v: v >= 0.60),
+            ("P(rest | lobster, day)", *rate("sp_lobster", "rest"), ">= 0.40", lambda v: v >= 0.40),
+            ("P(rest | lobster, night)", *rate("sp_lobster_n", "rest"), "<= 0.40", lambda v: v <= 0.40),
+            ("P(follow | lobster, day)", *rate("sp_lobster", "follow_friend"), "<= 0.05", lambda v: v <= 0.05),
+            ("P(rest | eel, night)", *rate("sp_eel_n", "rest"), "<= 0.50", lambda v: v <= 0.50),
+            ("P(dart | jellyfish, energetic)", *rate("sp_jelly", "dart_play"), "<= 0.03", lambda v: v <= 0.03),
+            ("P(rest+explore | jellyfish, content)", *rate2("sp_jelly", "rest", "explore"), ">= 0.55", lambda v: v >= 0.55),
+            ("P(bubbles | jellyfish, bubble near)", *rate("sp_jelly_b", "visit_bubbles"), ">= 0.20", lambda v: v >= 0.20),
+            ("P(seek_food | any species, starving)", *rate("sp_starving", "seek_food"), ">= 0.95", lambda v: v >= 0.95),
+        ]
     for name, v, n, want, ok in checks:
         print(f"  {'OK ' if ok(v) else 'BAD'}  {name:36s} = {v:.2f}  (n={n}, want {want})")
     # attractor check: no single goal should own the content fish
@@ -163,7 +234,9 @@ def main():
         print(f"       trust 9: [{top('trust9')}]\n       trust 0: [{top('trust0')}]")
     print("\n  per case:")
     for case in ("social9", "social1", "bold9", "bold1", "content", "shadowcalm", "lonely", "starving", "trust9", "trust0",
-                 "bored9bub", "bored9fol", "bored0bub", "nightbored"):
+                 "bored9bub", "bored9fol", "bored0bub", "nightbored",
+                 "sp_angler", "sp_shark", "sp_squid", "sp_octopus", "sp_seahorse", "sp_puffer", "sp_crab",
+                 "sp_lobster", "sp_lobster_n", "sp_eel_n", "sp_jelly", "sp_jelly_b", "sp_starving"):
         if case in results:
             print(f"    {case:10s} {top(case)}")
 

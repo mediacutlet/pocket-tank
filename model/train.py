@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Train the pocket-tank advisor on (state, goal) traces.
+"""Train the Aqua Pets advisor on (state, goal) traces.
 
 A minimal single-device training loop around llama2.c's Transformer (imported from
 ./llama2.c/model.py), replacing its tinystories-specific train.py. Data is every

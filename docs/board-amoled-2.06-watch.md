@@ -73,7 +73,7 @@ its own world, 410 wide and 502 tall (common/tank.h):
 Build and flash: `tools/flash_watch.sh` (`--full` for a blank board:
 bootloader, table, model, a cleared NVS). It builds with
 `SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.watch"` into
-`~/.cache/pocket-tank/fw-build-206` and finds the watch by USB serial. The
+`~/.cache/aqua-pets/fw-build-206` and finds the watch by USB serial. The
 sim: `make WATCH=1` -> `./fishsim-watch` (its window shows the round corners;
 `--snapshot` works; since 2026-10-01 every selftest passes here too -
 `make WATCH=1 check`, docs/BOARDS.md).

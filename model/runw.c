@@ -1,4 +1,4 @@
-/* runw.c — llama2.c runner with the pocket-tank WORD tokenizer.
+/* runw.c — llama2.c runner with the Aqua Pets WORD tokenizer.
  *
  * Vendored run.c is #included unchanged (its main renamed); only the prompt
  * encoder differs: whitespace split + vocab lookup (tokenizer.bin stores each

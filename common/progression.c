@@ -1,4 +1,5 @@
 #include "progression.h"
+#include "theme.h"
 #include "tank_events.h"
 #include "version.h"
 #include <stddef.h>
@@ -38,12 +39,26 @@ const char *const TMS_NAMES[TMS_COUNT] = {
 _Static_assert(ALGAE_CELLS <= ALGAE_SAVE, "the film grid outgrew the 644 cells the save keeps");
 
 typedef struct {
-    uint8_t preset, stage; uint16_t pad;
+    uint8_t preset, stage;
+    /* the species (2026-10-05, docs/species.md), in what was a 2-byte pad every
+     * build wrote as zeros: an older save's creatures are all SP_FISH, design 0 */
+    uint8_t species, variant;
     float size, trust, bold, sociable, bold0, sociable0, hunger, energy, stress, curiosity;
     float age_s, rest_dx, rest_dy;
     int32_t eaten, eaten_player;
     uint32_t ms_bits;
 } fish_save_t;
+/* the core's per-fish arrays are frozen at six (the layout lock below); fish
+ * 7..N_FISH_MAX each save one fish_ext_save_t in the tail */
+#define SV_FISH 6
+typedef struct {
+    fish_save_t f;
+    char     name[FISH_NAME_MAX + 1];
+    uint32_t body, accent, ms_seen;
+    uint8_t  parent_p1[2], pad[2];
+    float    drift_acc;
+    uint32_t sd_paid;
+} fish_ext_save_t;
 
 typedef struct {
     uint32_t magic;
@@ -54,7 +69,7 @@ typedef struct {
     float    feed_spot_x;
     int32_t  player_feedings, hold_approaches;
     uint32_t tank_ms_bits;
-    fish_save_t fish[N_FISH_MAX];
+    fish_save_t fish[SV_FISH];
     /* ---- upkeep tail (2026-08-30). Fields only ever APPEND here: boot falls
      * back to loading the prefix above from an older PTK2 save; the zeroed
      * tail then reads as clean glass and default vegetation (0 is not a legal
@@ -71,20 +86,20 @@ typedef struct {
      * whether the setup flow still owes the keeper a visit. Older saves read
      * zeros: preset looks, setup done. */
     uint8_t  setup_pending, pad_id[3];
-    char     names[N_FISH_MAX][FISH_NAME_MAX + 1];
-    uint32_t body[N_FISH_MAX], accent[N_FISH_MAX];
+    char     names[SV_FISH][FISH_NAME_MAX + 1];
+    uint32_t body[SV_FISH], accent[SV_FISH];
     float    bubble_x;                   /* the keeper's bubble column (0 = the default spot) */
     /* seen-milestones tail (2026-09-13, the milestones page): what the
      * keeper has already looked at, so a badge earned since wears a ring.
      * Older saves read zeros: everything earned shows as new once. */
-    uint32_t ms_seen[N_FISH_MAX], tank_ms_seen;
+    uint32_t ms_seen[SV_FISH], tank_ms_seen;
     /* family tail (2026-09-14, the birth flow): each fish's parents and the
      * arrival still owed its welcome, all as slot + 1 so an older save's
      * zeros read as "none". */
-    uint8_t  newborn_p1, parent_p1[N_FISH_MAX][2], pad_fam[3];
+    uint8_t  newborn_p1, parent_p1[SV_FISH][2], pad_fam[3];
     /* drift-pressure tail (2026-09-15, the CHANGE gate): older saves read
      * zeros, and the youngest simply starts earning it from this build on */
-    float    drift_acc[N_FISH_MAX];
+    float    drift_acc[SV_FISH];
     /* light settings tail (2026-09-15, the settings page): 0 seconds = the
      * default (older saves); auto 0 = MANUAL, the double-tap (the default) */
     uint16_t light_idle_s; uint8_t light_auto, light_manual_off;   /* auto 0 = MANUAL, the default */
@@ -95,7 +110,7 @@ typedef struct {
      * already earned on the first tick, once. */
     int32_t  sd_balance, sd_earned;
     uint32_t sd_unlocks;
-    uint32_t sd_paid_fish[N_FISH_MAX];
+    uint32_t sd_paid_fish[SV_FISH];
     int32_t  sd_colonies_paid, sd_inches_paid;
     int32_t  algae_colonies;
     float    trim_px;
@@ -157,6 +172,17 @@ typedef struct {
      * which every build wrote as zeros - still 1688 B; older saves read 0
      * and get the notice once. */
     uint8_t  light_tip_seen, pad_tip[3];
+    /* fish 7..10 (2026-10-05, the species raised N_FISH_MAX from 6): the core's
+     * n_fish stays <= SV_FISH, so an older build (an OTA rollback) still loads
+     * the tank - its first six; n_fish_all is the true count (0 in an older
+     * save: n_fish is). A fish here is the core's record and every per-fish
+     * tail of the core's in one. */
+    uint8_t  n_fish_all, pad_ext[3];
+    fish_ext_save_t fish_ext[N_FISH_MAX - SV_FISH];
+    uint8_t theme;                     /* 0 = Original, including every older save */
+    uint8_t pad_theme[7];
+    float   wreck_x;                   /* the shipwreck (2026-10-10): 0 = the default spot (or none) */
+    uint8_t wreck_z1, pad_wreck[3];    /* its depth + 1 (0 in an older save = FRONT) */
 } save_t;
 /* the smallest PTK2 save (pre-upkeep, 2026-08-30): anything shorter is not
  * ours. Every later build wrote sizeof(save_t) of its day - 448, 1112, 1304,
@@ -195,7 +221,7 @@ _Static_assert(SAVE_MAGIC == 0x50544b32u, "SAVE LAYOUT LOCK: a new magic = every
 _Static_assert(sizeof SAVE_NVS_NS == 5 && sizeof SAVE_NVS_KEY == 5, "SAVE LAYOUT LOCK: the NVS namespace / key are \"tank\" / \"save\"");
 #define SAVE_AT(f, off) _Static_assert(offsetof(save_t, f) == (off), "SAVE LAYOUT LOCK: save_t." #f " moved")
 #define FISH_AT(f, off) _Static_assert(offsetof(fish_save_t, f) == (off), "SAVE LAYOUT LOCK: fish_save_t." #f " moved")
-FISH_AT(preset, 0); FISH_AT(stage, 1); FISH_AT(pad, 2); FISH_AT(size, 4); FISH_AT(trust, 8);
+FISH_AT(preset, 0); FISH_AT(stage, 1); FISH_AT(species, 2); FISH_AT(variant, 3); FISH_AT(size, 4); FISH_AT(trust, 8);
 FISH_AT(bold, 12); FISH_AT(sociable, 16); FISH_AT(bold0, 20); FISH_AT(sociable0, 24);
 FISH_AT(hunger, 28); FISH_AT(energy, 32); FISH_AT(stress, 36); FISH_AT(curiosity, 40);
 FISH_AT(age_s, 44); FISH_AT(rest_dx, 48); FISH_AT(rest_dy, 52);
@@ -238,7 +264,20 @@ SAVE_AT(urchin_x, 1676); SAVE_AT(urchin_grazed_px, 1680);                       
 _Static_assert(sizeof(save_t) >= 1688, "SAVE LAYOUT LOCK: save_t only ever grows");
 SAVE_AT(light_tip_seen, 1684); SAVE_AT(pad_tip, 1685);                                                 /* the lights-out notice, 10-03 */
 _Static_assert(sizeof(save_t) >= 1688, "SAVE LAYOUT LOCK: save_t only ever grows");
-/* (the next field: SAVE_AT(its_name, 1688 or its type's alignment past it);) */
+_Static_assert(SV_FISH == 6, "SAVE LAYOUT LOCK: the core's per-fish arrays are six");
+_Static_assert(sizeof(fish_ext_save_t) == 100, "SAVE LAYOUT LOCK: fish_ext_save_t is frozen");
+SAVE_AT(n_fish_all, 1688); SAVE_AT(pad_ext, 1689); SAVE_AT(fish_ext, 1692);                            /* fish 7..10, the species, 10-05 */
+_Static_assert(sizeof(save_t) >= 2092, "SAVE LAYOUT LOCK: save_t only ever grows");
+/* 2026-10-07: N_FISH_MAX 25 - fish_ext is the save's LAST field, so the fifteen more records
+   only lengthen it (fish 7..10 keep their offsets; a 10-place build reads n_fish_all 25 as "too
+   many" and falls back to the core's six, the rollback promise as before) */
+_Static_assert(N_FISH_MAX == 25, "SAVE LAYOUT LOCK: fish_ext holds 19 records (fish 7..25)");
+_Static_assert(sizeof(save_t) >= 3592, "SAVE LAYOUT LOCK: save_t only ever grows");
+SAVE_AT(theme, 3592); SAVE_AT(pad_theme, 3593);
+_Static_assert(sizeof(save_t) >= 3600, "SAVE LAYOUT LOCK: save_t only ever grows");
+SAVE_AT(wreck_x, 3600); SAVE_AT(wreck_z1, 3604); SAVE_AT(pad_wreck, 3605);                           /* the shipwreck, 10-10 */
+_Static_assert(sizeof(save_t) == 3608, "SAVE LAYOUT LOCK: the wreck's tail ends at 3608");
+/* A larger population now needs a separate tail: fish_ext is no longer last. */
 /* NVS budget: the save is one blob in the nvs partition (0x9000, 0x6000 =
  * 6 pages of 4096 B; tools/make_installer.py pins the row). A page is 126
  * entries of 32 B, and NVS keeps one page free for its garbage collection:
@@ -249,8 +288,8 @@ _Static_assert(sizeof(save_t) >= 1688, "SAVE LAYOUT LOCK: save_t only ever grows
  * is 3 x ~128 = ~390 entries, plus ~10 for the settings, "bat"/"hist" and
  * the batlog's "bed": under 2/3 of the 630, so GC always has room. Past it,
  * saves can start failing for space, and any nvs_flash_init error makes
- * main.c ERASE the partition. 1688 B today (the urchin, 2026-10-02: its x and its tally after the
- * watch's way up; ~54 entries a copy): 2312 B of headroom. */
+ * main.c ERASE the partition. 3592 B today (fish 7..25, 2026-10-07: 19 x 100 B after the
+ * lights-out notice; ~113 entries a copy, 3 x 113 + 10 = ~350 of the 630): 408 B of headroom. */
 #define SAVE_NVS_BUDGET 4000
 _Static_assert(sizeof(save_t) <= SAVE_NVS_BUDGET, "the save outgrew its NVS budget - see the math above");
 
@@ -290,6 +329,9 @@ uint32_t progression_loaded_release(void) { return s_loaded_release; }
 int64_t  progression_loaded_unix(void) { return s_loaded_unix; }
 void  progression_newborn_done(tank_t *t) { s_newborn = -1; progression_save(t); }
 
+static void apply_growth(fish_t *f);
+static void set_tms(tank_t *t, uint32_t bit);
+static const uint32_t POP_TMS[N_FISH_MAX + 1];
 static void set_ms(fish_t *f, uint32_t bit) { if (!(f->ms_bits & bit)) { f->ms_bits |= bit; mark_dirty(); } }
 /* ---- sand dollars ---- */
 const sd_item_t SD_ITEMS[SD_ITEM_COUNT] = {
@@ -299,8 +341,26 @@ const sd_item_t SD_ITEMS[SD_ITEM_COUNT] = {
     { SD_ITEM_CORAL,  "CORAL",      "A BRANCHING REEF CORAL,",   "GROWS FOR WEEKS, YOUR COLOR", SD_PRICE_CORAL },    /* 2026-09-23 */
     { SD_ITEM_CLUSTER, "REEF CLUSTER", "A MATURE REEF ON A ROCK,", "FILLS OUT, THEN IT BLOOMS",  SD_PRICE_CLUSTER },  /* 2026-09-24: the dearest; three looks on its page */
     { SD_ITEM_SHRIMP,  "SHRIMP",    "A SCHOOL OF CHERRY SHRIMP", "THEY EAT SCRAPS AND MULTIPLY", SD_PRICE_SHRIMP },
-    { SD_ITEM_URCHIN,  "SEA URCHIN", "NIBBLES THE TALL GRASS,",  "EVEN WHILE THE TANK SLEEPS",  SD_PRICE_URCHIN },  /* 2026-10-02: the episode 5 promise, a resident like the snail */  /* 2026-09-29: a resident, like the snail; Strato: "should mention that they multiply" (28 chars, as the plant's) */
+    { SD_ITEM_URCHIN,  "SEA URCHIN", "NIBBLES THE TALL GRASS,",  "EVEN WHILE THE TANK SLEEPS",  SD_PRICE_URCHIN },
+    { SD_ITEM_WRECK,   "WRECK",      "A SUNKEN BOAT WITH HOLES", "TO SWIM THROUGH, AN ANCHOR",   SD_PRICE_WRECK },   /* "SHIPWRECK" until 2026-10-10 night */
+    { SD_ITEM_FROGMAN, "FROGMAN",    "A DIVER WHO DRIFTS ACROSS", "THE TANK, TRAILING BUBBLES",  SD_PRICE_FROGMAN },
+    { SD_ITEM_SUB,     "SUBMARINE",  "CRUISES THE TANK, BUBBLING;", "STOPS TO RAISE A PERISCOPE", SD_PRICE_SUB },   /* 2026-10-10 night */   /* 2026-10-10 (he came with the wreck that morning) */   /* 2026-10-10 */  /* 2026-10-02: the episode 5 promise, a resident like the snail */  /* 2026-09-29: a resident, like the snail; Strato: "should mention that they multiply" (28 chars, as the plant's) */
+    /* the species (2026-10-05, docs/species.md; one a purchase since 2026-10-07), in
+       species order; the words say what makes them them, and that two of a kind breed */
+    { SD_ITEM_SP_SEAHORSE, "SEAHORSE",    "A YOUNG ONE. IT HOLDS THE", "GRASS BY ITS TAIL. 2 BREED",  SD_PRICE_SP_SEAHORSE },
+    { SD_ITEM_SP_OCTOPUS,  "OCTOPUS",     "A YOUNG ONE. IT HIDES AND", "TAKES ITS DEN'S COLOR",       SD_PRICE_SP_OCTOPUS },
+    { SD_ITEM_SP_PUFFER,   "PUFFERFISH",  "A YOUNG ONE. STARTLED,",    "IT PUFFS UP. TWO BREED",      SD_PRICE_SP_PUFFER },
+    { SD_ITEM_SP_ANGLER,   "ANGLERFISH",  "A YOUNG ONE. ITS LURE",     "GLOWS AT NIGHT. TWO BREED",   SD_PRICE_SP_ANGLER },
+    { SD_ITEM_SP_EEL,      "ELECTRIC EEL", "A YOUNG ONE. IT RISES FOR", "AIR AND SPARKS. TWO BREED",  SD_PRICE_SP_EEL },
+    { SD_ITEM_SP_SHARK,    "HAMMERHEAD",  "A PUP THAT NEVER STOPS",    "SWIMMING. TWO BREED",         SD_PRICE_SP_SHARK },
+    { SD_ITEM_SP_SQUID,    "SQUID",       "A YOUNG ONE. IT JETS AND",  "INKS. TWO OF THEM BREED",     SD_PRICE_SP_SQUID },
+    { SD_ITEM_SP_CRAB,     "CRAB",        "A YOUNG ONE THAT WALKS",    "SIDEWAYS. TWO BREED",         SD_PRICE_SP_CRAB },
+    { SD_ITEM_SP_LOBSTER,  "LOBSTER",     "A YOUNG FLOOR WALKER.",     "TWO OF THEM BREED",           SD_PRICE_SP_LOBSTER },
+    { SD_ITEM_SP_JELLYFISH,"JELLYFISH",   "A YOUNG ONE. IT PULSES",    "AND DRIFTS. TWO BREED",       SD_PRICE_SP_JELLYFISH },
+    { SD_ITEM_SP_SWORDFISH,"SWORDFISH",   "A YOUNG ONE. IT CRUISES",   "FAST, BILL FIRST. 2 BREED",   SD_PRICE_SP_SWORDFISH },   /* 2026-10-10 night */
 };
+_Static_assert(SD_ITEM_SP_FIRST + SP_COUNT - 1 == SD_ITEM_COUNT, "a shop item per species, after the things");
+_Static_assert(SD_ITEM_COUNT <= 32, "sd_unlocks is 32 bits");
 static void sd_award(tank_t *t, int n) {
     if (n <= 0) return;
     t->sd_balance += n; t->sd_earned += n; s_sd_pending += n;
@@ -347,10 +407,28 @@ bool progression_sell(tank_t *t, int item) {
 /* ---- a fish sold (2026-10-01) ---- */
 int progression_fish_value(const tank_t *t, int fish) {
     static const int worth[4] = { SD_FISH_FRY, SD_FISH_JUV, SD_FISH_ADULT, SD_FISH_ELDER };
-    return fish < 0 || fish >= t->n_fish ? 0 : worth[t->fish[fish].stage & 3];
+    if (fish < 0 || fish >= t->n_fish) return 0;
+    int v = worth[t->fish[fish].stage & 3], sp = t->fish[fish].species;
+    /* a species' creature sells back for its shop price at most (2026-10-07: at 10 a creature,
+       a juvenile bought for 10 and sold for SD_FISH_JUV 15 would mint sand dollars) */
+    if (sp > SP_FISH && sp < SP_COUNT) { int price = SD_ITEMS[SD_ITEM_SP_FIRST + sp - 1].price; if (v > price) v = price; }
+    return v;
 }
 bool progression_fish_sellable(const tank_t *t, int fish) {
     return fish >= 0 && fish < t->n_fish && t->n_fish > FISH_KEEP_MIN && s_newborn < 0;
+}
+int progression_item_species(int item) {
+    return item >= SD_ITEM_SP_FIRST && item < SD_ITEM_COUNT ? 1 + item - SD_ITEM_SP_FIRST : -1;
+}
+bool progression_has_room(const tank_t *t) { return t->n_fish + 2 <= POP_CAP && t->n_fish + 2 <= N_FISH_MAX; }
+bool progression_has_room_one(const tank_t *t) { return t->n_fish + 1 <= POP_CAP && t->n_fish + 1 <= N_FISH_MAX; }
+void progression_species_sync(tank_t *t) {
+    uint32_t was = t->sd_unlocks;
+    for (int sp = 1; sp < SP_COUNT; sp++) {
+        uint32_t bit = SD_ITEMS[SD_ITEM_SP_FIRST + sp - 1].bit;
+        if (tank_species_n(t, sp) > 0) t->sd_unlocks |= bit; else t->sd_unlocks &= ~bit;
+    }
+    if (t->sd_unlocks != was) mark_dirty();
 }
 bool progression_sell_fish(tank_t *t, int fish) {
     if (!progression_fish_sellable(t, fish)) return false;
@@ -366,14 +444,40 @@ bool progression_sell_fish(tank_t *t, int fish) {
     s_arrival_pending = false; s_spawn_in = -1;
     s_sale_need = t->player_feedings + SELL_FRY_MEALS;
     sd_award(t, worth);
+    progression_species_sync(t);                           /* the last of a species gone: its pair is for sale again */
     tank_emit(TEV_CONFIRM, -1);
     progression_save(t);                                   /* a sale sticks at once */
+    return true;
+}
+/* a species' newcomers in the tank: n juveniles by the reef, their clocks
+   where a juvenile's are, nothing owed for the stage they were bought at
+   (the shop sells ONE at a time since 2026-10-07; the director's spawn stages a pair) */
+static bool add_species(tank_t *t, int sp, int n) {
+    if (sp <= SP_FISH || sp >= SP_COUNT || t->n_fish + n > POP_CAP) return false;
+    int first = tank_add_species_n(t, sp, n);
+    if (first < 0) return false;
+    for (int i = first; i < t->n_fish; i++) {
+        s_age[i] = STAGE_JUV_AGE; s_starve_s[i] = 0;
+        t->fish[i].ms_bits = MS_ARRIVED | MS_REACHED_JUV;
+        t->sd_paid_fish[i] = SD_PAID_JUV;                  /* bought grown that far: no stage pay for it */
+        apply_growth(&t->fish[i]);
+    }
+    if (t->n_fish <= N_FISH_MAX) set_tms(t, POP_TMS[t->n_fish]);
+    return true;
+}
+bool progression_spawn_pair(tank_t *t, int species) {
+    if (!add_species(t, species, 2)) return false;
+    progression_species_sync(t); progression_save(t);
     return true;
 }
 bool progression_buy(tank_t *t, int item) {
     if (item < 0 || item >= SD_ITEM_COUNT) return false;
     const sd_item_t *it = &SD_ITEMS[item];
-    if ((t->sd_unlocks & it->bit) || t->sd_balance < it->price) return false;
+    int sp = progression_item_species(item);
+    /* a thing is bought once; a species' creature is bought as often as there is room
+       (2026-10-07: one a purchase - two of a kind breed, so the keeper buys a second) */
+    if ((sp <= 0 && (t->sd_unlocks & it->bit)) || t->sd_balance < it->price) return false;
+    if (sp > 0 && !add_species(t, sp, 1)) return false;    /* one juvenile, by the reef - or no room */
     t->sd_balance -= it->price; t->sd_unlocks |= it->bit;
     if (it->bit == SD_ITEM_PLANT) tank_plant_place(t);
     if (it->bit == SD_ITEM_SNAIL) tank_snail_place(t);
@@ -382,6 +486,9 @@ bool progression_buy(tank_t *t, int item) {
     if (it->bit == SD_ITEM_CLUSTER) tank_cluster_place(t);
     if (it->bit == SD_ITEM_SHRIMP) { tank_shrimp_place(t, SHRIMP_START); t->shrimp_food = 0; t->shrimp_cool = 0; }
     if (it->bit == SD_ITEM_URCHIN) tank_urchin_place(t);
+    if (it->bit == SD_ITEM_WRECK) tank_wreck_place(t);
+    if (it->bit == SD_ITEM_FROGMAN) tank_frogman_place(t);
+    if (it->bit == SD_ITEM_SUB) tank_sub_place(t);
     progression_save(t);                                   /* a purchase sticks at once */
     return true;
 }
@@ -418,22 +525,35 @@ static void apply_growth(fish_t *f) {
     f->size = f->base_size * stage_scale[f->stage] * fed;
 }
 
-static const uint32_t POP_TMS[N_FISH_MAX + 1] = { 0, 0, TMS_PAIR, TMS_TRIO, TMS_QUARTET, TMS_QUINTET, TMS_SEXTET };
+static const uint32_t POP_TMS[N_FISH_MAX + 1] = { 0, 0, TMS_PAIR, TMS_TRIO, TMS_QUARTET, TMS_QUINTET, TMS_SEXTET };   /* (7..10: no badge of their own) */
 
 /* the parents: the two most trusting grown fish - or, with fewer than two
  * grown (at two fish no stage is gated), the most trusting of the rest fill
  * in, so there is always a pair to court (2026-09-24: the spawning needs
- * two fish in the grass; tank_add_fish already fell back to fish 0 and 1) */
+ * two fish in the grass; tank_add_fish already fell back to fish 0 and 1).
+ * Since the species (2026-10-05) a pair is two of ONE species: the ranking
+ * runs within each species, and the tank's pair is the species' best pair
+ * - the one whose weaker parent ranks highest (grown first, then trust),
+ * the classic fish winning a tie. No species with two = no pair (-1, -1):
+ * no courting, no arrival, until a pair is bought or one grows up. */
 static float parent_rank(const fish_t *f) { return (f->stage >= STAGE_ADULT ? 100.0f : 0.0f) + f->trust; }
 static void pick_parents(const tank_t *t, int *pa, int *pb) {
-    int a = -1, b = -1;
-    for (int i = 0; i < t->n_fish; i++) {
-        float r = parent_rank(&t->fish[i]);
-        if (a < 0 || r > parent_rank(&t->fish[a])) { b = a; a = i; }
-        else if (b < 0 || r > parent_rank(&t->fish[b])) b = i;
+    *pa = *pb = -1;
+    float best = -1;
+    for (int sp = 0; sp < SP_COUNT; sp++) {
+        int a = -1, b = -1;
+        for (int i = 0; i < t->n_fish; i++) {
+            if (t->fish[i].species != sp) continue;
+            float r = parent_rank(&t->fish[i]);
+            if (a < 0 || r > parent_rank(&t->fish[a])) { b = a; a = i; }
+            else if (b < 0 || r > parent_rank(&t->fish[b])) b = i;
+        }
+        if (b < 0) continue;
+        float r = parent_rank(&t->fish[b]);
+        if (r > best) { best = r; *pa = a; *pb = b; }
     }
-    *pa = a; *pb = b;
 }
+static bool have_pair(const tank_t *t) { int a, b; pick_parents(t, &a, &b); return a >= 0 && b >= 0; }
 
 /* the arrival itself: a fry in the nursery grass, traits inherited from the
  * parents; the stage clock starts from zero */
@@ -444,6 +564,7 @@ static void do_arrival(tank_t *t) {
     s_arrival_pending = false;
     s_spawn_in = -1; t->spawning = false; t->spawn_danced = 0;
     if (slot < 0) return;
+    progression_species_sync(t);             /* a surprise species is in the tank now: its pair is off the shelf */
     int nb = tank_nursery_bed(t);            /* born in the grass it was courted in */
     if (nb >= 0) {
         float x0, x1; tank_veg_bed(t, nb, &x0, &x1, NULL, NULL);
@@ -499,11 +620,24 @@ static int care_gates(const tank_t *t, gate_t g[CARE_GATES_MAX]) {
         GATE(FRY_REQ_FEED, (float)t->player_feedings, MEALS(80), t->player_feedings >= MEALS(80));
         GATE(FRY_REQ_TRUST, min_trust, 7.0f, min_trust >= 7.0f);
         break;
-    default:
+    case 5:
         GATE(FRY_REQ_GROW, age, (float)STAGE_ADULT_AGE, t->fish[last].stage >= STAGE_ADULT);
         GATE(FRY_REQ_FEED, (float)t->player_feedings, MEALS(140), t->player_feedings >= MEALS(140));
         GATE(FRY_REQ_TRUST, min_trust, 8.0f, min_trust >= 8.0f);
         break;
+    default: {
+        /* 6..9 (2026-10-05, the species' ten places): the five's gates, the
+           meals climbing ~+70 a place and the trust to 9 from eight - a
+           full tank is a lot of mouths, and every one of them must trust */
+        static const int meals[N_FISH_MAX] = { 0, 0, 0, 0, 0, 140, 200, 270, 350, 440,
+            /* 10..24 (2026-10-07, the 25 places): the same ladder on, ~+70 a place */
+            510, 580, 650, 720, 790, 860, 930, 1000, 1070, 1140, 1210, 1280, 1350, 1420, 1490 };
+        int nf = t->n_fish < N_FISH_MAX ? t->n_fish : N_FISH_MAX - 1;
+        float trust = nf >= 7 ? 9.0f : 8.0f;
+        GATE(FRY_REQ_GROW, age, (float)STAGE_ADULT_AGE, t->fish[last].stage >= STAGE_ADULT);
+        GATE(FRY_REQ_FEED, (float)t->player_feedings, MEALS(meals[nf]), t->player_feedings >= MEALS(meals[nf]));
+        GATE(FRY_REQ_TRUST, min_trust, trust, min_trust >= trust);
+        break; }
     }
     /* and a clean tank (Strato, 2026-09-16: "fish should not be able to
      * breed in a dirty tank. Some algae is OK but if a certain percentage of
@@ -558,7 +692,7 @@ const char *const *progression_fry_tip(int kind) {
 static const char *const STAGE_WORDS[4] = { "A FRY", "A JUVENILE", "AN ADULT", "AN ELDER" };
 int progression_next_fry(const tank_t *t, fry_req_t out[FRY_REQ_MAX], bool *staged) {
     if (staged) *staged = s_arrival_pending;
-    if (t->n_fish >= POP_CAP || t->n_fish >= N_FISH_MAX || t->n_fish < 2) return 0;
+    if (t->n_fish >= POP_CAP || t->n_fish >= N_FISH_MAX || t->n_fish < 2 || !have_pair(t)) return 0;   /* (no two of a kind: nothing to list) */
     gate_t g[CARE_GATES_MAX];
     int n = care_gates(t, g);
     for (int i = 0; i < n; i++) {
@@ -633,12 +767,13 @@ int progression_next_fry(const tank_t *t, fry_req_t out[FRY_REQ_MAX], bool *stag
 static bool arrival_earned(const tank_t *t) {
     if (t->n_fish >= POP_CAP || t->n_fish >= N_FISH_MAX) return false;
     if (tank_nursery_bed(t) < 0) return false;   /* no grass to be born in */
+    if (!have_pair(t)) return false;             /* no two of one species to court */
     int met, total;
     arrival_conditions(t, &met, &total);
     return met == total;
 }
 
-void progression_force_arrival(tank_t *t) { s_arrival_pending = true; do_arrival(t); }
+void progression_force_arrival(tank_t *t) { if (!have_pair(t)) return; s_arrival_pending = true; do_arrival(t); }
 void progression_woke(tank_t *t) { if (s_arrival_pending) do_arrival(t); }
 void progression_stage_arrival(tank_t *t) { (void)t; if (!s_arrival_pending) { s_arrival_pending = true; mark_dirty(); } }
 
@@ -674,6 +809,20 @@ void progression_set_age(tank_t *t, int idx, float seconds) {
     mark_dirty();
 }
 
+/* one fish's saved record, wherever it lives: the core's arrays (fish 1..6)
+ * or the tail's fish_ext (7..N_FISH_MAX) */
+typedef struct {
+    fish_save_t *f; char *name; uint32_t *body, *accent, *ms_seen, *sd_paid;
+    uint8_t *parent_p1; float *drift_acc;
+} sv_fish_t;
+static sv_fish_t sv_fish(save_t *sv, int i) {
+    if (i < SV_FISH)
+        return (sv_fish_t){ &sv->fish[i], sv->names[i], &sv->body[i], &sv->accent[i], &sv->ms_seen[i],
+                            &sv->sd_paid_fish[i], sv->parent_p1[i], &sv->drift_acc[i] };
+    fish_ext_save_t *e = &sv->fish_ext[i - SV_FISH];
+    return (sv_fish_t){ &e->f, e->name, &e->body, &e->accent, &e->ms_seen, &e->sd_paid, e->parent_p1, &e->drift_acc };
+}
+
 /* restore the saved tank into t; false = no usable save (t untouched).
  * *saved_unix gets the save's wall-clock stamp (0 if unknown). */
 static bool load_save(tank_t *t, int64_t *saved_unix) {
@@ -683,7 +832,7 @@ static bool load_save(tank_t *t, int64_t *saved_unix) {
      * every later tail's defaults (see the tail comments in save_t) */
     size_t got = 0;
     bool loaded = persist_port_load(&sv, sizeof sv, &got) && got >= SAVE_CORE_SIZE && got <= sizeof sv;
-    if (!loaded || sv.magic != SAVE_MAGIC || sv.n_fish < 2 || sv.n_fish > N_FISH_MAX) return false;
+    if (!loaded || sv.magic != SAVE_MAGIC || sv.n_fish < 2 || sv.n_fish > SV_FISH) return false;
     if (got == SAVE_PRE_BUBBLE_SIZE) {         /* the first public installer's layout: see SAVE_PRE_BUBBLE_SIZE */
         memmove(&sv.ms_seen, &sv.bubble_x, sizeof sv.ms_seen + sizeof sv.tank_ms_seen);
         sv.bubble_x = 0;                       /* = the default column */
@@ -691,27 +840,34 @@ static bool load_save(tank_t *t, int64_t *saved_unix) {
     *saved_unix = sv.saved_unix; s_loaded_unix = sv.saved_unix;
     s_loaded_release = sv.saved_release;
     t->n_fish = 0;
-    for (int i = 0; i < sv.n_fish; i++) {
-        const fish_save_t *s = &sv.fish[i];
+    /* the true count: the tail's, when it holds more than the core's six */
+    int n_all = sv.n_fish_all > sv.n_fish && sv.n_fish_all <= N_FISH_MAX ? sv.n_fish_all : sv.n_fish;
+    for (int i = 0; i < n_all; i++) {
+        sv_fish_t r = sv_fish(&sv, i);
+        const fish_save_t *s = r.f;
         tank_make_fish(t, i, s->preset % tank_roster_count(), s->sociable, s->bold, (stage_t)(s->stage & 3));
         fish_t *f = &t->fish[i];
         f->trust = s->trust; f->bold0 = s->bold0; f->sociable0 = s->sociable0;
+        if (s->species > SP_FISH && s->species < SP_COUNT) {   /* (before the curiosity: the species sets its default) */
+            t->n_fish = i + 1;
+            tank_set_species(t, i, s->species, s->variant);
+        }
         f->hunger = s->hunger; f->energy = s->energy; f->stress = s->stress; f->curiosity = s->curiosity;
         f->eaten = s->eaten; f->eaten_player = s->eaten_player;
         f->ms_bits = s->ms_bits & ~MS_RETIRED_MASK;   /* the shadow milestones, gone with it */
-        f->ms_seen = sv.ms_seen[i] & f->ms_bits;
+        f->ms_seen = *r.ms_seen & f->ms_bits;
         f->rest_dx = s->rest_dx; f->rest_dy = s->rest_dy;
-        f->drift_acc = sv.drift_acc[i];
+        f->drift_acc = *r.drift_acc;
         s_age[i] = s->age_s;
         t->n_fish = i + 1;
-        if (sv.names[i][0]) { sv.names[i][FISH_NAME_MAX] = 0; tank_set_name(t, i, sv.names[i]); }
-        tank_set_look(t, i, sv.body[i], sv.accent[i]);        /* zeros keep the preset's */
-        f->parent_a = (int8_t)(sv.parent_p1[i][0] - 1); f->parent_b = (int8_t)(sv.parent_p1[i][1] - 1);   /* 0 = none = -1 */
-        if (f->parent_a >= sv.n_fish) f->parent_a = -1;
-        if (f->parent_b >= sv.n_fish) f->parent_b = -1;
+        if (r.name[0]) { r.name[FISH_NAME_MAX] = 0; tank_set_name(t, i, r.name); }
+        tank_set_look(t, i, *r.body, *r.accent);              /* zeros keep the preset's */
+        f->parent_a = (int8_t)(r.parent_p1[0] - 1); f->parent_b = (int8_t)(r.parent_p1[1] - 1);   /* 0 = none = -1 */
+        if (f->parent_a >= n_all) f->parent_a = -1;
+        if (f->parent_b >= n_all) f->parent_b = -1;
     }
     s_setup_pending = sv.setup_pending != 0;
-    s_newborn = sv.newborn_p1 && sv.newborn_p1 <= sv.n_fish ? sv.newborn_p1 - 1 : -1;
+    s_newborn = sv.newborn_p1 && sv.newborn_p1 <= t->n_fish ? sv.newborn_p1 - 1 : -1;
     if (sv.bubble_x > 0) tank_set_bubble_x(t, sv.bubble_x);
     t->light_idle_s = sv.light_idle_s ? sv.light_idle_s : LIGHT_IDLE_S;
     t->light_auto = sv.light_auto != 0;
@@ -720,6 +876,7 @@ static bool load_save(tank_t *t, int64_t *saved_unix) {
     tank_screen_set(t, sv.screen_turned != 0);
     t->orient_lock = (sv.orient & 1) != 0; if (t->orient_lock) t->orient_inv = (sv.orient & 2) != 0;
     t->autofeed_off = sv.autofeed_off != 0;
+    t->theme = (uint8_t)theme_valid(sv.theme);
     t->light_override = false; t->light_on = true;   /* never restored (2026-09-15): a saved
                                                       * override once froze a tank in permanent day */
     t->feed_spot_x = sv.feed_spot_x; t->player_feedings = sv.player_feedings;
@@ -735,7 +892,7 @@ static bool load_save(tank_t *t, int64_t *saved_unix) {
     t->trims = sv.trims; t->cells_cleaned = sv.cells_cleaned;
     /* the sand dollar tail (zeros for an older save: the ledger back-pays) */
     t->sd_balance = sv.sd_balance; t->sd_earned = sv.sd_earned; t->sd_unlocks = sv.sd_unlocks & ((1u << SD_ITEM_COUNT) - 1);
-    for (int i = 0; i < N_FISH_MAX; i++) t->sd_paid_fish[i] = i < t->n_fish ? sv.sd_paid_fish[i] : 0;
+    for (int i = 0; i < N_FISH_MAX; i++) t->sd_paid_fish[i] = i < t->n_fish ? *sv_fish(&sv, i).sd_paid : 0;
     t->sd_colonies_paid = sv.sd_colonies_paid; t->sd_inches_paid = sv.sd_inches_paid;
     t->algae_colonies = sv.algae_colonies; t->trim_px = sv.trim_px;
     if (sv.snail_x > 0) { t->snail_x = sv.snail_x; t->snail_y = sv.snail_y; }
@@ -752,6 +909,9 @@ static bool load_save(tank_t *t, int64_t *saved_unix) {
     t->coral_growth = sv.coral_growth > 0 ? sv.coral_growth : 0;   /* 0 = full (tank_coral_growth) */
     if (sv.cluster_x > 0) tank_decor_set(t, 4, sv.cluster_x, sv.cluster_z1 ? sv.cluster_z1 - 1 : DECOR_Z_FRONT);
     tank_cluster_set_scheme(t, sv.cluster_scheme);
+    if (sv.wreck_x > 0) tank_decor_set(t, SD_ITEM_WRECK_IDX, sv.wreck_x, sv.wreck_z1 ? sv.wreck_z1 - 1 : DECOR_Z_FRONT);
+    if (t->sd_unlocks & SD_ITEM_FROGMAN) tank_frogman_place(t);   /* (his motion is not saved) */
+    if (t->sd_unlocks & SD_ITEM_SUB) tank_sub_place(t);
     t->cluster_growth = sv.cluster_growth > 0 ? sv.cluster_growth : 0;
     if (t->sd_unlocks & SD_ITEM_SHRIMP) {             /* the school back in the grass, its count and its progress */
         tank_shrimp_place(t, sv.shrimp_n >= SHRIMP_START ? sv.shrimp_n : SHRIMP_START);
@@ -769,6 +929,7 @@ static bool load_save(tank_t *t, int64_t *saved_unix) {
     s_arrival_pending = sv.arrival_pending; s_spawn_in = -1;
     s_sale_need = sv.sale_meals_need > 0 ? sv.sale_meals_need : 0;
     s_prev_night = t->night;
+    progression_species_sync(t);                     /* the species' bits from who is here (a save sold down past them) */
     return true;
 }
 
@@ -965,7 +1126,10 @@ bool progression_save(tank_t *t) {
     sv.screen_turned = t->screen_turned;
     sv.orient = (uint8_t)(t->orient_lock ? 1 | (t->orient_inv ? 2 : 0) : 0);
     sv.autofeed_off = t->autofeed_off;
-    sv.arrival_pending = s_arrival_pending; sv.n_fish = (uint8_t)t->n_fish;
+    sv.theme = (uint8_t)theme_valid(t->theme);
+    sv.arrival_pending = s_arrival_pending;
+    sv.n_fish = (uint8_t)(t->n_fish < SV_FISH ? t->n_fish : SV_FISH);   /* an older build loads these six */
+    sv.n_fish_all = (uint8_t)t->n_fish;
     sv.feed_spot_x = t->feed_spot_x; sv.player_feedings = t->player_feedings;
     sv.hold_approaches = t->hold_approaches; sv.tank_ms_bits = t->tank_ms_bits;
     sv.tank_ms_seen = t->tank_ms_seen;
@@ -976,7 +1140,6 @@ bool progression_save(tank_t *t) {
     memcpy(sv.algae, t->algae, ALGAE_CELLS);
     sv.trims = t->trims; sv.cells_cleaned = t->cells_cleaned;
     sv.sd_balance = t->sd_balance; sv.sd_earned = t->sd_earned; sv.sd_unlocks = t->sd_unlocks;
-    for (int i = 0; i < N_FISH_MAX; i++) sv.sd_paid_fish[i] = t->sd_paid_fish[i];
     sv.sd_colonies_paid = t->sd_colonies_paid; sv.sd_inches_paid = t->sd_inches_paid;
     sv.algae_colonies = t->algae_colonies; sv.trim_px = t->trim_px;
     sv.snail_x = t->snail_x > 0 ? t->snail_x : 0; sv.snail_y = t->snail_y > 0 ? t->snail_y : 0;
@@ -988,6 +1151,7 @@ bool progression_save(tank_t *t) {
     sv.coral_growth = t->coral_growth;
     sv.cluster_x = t->cluster_x > 0 ? t->cluster_x : 0; sv.cluster_z1 = (uint8_t)(t->cluster_z + 1); sv.cluster_scheme = t->cluster_scheme;
     sv.cluster_growth = t->cluster_growth;
+    sv.wreck_x = t->wreck_x > 0 ? t->wreck_x : 0; sv.wreck_z1 = (uint8_t)(t->wreck_z + 1);
     sv.shrimp_n = (t->sd_unlocks & SD_ITEM_SHRIMP) ? t->shrimp_n : 0; sv.shrimp_food = t->shrimp_food;
     sv.shrimp_cool = t->shrimp_cool > 0 ? t->shrimp_cool : 0; sv.shrimp_eaten = t->shrimp_eaten;
     sv.urchin_x = (t->sd_unlocks & SD_ITEM_URCHIN) && t->urchin_x > 0 ? t->urchin_x : 0;
@@ -996,18 +1160,20 @@ bool progression_save(tank_t *t) {
     sv.newborn_p1 = (uint8_t)(s_newborn >= 0 && s_newborn < t->n_fish ? s_newborn + 1 : 0);
     sv.bubble_x = t->bubble_x;
     for (int i = 0; i < t->n_fish; i++) {
-        const fish_t *f = &t->fish[i]; fish_save_t *s = &sv.fish[i];
-        if (strcmp(f->name, tank_roster_name(f->preset))) memcpy(sv.names[i], f->name, FISH_NAME_MAX + 1);
-        sv.body[i] = f->color; sv.accent[i] = f->accent;      /* the preset's too: harmless, exact */
-        sv.parent_p1[i][0] = (uint8_t)(f->parent_a + 1); sv.parent_p1[i][1] = (uint8_t)(f->parent_b + 1);
+        const fish_t *f = &t->fish[i]; sv_fish_t r = sv_fish(&sv, i); fish_save_t *s = r.f;
+        if (strcmp(f->name, tank_roster_name(f->preset))) memcpy(r.name, f->name, FISH_NAME_MAX + 1);
+        *r.body = f->color; *r.accent = f->accent;            /* the preset's too: harmless, exact */
+        r.parent_p1[0] = (uint8_t)(f->parent_a + 1); r.parent_p1[1] = (uint8_t)(f->parent_b + 1);
+        *r.sd_paid = t->sd_paid_fish[i];
         s->preset = (uint8_t)f->preset; s->stage = (uint8_t)f->stage;
+        s->species = f->species; s->variant = f->variant;
         s->size = f->size; s->trust = f->trust; s->bold = f->bold; s->sociable = f->sociable;
         s->bold0 = f->bold0; s->sociable0 = f->sociable0;
         s->hunger = f->hunger; s->energy = f->energy; s->stress = f->stress; s->curiosity = f->curiosity;
         s->age_s = s_age[i]; s->rest_dx = f->rest_dx; s->rest_dy = f->rest_dy;
         s->eaten = f->eaten; s->eaten_player = f->eaten_player; s->ms_bits = f->ms_bits;
-        sv.ms_seen[i] = f->ms_seen;
-        sv.drift_acc[i] = f->drift_acc;
+        *r.ms_seen = f->ms_seen;
+        *r.drift_acc = f->drift_acc;
     }
     if (!persist_port_save(&sv, sizeof sv)) {
         if (!s_dirty) { s_dirty = true; s_dirty_since = 0; }

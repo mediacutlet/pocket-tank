@@ -6,12 +6,12 @@
 #
 # 1. three trace workers against the Mac Mini teacher, hard 8 h wall-clock cap
 # 2. fold + closed-vocabulary verify -> out/v3_clean.jsonl
-# 3. train the 14M student (POCKET_SCHEMA=3), export 4-bit + fp32, probe
+# 3. train the 14M student (AQUA_PETS_SCHEMA=3), export 4-bit + fp32, probe
 # Step 4 (shipping the model into sim/firmware) is deliberately manual.
 set -u
 cd "$(dirname "$0")"
 LOG=out/v3_overnight.log
-PY=~/.venvs/pocket-tank/bin/python
+PY=~/.venvs/aquapets/bin/python
 HOST=${HOST:-http://localhost:11434}
 MINUTES=${MINUTES:-480}
 COUNT=${COUNT:-12000}
@@ -42,7 +42,7 @@ n=$(wc -l < out/v3_clean.jsonl | tr -d ' ')
 if [ "$n" -lt 5000 ]; then log "ABORT: only $n clean pairs - not training"; exit 1; fi
 
 log "--- train (14M, schema v3, $n pairs) ---"
-POCKET_SCHEMA=3 $PY train.py --data "out/v3_clean.jsonl" --dim 384 --n-layers 8 --n-heads 8 \
+AQUA_PETS_SCHEMA=3 $PY train.py --data "out/v3_clean.jsonl" --dim 384 --n-layers 8 --n-heads 8 \
     --max-seq-len 64 --batch 64 --iters 4000 --lr 6e-4 --out out/ckpt_v3.pt 2>&1 | tail -15 | tee -a "$LOG"
 [ -f out/ckpt_v3.pt ] || { log "ABORT: no checkpoint"; exit 1; }
 

@@ -57,4 +57,4 @@ The prompt in step 6 is any [schema.md](../model/schema.md) state line with
   synthetic states (evidence behind [progression-next.md](progression-next.md))
 - `model/teacher_vs_student.py` — side-by-side decisions for the same states
 - Schema v3 cycle: `--schema 3` on gen_traces / train_tokenizer / eval,
-  `POCKET_SCHEMA=3` for train.py — runbook in [retrain-v3.md](retrain-v3.md)
+  `AQUA_PETS_SCHEMA=3` for train.py — runbook in [retrain-v3.md](retrain-v3.md)

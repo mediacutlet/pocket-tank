@@ -2,7 +2,7 @@
 # for every board (docs/BOARDS.md) SIGNED with the project's key, make each
 # board's OTA manifest, and attach the images and the manifests to the GitHub
 # Release for that tag. A tank fetches its own board's
-#   https://github.com/mediacutlet/pocket-tank/releases/latest/download/latest-<board>.json
+#   https://aquapets.com/install/latest-<board>.json
 # (amoled18, round175c, watch206: common/version.h PT_BOARD)
 # so a release is live for every tank the moment it is published - and a
 # PRE-RELEASE is skipped by "latest": the private test channel (the
@@ -22,7 +22,7 @@ permissions:
 
 jobs:
   ota:
-    if: github.repository == 'mediacutlet/pocket-tank'
+    if: github.repository == 'fiatminimalist/aqua-pets'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -79,8 +79,8 @@ jobs:
           # a tag with a suffix (v0.3.0-rc1) is a pre-release: invisible to "latest"
           PRE=""; case "$TAG" in *-*) PRE="--prerelease";; esac
           if gh release view "$TAG" > /dev/null 2>&1; then
-            gh release upload "$TAG" ota/latest-*.json ota/pocket_tank-*.bin --clobber
+            gh release upload "$TAG" ota/latest-*.json ota/aqua_pets-*.bin --clobber
           else
-            gh release create "$TAG" ota/latest-*.json ota/pocket_tank-*.bin $PRE --verify-tag \
+            gh release create "$TAG" ota/latest-*.json ota/aqua_pets-*.bin $PRE --verify-tag \
               --title "$TAG" --notes "$(git tag -l --format='%(contents)' "$TAG")"
           fi

@@ -1,3 +1,3 @@
 # the WATCH build (Waveshare ESP32-S3-Touch-AMOLED-2.06): on top of sdkconfig.defaults
 #   idf.py -B <dir> -DSDKCONFIG=<dir>/sdkconfig -DSDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.watch" build
-CONFIG_POCKET_TANK_WATCH=y
+CONFIG_AQUA_PETS_WATCH=y

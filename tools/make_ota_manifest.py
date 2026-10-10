@@ -4,8 +4,8 @@ by its release, and the small manifest the tank fetches (docs/OTA.md,
 common/update.h update_manifest_t; the tank parses it in
 firmware/main/net_port_esp.c).
 
-  tools/make_ota_manifest.py --base-url https://github.com/mediacutlet/pocket-tank/releases/download/v0.3.0 --out ota/
-      -> ota/pocket_tank-v0.3.0-amoled18.bin  (a copy of the build's signed image)
+  tools/make_ota_manifest.py --base-url https://aquapets.com/install/releases/v0.3.0 --out ota/
+      -> ota/aqua_pets-v0.3.0-amoled18.bin  (a copy of the build's signed image)
          ota/latest-amoled18.json
 
 One run per board (2026-10-02: 0.3.0 ships three - docs/BOARDS.md). The
@@ -57,7 +57,7 @@ def is_signed(path):
 
 def main():
     a = argparse.ArgumentParser()
-    a.add_argument("--build-dir", default=os.path.expanduser("~/.cache/pocket-tank/fw-build") if os.path.isdir(os.path.expanduser("~/.cache/pocket-tank/fw-build")) else os.path.join(ROOT, "firmware", "build"))
+    a.add_argument("--build-dir", default=os.path.expanduser("~/.cache/aqua-pets/fw-build") if os.path.isdir(os.path.expanduser("~/.cache/aqua-pets/fw-build")) else os.path.join(ROOT, "firmware", "build"))
     a.add_argument("--base-url", required=True, help="where the .bin will be served from (no trailing slash)")
     a.add_argument("--out", default=os.path.join(ROOT, "ota"))
     a.add_argument("--note", default=None)
@@ -68,12 +68,12 @@ def main():
     rel, stage, tag, model_len = version_h()
     subprocess.run([sys.executable, os.path.join(ROOT, "tools", "model_trailer.py"), "--check", "--build-dir", a.build_dir,
                     "--out", os.devnull], check=True)   # the check alone: CI's build dirs are root-owned (the IDF action's docker), nothing may be written there
-    img = os.path.join(a.build_dir, "pocket_tank.bin")
+    img = os.path.join(a.build_dir, "aqua_pets.bin")
     if not os.path.isfile(img): sys.exit(f"no {img}")
     if not is_signed(img): sys.exit(f"{img} carries no signature block - the build must sign (tools/ota_key.sh, CONFIG_SECURE_BOOT_BUILD_SIGNED_BINARIES)")
     board = board_of_image(img)
     data = open(img, "rb").read()
-    name = f"pocket_tank-v{rel}-{board}.bin"
+    name = f"aqua_pets-v{rel}-{board}.bin"
     os.makedirs(a.out, exist_ok=True)
     open(os.path.join(a.out, name), "wb").write(data)
     note = a.note

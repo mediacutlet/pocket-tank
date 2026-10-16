@@ -1,5 +1,42 @@
+# The components each board family needs. esp_lcd_ili9881c and the GT911 are the
+# M5Stack Tab5's (ESP32-P4: a 720x1280 MIPI-DSI glass and its touch); the three
+# above them are the Waveshare ESP32-S3 boards'. The `rules` keep a target from
+# pulling in another family's driver (the ESP32-S3's SH8601 would not build for
+# the P4, and vice versa).
 dependencies:
   idf: ">=5.4"
-  espressif/esp_lcd_sh8601: "^2.0"
-  espressif/esp_lcd_touch_ft5x06: "^1.1"
-  espressif/esp_lcd_touch_cst816s: "^1.0"
+  espressif/esp_lcd_sh8601:
+    version: "^2.0"
+    rules:
+      - if: "target != esp32p4"
+  espressif/esp_lcd_touch_ft5x06:
+    version: "^1.1"
+    rules:
+      - if: "target != esp32p4"
+  espressif/esp_lcd_touch_cst816s:
+    version: "^1.0"
+    rules:
+      - if: "target != esp32p4"
+  espressif/esp_lcd_touch_gt911:
+    version: "^1"
+    rules:
+      - if: "target == esp32p4"
+  # the ST712x touch, for the ST7121/ST7123 units (the port builds its own IO at
+  # 400 kHz - see touch_port_ft3168.c - so it needs the driver's headers)
+  espressif/esp_lcd_touch_st7123:
+    version: "^1"
+    rules:
+      - if: "target == esp32p4"
+  # the Tab5's own bring-up (the expander, the panel and touch power, the D-PHY's
+  # LDO, and WHICH glass this unit has - an ILI9881C, an ST7123 or an ST7121).
+  # The noglib variant is the BSP without LVGL: the tank draws its own pixels.
+  espressif/m5stack_tab5_noglib:
+    version: "^1.3"
+    rules:
+      - if: "target == esp32p4"
+  # the Tab5's accelerometer: the BMI270 driver (the chip downloads an 8 KB
+  # configuration blob before its data path runs, which is what this does)
+  espressif/bmi270:
+    version: "^1.0"
+    rules:
+      - if: "target == esp32p4"

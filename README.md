@@ -43,6 +43,18 @@ Same fish, same shop, same saves on all four. From 0.3 on a tank updates
 itself over Wi-Fi, so the cable is only for the first install. Each board
 charges at a current sized for its own battery (0.3.4).
 
+Since 2026-10-16 there is a fifth: the **M5Stack Tab5**, a 5-inch 720 x 1280
+MIPI-DSI glass, landscape, on an ESP32-P4. It is the odd one out - a different
+chip family, no Wi-Fi of its own, and (on this unit) an ST7123 panel rather
+than an ILI9881C - so it builds with its own ESP-IDF and its own config
+(`TANK_TAB5`, `firmware/sdkconfig.tab5`, `tools/flash_tab5.ps1`). The tank is
+still the tank: a 720 x 405 world the P4's pixel-processing accelerator turns a
+quarter and scales onto the glass at 25.7 fps. [docs/board-tab5.md](docs/board-tab5.md)
+is the port and its traps; [docs/tab5-next.md](docs/tab5-next.md) is what is
+still missing on it (sound, the RTC, the IMU, the gauge, the ESP32-C6's Wi-Fi -
+the advisor's P4 PIE kernels landed 2026-10-16: 10.6 tok/s and 4.06 s a
+decision, against 2.2 tok/s and 19.5 s with the scalar path).
+
 | The 1.8 | The pendant | The watch | The square |
 |:---:|:---:|:---:|:---:|
 | <img src="docs/media/board-amoled18.webp" width="220" alt="The Waveshare 1.8-inch board from the front: a black rectangle with rounded corners"> | <img src="docs/media/board-round175c.webp" width="220" alt="The Waveshare 1.75C board from the front: a round screen in a silver aluminum ring"> | <img src="docs/media/board-watch206.webp" width="220" alt="The Waveshare 2.06-inch watch on its strap"> | <img src="docs/media/board-amoled216.webp" width="220" alt="The Waveshare 2.16-inch board from the front: a square screen in a white case"> |
@@ -608,8 +620,35 @@ Four Waveshare boards are supported, all ESP32-S3R8 with 16 MB flash or more and
 | **ESP32-S3-Touch-AMOLED-2.06**, the watch | 410×502, portrait | `sdkconfig.watch` |
 | **ESP32-S3-Touch-AMOLED-2.16**, the square | 480×480 | `sdkconfig.square` |
 
+...and the **M5Stack Tab5** (2026-10-16), which is not an ESP32-S3 and is built
+on its own: an ESP32-P4 (rev v1.3 on the unit it was brought up on) with a
+5-inch 720 x 1280 MIPI-DSI glass, held landscape. It wants **ESP-IDF v5.5.x**
+(the Tab5 BSP's `usb` dependency needs that HAL) with
+`CONFIG_ESP32P4_SELECTS_REV_LESS_V3=y` (IDF 5.5 builds for rev v3.1 by default
+and a v1.3 chip then refuses the image at both flash and boot time), a
+standalone `firmware/sdkconfig.tab5`, and `tools/flash_tab5.ps1`:
+
+```powershell
+$env:IDF_TOOLS_PATH='E:\Espressif'; . 'E:\Espressif\frameworks\esp-idf-v5.5.6\export.ps1'
+.\tools\flash_tab5.ps1 -Full      # a board still running M5's factory image
+```
+
+The tank's world there is 720 x 405, and the P4's pixel-processing accelerator
+turns it a quarter and scales it x16/9 onto the glass in one pass (one constant,
+`TAB5_ROT_DEG`, and the touch maps through its inverse); the panel and the touch
+are the ones Espressif's own Tab5 BSP brings up, because a Tab5 ships with three
+different glasses - ILI9881C+GT911, ST7123, ST7121 - and they are told apart by
+which touch chip answers on the I2C bus. The unit here is an ST7123, and the way
+to lose a day is to assume otherwise: the ILI9881C driver's first act is a DSI
+read that glass never answers, and the DSI HAL has no timeout, so the firmware
+stops with no log line at all. [docs/board-tab5.md](docs/board-tab5.md) has that
+trail, the numbers, and [docs/tab5-next.md](docs/tab5-next.md) what is still
+missing (sound, RTC, IMU, the gauge, the ESP32-C6's Wi-Fi - and the advisor's
+single-token cache path, which the P4's PIE kernels took from 2.2 to 10.6
+tok/s).
+
 Each board's touch panel is calibrated in its touch port, so a tap lands
-where the finger is. [docs/BOARDS.md](docs/BOARDS.md) has what the four
+where the finger is. [docs/BOARDS.md](docs/BOARDS.md) has what they
 share and where they differ; each board's own traps are in its doc. The
 browser installer above is the no-toolchain path; this is the developer one.
 
@@ -642,9 +681,10 @@ explains where every kilobyte goes. The boot log prints a per-stage frame
 profile and per-decision inference timings, so performance work is
 measurable without instruments.
 
-**Other boards.** This repo supports those four boards, to keep the project small
-while it is young. Two community ports run the tank elsewhere. They are not
-built or tested here, and they may lag behind this repo:
+**Other boards.** This repo supports the four Waveshare boards above and, since
+2026-10-16, the M5Stack Tab5, to keep the project small while it is young. Two
+community ports run the tank elsewhere. They are not built or tested here, and
+they may lag behind this repo:
 
 - [knoopx](https://github.com/knoopx) ported it to the Waveshare
   **ESP32-P4-WIFI6-Touch-LCD-4B** (4-inch 720×720 MIPI-DSI panel, GT911
@@ -688,8 +728,9 @@ seven-minute prompt check before an overnight run is always worth it.
   tokenizer, the shared encoder)
 - `sim/` — the LVGL + SDL2 simulator, its persistence port, and the self-tests
 - `firmware/` — ESP-IDF app: display, touch, battery, IMU, RTC and audio
-  ports for the four Waveshare boards, the on-device advisor scheduler,
-  update mode and its Wi-Fi port, the QEMU harness, and the partition table
+  ports for the Waveshare boards and the M5Stack Tab5, the on-device advisor
+  scheduler, update mode and its Wi-Fi port (a no-radio stub on the Tab5), the
+  QEMU harness, and the partition table
 - `model/` — the frozen [state/goal schema](model/schema.md), trace
   generation, training, evaluation, probes, and the 4-bit export
 - `installer/` — the browser installer page and the vendored ESP Web Tools
@@ -713,7 +754,7 @@ seven-minute prompt check before an overnight run is always worth it.
 - [docs/retrain-v3.md](docs/retrain-v3.md) — the schema v3 retrain runbook
 - [docs/retrain-v4.md](docs/retrain-v4.md) — the schema v4 (boredom) retrain runbook and its numbers
 - [docs/DEVICE.md](docs/DEVICE.md) — what is in flight on the device, and the flash rule
-- [docs/BOARDS.md](docs/BOARDS.md) — the four boards: what is shared, where one may differ, how a release keeps each to its own image
+- [docs/BOARDS.md](docs/BOARDS.md) — the boards: what is shared, where one may differ, how a release keeps each to its own image
 - [docs/board-amoled-1.75c.md](docs/board-amoled-1.75c.md) — the pendant's bring-up notes
 - [docs/board-amoled-2.06-watch.md](docs/board-amoled-2.06-watch.md) — the watch's bring-up notes
 - [docs/board-amoled-2.16.md](docs/board-amoled-2.16.md) — the square's bring-up notes

@@ -67,6 +67,13 @@ bool advisor_llm_esp_init(const uint8_t *model_bin, size_t model_len, const uint
         ESP_LOGE(TAG, "bad model/tokenizer"); return false;
     }
     q4_clock_us = esp_timer_get_time;        /* per-stage inference profiling */
+    /* the kernels first: an asm dot path that disagrees with the scalar one must
+     * be seen before a fish acts on it (PIE on the S3 and the P4; a no-op there
+     * is nothing to check). Cheap, and it runs at every boot. */
+    { int bad = q4_model_dot_check();
+      if (bad == -1) ESP_LOGI(TAG, "kernel check: the PIE dot matches the scalar dot");
+      else ESP_LOGE(TAG, "kernel check: %s mismatch in group %d - inference is NOT trustworthy",
+                    bad == -2 ? "batch-dot" : "dot", bad < 0 ? 0 : bad); }
     /* one-time kernel/memory bench on boot (numbers for docs/bringup step 9) */
     q4_model_t *bm = advisor_core_model();
     ESP_LOGI(TAG, "bench: dot100k %lld us | batch44 flash %lld us ram %lld us | decode flash %lld us ram %lld us",

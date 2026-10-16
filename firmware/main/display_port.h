@@ -51,6 +51,10 @@ bool board_is_watch(void);
 /* the SQUARE (Waveshare 2.16, 480 x 480), GPIO resets like the round board's;
  * its own build (TANK_SQUARE) is a tank that IS the panel, sent unturned */
 bool board_is_square(void);
+/* the TAB5 (M5Stack, ESP32-P4, 2026-10-16): a 720 x 1280 MIPI-DSI glass held
+ * landscape, the tank a 720 x 405 world the display port turns and scales onto
+ * it with the pixel-processing accelerator (display_port_tab5.c) */
+bool board_is_tab5(void);
 void display_port_set_madctl(uint8_t v);         /* the square: the panel's orientation register (0x36), live */
 uint8_t display_port_madctl(void);
 int  board_pwr_sense_pin(void);                 /* the GPIO that is high while the PWR key is down (the 1.75C: 3, the watch: 10), -1 = none */

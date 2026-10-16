@@ -1,8 +1,9 @@
-# Four boards, one tank: how a change reaches all of them
+# Five boards, one tank: how a change reaches all of them
 
-Since 2026-10-01 the tank runs on three boards, since 2026-10-12 on four. This file is the rule for
-changing anything they share - read it before a feature, the way DEVICE.md is
-read before a flash.
+Since 2026-10-01 the tank runs on three boards, since 2026-10-12 on four, and
+since 2026-10-16 on five (the first one that is not an ESP32-S3). This file is
+the rule for changing anything they share - read it before a feature, the way
+DEVICE.md is read before a flash.
 
 ## The boards
 
@@ -12,9 +13,28 @@ read before a flash.
 | Waveshare 1.75C (the bowl) | 466 circle | `TANK_ROUND` | `make ROUND=1` -> `fishsim-round` | `tools/flash_round.sh` (`fw-build-175c`) | its USB serial (`ROUND_SERIAL`, tools/boards.local.sh) |
 | Waveshare 2.06 (the watch) | 410 x 502 portrait, 100 px corners | `TANK_WATCH` | `make WATCH=1` -> `fishsim-watch` | `tools/flash_watch.sh` (`fw-build-206`) | its USB serial (`WATCH_SERIAL`, tools/boards.local.sh) |
 | Waveshare 2.16 (the square, 2026-10-12) | 480 x 480, ~40 px corners | `TANK_SQUARE` | `make SQUARE=1` -> `fishsim-square` | `tools/flash_square.sh` (`fw-build-216`) | its USB serial (`SQUARE_SERIAL`, tools/boards.local.sh) |
+| M5Stack Tab5 (2026-10-16) | 720 x 1280 MIPI-DSI, held landscape; the world is 720 x 405 | `TANK_TAB5` + `sdkconfig.tab5` | `make TAB5=1` -> `fishsim-tab5` | `tools/flash_tab5.ps1` (`build-tab5`) | its COM port (`-Port`, COM9 on the bench) |
 
 Each board's own traps are in its doc (board-amoled-1.75c.md,
-board-amoled-2.06-watch.md, board-amoled-2.16.md).
+board-amoled-2.06-watch.md, board-amoled-2.16.md, board-tab5.md).
+
+**The Tab5 is the odd one out in three ways**, and they are the only places a
+`CONFIG_IDF_TARGET_ESP32P4` may appear:
+
+- it is an **ESP32-P4**, not an ESP32-S3: it builds with **ESP-IDF v5.5.x**
+  (the BSP's `usb` dependency needs that HAL) against the S3 boards' v5.4.1, and
+  this unit's silicon is **rev v1.3**, which needs
+  `ESP32P4_SELECTS_REV_LESS_V3` (IDF 5.5 defaults to rev v3.1 and the image is
+  then refused at both flash and boot time);
+- it has **no radio**: `main/CMakeLists.txt` builds `net_port_stub.c` instead of
+  `net_port_esp.c` (Wi-Fi 6 is an ESP32-C6 on SDIO, not brought up yet);
+- a Tab5 ships as **three different glasses** (ILI9881C+GT911, ST7123+ST7123,
+  ST7121+ST712x) told apart on the I2C bus, so the port lets Espressif's own
+  BSP (`espressif/m5stack_tab5_noglib`) bring the panel and the touch up rather
+  than driving either by hand. The renderer still only sees a `TANK_W x TANK_H`
+  frame: the turn and the scale onto the 720 x 1280 glass are the P4's
+  pixel-processing accelerator's, inside `display_port_tab5.c`.
+
 
 ## What is shared, and where a board may differ
 

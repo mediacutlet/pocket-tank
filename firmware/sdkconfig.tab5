@@ -1,0 +1,92 @@
+# pocket-tank — the M5Stack Tab5: ESP32-P4 (chip rev v1.3), 16 MB flash,
+# 32 MB "hex" PSRAM, a 720 x 1280 MIPI-DSI glass, a GT911 touch, no radio.
+#
+# NOT layered on sdkconfig.defaults: that file is the ESP32-S3 family's (octal
+# PSRAM, Wi-Fi, the S3's data caches, and the signed-app key that is not in the
+# repo), and half of it does not exist on the P4. This file is the whole config
+# for this board. Build (ESP-IDF v5.4.2):
+#
+#   cd firmware
+#   idf.py -DSDKCONFIG_DEFAULTS="sdkconfig.tab5" -B build-tab5 build
+#   idf.py -B build-tab5 -p COM9 flash
+#
+# (docs/board-tab5.md carries the pins, the traps and the bring-up log.)
+
+# ---- the chip ----
+CONFIG_IDF_TARGET="esp32p4"
+# This unit's ESP32-P4 is silicon rev v1.3, and ESP-IDF treats "rev < 3.0" and
+# "rev >= 3.0" as mutually exclusive builds (Kconfig.hw_support: the two have
+# "huge hardware difference"). Out of the box IDF 5.5 builds for rev v3.1, and
+# the image is then refused at flash time AND at boot ("requires chip revision
+# in range [v3.1 - v3.99], this chip is revision v1.3"). So: pre-v3, minimum
+# v1.0. esptool tells you which chip it is (esptool ... flash_id).
+CONFIG_ESP32P4_SELECTS_REV_LESS_V3=y
+CONFIG_ESP32P4_REV_MIN_100=y
+CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_360=y
+CONFIG_COMPILER_OPTIMIZATION_PERF=y
+
+# ---- PSRAM: 32 MB, 16-line ("hex") mode. 200 MHz sits behind the experimental
+# gate; M5Stack's own Tab5 build turns both on. The tank needs ~3.5 MB for its
+# own buffers and ~3.7 MB for the two panel frame buffers. ----
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_HEX=y
+CONFIG_IDF_EXPERIMENTAL_FEATURES=y
+CONFIG_SPIRAM_SPEED_200M=y
+CONFIG_SPIRAM_USE_MALLOC=y
+CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=8192
+CONFIG_SPIRAM_MALLOC_RESERVE_INTERNAL=65536
+CONFIG_SPIRAM_ALLOW_STACK_EXTERNAL_MEMORY=y
+CONFIG_SPIRAM_MEMTEST=n
+
+# ---- the P4's L2 cache: 256 KB on 64-byte lines. The line size matters: the
+# pixel-processing accelerator (PPA) wants its buffers aligned to the L1 and L2
+# cache line, and every buffer the tank allocates is already 64-byte aligned. ----
+CONFIG_CACHE_L2_CACHE_256KB=y
+CONFIG_CACHE_L2_CACHE_LINE_64B=y
+
+# ---- flash: 16 MB, QIO at 80 MHz. The partition table is the project's own
+# (partitions.csv): two app slots, the 8 MB raw model partition, nvs, otadata,
+# storage - it fits this board's flash exactly as it fits the S3's. ----
+CONFIG_ESPTOOLPY_FLASHMODE_QIO=y
+CONFIG_ESPTOOLPY_FLASHFREQ_80M=y
+CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+CONFIG_ESPTOOLPY_FLASHSIZE="16MB"
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
+
+# ---- no radio at all. The P4 has none: the Tab5's Wi-Fi 6 comes from an
+# ESP32-C6 wired to the P4 over SDIO, which needs esp_hosted and the C6's own
+# firmware - not part of this port. main/CMakeLists.txt builds net_port_stub.c
+# for this target, so every network path (updates over the air, the setup
+# page's Wi-Fi step, the clock from the internet) is a no-op that says so. ----
+CONFIG_BT_ENABLED=n
+
+# ---- the tank's own ports on this board ----
+CONFIG_POCKET_TANK_TAB5=y
+CONFIG_POCKET_TANK_DISPLAY_TAB5=y
+CONFIG_POCKET_TANK_TOUCH_GT911=y
+# sound: the ES8388 at I2C 0x10 and the amp on expander #0's bit 1, both through
+# the BSP (audio_port_tab5.c)
+CONFIG_POCKET_TANK_AUDIO_TAB5=y
+# TWO DSI frame buffers: the tank draws into the one the engine is not scanning
+# and hands it over at the frame boundary (display_port_tab5.c)
+CONFIG_BSP_LCD_DPI_BUFFER_NUMS=2
+# the PIE path is ON for this board: q4_model.c now has the P4's own kernels
+# (esp.vmulas.s8.xacc into the 40-bit xacc, the same shape as the S3's
+# ee.vmulas.s8.accx), and the advisor checks them against the scalar dot at
+# every boot. CONFIG_POCKET_TANK_NO_PIE would force the scalar path back.
+
+# ---- no signed images on this board yet: the project's key
+# (firmware/keys/ota_signing_key.pem, tools/ota_key.sh) is not in the repo, so a
+# build here must not ask for it. A release build re-enables the four
+# CONFIG_SECURE_SIGNED_* together with the key. ----
+CONFIG_SECURE_BOOT=n
+CONFIG_SECURE_SIGNED_APPS_NO_SECURE_BOOT=n
+CONFIG_SECURE_SIGNED_ON_UPDATE_NO_SECURE_BOOT=n
+
+# ---- tasks and heap ----
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=16384
+CONFIG_FREERTOS_HZ=1000
+CONFIG_ESP_TASK_WDT_TIMEOUT_S=30
+CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU1=n
+CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y

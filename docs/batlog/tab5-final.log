@@ -1,0 +1,102 @@
+I (134) esp_image: segment 5: paddr=000dcaa4 vaddr=4ff0064c size=142fch ( 82684) load
+I (148) esp_image: segment 6: paddr=000f0da8 vaddr=4ff14980 size=037a0h ( 14240) load
+I (151) esp_image: segment 7: paddr=000f4550 vaddr=50108080 size=00064h (   100) load
+I (153) esp_image: segment 8: paddr=000f45bc vaddr=50108c18 size=00020h (    32) load
+I (159) boot: Loaded app from partition at offset 0x10000
+I (163) hex_psram: vendor id    : 0x0d (AP)
+I (163) hex_psram: Latency      : 0x01 (Fixed)
+I (164) hex_psram: DriveStr.    : 0x00 (25 Ohm)
+I (164) hex_psram: dev id       : 0x03 (generation 4)
+I (165) hex_psram: density      : 0x07 (256 Mbit)
+I (165) hex_psram: good-die     : 0x06 (Pass)
+I (166) hex_psram: SRF          : 0x02 (Slow Refresh)
+I (166) hex_psram: BurstType    : 0x00 ( Wrap)
+I (167) hex_psram: BurstLen     : 0x03 (2048 Byte)
+I (167) hex_psram: BitMode      : 0x01 (X16 Mode)
+I (168) hex_psram: Readlatency  : 0x04 (14 cycles@Fixed)
+I (168) hex_psram: DriveStrength: 0x00 (1/1)
+I (169) MSPI Timing: Enter psram timing tuning
+I (337) esp_psram: Found 32MB PSRAM device
+I (337) esp_psram: Speed: 200MHz
+I (341) hex_psram: psram CS IO is dedicated
+I (341) cpu_start: Multicore app
+I (351) cpu_start: GPIO 38 and 37 are used as console UART I/O pins
+I (352) cpu_start: Pro cpu start user code
+I (352) cpu_start: cpu freq: 360000000 Hz
+I (352) app_init: Application information:
+I (352) app_init: Project name:     pocket_tank
+I (353) app_init: App version:      f827ba8-dirty
+I (353) app_init: Compile time:     Oct 16 2026 21:01:11
+I (353) app_init: ELF file SHA256:  e20deffd3...
+I (353) app_init: ESP-IDF:          v5.5.6
+I (354) efuse_init: Min chip rev:     v1.0
+I (354) efuse_init: Max chip rev:     v1.99 
+I (354) efuse_init: Chip rev:         v1.3
+I (354) heap_init: Initializing. RAM available for dynamic allocation:
+I (355) heap_init: At 4FF20E30 len 0001A190 (104 KiB): RETENT_RAM
+I (355) heap_init: At 4FF3AFC0 len 00004BF0 (18 KiB): RAM
+I (356) heap_init: At 4FF40000 len 00040000 (256 KiB): RAM
+I (356) heap_init: At 50108C38 len 000073C8 (28 KiB): RTCRAM
+I (356) heap_init: At 301005B0 len 00001A50 (6 KiB): SPM
+I (357) esp_psram: Adding pool of 32768K of PSRAM memory to heap allocator
+I (358) spi_flash: detected chip: generic
+I (358) spi_flash: flash io: qio
+I (358) sleep_gpio: Configure to isolate all GPIO pins in sleep state
+I (359) sleep_gpio: Enable automatic switching of GPIO sleep configuration
+I (360) main_task: Started on CPU0
+I (360) esp_psram: Reserving pool of 64K of internal memory for DMA/internal allocations
+I (361) main_task: Calling app_main()
+I (361) pocket-tank: pocket-tank v0.3.5 alpha (build f827ba8-dirty) for tab5 boot
+I (364) director: console ready (type help)
+
+IMPROV�
+I (366) pocket-tank: batlog: 2 samples carried through the reset (director `batlog` reads them)
+I (366) pocket-tank: PSRAM total 32768 KB free 32765 KB | internal free 373 KB
+I (367) pocket-tank: PSRAM plan OK (need 4723 KB)
+I (367) display: Tab5 display: the BSP brings the glass up | tank 720x405 turned 90 deg, scaled 1.7778
+I (369) M5Stack Tab5: MIPI DSI PHY Powered on
+I (869) M5Stack Tab5: Discovered board version 2 (LCD ST7123, Touch ST7123, FW 3)
+I (871) M5Stack Tab5: Install MIPI DSI LCD control panel
+I (871) st7123: version: 1.0.2
+W (1138) st7123: The 36h command has been used and will be overwritten by external initialization sequence
+I (1328) M5Stack Tab5: Display initialized with resolution 720x1280
+I (1328) display: panel up (720 x 1280, 2 frame buffers): the turn and the scale are the PPA's from here
+I (1328) display: fb 0x4811d8c0 / 0x482df900 (1800 KB each)
+I (1328) M5Stack Tab5: Setting LCD backlight: 100%
+I (1830) ST7123: Firmware version: 3(1.71.1.3), Max.X: 720, Max.Y: 1280, Max.Touchs: 10
+I (1830) ST7123: Touch panel create success, version: 1.0.2
+I (1830) touch: touch ready (ST712x at 400 kHz)
+W (1830) battery: no AXP2101
+I (1830) battery: rail aldo1 pinned on (FAILED)
+I (1832) codec: ES7210 @0x40 suspended (POWER_DOWN 07)
+I (1832) battery: rails trimmed: 0 of 12 unused outputs off (dcdc1 = VCC3V3 and the RTC LDO stay)
+I (1832) update: provisioning: a reset over USB and no network saved - the glass stays dark while the installer page may ask (8 s)
+I (9860) update: provisioning over: the page never asked
+W (9860) rtc: no RTC chip on this board: the ESP32's own clock (still running from before this boot)
+I (9861) model: trailer: model v3m, 7557640 bytes - good
+I (9865) advisor: bench: dot100k 164706 us | batch44 flash 415694 us ram 412972 us | decode flash 21594 us ram 18999 us
+I (10909) advisor: model dim 384 layers 8 vocab 54 seq 64, schema v4, sampled decoding
+I (10909) pocket-tank: model partition 8192 KB mmap'd, advisor LLM
+I (10910) pocket-tank: after the advisor: internal heap 269 KB free
+I (10910) pocket-tank: dirty mask internal SRAM
+I (10910) pocket-tank: card cache internal SRAM
+W (10911) codec: no ES8311 at 0x18/0x19
+I (10911) audio: stub port: 24 cues known, nothing plays
+W (10911) imu: no QMI8658
+I (10911) pocket-tank: scene restore: CPU memcpy (this chip's DMA copy measured ~9 MB/s: see main.c)
+I (10915) pocket-tank: cold boot: 0.0 h lived through since the save | hunger[0] 7.2 | battery -1% 0 mV
+I (10916) pocket-tank: the save was written by v0.3.5
+I (10916) pocket-tank: population 2 (cap 5): nori + bolt ...
+I (11004) display: stats card: redraw 8.0 ms, blit 1.2 ms per frame
+I (11005) pocket-tank: app_main done: internal heap 167 KB free (largest block 62 KB); the tank task starts once this stack is freed
+I (11006) main_task: Returned from app_main()
+I (11206) pocket-tank: starting the tank task: internal heap 184 KB free (largest block 62 KB)
+I (11206) pocket-tank: tank task up | heap int 172 KB
+I (11207) touch: touch: read 0.40 ms, the whole poll 0.44 ms (1 polls, 0 with a finger)
+I (11207) M5Stack Tab5: Setting LCD backlight: 100%
+I (21211) touch: touch: read 0.31 ms, the whole poll 0.32 ms (513 polls, 0 with a finger)
+I (21251) display: fb mid 0x0925 corner 0x0000 | scene mid 0x0925 ep 1 | night 0 prefetch 0
+I (21252) display: 25.7 fps | render 17.7 ms flush 1.6 ms | scene 13.9 shafts 0.0 veg 1.5 fd/bub 0.3 fish 1.5 vig 0.6 algae 0.1 | card 0.0 ms x0 | veg 0.37 0.37 0.36
+I (21253) display: flush parts (Tab5): prefetch issue 0.0 + port 1.1 + touch 0.5 = 1.6 of 1.6
+I (21253) display: frame 38.9 ms = polls 0.3 + tick 0.7 + prefetch wait 0.0 + render 17.7 + flush 1.6 + tail 0.0 + sleep 18.6 | flush: fill 1.6, wire wait 0.0, send calls 0.0
+I (21254) pocket-tank: t=41s 2 fish goals: explore explore | asks 2 decisions 0 last 0 ms 0.0 tok/s | starve-ignored 0 | heap int 171 KB psram 24832 KB | battery -1% 0 mV bright 255

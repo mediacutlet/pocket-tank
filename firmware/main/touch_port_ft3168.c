@@ -30,8 +30,13 @@
 #include "notice.h"
 #include "audio_port.h"
 #include "progression.h"
+#if CONFIG_POCKET_TANK_TOUCH_FT3168
 #include "esp_lcd_touch_ft5x06.h"
 #include "esp_lcd_touch_cst816s.h"
+#endif
+#if CONFIG_POCKET_TANK_TOUCH_GT911
+#include "esp_lcd_touch_gt911.h"
+#endif
 #include "esp_lcd_panel_io.h"
 #include "esp_timer.h"
 #include "esp_log.h"
@@ -237,7 +242,59 @@ static bool panel_read(uint16_t *x, uint16_t *y) {
     return true;
 }
 
+/* ---- the Tab5's touch (M5Stack, ESP32-P4, 2026-10-16) ----
+ * Which chip answers depends on the unit: a Tab5 ships as an ILI9881C glass
+ * with a GT911, an ST7123 glass with an ST7123 touch, or an ST7121 with an
+ * ST712x-compatible one (M5's own BSP tells them apart; it logs "Discovered
+ * board version N"). So the driver is NOT chosen here: bsp_touch_new does it,
+ * and what comes back is a plain esp_lcd_touch handle - which is exactly what
+ * panel_read()'s generic path wants, so nothing below this line changes.
+ * tab5_touch_power raises the expander's TOUCH_EN first: no touch chip answers
+ * while that is low (display_port_tab5.c). */
+#if CONFIG_POCKET_TANK_TOUCH_GT911
+#include "bsp/touch.h"
+#include "esp_lcd_touch_gt911.h"
+#include "esp_lcd_touch_st7123.h"
+extern void tab5_touch_power(bool on);
+/* The Tab5's own touch bring-up, NOT bsp_touch_new - for one measured reason:
+ * the ST7123 driver's own IO configuration hardcodes `.scl_speed_hz = 100000`
+ * (esp_lcd_touch_st7123.h, ESP_LCD_TOUCH_IO_I2C_ST7123_CONFIG()), and that
+ * driver reads 92 bytes per poll: the adv-info byte, the max-touches byte and
+ * then 9 bytes for EACH of up to 10 points. At 100 kHz that is ~8 ms a read,
+ * and the tank polls twice a frame: 30.4 ms of every 108 ms frame went to the
+ * bus (2026-10-16, the first working board's log). So the IO is built here at
+ * 400 kHz and handed to the same driver; everything else matches the BSP's
+ * bsp_touch_new (the variant is chosen by which chip answers: the ST712x at
+ * 0x55 on the ST7121/ST7123 units, the GT911 at 0x14 on the ILI9881C ones). */
+static bool tab5_touch_init(void)
+{
+    tab5_touch_power(true);
+    i2c_master_bus_handle_t bus = board_i2c_bus();
+    bool st = i2c_master_probe(bus, ESP_LCD_TOUCH_IO_I2C_ST7123_ADDRESS, 100) == ESP_OK;
+    bool gt = !st && i2c_master_probe(bus, I2C_ADDR_GT911_ALT, 100) == ESP_OK;
+    if (!st && !gt) { ESP_LOGW(TAG, "no touch chip answered (ST712x 0x%02x, GT911 0x%02x)",
+                               ESP_LCD_TOUCH_IO_I2C_ST7123_ADDRESS, I2C_ADDR_GT911_ALT); return false; }
+    esp_lcd_panel_io_handle_t io;
+    esp_lcd_panel_io_i2c_config_t io_cfg = st ? (esp_lcd_panel_io_i2c_config_t)ESP_LCD_TOUCH_IO_I2C_ST7123_CONFIG()
+                                              : (esp_lcd_panel_io_i2c_config_t)ESP_LCD_TOUCH_IO_I2C_GT911_CONFIG();
+    if (!st) io_cfg.dev_addr = I2C_ADDR_GT911_ALT;
+    io_cfg.scl_speed_hz = 400000;                  /* the driver's own config says 100 kHz; the bus does 400 */
+    if (esp_lcd_new_panel_io_i2c(bus, &io_cfg, &io) != ESP_OK) { ESP_LOGW(TAG, "no touch io"); return false; }
+    esp_lcd_touch_config_t tp_cfg = { .x_max = T_PANEL_W, .y_max = T_PANEL_H, .rst_gpio_num = -1, .int_gpio_num = -1,
+        .levels = { .reset = 0, .interrupt = 0 }, .flags = { .swap_xy = 0, .mirror_x = 0, .mirror_y = 0 } };
+    esp_err_t err = st ? esp_lcd_touch_new_i2c_st7123(io, &tp_cfg, &s_tp)
+                       : esp_lcd_touch_new_i2c_gt911(io, &tp_cfg, &s_tp);
+    if (err != ESP_OK || !s_tp) { ESP_LOGW(TAG, "no touch driver: %s", esp_err_to_name(err)); return false; }
+    ESP_LOGI(TAG, "touch ready (%s at %d kHz)", st ? "ST712x" : "GT911", 400);
+    return true;
+}
+#endif
+
 bool touch_port_init(void) {
+#if CONFIG_POCKET_TANK_TOUCH_GT911
+    if (board_is_tab5()) return tab5_touch_init();
+#endif
+#if CONFIG_POCKET_TANK_TOUCH_FT3168
     if (board_is_round() || board_is_square()) return cst9217_init();
     if (board_is_watch()) return ft3168_init();
     esp_lcd_panel_io_handle_t io;
@@ -253,7 +310,20 @@ bool touch_port_init(void) {
     if (err != ESP_OK) { ESP_LOGW(TAG, "no %s", v2 ? "CST816" : "FT3168"); return false; }
     ESP_LOGI(TAG, "%s ready", v2 ? "CST816" : "FT3168");
     return true;
+#else
+    ESP_LOGW(TAG, "no touch driver is built in (neither FT3168 nor GT911 is configured)");
+    return false;
+#endif
 }
+
+/* One sample a frame is enough on the Tab5: its ST712x driver reads 92 bytes
+ * over I2C per poll (~10 ms on this bus at 400 kHz - measured 2026-10-16: the
+ * two polls of a frame were 20 ms of a 40 ms frame), and a finger's tap lasts
+ * tens of frames. The Waveshare boards' reads are a few hundred microseconds,
+ * so they keep the second sample that catches a tap slipping between frames. */
+bool touch_port_wants_second_poll(void) { return !board_is_tab5(); }
+static int64_t s_touch_log;      /* the read-cost line's own clock (see touch_port_poll) */
+static int64_t s_read_acc;       /* ... and the read's own cost, inside the poll's */
 
 /* panel -> tank space, CALIBRATED (2026-09-30). Nine crosshairs on Strato's
  * V2 board (CST816), a press each, the panel's report against the target
@@ -394,6 +464,10 @@ static void map_touch(uint16_t px, uint16_t py, float *tx, float *ty) {
      * on the watch, ~20 at the top of the bowl, ~2 on the 1.8. */
 #if defined(TANK_WATCH) || defined(TANK_SQUARE)       /* the watch's portrait tank, the square's: the panel's px are the tank's */
     int rx = fx, ry = fy;
+#elif defined(TANK_TAB5)                              /* the Tab5: the display port's turn and scale, undone (720x1280 -> 720x405) */
+    float gx, gy; display_port_panel_to_tank(px, py, &gx, &gy);
+    int rx = (int)(gx + 0.5f), ry = (int)(gy + 0.5f);
+    (void)fx; (void)fy;
 #else
     int rx = TANK_W - 1 - fy, ry = fx;
 #endif
@@ -494,10 +568,13 @@ bool touch_port_read_raw(float *x, float *y) {
 /* call every frame from the tank task */
 void touch_port_poll(tank_t *t) {
     int64_t now = esp_timer_get_time();
+    int64_t p0 = now;                          /* this whole poll's cost (see the tail) */
     if (s_cf && now - s_cf_us > CONFIRM_TIMEOUT_US) touch_port_confirm_answer(-1);   /* nobody answered: keep the tank */
     if (!s_tp && !s_cst && !s_ft) return;
-    uint16_t x[1], y[1];
-    bool touched = panel_read(x, y);
+    uint16_t x[1], y[1]; bool touched = false;
+    int64_t t0 = esp_timer_get_time();
+    touched = panel_read(x, y);
+    s_read_acc += esp_timer_get_time() - t0;
     /* portrait panel (px,py) -> landscape tank (tx,ty): tx = TANK_W-1-py, ty = px;
      * flipped screen: mirror both, so downstream gestures live in displayed space */
     float tx = s_lx, ty = s_ly;
@@ -690,6 +767,14 @@ released:
     if (s_sel >= t->n_fish && s_sel != RENDER_CARD_SNAIL && s_sel != RENDER_CARD_SHRIMP && s_sel != RENDER_CARD_URCHIN) s_sel = -1;   /* fresh tank / save load */
     if (s_sel >= 0 && now - s_sel_us > 10 * 1000000) s_sel = -1; /* auto-dismiss */
     if (s_bat && now - s_bat_us > BATTERY_PAGE_US) s_bat = false; /* the battery page too, after a while */
+    { static int64_t acc; static uint32_t n, nt;
+      acc += esp_timer_get_time() - p0; n++; if (touched) nt++;
+      if (now - s_touch_log > 10LL * 1000000) {
+          s_touch_log = now;
+          ESP_LOGI(TAG, "touch: read %.2f ms, the whole poll %.2f ms (%lu polls, %lu with a finger)",
+                   s_read_acc / 1e3f / n, acc / 1e3f / n, (unsigned long)n, (unsigned long)nt);
+          acc = 0; n = 0; nt = 0; s_read_acc = 0;
+      } }
 }
 
 int touch_port_selected(void) { return s_sel; }

@@ -37,11 +37,38 @@ menu "pocket-tank"
     config POCKET_TANK_TOUCH_FT3168
         bool "Read the FT3168 capacitive touch (taps / holds)"
         default n
+    config POCKET_TANK_TAB5
+        bool "The TAB5 build: a 720x405 landscape tank for the M5Stack Tab5 (ESP32-P4)"
+        default n
+        depends on !POCKET_TANK_ROUND && !POCKET_TANK_WATCH && !POCKET_TANK_SQUARE
+        help
+            On = TANK_TAB5: a 16:9 world the display port turns a quarter turn
+            and scales onto the Tab5's 720x1280 MIPI-DSI glass, so the tank
+            fills it landscape. Build it (ESP-IDF v5.4.2, target esp32p4) with
+            SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.tab5" into its own
+            build directory and sdkconfig (docs/board-tab5.md).
+    config POCKET_TANK_DISPLAY_TAB5
+        bool "Drive the Tab5's 720x1280 MIPI-DSI panel (ILI9881C, 2 DSI lanes)"
+        default n
+        help
+            The P4's MIPI-DSI DPI panel + the pixel-processing accelerator that
+            turns and scales the tank onto it. On = display_port_tab5.c.
+    config POCKET_TANK_TOUCH_GT911
+        bool "Read the Tab5's GT911 capacitive touch"
+        default n
     config POCKET_TANK_AUDIO_ES8311
         bool "Play the sound bank through the ES8311 codec + NS4150B amp (I2S)"
         default n
         help
             Enable for the real board (docs/AUDIO.md). Off = stub audio port: cues compile, nothing plays.
+    config POCKET_TANK_AUDIO_TAB5
+        bool "Play the sound bank through the Tab5's ES8388 + speaker amp (I2S, via the BSP)"
+        default n
+        help
+            The Tab5's codec is an ES8388 (I2C 0x10) and its speaker amp hangs off
+            the IO expander, so this port lets Espressif's Tab5 BSP own the I2S
+            channel and the codec and runs only the tank's mixer, power and settle
+            behaviour on top (audio_port_tab5.c). Off = stub audio port.
     config POCKET_TANK_NO_PIE
         bool "Disable the PIE SIMD inference kernel (scalar dot products)"
         default n

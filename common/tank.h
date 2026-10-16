@@ -34,6 +34,15 @@
 #define TANK_W 480
 #define TANK_H 480
 #endif
+#ifdef TANK_TAB5                /* the Tab5 (M5Stack, ESP32-P4, 2026-10-16): a 5-inch 720 x 1280 MIPI-DSI glass held
+                                 * LANDSCAPE. The world is a 16:9 rectangle, 720 x 405: the display port turns it a
+                                 * quarter turn and scales it 16/9 onto the panel with the pixel-processing
+                                 * accelerator (display_port_tab5.c), so the tank fills the glass the way it does on
+                                 * the other boards while the renderer keeps a 291k-pixel frame (~1.8x the 1.8's).
+                                 * The pages' 448 x 368 sits at PAGE_X 136 / PAGE_Y 18 - whole and off the bezel. */
+#define TANK_W 720
+#define TANK_H 405
+#endif
 /* a tank WORN on a wrist (2026-10-02): the picture's way up is the keeper's
  * setting (settings SCREEN), never the live IMU's - the arm swings through
  * every angle (tank_screen_*) */
@@ -166,6 +175,13 @@ typedef enum { VEG_KIND_GRASS, VEG_KIND_SWORD } veg_kind_t;
 #define ALGAE_CELL 20
 #define ALGAE_COLS 24
 #define ALGAE_ROWS 24
+#elif defined(TANK_TAB5)                       /* the Tab5: 32 x 18 cells of 22 px = 576 over the 720 x 405 world (16 px cells
+                                                * would be 45 x 25 = 1125; the save keeps 644). 22 of 720 is a finer
+                                                * share of the glass than the 1.8's 16 of 448, so the film reads as
+                                                * the same effect a little larger. */
+#define ALGAE_CELL 22
+#define ALGAE_COLS 32
+#define ALGAE_ROWS 18
 #else
 #define ALGAE_CELL 16                          /* px per glass-film grid cell */
 #define ALGAE_COLS (TANK_W / ALGAE_CELL)       /* 28 */
@@ -181,6 +197,8 @@ typedef enum { VEG_KIND_GRASS, VEG_KIND_SWORD } veg_kind_t;
 #define VEG_SEG_PX 4.3f
 #elif defined(TANK_SQUARE)                     /* ... and the square's 112 px taller: 107 x 4.2 from y 464, the tip at 14 */
 #define VEG_SEG_PX 4.2f
+#elif defined(TANK_TAB5)                       /* the Tab5's 405: 107 x 3.5 from y 389, the tip just under the surface */
+#define VEG_SEG_PX 3.5f
 #else
 #define VEG_SEG_PX 3.2f
 #endif

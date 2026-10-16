@@ -44,6 +44,11 @@ extern int64_t q4_prof_us[6];
  * flash, 2 = same with the weights copied to RAM first, 3 = single-token w1
  * matmul from flash, 4 = same from RAM. Returns elapsed µs (-1 on alloc fail). */
 int64_t q4_model_bench(q4_model_t *m, int which, int n_tok, int64_t (*clock_us)(void));
+/* the PIE kernels against the scalar ones, on the tank's own shapes: -1 when
+ * every group agrees, else the group (-2 for the batch kernels) that did not.
+ * Cheap enough to run at every boot, and the only check an on-device asm path
+ * can have (the host tests cannot execute it). */
+int q4_model_dot_check(void);
 /* run one token at position pos; returns logits[vocab_size] (valid until next call) */
 float *q4_model_forward(q4_model_t *m, int token, int pos);
 /* batched prefill: run all n prompt tokens with ONE pass over the weights per

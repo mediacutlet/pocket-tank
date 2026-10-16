@@ -51,6 +51,9 @@
 #elif defined(TANK_SQUARE)
 #define PT_BOARD         "square216"
 #define PT_BOARD_NAME    "ESP32-S3-Touch-AMOLED-2.16"
+#elif defined(TANK_TAB5)
+#define PT_BOARD         "tab5"
+#define PT_BOARD_NAME    "M5Stack Tab5 (ESP32-P4)"
 #else
 #define PT_BOARD         "amoled18"
 #define PT_BOARD_NAME    "ESP32-S3-Touch-AMOLED-1.8"

@@ -4,7 +4,14 @@
 #include <stdint.h>
 #include "tank.h"
 bool touch_port_init(void);
-bool touch_port_deep_sleep(void);   /* the night's deep sleep: the chip's own sleep, its reset left high (true = it took it); the wake is a reboot */
+bool touch_port_deep_sleep(void);
+/* whether a SECOND sample inside the same frame is worth its cost (main.c polls
+ * once before the tick and once inside the frame). True on the Waveshare boards,
+ * whose touch read is a few hundred microseconds. False on the Tab5: its ST712x
+ * driver reads 92 bytes over I2C per poll, ~10 ms on this bus, and the tank
+ * would rather have a quarter of a frame back than a 10 ms finer tap (the tank
+ * still samples every frame, 25-30 times a second). */
+bool touch_port_wants_second_poll(void);   /* the night's deep sleep: the chip's own sleep, its reset left high (true = it took it); the wake is a reboot */
 void touch_port_poll(tank_t *t);
 int  touch_port_selected(void);   /* tapped fish for the stats card, RENDER_CARD_SNAIL for the snail's, -1 = none */
 /* milestones page: a tap ON the open stats card (its MORE button, or any of

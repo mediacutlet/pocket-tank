@@ -91,4 +91,37 @@
 #define S_PIN_KEY3        18       /* the user button (unused) */
 #define S_PANEL           480
 #define S_PANEL_X_GAP     0
+
+/* ---- the M5Stack Tab5 (ESP32-P4, 2026-10-16) ----
+ * A different chip family: no QSPI panel, no AXP2101, no Wi-Fi/Bluetooth at
+ * all. Sources: M5Stack's own Tab5 demo (platforms/tab5) and Espressif's BSP
+ * (esp-bsp, bsp/m5stack_tab5: include/bsp/m5stack_tab5.h, src/m5stack_tab5.c).
+ * The glass is a 5-inch 720 x 1280 MIPI-DSI panel (ILI9881C) on 2 lanes at
+ * 1 Gbps, fed by the DPI engine from PSRAM; the DPHY's own rail is LDO_VO3 at
+ * 2.5 V (esp_ldo_acquire_channel). Backlight: LEDC on GPIO 22. There is no
+ * panel reset GPIO and no expander bit for one - the panel is powered by the
+ * PI4IOE5V6408's bit 4 (LCD_EN) and the touch chip by its bit 5 (TOUCH_EN).
+ * TWO PI4IOE5V6408 expanders answer: 0x43 (LCD, touch, speaker, camera) and
+ * 0x44 (the ESP32-C6's power, USB). The GT911 sits at the BACKUP address
+ * 0x14 because its INT line (GPIO 23) is pulled to 3V3 on the board and
+ * Espressif holds it LOW to make the chip answer at all. */
+#define T_PIN_I2C_SDA     31
+#define T_PIN_I2C_SCL     32
+#define T_PIN_LCD_BL      22       /* LEDC PWM, 5 kHz */
+#define T_PIN_TP_INT      23       /* held LOW as an output: the pull-up on it hides the GT911 */
+#define T_PIN_I2S_MCLK    30
+#define T_PIN_I2S_BCLK    27
+#define T_PIN_I2S_WS      29
+#define T_PIN_I2S_DOUT    26       /* ESP -> ES8388 */
+#define T_PIN_I2S_DIN     28
+#define I2C_ADDR_EXP0     0x43     /* PI4IOE5V6408 #0 */
+#define I2C_ADDR_EXP1     0x44     /* PI4IOE5V6408 #1 */
+#define T_EXP_LCD_EN      4        /* #0: the panel's power */
+#define T_EXP_TOUCH_EN    5        /* #0: the touch chip's power */
+#define T_EXP_SPEAKER_EN  1        /* #0: the speaker amp's enable */
+#define I2C_ADDR_GT911    0x5D     /* the GT911's normal address */
+#define I2C_ADDR_GT911_ALT 0x14    /* ... and the one the BSP uses with INT held low */
+#define T_PANEL_W         720      /* native portrait: the DSI scans this */
+#define T_PANEL_H         1280
+#define PT_TAB5           1        /* the tank world is 720 x 405 (tank.h, TANK_TAB5) */
 #endif

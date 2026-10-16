@@ -68,8 +68,8 @@ static bool s_rtc;                         /* an RTC chip answered: the wall clo
 #define PWR_SENSE ((gpio_num_t)board_pwr_sense_pin())   /* the round board and the watch: a line that is high while the PWR key is down */
 static bool pwr_sensed(void) { return board_pwr_sense_pin() >= 0; }
 static bool pwr_sense_down(void) { return pwr_sensed() && gpio_get_level(PWR_SENSE); }
-#ifdef CONFIG_POCKET_TANK_DISPLAY_SH8601
-extern i2c_master_bus_handle_t board_i2c_bus(void);
+#if defined(CONFIG_POCKET_TANK_DISPLAY_SH8601) || defined(CONFIG_POCKET_TANK_DISPLAY_TAB5)
+extern i2c_master_bus_handle_t board_i2c_bus(void);   /* the display port owns the bus (every board) */
 #else
 static i2c_master_bus_handle_t board_i2c_bus(void) { return NULL; }
 #endif
@@ -406,11 +406,18 @@ static void deep_sleep_now(int wake_after_s) {
     } else {
         ESP_LOGI(TAG, "deep sleep (BOOT wakes%s)", wake_after_s > 0 ? ", or the timer" : "");
         rtc_gpio_pullup_en(BTN_SLEEP); rtc_gpio_pulldown_dis(BTN_SLEEP);
+#if CONFIG_IDF_TARGET_ESP32P4
+        /* the P4 has no RTC-IO ext0 wake: the same button is ext1, ANY_LOW */
+        esp_sleep_enable_ext1_wakeup(1ULL << BTN_SLEEP, ESP_EXT1_WAKEUP_ANY_LOW);
+#else
         esp_sleep_enable_ext0_wakeup(BTN_SLEEP, 0);
+#endif
     }
     if (wake_after_s > 0) esp_sleep_enable_timer_wakeup((int64_t)wake_after_s * 1000000);
     audio_port_deep_sleep_pins();
-    gpio_deep_sleep_hold_en();
+#if !CONFIG_IDF_TARGET_ESP32P4
+    gpio_deep_sleep_hold_en();     /* the P4 has no per-pad deep-sleep hold (see app_main's dis) */
+#endif
     ESP_LOGI(TAG, "digital pads held + isolated");
     esp_deep_sleep_start();
 }
@@ -597,6 +604,7 @@ static void tank_task(void *arg) {
     int64_t last = esp_timer_get_time(); int cur = 0;
     int64_t last_log = last;
     int64_t render_us = 0, flush_us = 0, card_us = 0; uint32_t frames = 0, card_frames = 0;
+    int64_t pf_issue_us = 0, dpf_us = 0, tpoll_us = 0;   /* the flush half, split (see its own log line) */
     /* the rest of the frame (2026-10-03: render + flush were ~36 ms of a ~50 ms frame, the other ~14 untimed):
        the polls (keys, IMU, touch, the console), the tank's tick, the wait for the scene prefetch, what
        follows the flush (the next prefetch, this log), and the frame's sleep */
@@ -695,10 +703,13 @@ static void tank_task(void *arg) {
             bool page = touch_port_milestones() || touch_port_settings() || touch_port_updates() || touch_port_shop();
             if (page) render_fb_primed(NULL, 0);
             else render_tank(&tank, fb[cur], TANK_W);
-            touch_port_poll(&tank);          /* the CST816 is polled, not interrupt-
+            if (touch_port_wants_second_poll())
+                touch_port_poll(&tank);      /* the CST816 is polled, not interrupt-
                                                 driven: extra samples inside the frame
                                                 keep quick finger taps from slipping
-                                                between 40 ms frame boundaries */
+                                                between 40 ms frame boundaries. The
+                                                Tab5's own touch read is ~10 ms, so
+                                                it samples once a frame instead */
             int sel = touch_port_selected();
             int64_t tc = esp_timer_get_time();
             if (touch_port_milestones()) {       /* milestones page: covers the tank until a tap */
@@ -742,6 +753,7 @@ static void tank_task(void *arg) {
                into the idle framebuffer takes ~14 ms, and started after the flush it had only the
                tick and a 1 ms sleep to hide behind - the next frame waited ~9 ms for it. The flush
                only reads this frame's buffer; the copy rides alongside it. */
+            int64_t dpf_start = esp_timer_get_time();
             { uint16_t *next = fb[cur ^ 1];
               const uint16_t *scene = render_scene_buf(&s_prefetch_ep);
               if (!page && s_amc && scene && next && next != fb[cur] &&      /* (under a page the scene would only be painted over) */
@@ -749,8 +761,13 @@ static void tank_task(void *arg) {
                   s_prefetch_fb = next; s_prefetch_pending = true;
               } }
             display_port_flush(fb[cur]);
+            int64_t pf_flush_end = esp_timer_get_time();
             touch_port_poll(&tank);
             pf_tail = esp_timer_get_time();
+            /* what the flush half of the frame is actually made of (2026-10-16,
+               the Tab5: the port's own timer said 0.1 ms and the touch poll 0.3,
+               yet this half measured 20 - so here are the three parts, apart) */
+            pf_issue_us += dpf_start - t1; dpf_us += pf_flush_end - dpf_start; tpoll_us += pf_tail - pf_flush_end;
             render_us += t1 - t0; flush_us += pf_tail - t1; frames++;
         }
         cur ^= 1;
@@ -772,6 +789,17 @@ static void tank_task(void *arg) {
                          card_frames ? card_us / 1e3f / card_frames : 0.0f, (unsigned long)card_frames,
                          tank.veg_growth[0], tank.veg_growth[1], tank.veg_growth[2]);
                 int64_t fw, fs; display_port_flush_prof(&fw, &fs);
+#if CONFIG_IDF_TARGET_ESP32P4
+                /* the Tab5's own line (2026-10-16): its flush is not a wire, it
+                   is a turn-and-scale the port runs one frame behind - this is
+                   what showed the PPA's blocking wait owning half the frame
+                   (19.9 ms of 39.5) and then, pipelined, owning 1.6 */
+                ESP_LOGI("display", "flush parts (Tab5): prefetch issue %.1f + port %.1f + touch %.1f = %.1f of %.1f",
+                         pf_issue_us / 1e3f / frames, dpf_us / 1e3f / frames, tpoll_us / 1e3f / frames,
+                         (pf_issue_us + dpf_us + tpoll_us) / 1e3f / frames, flush_us / 1e3f / frames);
+#else
+                (void)fw; (void)fs; (void)pf_issue_us; (void)dpf_us; (void)tpoll_us;
+#endif
                 ESP_LOGI("display", "frame %.1f ms = polls %.1f + tick %.1f + prefetch wait %.1f + render %.1f + flush %.1f + tail %.1f + sleep %.1f | flush: fill %.1f, wire wait %.1f, send calls %.1f",
                          (float)(now - last_log) / 1e3f / frames, polls_us / 1e3f / frames, tick_us / 1e3f / frames, wait_us / 1e3f / frames,
                          render_us / 1e3f / frames, flush_us / 1e3f / frames, tail_us / 1e3f / frames, sleep_us / 1e3f / frames,
@@ -780,6 +808,7 @@ static void tank_task(void *arg) {
                 memset(render_prof_us, 0, sizeof render_prof_us);
             }
             render_us = flush_us = 0; frames = 0;
+            pf_issue_us = dpf_us = tpoll_us = 0;
             polls_us = tick_us = wait_us = tail_us = sleep_us = 0;
             uint32_t d, ms; float tps; advisor_llm_esp_stats(&d, &ms, &tps);
             char goals[N_FISH_MAX * 16] = ""; size_t gl = 0;
@@ -871,7 +900,10 @@ void app_main(void) {
     gpio_config_t btn = { .pin_bit_mask = 1ULL << BTN_SLEEP, .mode = GPIO_MODE_INPUT,
                           .pull_up_en = GPIO_PULLUP_ENABLE };
     gpio_config(&btn);
-    gpio_deep_sleep_hold_dis();              /* a deep-sleep wake is a boot: the night's pad holds end here */
+#if !CONFIG_IDF_TARGET_ESP32P4
+    gpio_deep_sleep_hold_dis();              /* a deep-sleep wake is a boot: the night's pad holds end here
+                                                (the P4 has no per-pad hold: nothing to let go) */
+#endif
     nvs_start();
     director_early();                        /* the installer page's handshake, answered from here on (director.c) */
     { int carried = batlog_init();       /* the battery log survives every reset but a power-on */
@@ -959,7 +991,18 @@ void app_main(void) {
     director_init();                  /* serial scenario console (filming / bench) */
     /* scene-prefetch DMA: installed only AFTER the display grabbed its SPI DMA
        channel — installed earlier, async memcpy steals SPI2's GDMA trigger
-       slot and the panel silently loses its pixel path (black screen). */
+       slot and the panel silently loses its pixel path (black screen).
+       THE TAB5 DOES NOT INSTALL IT (2026-10-16): on the ESP32-P4 the same copy
+       of the 583 KB scene measured ~66 ms through esp_async_memcpy - about
+       9 MB/s - where the CPU's own memcpy inside render_tank does it in two or
+       three (the frame's "prefetch wait" was 66 ms of a 108 ms frame, 9 fps).
+       The DMA engines on this chip+bus are not built for this copy; the tank
+       wants the time back. s_amc stays NULL, so render_tank restores the scene
+       itself, on the CPU, inside its own measured time. */
+#if CONFIG_IDF_TARGET_ESP32P4
+    s_amc = NULL;
+    ESP_LOGI(TAG, "scene restore: CPU memcpy (this chip's DMA copy measured ~9 MB/s: see main.c)");
+#else
     if (scene && fb[0] && fb[1] != fb[0]) {
         async_memcpy_config_t amc_cfg = ASYNC_MEMCPY_DEFAULT_CONFIG();
         amc_cfg.backlog = 4; amc_cfg.sram_trans_align = 4; amc_cfg.psram_trans_align = 64;
@@ -968,6 +1011,7 @@ void app_main(void) {
             s_amc = NULL; ESP_LOGW(TAG, "async memcpy unavailable: CPU scene restore");
         }
     }
+#endif
     tank_init(&tank, (uint32_t)esp_timer_get_time() ^ 0xC0FFEEu);
     esp_sleep_wakeup_cause_t cause = esp_sleep_get_wakeup_cause();
     bool from_sleep = cause == ESP_SLEEP_WAKEUP_EXT0 || cause == ESP_SLEEP_WAKEUP_EXT1 || cause == ESP_SLEEP_WAKEUP_TIMER;

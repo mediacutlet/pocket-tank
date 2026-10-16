@@ -214,6 +214,206 @@ static inline int32_t dot_q4pk_64(const uint8_t *wp, const int8_t *x) {
     return acc;
 }
 #define Q4_PK 1
+#elif defined(CONFIG_IDF_TARGET_ESP32P4) && defined(__riscv_xesppie) && !defined(POCKET_TANK_NO_PIE)
+/* The same kernels for the ESP32-P4's PIE, one mnemonic at a time. The P4's
+ * `xacc` is the S3's `accx` - a 40-bit scalar accumulator that the MAC sums its
+ * 16 int8 products into - so the S3's shape carries over whole:
+ *
+ *     ee.zero.accx                 -> esp.zero.xacc
+ *     ee.vld.128.ip q, p, i        -> esp.vld.128.ip q, p, i
+ *     ee.vmulas.s8.accx qa, qb     -> esp.vmulas.s8.xacc qa, qb
+ *     ee.vmulas.s8.accx.ld.ip ...  -> esp.vmulas.s8.xacc.ld.ip ...
+ *     rur.accx_0 rd                -> esp.srs.s.xacc rd, rshift
+ *
+ * THE TRAP, and it costs an afternoon: **every general-purpose operand of a PIE
+ * instruction must be one of twelve registers** - a0-a5, t3-t6, s0, s1. The
+ * assembler rejects the rest outright ("illegal operands `esp.vld.128.ip q0,a7,16`"),
+ * including `zero` as the read-out's shift (which is why `esp.srs.s.xacc` needs a
+ * register holding 0 and not x0). Espressif's own esp-dsp P4 sources move their
+ * argument registers into t3/t4 first for exactly this reason. So the pointers
+ * are pinned with local register variables, the read-out goes through one pinned
+ * temp, and the shift amount sits in another. (The P4 also has a 4x128-bit
+ * vector accumulator, `qacc`, which these scalar dots do not use.)
+ * The spellings come from esp-dsp's *_arp4.S and IDF's gdbstub decode tables. */
+#define Q4_PIE 1
+static inline int32_t dot_i8_64(const int8_t *w, const int8_t *x) {
+    int32_t acc;
+    register const int8_t *pw asm("a0") = w;
+    register const int8_t *px asm("a1") = x;
+    register int32_t rt asm("a2") = 0;      /* the PIE-legal read-out register */
+    register int32_t zsh asm("a3") = 0;     /* ... and a PIE-legal zero shift */
+    __asm__ volatile(
+        "esp.zero.xacc\n"
+        "esp.vld.128.ip q0, %[pw], 16\n"
+        "esp.vld.128.ip q1, %[px], 16\n"
+        "esp.vld.128.ip q2, %[pw], 16\n"
+        "esp.vld.128.ip q3, %[px], 16\n"
+        "esp.vmulas.s8.xacc q0, q1\n"
+        "esp.vld.128.ip q0, %[pw], 16\n"
+        "esp.vld.128.ip q1, %[px], 16\n"
+        "esp.vmulas.s8.xacc q2, q3\n"
+        "esp.vld.128.ip q2, %[pw], 16\n"
+        "esp.vld.128.ip q3, %[px], 16\n"
+        "esp.vmulas.s8.xacc q0, q1\n"
+        "esp.vmulas.s8.xacc q2, q3\n"
+        "esp.srs.s.xacc %[rt], %[zsh]\n"
+        "mv %[acc], %[rt]\n"
+        : [acc] "=&r"(acc), [pw] "+r"(pw), [px] "+r"(px), [rt] "+r"(rt)
+        : [zsh] "r"(zsh)
+        : "memory");
+    return acc;
+}
+/* four tokens against one weight group: the group loads into q0-q3 once and
+ * stays there for all four activation rows (stride apart) */
+static inline void dot4_i8_64(const int8_t *w, const int8_t *x0, int stride, int32_t iv[4]) {
+    const int8_t *x1 = x0 + stride, *x2 = x1 + stride, *x3 = x2 + stride;
+    int32_t a0, a1, a2, a3;
+    register const int8_t *pw asm("a0") = w;
+    register const int8_t *p0 asm("a1") = x0;
+    register const int8_t *p1 asm("a2") = x1;
+    register const int8_t *p2 asm("a3") = x2;
+    register const int8_t *p3 asm("a4") = x3;
+    register int32_t rt asm("t3") = 0;
+    register int32_t zsh asm("a5") = 0;
+    __asm__ volatile(
+        "esp.vld.128.ip q0, %[pw], 16\n"
+        "esp.vld.128.ip q1, %[pw], 16\n"
+        "esp.vld.128.ip q2, %[pw], 16\n"
+        "esp.vld.128.ip q3, %[pw], 16\n"
+        "esp.zero.xacc\n"
+        "esp.vld.128.ip q4, %[p0], 16\n"
+        "esp.vmulas.s8.xacc.ld.ip q5, %[p0], 16, q0, q4\n"
+        "esp.vmulas.s8.xacc.ld.ip q4, %[p0], 16, q1, q5\n"
+        "esp.vmulas.s8.xacc.ld.ip q5, %[p0], 16, q2, q4\n"
+        "esp.vmulas.s8.xacc q3, q5\n"
+        "esp.srs.s.xacc %[rt], %[zsh]\n"
+        "mv %[a0], %[rt]\n"
+        "esp.zero.xacc\n"
+        "esp.vld.128.ip q4, %[p1], 16\n"
+        "esp.vmulas.s8.xacc.ld.ip q5, %[p1], 16, q0, q4\n"
+        "esp.vmulas.s8.xacc.ld.ip q4, %[p1], 16, q1, q5\n"
+        "esp.vmulas.s8.xacc.ld.ip q5, %[p1], 16, q2, q4\n"
+        "esp.vmulas.s8.xacc q3, q5\n"
+        "esp.srs.s.xacc %[rt], %[zsh]\n"
+        "mv %[a1], %[rt]\n"
+        "esp.zero.xacc\n"
+        "esp.vld.128.ip q4, %[p2], 16\n"
+        "esp.vmulas.s8.xacc.ld.ip q5, %[p2], 16, q0, q4\n"
+        "esp.vmulas.s8.xacc.ld.ip q4, %[p2], 16, q1, q5\n"
+        "esp.vmulas.s8.xacc.ld.ip q5, %[p2], 16, q2, q4\n"
+        "esp.vmulas.s8.xacc q3, q5\n"
+        "esp.srs.s.xacc %[rt], %[zsh]\n"
+        "mv %[a2], %[rt]\n"
+        "esp.zero.xacc\n"
+        "esp.vld.128.ip q4, %[p3], 16\n"
+        "esp.vmulas.s8.xacc.ld.ip q5, %[p3], 16, q0, q4\n"
+        "esp.vmulas.s8.xacc.ld.ip q4, %[p3], 16, q1, q5\n"
+        "esp.vmulas.s8.xacc.ld.ip q5, %[p3], 16, q2, q4\n"
+        "esp.vmulas.s8.xacc q3, q5\n"
+        "esp.srs.s.xacc %[rt], %[zsh]\n"
+        "mv %[a3], %[rt]\n"
+        : [a0] "=&r"(a0), [a1] "=&r"(a1), [a2] "=&r"(a2), [a3] "=r"(a3),
+          [pw] "+r"(pw), [p0] "+r"(p0), [p1] "+r"(p1), [p2] "+r"(p2), [p3] "+r"(p3),
+          [rt] "+r"(rt)
+        : [zsh] "r"(zsh)
+        : "memory");
+    iv[0] = a0; iv[1] = a1; iv[2] = a2; iv[3] = a3;
+}
+/* eight tokens per weight-group load: the four activation pointers each hop
+ * (4*stride - 64) after their first pass to cover tokens t+4..t+7 */
+static inline void dot8_i8_64(const int8_t *w, const int8_t *x0, int stride, int32_t iv[8]) {
+    const int8_t *x1 = x0 + stride, *x2 = x1 + stride, *x3 = x2 + stride;
+    int hop = 4 * stride - 64;
+    int32_t a0, a1, a2, a3, b0, b1, b2, b3;
+    register const int8_t *pw asm("a0") = w;
+    register const int8_t *p0 asm("a1") = x0;
+    register const int8_t *p1 asm("a2") = x1;
+    register const int8_t *p2 asm("a3") = x2;
+    register const int8_t *p3 asm("a4") = x3;
+    register int32_t rt asm("t3") = 0;
+    register int32_t zsh asm("a5") = 0;
+    __asm__ volatile(
+        "esp.vld.128.ip q0, %[pw], 16\n"
+        "esp.vld.128.ip q1, %[pw], 16\n"
+        "esp.vld.128.ip q2, %[pw], 16\n"
+        "esp.vld.128.ip q3, %[pw], 16\n"
+        "esp.zero.xacc\n"
+        "esp.vld.128.ip q4, %[p0], 16\n"
+        "esp.vmulas.s8.xacc.ld.ip q5, %[p0], 16, q0, q4\n"
+        "esp.vmulas.s8.xacc.ld.ip q4, %[p0], 16, q1, q5\n"
+        "esp.vmulas.s8.xacc.ld.ip q5, %[p0], 16, q2, q4\n"
+        "esp.vmulas.s8.xacc q3, q5\n"
+        "esp.srs.s.xacc %[rt], %[zsh]\n"
+        "mv %[a0], %[rt]\n"
+        "add %[p0], %[p0], %[hop]\n"
+        "esp.zero.xacc\n"
+        "esp.vld.128.ip q4, %[p1], 16\n"
+        "esp.vmulas.s8.xacc.ld.ip q5, %[p1], 16, q0, q4\n"
+        "esp.vmulas.s8.xacc.ld.ip q4, %[p1], 16, q1, q5\n"
+        "esp.vmulas.s8.xacc.ld.ip q5, %[p1], 16, q2, q4\n"
+        "esp.vmulas.s8.xacc q3, q5\n"
+        "esp.srs.s.xacc %[rt], %[zsh]\n"
+        "mv %[a1], %[rt]\n"
+        "add %[p1], %[p1], %[hop]\n"
+        "esp.zero.xacc\n"
+        "esp.vld.128.ip q4, %[p2], 16\n"
+        "esp.vmulas.s8.xacc.ld.ip q5, %[p2], 16, q0, q4\n"
+        "esp.vmulas.s8.xacc.ld.ip q4, %[p2], 16, q1, q5\n"
+        "esp.vmulas.s8.xacc.ld.ip q5, %[p2], 16, q2, q4\n"
+        "esp.vmulas.s8.xacc q3, q5\n"
+        "esp.srs.s.xacc %[rt], %[zsh]\n"
+        "mv %[a2], %[rt]\n"
+        "add %[p2], %[p2], %[hop]\n"
+        "esp.zero.xacc\n"
+        "esp.vld.128.ip q4, %[p3], 16\n"
+        "esp.vmulas.s8.xacc.ld.ip q5, %[p3], 16, q0, q4\n"
+        "esp.vmulas.s8.xacc.ld.ip q4, %[p3], 16, q1, q5\n"
+        "esp.vmulas.s8.xacc.ld.ip q5, %[p3], 16, q2, q4\n"
+        "esp.vmulas.s8.xacc q3, q5\n"
+        "esp.srs.s.xacc %[rt], %[zsh]\n"
+        "mv %[a3], %[rt]\n"
+        "add %[p3], %[p3], %[hop]\n"
+        "esp.zero.xacc\n"
+        "esp.vld.128.ip q4, %[p0], 16\n"
+        "esp.vmulas.s8.xacc.ld.ip q5, %[p0], 16, q0, q4\n"
+        "esp.vmulas.s8.xacc.ld.ip q4, %[p0], 16, q1, q5\n"
+        "esp.vmulas.s8.xacc.ld.ip q5, %[p0], 16, q2, q4\n"
+        "esp.vmulas.s8.xacc q3, q5\n"
+        "esp.srs.s.xacc %[rt], %[zsh]\n"
+        "mv %[b0], %[rt]\n"
+        "esp.zero.xacc\n"
+        "esp.vld.128.ip q4, %[p1], 16\n"
+        "esp.vmulas.s8.xacc.ld.ip q5, %[p1], 16, q0, q4\n"
+        "esp.vmulas.s8.xacc.ld.ip q4, %[p1], 16, q1, q5\n"
+        "esp.vmulas.s8.xacc.ld.ip q5, %[p1], 16, q2, q4\n"
+        "esp.vmulas.s8.xacc q3, q5\n"
+        "esp.srs.s.xacc %[rt], %[zsh]\n"
+        "mv %[b1], %[rt]\n"
+        "esp.zero.xacc\n"
+        "esp.vld.128.ip q4, %[p2], 16\n"
+        "esp.vmulas.s8.xacc.ld.ip q5, %[p2], 16, q0, q4\n"
+        "esp.vmulas.s8.xacc.ld.ip q4, %[p2], 16, q1, q5\n"
+        "esp.vmulas.s8.xacc.ld.ip q5, %[p2], 16, q2, q4\n"
+        "esp.vmulas.s8.xacc q3, q5\n"
+        "esp.srs.s.xacc %[rt], %[zsh]\n"
+        "mv %[b2], %[rt]\n"
+        "esp.zero.xacc\n"
+        "esp.vld.128.ip q4, %[p3], 16\n"
+        "esp.vmulas.s8.xacc.ld.ip q5, %[p3], 16, q0, q4\n"
+        "esp.vmulas.s8.xacc.ld.ip q4, %[p3], 16, q1, q5\n"
+        "esp.vmulas.s8.xacc.ld.ip q5, %[p3], 16, q2, q4\n"
+        "esp.vmulas.s8.xacc q3, q5\n"
+        "esp.srs.s.xacc %[rt], %[zsh]\n"
+        "mv %[b3], %[rt]\n"
+        : [a0] "=&r"(a0), [a1] "=&r"(a1), [a2] "=&r"(a2), [a3] "=&r"(a3),
+          [b0] "=&r"(b0), [b1] "=&r"(b1), [b2] "=&r"(b2), [b3] "=r"(b3),
+          [pw] "+r"(pw), [p0] "+r"(p0), [p1] "+r"(p1), [p2] "+r"(p2), [p3] "+r"(p3),
+          [rt] "+r"(rt)
+        : [hop] "r"(hop), [zsh] "r"(zsh)
+        : "memory");
+    iv[0] = a0; iv[1] = a1; iv[2] = a2; iv[3] = a3;
+    iv[4] = b0; iv[5] = b1; iv[6] = b2; iv[7] = b3;
+}
 #else
 #define Q4_PK 0
 #define Q4_PIE 0
@@ -732,6 +932,41 @@ float *q4_model_prefill(q4_model_t *m, const int *toks, int n) {
     quantize(&m->xq, m->x, dim, gs);
     matmul(m->logits, &m->xq, &m->wcls, dim, c->vocab_size, gs);
     return m->logits;
+}
+
+/* The PIE kernels against the scalar ones, on the shape the tank uses: 64 int8
+ * weights x 64 int8 activations at 16-byte alignment, weights in the 4-bit
+ * range. Both asm paths are thirty lines of vector ops; this is what says they
+ * compute what the scalar loop computes. It runs at every boot (the advisor
+ * logs the result with its bench) and costs microseconds.
+ * Returns -1 when every group agrees, else the index of the first that did not
+ * (so the log can say which shape broke), -2 for a batch-kernel disagreement. */
+int q4_model_dot_check(void)
+{
+    static int8_t w[64] __attribute__((aligned(16)));
+    static int8_t x[8 * 64 + 64] __attribute__((aligned(16)));   /* 8 rows of 64 + slack: dot8 reads past the last row's start */
+    uint32_t s = 0x1234abcdu;
+    for (int g = 0; g < 8; g++) {
+        for (int i = 0; i < 64; i++) {
+            s = s * 1103515245u + 12345u; w[i] = (int8_t)((int)((s >> 16) & 0x0fu) - 8);
+            for (int t = 0; t < 8; t++) { s = s * 1103515245u + 12345u; x[t * 64 + i] = (int8_t)((s >> 16) & 0xff); }
+        }
+        int32_t ref = 0;
+        for (int i = 0; i < 64; i++) ref += (int32_t)w[i] * x[i];
+        if (dot_i8_64(w, x) != ref) return g;
+#if Q4_PIE
+        int32_t iv4[4], iv8[8];
+        dot4_i8_64(w, x, 64, iv4);
+        dot8_i8_64(w, x, 64, iv8);
+        for (int t = 0; t < 8; t++) {
+            int32_t r = 0;
+            for (int i = 0; i < 64; i++) r += (int32_t)w[i] * x[t * 64 + i];
+            if (t < 4 && iv4[t] != r) return -2;
+            if (iv8[t] != r) return -2;
+        }
+#endif
+    }
+    return -1;
 }
 
 int64_t q4_model_bench(q4_model_t *m, int which, int n_tok, int64_t (*clock_us)(void)) {

@@ -29,6 +29,24 @@
 #define TANK_W 410
 #define TANK_H 502
 #endif
+#ifdef CONFIG_POCKET_TANK_320X240
+/* a 320 x 240 landscape tank (this fork): the part every 320 x 240 board shares -
+ * the 2.8" CYD (ES3C28P) and the Waveshare ESP32-S3-Touch-LCD-2. Their Kconfig
+ * board choices each select it, tankcore's CMakeLists hands it to every
+ * component, and the sim's make 320X240=1 defines it. A plain rectangle (CYD.md) */
+#define TANK_W 320
+#define TANK_H 240
+/* (this fork) Upstream's ROUND, WATCH and SQUARE builds are their own Kconfig
+ * switches, outside the board choice, so menuconfig lets one be ticked on a
+ * 320 x 240 board too. Each also defines TANK_W and TANK_H: the preprocessor
+ * would only warn about the second definition, and the build would go on as
+ * a 320 x 240 board running another board's world (its bed, its corners, its
+ * walls). Stop the build instead. The check sits in the fork's own block so
+ * upstream's Kconfig and its size blocks stay exactly as upstream ships them. */
+#if defined(TANK_ROUND) || defined(TANK_WATCH) || defined(TANK_SQUARE)
+#error "a 320 x 240 board with the ROUND, WATCH or SQUARE build ticked: untick it (CONFIG_POCKET_TANK_ROUND / _WATCH / _SQUARE)"
+#endif
+#endif
 #ifdef TANK_SQUARE              /* the square (Waveshare 2.16, 2026-10-12): a 480 x 480 glass in a desk box, USB at its foot -
                                  * the rectangle's world 32 px wider and 112 px taller, the pages centred in it */
 #define TANK_W 480
@@ -44,6 +62,8 @@
 #endif
 #ifndef TANK_W                  /* a build may override both (-DTANK_W=480 -DTANK_H=480: a square panel) */
 #define TANK_W 448
+#endif
+#ifndef TANK_H
 #define TANK_H 368
 #endif
 

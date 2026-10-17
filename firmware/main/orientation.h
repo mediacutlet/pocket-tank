@@ -1,0 +1,18 @@
+/* orientation.h - the keeper's choice of which way up the screen is, for a
+ * board with no IMU to decide it (the 2.8" CYD). The settings page's SCREEN
+ * row sets it; it is kept in NVS beside the brightness ("tank"/"flip") and
+ * re-saved after a tank reset erases NVS, as the brightness is. main.c turns
+ * the display and touch by it, combined with the IMU's own flip where there
+ * is one. */
+#ifndef ORIENTATION_H
+#define ORIENTATION_H
+#include <stdbool.h>
+void orientation_init(void);          /* after nvs_flash_init */
+bool orientation_flipped(void);
+void orientation_set(bool flipped);   /* saved */
+void orientation_save(void);          /* re-save after an NVS erase (reset) */
+/* The face-down gesture's own switch, kept here from 2026-09-30 ("tank"/
+ * "facedn"), was removed on 2026-10-08: the gesture now does what the settings
+ * page's SLEEP row says, as every way into sleep does (sleep_setting.h).
+ * An old "facedn" key is left in NVS, unread. */
+#endif

@@ -1,5 +1,6 @@
 /* setup.c — first-run setup flow (see setup.h). */
 #include "setup.h"
+#include "lang.h"
 #include "tank_events.h"
 #include "render.h"
 #include "progression.h"
@@ -440,10 +441,10 @@ static void dots(uint16_t *fb, int stride, int y) {
 static void fish_ring(uint16_t *fb, int stride, const fish_t *f, float r, uint32_t rgb) {
     render_ring(fb, stride, f->x - PAGE_X, f->y - PAGE_Y, r, rgb);
 }
-/* a caption with a name in it, the name in its own colour: `pre` NAME `post` */
+/* a caption with a name in it, the name in its own colour: `pre` NAME `post` (name untranslated) */
 static void text_named(uint16_t *fb, int stride, int x, int y, const char *pre, const char *name, uint32_t name_rgb, const char *post) {
     render_text(fb, stride, x, y, 2, C_CAPT, pre); x += render_text_w(pre, 2);
-    render_text(fb, stride, x, y, 2, name_rgb, name); x += render_text_w(name, 2);
+    render_name(fb, stride, x, y, 2, name_rgb, name); x += render_name_w(name, 2);
     if (post) render_text(fb, stride, x, y, 2, C_CAPT, post);
 }
 static uint32_t dim(uint32_t c, int pct) {              /* c toward the ink, pct% of it left */
@@ -779,8 +780,8 @@ void render_setup(const tank_t *t, uint16_t *fb, int stride, float clock) {
         const fish_t *f = &t->fish[page_fish()];
         fish_ring(fb, stride, f, 17 * f->size + 6, f->color);
         render_rect_blend(fb, stride, -PAGE_X, SETUP_SW_Y - 30, TANK_W, SETUP_ACC_Y + SETUP_SW_H + 16 - (SETUP_SW_Y - 30), C_PANEL, 110);
-        char cap[FISH_NAME_MAX + 16]; snprintf(cap, sizeof cap, "A COLOR FOR %s", f->name);
-        text_c(fb, stride, CX, SETUP_Y + 7, 2, C_CAPT, cap);
+        char cap[FISH_NAME_MAX + 16]; snprintf(cap, sizeof cap, lang_tr("A COLOR FOR %s"), f->name);   /* format translated (lang.h) */
+        render_name(fb, stride, CX - render_name_w(cap, 2) / 2, SETUP_Y + 7, 2, C_CAPT, cap);   /* has a name: as built */
         nav(fb, stride, true, "NEXT", false);
         render_text(fb, stride, SETUP_SW_X + 2, SETUP_SW_Y - 20, 2, C_CAPT, "BODY");
         for (int i = 0; i < SETUP_SW_N; i++) {
@@ -809,9 +810,9 @@ void render_setup(const tank_t *t, uint16_t *fb, int stride, float clock) {
         text_c(fb, stride, CX, 104, 3, C_TEXT, "A NEW FRY!");
         char l1[FISH_NAME_MAX * 2 + 24];
         bool shop = f->parent_a < 0 && f->parent_b < 0;              /* bought (0.3.5): no parents, in at the surface */
-        if (shop) snprintf(l1, sizeof l1, "FROM THE SHOP,");
-        else snprintf(l1, sizeof l1, "BORN TO %s AND %s", fish_name(t, f->parent_a), fish_name(t, f->parent_b));
-        text_c(fb, stride, CX, 140, 2, C_CAPT, l1);
+        if (shop) snprintf(l1, sizeof l1, "%s", lang_tr("FROM THE SHOP,"));
+        else snprintf(l1, sizeof l1, lang_tr("BORN TO %s AND %s"), fish_name(t, f->parent_a), fish_name(t, f->parent_b));
+        render_name(fb, stride, CX - render_name_w(l1, 2) / 2, 140, 2, C_CAPT, l1);   /* has names: as built */
         text_c(fb, stride, CX, 162, 2, C_CAPT, shop ? "IN AT THE SURFACE." : "DOWN IN THE GRASS.");
         text_c(fb, stride, CX, 184, 2, C_CAPT, "GO AND SAY HELLO.");
         render_button(fb, stride, SETUP_MID_X, SETUP_BTN_Y, SETUP_BTN_W, SETUP_BTN_H, C_GO, C_GO_E, "MEET IT", 2);
@@ -825,10 +826,10 @@ void render_setup(const tank_t *t, uint16_t *fb, int stride, float clock) {
         const fish_t *pa = f->parent_a >= 0 && f->parent_a < t->n_fish ? &t->fish[f->parent_a] : NULL;
         const fish_t *pb = f->parent_b >= 0 && f->parent_b < t->n_fish ? &t->fish[f->parent_b] : NULL;
         bool shop = f->parent_a < 0 && f->parent_b < 0;              /* bought (0.3.5): its look is the shop's */
-        const char *na = shop ? "THE SHOP" : fish_name(t, f->parent_a), *nb = shop ? "THE SHOP" : fish_name(t, f->parent_b);
+        const char *na = shop ? lang_tr("THE SHOP") : fish_name(t, f->parent_a), *nb = shop ? lang_tr("THE SHOP") : fish_name(t, f->parent_b);
         uint32_t ca = pa ? pa->color : shop ? C_CAPT : C_DIM, cb = pb ? pb->color : shop ? C_CAPT : C_DIM;
         panel(fb, stride);
-        text_c(fb, stride, CX, SETUP_Y + 20, 3, C_TEXT, f->name);
+        render_name(fb, stride, CX - render_name_w(f->name, 3) / 2, SETUP_Y + 20, 3, C_TEXT, f->name);
         float ps = f->size * 2.0f;                                   /* a portrait, twice life size (a fry) ... */
         if (ps > 1.2f) ps = 1.2f;                                    /* ... but a juvenile's ring must clear the name */
         render_ring(fb, stride, CX, SETUP_FAM_PORTRAIT_Y, 17 * ps + 6, f->color);
@@ -861,8 +862,8 @@ void render_setup(const tank_t *t, uint16_t *fb, int stride, float clock) {
         render_text(fb, stride, SETUP_FAM_LABEL_X, y, 2, C_CAPT, "PARENTS");
         if (shop) render_text(fb, stride, vx, y, 2, C_CAPT, "NONE HERE");
         else {
-            render_text(fb, stride, vx, y, 2, ca, na);
-            render_text(fb, stride, vx + render_text_w(na, 2) + 16, y, 2, cb, nb);
+            render_name(fb, stride, vx, y, 2, ca, na);
+            render_name(fb, stride, vx + render_name_w(na, 2) + 16, y, 2, cb, nb);
         }
         nav(fb, stride, false, "DONE", true);
         dots(fb, stride, SETUP_Y + SETUP_H - 8);

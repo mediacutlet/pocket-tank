@@ -1,6 +1,7 @@
 /* update.c - over-the-air updates: the UPDATES page, update mode's pages and
  * the flow between them. See update.h and docs/OTA.md. */
 #include "update.h"
+#include "lang.h"
 #include "render.h"
 #include "tank.h"
 #include "version.h"
@@ -159,9 +160,9 @@ void render_updates_page(uint16_t *fb, int stride) {
     text_c(fb, stride, 14, 3, C_TEXT, "UPDATES");
     char line[64];
     snprintf(line, sizeof line, "VERSION %s %s", PT_RELEASE, PT_RELEASE_STAGE);
-    render_text(fb, stride, 32, 62, 2, C_TEXT, line);
+    render_name(fb, stride, 32, 62, 2, C_TEXT, line);   /* version and build id: as built (lang.h) */
     snprintf(line, sizeof line, "BUILD %s", version_port_string());
-    render_text(fb, stride, 32, 84, 2, C_DIM, line);
+    render_name(fb, stride, 32, 84, 2, C_DIM, line);
     char ssid[NET_SSID_MAX + 1], pass[NET_PASS_MAX + 1];
     if (net_port_creds_get(ssid, pass)) {
         render_text(fb, stride, 32, 122, 2, C_CAPT, "NETWORK");
@@ -607,7 +608,7 @@ void render_update(uint16_t *fb, int stride, float clock) {
     switch (s.page) {
     case UPD_PG_POWER:
         text_c(fb, stride, 96, 3, C_TEXT, "PLUG IN TO UPDATE");
-        snprintf(line, sizeof line, "THE BATTERY IS AT %d%%", s.battery_pct);
+        snprintf(line, sizeof line, lang_tr("THE BATTERY IS AT %d%%"), s.battery_pct);
         text_c(fb, stride, 150, 2, C_CAPT, line);
         text_c(fb, stride, 176, 2, C_DIM, "AN UPDATE NEEDS THE CABLE IN");
         render_button(fb, stride, UPD_BTN_MID_X, UPD_BTN_Y, UPD_BTN_W, UPD_BTN_H, C_INNER, C_EDGE, "BACK TO TANK", 2);
@@ -661,11 +662,11 @@ void render_update(uint16_t *fb, int stride, float clock) {
         snprintf(line, sizeof line, "VERSION %s %s, %.1f MB", s.m.release, PT_RELEASE_STAGE, bytes / 1048576.0);
         text_c(fb, stride, 92, 2, C_CAPT, line);
         char l1[32], l2[32]; wrap2(s.m.note, l1, l2, sizeof l1);
-        text_c(fb, stride, 138, 2, C_TEXT, l1);
-        if (l2[0]) text_c(fb, stride, 160, 2, C_TEXT, l2);
+        render_name(fb, stride, CX - render_name_w(l1, 2) / 2, 138, 2, C_TEXT, l1);   /* the release note: server text, untranslated */
+        if (l2[0]) render_name(fb, stride, CX - render_name_w(l2, 2) / 2, 160, 2, C_TEXT, l2);
         int secs = (int)(bytes / 120000) + 10;
         if (secs < 90) snprintf(line, sizeof line, "IT TAKES ABOUT A MINUTE");
-        else snprintf(line, sizeof line, "IT TAKES ABOUT %d MINUTES", (secs + 30) / 60);
+        else snprintf(line, sizeof line, lang_tr("IT TAKES ABOUT %d MINUTES"), (secs + 30) / 60);
         text_c(fb, stride, 208, 2, C_DIM, line);
         text_c(fb, stride, 230, 2, C_DIM, "THE TANK RESTARTS BY ITSELF");
         render_button(fb, stride, UPD_BTN_L_X, UPD_BTN_Y, UPD_BTN_W, UPD_BTN_H, C_GO, C_GO_E, "UPDATE", 2);
@@ -677,7 +678,7 @@ void render_update(uint16_t *fb, int stride, float clock) {
         tx -= PAGE_X; ty -= PAGE_Y;                      /* drawn on the page */
         render_rect(fb, stride, tx - 24, ty - 1, 49, 3, C_EDGE); render_rect(fb, stride, tx - 1, ty - 24, 3, 49, C_EDGE);
         render_rect(fb, stride, tx - 4, ty - 4, 9, 9, C_TEXT);
-        snprintf(line, sizeof line, "TAP THE CROSS  %d OF 9", i + 1);
+        snprintf(line, sizeof line, lang_tr("TAP THE CROSS  %d OF 9"), i + 1);
         text_c(fb, stride, ty < PAGE_H / 2 ? PAGE_H - 60 : 46, 2, C_CAPT, line);
         break; }
     case UPD_PG_MESSAGE: {

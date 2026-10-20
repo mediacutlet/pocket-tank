@@ -68,6 +68,7 @@
 #include "notice.h"
 #include "tank_events.h"
 #include "update.h"
+#include "lang.h"
 void net_sim_advance(float dt);    /* net_port_sim.c: the pretend radio's clock */
 bool net_sim_radio_on(void);
 
@@ -3088,6 +3089,11 @@ static int snapshot(const char *prefix, int seconds) {
         render_shop_leave();
     }
     printf("snapshot: %d fish, wrote %s_{tank,card,card1,milestones,milestones_shrimp{,2},milestones_fry,confirm,setup_*}.ppm\n", tank.n_fish, prefix);
+    if (lang_now != LANG_EN) {                       /* --lang: fail on missing strings or text too wide (lang.h) */
+        const char *names[N_FISH_MAX];
+        for (int i = 0; i < tank.n_fish; i++) names[i] = tank.fish[i].name;
+        if (lang_audit_report(names, tank.n_fish)) return 1;
+    }
     return 0;
 }
 
@@ -5026,9 +5032,78 @@ static int selftest_fry(const char *prefix) {
     return 0;
 }
 
+/* --selftest-lang [strict]: the German table (lang_de.c) and the language setting (lang.h).
+ * Missing or too wide German is listed; only strict (for translators) fails on it. */
+static void lang_specs(const char *s, char *out, int n) {     /* the %-specifiers of s, in order */
+    int k = 0;
+    for (; *s && k < n - 2; s++) {
+        if (*s != '%') continue;
+        out[k++] = '%';
+        for (s++; *s && k < n - 1; s++) { out[k++] = *s; if (isalpha((unsigned char)*s) || *s == '%') break; }
+        if (!*s) break;
+    }
+    out[k] = 0;
+}
+static int selftest_lang(bool strict) {
+    const lang_table_t *de = lang_table(LANG_DE);
+    int bad = 0;
+    lang_now = LANG_DE;
+    for (int i = 0; i < de->n; i++) {                          /* sorted, the font's characters, the same specifiers, no double lookup */
+        const char *en = de->pairs[i].en, *tr = de->pairs[i].tr;
+        if (i && strcmp(de->pairs[i - 1].en, en) >= 0) { printf("FAIL: lang_de.c: %s out of order or twice\n", en); bad++; }
+        for (const unsigned char *p = (const unsigned char *)tr; *p; p++) {
+            if (p[0] == 0xc3 && (p[1] == 0x84 || p[1] == 0x96 || p[1] == 0x9c)) { p++; continue; }
+            if (*p == '%') { while (p[1] && !isalpha(p[1]) && p[1] != '%') p++; if (p[1]) p++; continue; }   /* a specifier */
+            if (!strchr("ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 ?!.,-:'/+%~", *p)) { printf("FAIL: lang_de.c: %s: a character the font lacks\n", tr); bad++; break; }
+        }
+        char se[16], st[16]; lang_specs(en, se, sizeof se); lang_specs(tr, st, sizeof st);
+        if (strcmp(se, st)) { printf("FAIL: lang_de.c: %s has %s, the English %s\n", tr, st, se); bad++; }
+        for (int k = 0; k < de->n; k++)
+            if (k != i && !strcmp(de->pairs[k].en, tr)) { printf("FAIL: lang_de.c: %s is also an English key\n", tr); bad++; }
+    }
+    /* a fish named like a word on the pages keeps its name */
+    setenv("POCKET_TANK_SAVE", "/tmp/pocket-tank-selftest-lang.sav", 1);
+    (void)system("rm -f /tmp/pocket-tank-selftest-lang.sav");
+    if (!strcmp(lang_tr("CORAL"), "CORAL")) { printf("FAIL: the name test needs CORAL in the table\n"); bad++; }
+    lang_now = LANG_EN; tank_init(&tank, 77); progression_boot(&tank);
+    snprintf(tank.fish[0].name, sizeof tank.fish[0].name, "CORAL");
+    static uint16_t fb_en[TANK_W * TANK_H], fb_de[TANK_W * TANK_H];
+    lang_now = LANG_EN; render_milestones(&tank, fb_en, TANK_W);
+    lang_now = LANG_DE; render_milestones(&tank, fb_de, TANK_W);
+    for (int y = PAGE_Y + MSP_ROW_Y0 + 2; y < PAGE_Y + MSP_ROW_Y0 + 16; y++)
+        for (int x = PAGE_X + 92; x < PAGE_X + 92 + render_name_w("CORAL", 2); x++)
+            if (fb_en[y * TANK_W + x] != fb_de[y * TANK_W + x]) { printf("FAIL: a fish named CORAL is translated on the milestones page\n"); bad++; y = TANK_H; break; }
+    /* the chip steps the language; the choice is saved, and a reset keeps it */
+    lang_now = LANG_EN;
+    { float cx = PAGE_X + (PAGE_W + render_text_w("SETTINGS", 3) + 8 - SET_LANG_W) / 2 + SET_LANG_W / 2, cy = PAGE_Y + SET_TITLE_Y + 10; int v;
+      render_settings_touch(&tank, cx, cy, true, &v);
+      if (render_settings_touch(&tank, cx, cy, false, &v) != SET_TAP_LANG || lang_now != LANG_DE) { printf("FAIL: the language chip did not step to DE\n"); bad++; } }
+    progression_save(&tank);
+    lang_now = LANG_EN; tank_init(&tank, 78); progression_boot(&tank);
+    if (lang_now != LANG_DE) { printf("FAIL: German did not survive a save\n"); bad++; }
+    progression_reset(&tank, 79);
+    lang_now = LANG_EN; tank_init(&tank, 80); progression_boot(&tank);
+    if (lang_now != LANG_DE) { printf("FAIL: a reset lost the language\n"); bad++; }
+    /* every snapshot page in German: nothing missing, nothing too wide */
+    lang_now = lang_default = LANG_DE;
+    (void)system("rm -rf /tmp/pocket-tank-lang && mkdir -p /tmp/pocket-tank-lang");
+    int todo = snapshot("/tmp/pocket-tank-lang/s", 20);
+    (void)system("rm -rf /tmp/pocket-tank-lang");
+    remove(getenv("POCKET_TANK_SAVE"));
+    if (bad || (todo && strict)) return 1;
+    printf("selftest-lang: %d German strings sorted, in the font, same specifiers; a fish named CORAL keeps its name; "
+           "the chip, a save and a reset keep German; snapshot pages: %s\n", de->n, todo ? "German to add or shorten, listed above" : "complete, in their boxes");
+    return 0;
+}
+
 int main(int argc, char **argv) {
     for (int a = 1; a < argc; a++)
         if (strcmp(argv[a], "--greedy") == 0) advisor_core_sample = false;
+    for (int a = 1; a + 1 < argc; a++)              /* --lang de: pages in German (lang.h), for every mode below */
+        if (strcmp(argv[a], "--lang") == 0)
+            for (int l = 0; l < LANG_N; l++)
+                if (toupper((unsigned char)argv[a + 1][0]) == lang_code(l)[0] && toupper((unsigned char)argv[a + 1][1]) == lang_code(l)[1])
+                    lang_now = lang_default = (uint8_t)l;
     for (int a = 1; a < argc; a++) {                 /* mode flags may sit anywhere */
         if (strcmp(argv[a], "--hero") == 0 && a + 1 < argc) return hero_shot(argv[a + 1]);
         if (strcmp(argv[a], "--pumpkin") == 0 && a + 1 < argc) return pumpkin_shot(argv[a + 1]);
@@ -5048,6 +5123,7 @@ int main(int argc, char **argv) {
         if (strcmp(argv[a], "--selftest-sleep") == 0) return selftest_sleep();
         if (strcmp(argv[a], "--selftest-tend") == 0) return selftest_tend();
         if (strcmp(argv[a], "--selftest-update") == 0) return selftest_update();
+        if (strcmp(argv[a], "--selftest-lang") == 0) return selftest_lang(a + 1 < argc && !strcmp(argv[a + 1], "strict"));
         if (strcmp(argv[a], "--selftest-llm") == 0)
             return selftest_llm(a + 1 < argc ? atoi(argv[a + 1]) : 0);
     }

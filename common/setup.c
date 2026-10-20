@@ -1,6 +1,7 @@
 /* setup.c — first-run setup flow (see setup.h). */
 #include "collection.h"
 #include "setup.h"
+#include "lang.h"
 #include "tank_events.h"
 #include "render.h"
 #include "progression.h"
@@ -92,8 +93,8 @@ static bool born_next_door(const fish_t *f) { return (f->ms_bits & MS_CROSSBRED)
 void setup_born_lines(const tank_t *t, int fish, char *l1, size_t n1, const char **l2) {
     const fish_t *f = &t->fish[fish];
     bool shop = from_shop(f);                                         /* bought (0.3.5): no parents, in at the surface */
-    if (shop) snprintf(l1, n1, "FROM THE SHOP,");
-    else snprintf(l1, n1, "BORN TO %s AND %s", parent_of(t, f, 0).name, parent_of(t, f, 1).name);
+    if (shop) snprintf(l1, n1, "%s", lang_tr("FROM THE SHOP,"));             /* (translated here: l1 has names, drawn as built) */
+    else snprintf(l1, n1, lang_tr("BORN TO %s AND %s"), parent_of(t, f, 0).name, parent_of(t, f, 1).name);
     *l2 = shop ? "IN AT THE SURFACE." : born_next_door(f) ? "NEXT DOOR." : "DOWN IN THE GRASS.";
 }
 const char *setup_from_name(const tank_t *t, int fish, int g) {
@@ -108,11 +109,11 @@ static bool mutation_words(const fish_t *f, char *out, size_t n) {
     if (!f->mutated || f->mutated > GENE_N) return false;
     static const char *const PAT[PATTERN_N] = { "BARS", "A MASK", "AN EYE BAND", "NO MARKINGS" };
     switch (f->mutated - 1) {
-    case GENE_SHAPE:   snprintf(out, n, "SOMETHING NEW: A %s BODY", SHAPE_NAMES[f->shape]); break;
-    case GENE_FINS:    snprintf(out, n, "SOMETHING NEW: %s FINS", FINS_NAMES[f->fins]); break;
-    case GENE_PATTERN: snprintf(out, n, "SOMETHING NEW: %s", PAT[f->pattern < PATTERN_N ? f->pattern : 0]); break;
-    case GENE_BODY:    snprintf(out, n, "SOMETHING NEW: ITS BODY COLOR"); break;
-    default:           snprintf(out, n, "SOMETHING NEW: ITS MARKINGS"); break;
+    case GENE_SHAPE:   snprintf(out, n, lang_tr("SOMETHING NEW: A %s BODY"), lang_tr(SHAPE_NAMES[f->shape])); break;   /* (formats and words */
+    case GENE_FINS:    snprintf(out, n, lang_tr("SOMETHING NEW: %s FINS"), lang_tr(FINS_NAMES[f->fins])); break;       /*  translated, lang.h) */
+    case GENE_PATTERN: snprintf(out, n, lang_tr("SOMETHING NEW: %s"), lang_tr(PAT[f->pattern < PATTERN_N ? f->pattern : 0])); break;
+    case GENE_BODY:    snprintf(out, n, "%s", lang_tr("SOMETHING NEW: ITS BODY COLOR")); break;
+    default:           snprintf(out, n, "%s", lang_tr("SOMETHING NEW: ITS MARKINGS")); break;
     }
     return true;
 }
@@ -265,6 +266,7 @@ static void kbd_key(fish_t *f, int k) {
 const char *setup_hit_name(int id) {
     static char buf[12];
     if (id == SETUP_HIT_NEXT) return "NEXT";
+    if (id == SETUP_HIT_LANG) return "LANGUAGE";
     if (id == SETUP_HIT_BACK) return "BACK";
     if (id == SETUP_HIT_SELL) return "SELL";
     if (id == SETUP_HIT_ROLL) return "ROLL";
@@ -398,6 +400,7 @@ int setup_hit(float x, float y) {
     if (!s_active) return 0;
     x -= PAGE_X; y -= PAGE_Y;                           /* the page's own coordinates (render.h) */
     const int m = 10;                                   /* a fingertip's slop, as on the reset prompt */
+    if (s_page == SETUP_PG_WELCOME && in_box(x, y, SETUP_LANG_X, SETUP_LANG_Y, SET_LANG_W, SET_LANG_H, m)) return SETUP_HIT_LANG;
     if (page_one_button())
         return in_box(x, y, SETUP_MID_X, SETUP_BTN_Y, SETUP_BTN_W, SETUP_BTN_H, m) ? SETUP_HIT_NEXT : 0;
     if (nav_on_top()) {
@@ -486,6 +489,7 @@ int setup_hit(float x, float y) {
 
 void setup_activate(tank_t *t, int id) {
     if (!s_active || !id) return;
+    if (id == SETUP_HIT_LANG) { lang_now = (uint8_t)((lang_now + 1) % LANG_N); tank_emit(TEV_WHEEL_TICK, -1); progression_settings_changed(); return; }   /* as the settings' chip */
     fish_t *f = &t->fish[page_fish()];
     if (s_place) {                                      /* DONE saves the spot; a layer button sets the depth; SELL twice sells */
         if (id == SETUP_HIT_SELL) {
@@ -647,11 +651,11 @@ static void dots(uint16_t *fb, int stride, int y) {
 static void fish_ring(uint16_t *fb, int stride, const fish_t *f, float r, uint32_t rgb) {
     render_ring(fb, stride, f->x - PAGE_X, f->y - PAGE_Y, r, rgb);
 }
-/* a caption with a name in it, the name in its own colour: `pre` NAME `post` */
+/* a caption with a name in it, the name in its own colour: `pre` NAME `post` (name untranslated) */
 static void text_named(uint16_t *fb, int stride, int x, int y, const char *pre, const char *name, uint32_t name_rgb, const char *post) {
     render_text(fb, stride, x, y, 2, C_CAPT, pre); x += render_text_w(pre, 2);
-    render_text(fb, stride, x, y, 2, name_rgb, name); x += render_text_w(name, 2);
-    if (post) render_text(fb, stride, x, y, 2, C_CAPT, post);
+    render_name(fb, stride, x, y, 2, name_rgb, name); x += render_name_w(name, 2);
+    if (post) render_name(fb, stride, x, y, 2, C_CAPT, post);   /* (a mark: as given) */
 }
 static uint32_t dim(uint32_t c, int pct) {              /* c toward the ink, pct% of it left */
     return ((c >> 16 & 255) * pct / 100) << 16 | ((c >> 8 & 255) * pct / 100) << 8 | (c & 255) * pct / 100;
@@ -880,6 +884,8 @@ void render_setup(const tank_t *t, uint16_t *fb, int stride, double clock) {
     if (s_page == SETUP_PG_WELCOME) {
         panel(fb, stride);
         text_c(fb, stride, CX, SETUP_Y + 36, 3, C_TEXT, "WELCOME");
+        render_button(fb, stride, SETUP_LANG_X, SETUP_LANG_Y, SET_LANG_W, SET_LANG_H, C_INNER, C_EDGE, "", 2);
+        render_name(fb, stride, SETUP_LANG_X + (SET_LANG_W - render_name_w(lang_code(lang_now), 2)) / 2, SETUP_LANG_Y + (SET_LANG_H - 14) / 2, 2, C_TEXT, lang_code(lang_now));
         static const char *const ls[] = {
             "TWO FRY HAVE MOVED IN.",
             "THEY EAT, PLAY, REST AND",
@@ -1104,8 +1110,8 @@ void render_setup(const tank_t *t, uint16_t *fb, int stride, double clock) {
            (NOW), the grown fish on a dark plate (GROWN UP), the rows under a
            panel band */
         const fish_t *f = &t->fish[page_fish()];
-        char cap[40]; snprintf(cap, sizeof cap, "%s FOR THE %s FISH", page_is_form() ? "A FORM" : "COLORS", page_fish() ? "SECOND" : "FIRST");   /* not named yet (0.4) */
-        text_c(fb, stride, CX, SETUP_Y + 7, 2, C_CAPT, cap);
+        char cap[48]; snprintf(cap, sizeof cap, lang_tr("%s FOR THE %s FISH"), lang_tr(page_is_form() ? "A FORM" : "COLORS"), lang_tr(page_fish() ? "SECOND" : "FIRST"));   /* not named yet (0.4); parts translated (lang.h) */
+        render_name(fb, stride, CX - render_name_w(cap, 2) / 2, SETUP_Y + 7, 2, C_CAPT, cap);   /* built from translated parts: as built */
         nav(fb, stride, true, "NEXT", false);
         render_button(fb, stride, SETUP_ROLL_X, SETUP_TOP_BTN_Y, SETUP_TOP_BTN_W, SETUP_BTN_H, C_KEY, C_DIM, "ROLL", 2);
         const edit_row_t *r; int n = edit_rows(&r);
@@ -1120,11 +1126,11 @@ void render_setup(const tank_t *t, uint16_t *fb, int stride, double clock) {
         for (int k = 0; k < n; k++) {
             int cur = tank_gene(f, r[k].gene);
             char lab[32];
-            if (r[k].gene == GENE_PATTERN) snprintf(lab, sizeof lab, "%s  %s", r[k].label, PATTERN_NAMES[cur]);   /* its tiles carry no names */
-            else if (r[k].gene == GENE_ACCENT && s_same_note > 0) snprintf(lab, sizeof lab, "%s  SAME AS ITS BODY", r[k].label);
-            else snprintf(lab, sizeof lab, "%s", r[k].label);
+            if (r[k].gene == GENE_PATTERN) snprintf(lab, sizeof lab, "%s  %s", lang_tr(r[k].label), lang_tr(PATTERN_NAMES[cur]));   /* its tiles carry no names */
+            else if (r[k].gene == GENE_ACCENT && s_same_note > 0) snprintf(lab, sizeof lab, lang_tr("%s  SAME AS ITS BODY"), lang_tr(r[k].label));
+            else snprintf(lab, sizeof lab, "%s", lang_tr(r[k].label));
             bool unused = r[k].gene == GENE_ACCENT && f->pattern == PATTERN_SOLID;   /* a solid fish wears no markings */
-            render_text(fb, stride, r[k].x + 2, r[k].y - SETUP_LABEL_DY, 2, unused ? dim(C_CAPT, 45) : C_CAPT, lab);
+            render_name(fb, stride, r[k].x + 2, r[k].y - SETUP_LABEL_DY, 2, unused ? dim(C_CAPT, 45) : C_CAPT, lab);   /* (built from translated words) */
             for (int i = 0; i < r[k].n; i++) {
                 int x = r[k].x + i * r[k].px, y = r[k].y, w = r[k].w, h = r[k].h;
                 bool on = i == cur;
@@ -1173,10 +1179,10 @@ void render_setup(const tank_t *t, uint16_t *fb, int stride, double clock) {
         text_c(fb, stride, CX, 104, 3, C_TEXT, "A NEW FRY!");
         char l1[FISH_NAME_MAX * 2 + 24]; const char *l2;
         setup_born_lines(t, page_fish(), l1, sizeof l1, &l2);
-        text_c(fb, stride, CX, 140, 2, C_CAPT, l1);
+        render_name(fb, stride, CX - render_name_w(l1, 2) / 2, 140, 2, C_CAPT, l1);   /* has names: as built */
         text_c(fb, stride, CX, 162, 2, C_CAPT, l2);
         text_c(fb, stride, CX, 184, 2, C_CAPT, "GO AND SAY HELLO.");
-        if (mut) text_c(fb, stride, CX, 206, 2, C_NEW, news);      /* 0.4: neither parent shows it */
+        if (mut) render_name(fb, stride, CX - render_name_w(news, 2) / 2, 206, 2, C_NEW, news);   /* 0.4: neither parent shows it (built from translated words) */
         render_button(fb, stride, SETUP_MID_X, SETUP_BTN_Y, SETUP_BTN_W, SETUP_BTN_H, C_GO, C_GO_E, "MEET IT", 2);
         dots(fb, stride, PAGE_H - 14);
     } else if (s_page == SETUP_PG_FAMILY) {
@@ -1185,7 +1191,7 @@ void render_setup(const tank_t *t, uint16_t *fb, int stride, double clock) {
            NEW! (a mutation) */
         const fish_t *f = &t->fish[page_fish()];
         panel(fb, stride);
-        text_c(fb, stride, CX, SETUP_Y + 20, 3, C_TEXT, f->name);
+        render_name(fb, stride, CX - render_name_w(f->name, 3) / 2, SETUP_Y + 20, 3, C_TEXT, f->name);
         float ps = f->size * 2.0f;                                   /* the fry, twice life size ... */
         if (ps > 1.2f) ps = 1.2f;                                    /* ... a juvenile's ring clear of the name */
         render_ring(fb, stride, SETUP_FAM_NOW_X, SETUP_FAM_PORTRAIT_Y, 17 * ps + 6, f->color);
@@ -1222,7 +1228,7 @@ void render_setup(const tank_t *t, uint16_t *fb, int stride, double clock) {
         const char *na = shop ? "THE SHOP" : PA.name, *nb = shop ? "THE SHOP" : PB.name;
         uint32_t ca = pa ? name_rgb(pa->color) : shop ? C_CAPT : C_DIM, cb = pb ? name_rgb(pb->color) : shop ? C_CAPT : C_DIM;
         panel(fb, stride);
-        text_c(fb, stride, CX, SETUP_Y + 20, 3, C_TEXT, f->name);
+        render_name(fb, stride, CX - render_name_w(f->name, 3) / 2, SETUP_Y + 20, 3, C_TEXT, f->name);
         text_c(fb, stride, CX, SETUP_Y + 56, 2, C_CAPT, "ITS NATURE");
         int y = SETUP_NAT_ROW_Y, vx = SETUP_FAM_VALUE_X + 12;
         static const char *const TRAIT[2] = { "BOLD", "SOCIAL" };
@@ -1243,8 +1249,8 @@ void render_setup(const tank_t *t, uint16_t *fb, int stride, double clock) {
         render_text(fb, stride, SETUP_FAM_LABEL_X, y, 2, C_CAPT, "PARENTS");
         if (shop) render_text(fb, stride, vx, y, 2, C_CAPT, "NONE HERE");
         else {
-            render_text(fb, stride, vx, y, 2, ca, na);
-            render_text(fb, stride, vx + render_text_w(na, 2) + 16, y, 2, cb, nb);
+            render_name(fb, stride, vx, y, 2, ca, na);
+            render_name(fb, stride, vx + render_name_w(na, 2) + 16, y, 2, cb, nb);
         }
         nav(fb, stride, false, "DONE", true);
         dots(fb, stride, SETUP_Y + SETUP_H - 8);

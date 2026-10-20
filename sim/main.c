@@ -111,6 +111,7 @@ int selftest_coll_pages(void);          /* selftest_coll.c: the visitor collecti
 int selftest_clock_gate(void);          /* selftest_clock_gate.c: the boot's TIME CHECK gate, a host model of the boot (0.4.1) */
 int selftest_touch_port(void);          /* selftest_touch.c: the firmware's touch port on the host - firm presses, slow closes, double taps, MY TANKS over link mode (0.4.1) */
 int coll_shot(const char *prefix);      /* selftest_coll.c: --coll-shot, the paged look */
+#include "lang.h"
 void net_sim_advance(float dt);    /* net_port_sim.c: the pretend radio's clock */
 bool net_sim_radio_on(void);
 
@@ -11010,6 +11011,11 @@ static int snapshot(const char *prefix, int seconds) {
         render_shop_leave();
     }
     printf("snapshot: %d fish, wrote %s_{tank,card,card1,milestones,milestones_shrimp{,2},milestones_fry,confirm,setup_*}.ppm\n", tank.n_fish, prefix);
+    if (lang_now != LANG_EN) {                       /* --lang: fail on missing strings or text too wide (lang.h) */
+        const char *names[N_FISH_MAX];
+        for (int i = 0; i < tank.n_fish; i++) names[i] = tank.fish[i].name;
+        if (lang_audit_report(names, tank.n_fish)) return 1;
+    }
     return 0;
 }
 
@@ -15986,6 +15992,86 @@ static void swim_breach(const tank_t *t, int swim, int visitors, const char *pat
 #include "dr3_probe.inc"     /* (round 2, the third review's probes: --selftest-dr3 [DLORSCM]) */
 #include "dr3_fall.inc"      /* (... and --selftest-dr3f/-dr3a/-dr3g/-dr3h/-dr3j) */
 #include "rv4_probe.inc"     /* (the fourth review's probes: --selftest-rv4 [ABC], -rv4d, -rv4e, -rv4s) */
+/* --selftest-lang [strict]: the German table (lang_de.c) and the language setting (lang.h).
+ * Missing or too wide German is listed; only strict (for translators) fails on it. */
+static void lang_specs(const char *s, char *out, int n) {     /* the %-specifiers of s, in order */
+    int k = 0;
+    for (; *s && k < n - 2; s++) {
+        if (*s != '%') continue;
+        out[k++] = '%';
+        for (s++; *s && k < n - 1; s++) { out[k++] = *s; if (isalpha((unsigned char)*s) || *s == '%') break; }
+        if (!*s) break;
+    }
+    out[k] = 0;
+}
+static int selftest_lang(bool strict) {
+    const lang_table_t *de = lang_table(LANG_DE);
+    int bad = 0;
+    lang_now = LANG_DE;
+    for (int i = 0; i < de->n; i++) {                          /* sorted, the font's characters, the same specifiers, no double lookup */
+        const char *en = de->pairs[i].en, *tr = de->pairs[i].tr;
+        if (i && strcmp(de->pairs[i - 1].en, en) >= 0) { printf("FAIL: lang_de.c: %s out of order or twice\n", en); bad++; }
+        for (const unsigned char *p = (const unsigned char *)tr; *p; p++) {
+            if (p[0] == 0xc3 && (p[1] == 0x84 || p[1] == 0x96 || p[1] == 0x9c)) { p++; continue; }
+            if (*p == '%') { while (p[1] && !isalpha(p[1]) && p[1] != '%') p++; if (p[1]) p++; continue; }   /* a specifier */
+            if (!strchr("ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 ?!.,-:'/+%~*", *p)) { printf("FAIL: lang_de.c: %s: a character the font lacks\n", tr); bad++; break; }
+        }
+        char se[16], st[16]; lang_specs(en, se, sizeof se); lang_specs(tr, st, sizeof st);
+        if (strcmp(se, st)) { printf("FAIL: lang_de.c: %s has %s, the English %s\n", tr, st, se); bad++; }
+        for (int k = 0; k < de->n; k++)
+            if (k != i && !strcmp(de->pairs[k].en, tr) && strcmp(de->pairs[k].tr, tr)) { printf("FAIL: lang_de.c: %s is also an English key\n", tr); bad++; }   /* (one that stays as it is: no second step) */
+    }
+    /* a fish named like a word on the pages keeps its name */
+    setenv("POCKET_TANK_SAVE", "/tmp/pocket-tank-selftest-lang.sav", 1);
+    (void)system("rm -f /tmp/pocket-tank-selftest-lang.sav");
+    if (!strcmp(lang_tr("CORAL"), "CORAL")) { printf("FAIL: the name test needs CORAL in the table\n"); bad++; }
+    lang_now = LANG_EN; tank_init(&tank, 77); progression_boot(&tank);
+    snprintf(tank.fish[0].name, sizeof tank.fish[0].name, "CORAL");
+    static uint16_t fb_en[TANK_W * TANK_H], fb_de[TANK_W * TANK_H];
+    lang_now = LANG_EN; render_milestones(&tank, fb_en, TANK_W);
+    lang_now = LANG_DE; render_milestones(&tank, fb_de, TANK_W);
+    for (int y = PAGE_Y + MSP_ROW_Y0 + 2; y < PAGE_Y + MSP_ROW_Y0 + 16; y++)
+        for (int x = PAGE_X + 92; x < PAGE_X + 92 + render_name_w("CORAL", 2); x++)
+            if (fb_en[y * TANK_W + x] != fb_de[y * TANK_W + x]) { printf("FAIL: a fish named CORAL is translated on the milestones page\n"); bad++; y = TANK_H; break; }
+    {   /* a new tank's welcome has the chip too: German before the first English word */
+      lang_now = LANG_EN; setup_begin(&tank);
+      float cx = PAGE_X + SETUP_LANG_X + SET_LANG_W / 2, cy = PAGE_Y + SETUP_LANG_Y + SET_LANG_H / 2;
+      setup_touch(&tank, cx, cy, true); setup_touch(&tank, cx, cy, false);
+      if (lang_now != LANG_DE || !setup_active() || setup_page() != SETUP_PG_WELCOME) { printf("FAIL: the welcome's chip did not step to DE\n"); bad++; }
+      setup_cancel(&tank); }
+    /* the chip steps the language; the choice is saved, and a reset keeps it */
+    lang_now = LANG_EN;
+    { float cx = PAGE_X + (PAGE_W + render_text_w("SETTINGS", 3) + 8 - SET_LANG_W) / 2 + SET_LANG_W / 2, cy = PAGE_Y + SET_TITLE_Y + 10; int v;
+      render_settings_touch(&tank, cx, cy, true, &v);
+      if (render_settings_touch(&tank, cx, cy, false, &v) != SET_TAP_LANG || lang_now != LANG_DE) { printf("FAIL: the language chip did not step to DE\n"); bad++; }
+      if (render_settings_tap(cx, PAGE_Y + SET_SEG_Y(SET_ROW1_Y) - 12, &v) == SET_TAP_LANG) { printf("FAIL: the chip takes the slider's band\n"); bad++; } }
+    {   /* the shop's HOW TO EARN lines follow the language */
+      char was[32]; lang_now = LANG_EN; snprintf(was, sizeof was, "%s", progression_sd_earn_lines()[0]);
+      lang_now = LANG_DE; if (!strcmp(was, progression_sd_earn_lines()[0])) { printf("FAIL: HOW TO EARN kept its language\n"); bad++; } }
+    {   /* MY TANKS: the language goes with a swap, as the board's other settings */
+      progression_carry_t cr; progression_carry_take(&tank, &cr);
+      lang_now = LANG_EN; progression_carry_give(&tank, &cr);
+      if (lang_now != LANG_DE) { printf("FAIL: a swap lost the language\n"); bad++; } }
+    progression_save(&tank);
+    lang_now = LANG_EN; tank_init(&tank, 78); progression_boot(&tank);
+    if (lang_now != LANG_DE) { printf("FAIL: German did not survive a save\n"); bad++; }
+    progression_reset(&tank, 79);
+    lang_now = LANG_EN; tank_init(&tank, 80); progression_boot(&tank);
+    if (lang_now != LANG_DE) { printf("FAIL: a reset lost the language\n"); bad++; }
+    /* every snapshot page in German: nothing missing, nothing too wide */
+    lang_now = lang_default = LANG_DE;
+    (void)system("rm -rf /tmp/pocket-tank-lang && mkdir -p /tmp/pocket-tank-lang");
+    int todo = snapshot("/tmp/pocket-tank-lang/s", 20);
+    shelf_shot("/tmp/pocket-tank-lang/t", NULL);               /* and MY TANKS */
+    todo += lang_audit_report(NULL, 0);
+    (void)system("rm -rf /tmp/pocket-tank-lang");
+    remove(getenv("POCKET_TANK_SAVE"));
+    if (bad || (todo && strict)) return 1;
+    printf("selftest-lang: %d German strings sorted, in the font, same specifiers; a fish named CORAL keeps its name; "
+           "the chip, a save, a swap and a reset keep German, HOW TO EARN follows; snapshot and MY TANKS pages: %s\n", de->n, todo ? "German to add or shorten, listed above" : "complete, in their boxes");
+    return 0;
+}
+
 int main(int argc, char **argv) {
     render_set_depth_buf(malloc(render_depth_buf_bytes()));   /* SWIM DEPTH (0.3.9.4): as the boards do */
     progression_cap_hook = cap_breach;
@@ -15999,6 +16085,11 @@ int main(int argc, char **argv) {
         render_set_grass_cache(sg, bgm); render_set_grass_cache_on(true, atoi(getenv("PT_GRASS_CACHE"))); }
     for (int a = 1; a < argc; a++)
         if (strcmp(argv[a], "--greedy") == 0) advisor_core_sample = false;
+    for (int a = 1; a + 1 < argc; a++)              /* --lang de: pages in German (lang.h), for every mode below */
+        if (strcmp(argv[a], "--lang") == 0)
+            for (int l = 0; l < LANG_N; l++)
+                if (toupper((unsigned char)argv[a + 1][0]) == lang_code(l)[0] && toupper((unsigned char)argv[a + 1][1]) == lang_code(l)[1])
+                    lang_now = lang_default = (uint8_t)l;
     for (int a = 1; a < argc; a++) {                 /* mode flags may sit anywhere */
         if (strcmp(argv[a], "--hero") == 0 && a + 1 < argc) return hero_shot(argv[a + 1]);
         if (strcmp(argv[a], "--bg-sheet") == 0 && a + 1 < argc) return bg_sheet(argv[a + 1]);
@@ -16139,6 +16230,7 @@ int main(int argc, char **argv) {
         if (strcmp(argv[a], "--selftest-board") == 0)
             return selftest_board(a + 1 < argc && argv[a + 1][0] != '-' ? argv[a + 1] : NULL);
         if (strcmp(argv[a], "--selftest-give") == 0) return selftest_give();
+        if (strcmp(argv[a], "--selftest-lang") == 0) return selftest_lang(a + 1 < argc && !strcmp(argv[a + 1], "strict"));
         if (strcmp(argv[a], "--selftest-llm") == 0)
             return selftest_llm(a + 1 < argc ? atoi(argv[a + 1]) : 0);
         if (strcmp(argv[a], "--selftest-drift") == 0) return selftest_drift();

@@ -1,5 +1,6 @@
 /* battery.c — the battery page's history and estimates (battery.h). */
 #include "battery.h"
+#include "lang.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -112,6 +113,6 @@ void battery_fmt_dur(char *buf, int n, int min) {
         else snprintf(buf, n, "%dH", min / 60);
     } else {
         int d = min / 1440, hh = min % 1440 / 60;
-        if (hh) snprintf(buf, n, "%dD %dH", d, hh); else snprintf(buf, n, "%dD", d);
+        if (hh) snprintf(buf, n, lang_tr("%dD %dH"), d, hh); else snprintf(buf, n, lang_tr("%dD"), d);   /* German: T (lang.h) */
     }
 }

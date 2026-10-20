@@ -6,6 +6,7 @@ set(COMMON ${CMAKE_CURRENT_LIST_DIR}/../../../common)
 idf_component_register(
     SRCS "${COMMON}/tank.c" "${COMMON}/advisor.c" "${COMMON}/render.c" "${COMMON}/backgrounds.c" "${COMMON}/icons.c" "${COMMON}/icons4.c" "${COMMON}/progression.c" "${COMMON}/setup.c"
          "${COMMON}/audio.c" "${COMMON}/notice.c" "${COMMON}/sounds.c" "${COMMON}/battery.c" "${COMMON}/update.c" "${COMMON}/wifi_nets.c" "${COMMON}/advanced.c" "${COMMON}/shelf.c" "${COMMON}/boot_show.c" "${COMMON}/passport.c" "${COMMON}/link.c" "${COMMON}/tank_link.c" "${COMMON}/collection.c" "${COMMON}/gift.c" "${COMMON}/sdgift.c" "${COMMON}/jelly.c" "${COMMON}/school.c" "${COMMON}/piranha_spike.c" "${COMMON}/lib_thumbs.c" "${COMMON}/lib_pics.c"
+         "${COMMON}/lang.c" "${COMMON}/lang_de.c"
          "persist_port_esp.c" "rtc_port_pcf85063.c"
     INCLUDE_DIRS "${COMMON}" "."
     PRIV_REQUIRES nvs_flash esp_driver_i2c esp_partition

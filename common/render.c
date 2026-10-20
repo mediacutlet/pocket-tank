@@ -16,6 +16,7 @@
 #include "tank_events.h"
 #include "setup.h"
 #include "version.h"
+#include "lang.h"
 #include "backgrounds.h"
 #include "touch_gate.h"
 #include "shelf.h"
@@ -8311,6 +8312,8 @@ static void slider(ctx_t *c, int x, int y, int w, float frac, uint32_t rgb,
 
 static void button(ctx_t *c, int x, int y, int W, int H, uint32_t fill, uint32_t edge, const char *label, int scale);   /* below */
 static void draw_text(ctx_t *c, int x, int y, int scale, uint32_t rgb, const char *s);                                  /* the pixel font, below */
+static int  words_w(const char *s, int scale);                                                                            /* (a name: as typed) */
+static void draw_words(ctx_t *c, int x, int y, int scale, uint32_t rgb, const char *s);
 #define CARD_MORE_H 22
 static void card_draw(ctx_t c, const tank_t *t, int fish_idx) {
     const fish_t *f = &t->fish[fish_idx];
@@ -8332,7 +8335,7 @@ static void card_draw(ctx_t c, const tank_t *t, int fish_idx) {
      * ambiguous", the keeper sees the fish's size, and the milestones page a
      * tap deeper names the stage. The colour swatch went with them: the
      * border is the fish's colour, and a 7-letter name needs the row.) */
-    draw_text(&c, X + 8, Y + 8, 2, 0xffffff, f->name);
+    draw_words(&c, X + 8, Y + 8, 2, 0xffffff, f->name);                   /* name: as typed */
     fill_ellipse(&c, X + W - 14, Y + 14, 3.2f, 3.2f, 0xffffff, (int)(40 + 200 * f->goal.confidence));
 
     /* needs: 5 segments each. Hunger is shown as FULLNESS - a full belly is
@@ -8414,7 +8417,7 @@ static void snail_card_draw(ctx_t *c, const tank_t *t) {
     draw_text(c, X + (W - text_w(cap, 2)) / 2, Y + 112, 2, 0x9fd8e2, cap);
     char n[24];
     if (t->snail_grazed <= 0) snprintf(n, sizeof n, "NOTHING YET");
-    else snprintf(n, sizeof n, "%d SPOT%s", (int)t->snail_grazed, t->snail_grazed == 1 ? "" : "S");
+    else snprintf(n, sizeof n, lang_tr(t->snail_grazed == 1 ? "%d SPOT" : "%d SPOTS"), (int)t->snail_grazed);   /* format translated, one per plural (lang.h) */
     draw_text(c, X + (W - text_w(n, 3)) / 2, Y + 134, 3, 0xffffff, n);
 }
 
@@ -8509,8 +8512,8 @@ static void urchin_card_draw(ctx_t *c, const tank_t *t) {
        Strato: "1.4K CM is odd"); the longest line, "999.9 M", fits the card */
     if (cm < 1) snprintf(n, sizeof n, "NOTHING YET");
     else if (cm < 100) snprintf(n, sizeof n, "%d CM", cm);
-    else if (cm < 100000) snprintf(n, sizeof n, "%d.%d M", cm / 100, cm % 100 / 10);
-    else snprintf(n, sizeof n, "%d.%d KM", cm / 100000, cm % 100000 / 10000);
+    else if (cm < 100000) snprintf(n, sizeof n, lang_tr("%d.%d M"), cm / 100, cm % 100 / 10);
+    else snprintf(n, sizeof n, lang_tr("%d.%d KM"), cm / 100000, cm % 100000 / 10000);
     draw_text(c, X + (W - text_w(n, 3)) / 2, Y + 140, 3, 0xffffff, n);
     const char *now = tank_urchin_chewing(t) ? "CHEWING"
                     : t->urchin_frond >= 0 ? "OFF TO THE TALL GRASS"
@@ -8529,8 +8532,9 @@ static const char *const BADGE_WORDS[LINK_BADGES] = { "CIRCLE", "TRIANGLE", "SQU
    who is next door now), or a renamed tank's own name with its waters small in the label - two SAM'S REEFs still differ */
 static void home_fields(uint32_t home, const char *name, const char *lbl0, char *lbl, size_t ln, char *val, size_t vn) {
     char w[PASSPORT_WATERS_MAX]; passport_home_waters(home, w, sizeof w);
-    if (name && name[0]) { snprintf(lbl, ln, "%s - %s", lbl0, w); snprintf(val, vn, "%s", name); }
-    else { snprintf(lbl, ln, "%s", lbl0); snprintf(val, vn, "%s", w); }
+    if (!home) snprintf(w, sizeof w, "%s", lang_tr("FAR WATERS"));   /* (the one word among the names: translated) */
+    if (name && name[0]) { snprintf(lbl, ln, "%s - %s", lang_tr(lbl0), w); snprintf(val, vn, "%s", name); }   /* (lbl0 translated, */
+    else { snprintf(lbl, ln, "%s", lang_tr(lbl0)); snprintf(val, vn, "%s", w); }                              /*  names as built) */
 }
 /* five hearts in a row, the first `lit` filled white, the rest hollow (their outline in the card's teal) - the shape says
    it, never the color (Strato 11-01). scale 1: the visitor card's time together; 2: a fish's TRUST (0.4.2, ITS STORY) */
@@ -8577,30 +8581,30 @@ static void passport_card_draw(ctx_t *c, uint16_t *fb, int stride, const tank_t 
     int vb = t->vis_badge[k];
     char home[24], hlbl[40], form[24], here[24];
     home_fields(t->vis_home[k], t->vis_home_name[k], "HOME", hlbl, sizeof hlbl, home, sizeof home);
-    snprintf(form, sizeof form, "%s %s", SHAPE_NAMES[f->shape % SHAPE_N], FINS_NAMES[f->fins % FINS_N]);
+    snprintf(form, sizeof form, "%s %s", lang_tr(SHAPE_NAMES[f->shape % SHAPE_N]), lang_tr(FINS_NAMES[f->fins % FINS_N]));
     float s = (float)(t->clock - t->vis_since[k]);
-    if (f->homeward) snprintf(here, sizeof here, "HEADING HOME");
-    else if (s < 60) snprintf(here, sizeof here, "JUST ARRIVED");
-    else snprintf(here, sizeof here, "HERE %d MIN", (int)(s / 60));
+    if (f->homeward) snprintf(here, sizeof here, "%s", lang_tr("HEADING HOME"));
+    else if (s < 60) snprintf(here, sizeof here, "%s", lang_tr("JUST ARRIVED"));
+    else snprintf(here, sizeof here, lang_tr("HERE %d MIN"), (int)(s / 60));
     static const char *const STAGE_W[4] = { "FRY", "JUVENILE", "ADULT", "ELDER" };
-    struct { const char *lbl, *val; } FL[4] = { { "NAME", f->name }, { hlbl, home }, { "FORM", form }, { "STAGE", STAGE_W[f->stage & 3] } };
+    struct { const char *lbl, *val; } FL[4] = { { lang_tr("NAME"), f->name }, { hlbl, home }, { lang_tr("FORM"), form }, { lang_tr("STAGE"), lang_tr(STAGE_W[f->stage & 3]) } };   /* (translated here, drawn as built) */
     for (int i = 0; i < 4; i++) {
         int fy = Y + 33 + i * 26;
-        draw_text(c, FX, fy, 1, LBL, FL[i].lbl);
+        draw_words(c, FX, fy, 1, LBL, FL[i].lbl);
         int vx = FX;
         if (i == 1 && vb >= 0) { link_badge_draw(c, FX + 6, fy + 17, 6, vb, 255); vx += 16; }
-        draw_text(c, vx, fy + 10, 2, 0xffffff, FL[i].val);
+        draw_words(c, vx, fy + 10, 2, 0xffffff, FL[i].val);   /* a name, waters, the form: as built */
     }
     draw_text(c, PX, PY + PH + 12, 1, LBL, "VISITING");   /* (a gap under STAGE's value: HERE NN MIN reaches under it) */
-    draw_text(c, PX, PY + PH + 21, 2, 0xffffff, here);
+    draw_words(c, PX, PY + PH + 21, 2, 0xffffff, here);
     /* time together (2026-10-06): CLOSE TO <one of ours> and five pips that
        fill - filled vs hollow, never colour - no minutes (the goal is random) */
     { uint32_t mate = 0; float b = progression_bond(t, f->uid, &mate);
       const fish_t *m = NULL; for (int i = 0; i < t->n_fish && !m; i++) if (mate && t->fish[i].uid == mate) m = &t->fish[i];
       if (m && b > 0.02f) {
-          char cl[32]; snprintf(cl, sizeof cl, "INTERESTED IN %s", m->name);   /* (Strato 11-01: was CLOSE TO) */
+          char cl[32]; snprintf(cl, sizeof cl, lang_tr("INTERESTED IN %s"), m->name);   /* (Strato 11-01: was CLOSE TO) */
           int cy = PY + PH + 39;
-          draw_text(c, PX, cy, 1, LBL, cl);
+          draw_words(c, PX, cy, 1, LBL, cl);                 /* (a name in it) */
           hearts(c, PX, cy + 10, (int)(b * 5 + 0.0001f), 1);   /* five hearts (Strato 11-01): filled, or hollow - the shape, never the color */
       } }
     /* this tank's stamp: two rings, our badge, VISITED */
@@ -8623,8 +8627,8 @@ static void passport_card_draw(ctx_t *c, uint16_t *fb, int stride, const tank_t 
     for (int j = (int)strlen(m1); j < cols; j++) m1[j] = '<';
     for (int j = (int)strlen(m2); j < cols; j++) m2[j] = '<';
     m1[cols] = m2[cols] = 0;
-    draw_text(c, X + 10, Y + 186, 1, 0xc8d6de, m1);
-    draw_text(c, X + 10, Y + 197, 1, 0xc8d6de, m2);
+    draw_words(c, X + 10, Y + 186, 1, 0xc8d6de, m1);   /* (a name in it: as built) */
+    draw_words(c, X + 10, Y + 197, 1, 0xc8d6de, m2);
     /* collected: our COLLECTED stamp beside the VISITED one (Strato: keepers
        tell at a glance), and the buttons - DEPORT | COLLECT, the second dim
        once it is in the collection */
@@ -8725,15 +8729,15 @@ static void gift_paint(ctx_t *c, const tank_t *t) {
     char from[24], flbl[40], form[24];
     int b = g->ask.badge;
     home_fields(pp->home_tank, pp->home_name, "FROM", flbl, sizeof flbl, from, sizeof from);
-    snprintf(form, sizeof form, "%s %s", SHAPE_NAMES[f.shape % SHAPE_N], FINS_NAMES[f.fins % FINS_N]);
+    snprintf(form, sizeof form, "%s %s", lang_tr(SHAPE_NAMES[f.shape % SHAPE_N]), lang_tr(FINS_NAMES[f.fins % FINS_N]));
     static const char *const STAGE_W[4] = { "FRY", "JUVENILE", "ADULT", "ELDER" };
-    struct { const char *lbl, *val; } FL[4] = { { "NAME", f.name }, { flbl, from }, { "FORM", form }, { "STAGE", STAGE_W[pp->stage & 3] } };
+    struct { const char *lbl, *val; } FL[4] = { { lang_tr("NAME"), f.name }, { flbl, from }, { lang_tr("FORM"), form }, { lang_tr("STAGE"), lang_tr(STAGE_W[pp->stage & 3]) } };
     for (int i = 0; i < 4; i++) {
         int fy = Y + 33 + i * 26;
-        draw_text(c, FX, fy, 1, LBL, FL[i].lbl);
+        draw_words(c, FX, fy, 1, LBL, FL[i].lbl);
         int vx = FX;
         if (i == 1 && b >= 0 && b < LINK_BADGES) { link_badge_draw(c, FX + 6, fy + 17, 6, b, 255); vx += 16; }   /* the shape AND the word */
-        draw_text(c, vx, fy + 10, 2, 0xffffff, FL[i].val);
+        draw_words(c, vx, fy + 10, 2, 0xffffff, FL[i].val);
     }
     const char *l1 = "IT WOULD LIVE HERE", *l2 = "FOR GOOD";
     draw_text(c, X + (W - text_w(l1, 2)) / 2, Y + 140, 2, 0xffffff, l1);
@@ -8777,6 +8781,7 @@ void render_gift(const tank_t *t, uint16_t *fb, int stride) {
     bake_want(&g_bake_gift, 1);
     if (g_bake_gift.buf) {
         uint32_t key = bake_hash(bake_hash(bake_hash(2166136261u, g->ask.uid), g->ask.nonce), (uint32_t)(g->ask.badge + 1));
+        key = bake_hash(key, lang_now);
         key = bake_hash_s(bake_hash(key, pp->home_tank), pp->home_name); key = bake_hash_s(key, pp->name);
         key = bake_hash(key, (uint32_t)pp->stage); key = bake_hash(key, (uint32_t)pp->shape | (uint32_t)pp->fins << 8);
         if (bake_stale(&g_bake_gift, key, H)) {
@@ -8836,9 +8841,9 @@ static void shrimp_card_draw(ctx_t *c, const tank_t *t) {
             for (int yy = 0; yy < S; yy++) span(c, sx + x * S, sx + x * S + S - 1, sy + y * S + yy, &pal[ti], SHRIMP_ALPHA[ti]);
         }
     char line[32];
-    snprintf(line, sizeof line, "%d SHRIMP", n);
+    snprintf(line, sizeof line, lang_tr("%d SHRIMP"), n);
     draw_text(c, X + (W - text_w(line, 3)) / 2, Y + 46, 3, 0xffffff, line);
-    snprintf(line, sizeof line, "%d PELLET%s EATEN", (int)t->shrimp_eaten, t->shrimp_eaten == 1 ? "" : "S");
+    snprintf(line, sizeof line, lang_tr(t->shrimp_eaten == 1 ? "%d PELLET EATEN" : "%d PELLETS EATEN"), (int)t->shrimp_eaten);
     draw_text(c, X + (W - text_w(line, 2)) / 2, Y + 76, 2, 0x9fd8e2, line);
     const char *cap = "NEXT SHRIMP";
     draw_text(c, X + (W - text_w(cap, 2)) / 2, Y + 104, 2, 0x9fd8e2, cap);
@@ -8856,10 +8861,10 @@ static void shrimp_card_draw(ctx_t *c, const tank_t *t) {
     else if (tank_shrimp_refusing(t)) snprintf(line, sizeof line, "TOO MUCH ALGAE TO EAT");
     else if (t->shrimp_food >= SHRIMP_PER_JOIN && t->shrimp_cool > 0) {
         int m = (int)ceilf(t->shrimp_cool / 60.0f);
-        snprintf(line, sizeof line, "ARRIVES IN %d MIN", m < 1 ? 1 : m);
+        snprintf(line, sizeof line, lang_tr("ARRIVES IN %d MIN"), m < 1 ? 1 : m);
     } else {
         int more = SHRIMP_PER_JOIN - t->shrimp_food;
-        snprintf(line, sizeof line, "%d MORE PELLET%s", more, more == 1 ? "" : "S");
+        snprintf(line, sizeof line, lang_tr(more == 1 ? "%d MORE PELLET" : "%d MORE PELLETS"), more);
     }
     draw_text(c, X + (W - text_w(line, 2)) / 2, Y + 158, 2, 0xffffff, line);
 }
@@ -8892,13 +8897,13 @@ static void seahorse_card_draw(ctx_t *c, const tank_t *t) {
     char line[32];
     float days = tank_seahorse_days(t);
     if (days < 1) snprintf(line, sizeof line, "WITH YOU SINCE TODAY");
-    else snprintf(line, sizeof line, "%d DAY%s WITH YOU", (int)days, (int)days == 1 ? "" : "S");
+    else snprintf(line, sizeof line, lang_tr((int)days == 1 ? "%d DAY WITH YOU" : "%d DAYS WITH YOU"), (int)days);
     draw_text(c, TX, Y + 52, 2, 0x9fd8e2, line);
-    snprintf(line, sizeof line, "%d HITCH%s", (int)t->sh_hitches, t->sh_hitches == 1 ? "" : "ES");
+    snprintf(line, sizeof line, lang_tr(t->sh_hitches == 1 ? "%d HITCH" : "%d HITCHES"), (int)t->sh_hitches);
     draw_text(c, TX, Y + 76, 2, 0xffffff, line);
-    snprintf(line, sizeof line, "+%d.%d TRUST PASSED ON", (int)t->sh_trust_passed, (int)(t->sh_trust_passed * 10) % 10);
+    snprintf(line, sizeof line, lang_tr("+%d.%d TRUST PASSED ON"), (int)t->sh_trust_passed, (int)(t->sh_trust_passed * 10) % 10);
     draw_text(c, TX, Y + 100, 2, 0xffffff, line);
-    snprintf(line, sizeof line, "%d PELLET%s SNAPPED", (int)t->sh_eaten, t->sh_eaten == 1 ? "" : "S");
+    snprintf(line, sizeof line, lang_tr(t->sh_eaten == 1 ? "%d PELLET SNAPPED" : "%d PELLETS SNAPPED"), (int)t->sh_eaten);
     draw_text(c, TX, Y + 124, 2, 0xffffff, line);
     char now[32];
     if (t->sh_hitched) snprintf(now, sizeof now, "ON YOUR FINGER");
@@ -9049,9 +9054,9 @@ void render_critter_shelve_disarm(void) { g_cs_card = -1; }
 /* "<NAME> WAITS ON THE SHELF" / "IT WAITS ..." / the school's "THEY WAIT ..." (28 chars at most: a name is 7) */
 static const char *crit_waits(const tank_t *t, int item, char *out, size_t n) {
     const int k = item == 1 ? CRIT_NAME_SNAIL : item == 6 ? CRIT_NAME_URCHIN : item == 10 ? CRIT_NAME_CRAB : item == 7 ? CRIT_NAME_SEAHORSE : -1;
-    if (k < 0) snprintf(out, n, "THEY WAIT ON THE SHELF");
-    else if (t->crit_name[k][0]) snprintf(out, n, "%s WAITS ON THE SHELF", t->crit_name[k]);
-    else snprintf(out, n, "IT WAITS ON THE SHELF");
+    if (k < 0) snprintf(out, n, "%s", lang_tr("THEY WAIT ON THE SHELF"));
+    else if (t->crit_name[k][0]) snprintf(out, n, lang_tr("%s WAITS ON THE SHELF"), t->crit_name[k]);
+    else snprintf(out, n, "%s", lang_tr("IT WAITS ON THE SHELF"));
     return out;
 }
 static void crit_shelve_foot(ctx_t *c, const tank_t *t, int card) {
@@ -9070,9 +9075,9 @@ static void crit_shelve_foot(ctx_t *c, const tank_t *t, int card) {
     for (int y = top; y < bot; y++) span(c, x0, x1, y, &bg, 255);
     char who[40], *sp;
     crit_waits(t, render_crit_item_of_card(card), who, sizeof who);
-    if ((sp = strstr(who, " ON THE SHELF")) != NULL) *sp = 0;               /* "SHELLY WAITS" */
+    if ((sp = strstr(who, lang_tr("ON THE SHELF"))) != NULL && sp > who) sp[-1] = 0;   /* "SHELLY WAITS" (the words as translated: lang.h) */
     const int mid = (x0 + x1) / 2, ly = top + (bot - top) / 2 - 18;
-    draw_text(c, mid - text_w(who, 2) / 2, ly, 2, 0xffffff, who);
+    draw_words(c, mid - words_w(who, 2) / 2, ly, 2, 0xffffff, who);   /* (a name in it) */
     draw_text(c, mid - text_w("ON THE SHELF", 2) / 2, ly + 22, 2, 0xffffff, "ON THE SHELF");
 }
 bool render_critter_name_hit(const tank_t *t, int card, float x, float y) {
@@ -9392,11 +9397,31 @@ static const uint8_t *glyph(char ch) {
     const char *p = ch ? strchr(FONT_CHARS, ch) : NULL;
     return p ? FONT5X7[p - FONT_CHARS] : NULL;
 }
-static int text_w(const char *s, int scale) { int n = (int)strlen(s); return n ? n * 6 * scale - scale : 0; }
-static void draw_text(ctx_t *c, int x, int y, int scale, uint32_t rgb, const char *s) {
+/* Ä Ö Ü for German (lang.h): dots on row 0, the letter in rows 1-6, so the
+ * cell stays 7 rows. UTF-8; lower case draws as the capital. */
+static const uint8_t FONT_UMLAUT[][7] = {
+    { 0x11, 0x0e, 0x11, 0x11, 0x1f, 0x11, 0x11 }, /* Ä */
+    { 0x11, 0x0e, 0x11, 0x11, 0x11, 0x11, 0x0e }, /* Ö */
+    { 0x0a, 0x11, 0x11, 0x11, 0x11, 0x11, 0x0e }, /* Ü */
+};
+static const uint8_t *glyph_next(const char **s) {    /* the glyph of the character at *s, and *s past it */
+    const unsigned char *u = (const unsigned char *)*s;
+    if (u[0] == 0xc3 && u[1]) {                        /* Ä Ö Ü (C3 84 / 96 / 9C), ä ö ü (C3 A4 / B6 / BC) */
+        unsigned char b = u[1] & ~0x20; *s += 2;
+        return b == 0x84 ? FONT_UMLAUT[0] : b == 0x96 ? FONT_UMLAUT[1] : b == 0x9c ? FONT_UMLAUT[2] : NULL;
+    }
+    return glyph(*(*s)++);
+}
+/* words_w / draw_words: as written (a name). text_w / draw_text: translated. */
+static int words_w(const char *s, int scale) {
+    int n = 0;
+    while (*s) { glyph_next(&s); n++; }                        /* the cells draw_words steps */
+    return n ? n * 6 * scale - scale : 0;
+}
+static void draw_words(ctx_t *c, int x, int y, int scale, uint32_t rgb, const char *s) {
     src_t col = src_color(rgb, c->dim);
-    for (; *s; s++, x += 6 * scale) {
-        const uint8_t *g = glyph(*s);
+    for (; *s; x += 6 * scale) {
+        const uint8_t *g = glyph_next(&s);
         if (!g) continue;
         for (int r = 0; r < 7; r++)
             for (int k = 0; k < 5; k++)
@@ -9404,6 +9429,14 @@ static void draw_text(ctx_t *c, int x, int y, int scale, uint32_t rgb, const cha
                     for (int yy = 0; yy < scale; yy++)
                         span(c, x + k * scale, x + k * scale + scale - 1, y + r * scale + yy, &col, 255);
     }
+}
+static int text_w(const char *s, int scale) { return words_w(lang_tr(s), scale); }
+static void draw_text(ctx_t *c, int x, int y, int scale, uint32_t rgb, const char *s) {
+    const char *tr = lang_tr(s);
+#ifdef LANG_AUDIT
+    if (tr != s && (x - c->ox < 0 || x + words_w(tr, scale) - c->ox > c->w)) lang_audit("OFF THE SCREEN", tr);
+#endif
+    draw_words(c, x, y, scale, rgb, tr);
 }
 
 /* A STAMP (0.4.2, Strato 11-08: a starter fish's FAMILY page, "something more fun"): one or two lines of the pixel font in
@@ -9479,12 +9512,19 @@ static void rect_edge(ctx_t *c, int x, int y, int w, int h, uint32_t rgb) {
 static void button(ctx_t *c, int x, int y, int W, int H, uint32_t fill, uint32_t edge, const char *label, int scale) {
     rect_fill(c, x, y, W, H, fill);
     rect_edge(c, x, y, W, H, edge); rect_edge(c, x + 1, y + 1, W - 2, H - 2, edge);
+#ifdef LANG_AUDIT
+    if (text_w(label, scale) > W - 4 && text_w(label, scale) > words_w(label, scale)) lang_audit("WIDER THAN ITS BUTTON", lang_tr(label));
+#endif
     draw_text(c, x + (W - text_w(label, scale)) / 2, y + (H - 7 * scale) / 2, scale, 0xffffff, label);
 }
 /* the same primitives for panels built elsewhere (render.h) */
 int  render_text_w(const char *s, int scale) { return text_w(s, scale); }
 void render_text(uint16_t *fb, int stride, int x, int y, int scale, uint32_t rgb, const char *s) {
     ctx_t c = ctx_page(fb, stride); draw_text(&c, x, y, scale, rgb, s);
+}
+int  render_name_w(const char *s, int scale) { return words_w(s, scale); }
+void render_name(uint16_t *fb, int stride, int x, int y, int scale, uint32_t rgb, const char *s) {
+    ctx_t c = ctx_page(fb, stride); draw_words(&c, x, y, scale, rgb, s);
 }
 void render_rect(uint16_t *fb, int stride, int x, int y, int w, int h, uint32_t rgb) {
     ctx_t c = ctx_page(fb, stride); rect_fill(&c, x, y, w, h, rgb);
@@ -9889,7 +9929,7 @@ void render_battery_info(uint16_t *fb, int stride, const bat_info_t *bi, double 
     if (bi->since_min >= 0) {
         snprintf(lab[nr], sizeof lab[nr], pw ? "PLUGGED IN" : "UNPLUGGED");
         if (bi->since_min < 1) snprintf(val[nr], sizeof val[nr], "JUST NOW");
-        else { battery_fmt_dur(d, sizeof d, bi->since_min); snprintf(val[nr], sizeof val[nr], "%s AGO", d); }
+        else { battery_fmt_dur(d, sizeof d, bi->since_min); snprintf(val[nr], sizeof val[nr], lang_tr("%s AGO"), d); }
         nr++;
     }
     if (!pw && bi->awake_min >= 0) {
@@ -9916,11 +9956,11 @@ void render_battery_info(uint16_t *fb, int stride, const bat_info_t *bi, double 
                    : bi->state == BAT_PLUGGED ? "PLUGGED IN" : "ON BATTERY";
     draw_text(&c, X + (W - text_w(st, 3)) / 2, Y + 78, 3, 0xffffff, st);
     char est[48];
-    if (bi->state == BAT_CHARGING) { battery_fmt_dur(d, sizeof d, bi->left_min); snprintf(est, sizeof est, "FULL IN ABOUT %s", d); }
+    if (bi->state == BAT_CHARGING) { battery_fmt_dur(d, sizeof d, bi->left_min); snprintf(est, sizeof est, lang_tr("FULL IN ABOUT %s"), d); }
     else if (bi->state == BAT_FULL) snprintf(est, sizeof est, "READY TO UNPLUG");
     else if (bi->state == BAT_PLUGGED) snprintf(est, sizeof est, "NOT CHARGING RIGHT NOW");
     else if (bi->left_min < 5) snprintf(est, sizeof est, "ALMOST EMPTY");
-    else { battery_fmt_dur(d, sizeof d, bi->left_min); snprintf(est, sizeof est, "ABOUT %s LEFT", d); }
+    else { battery_fmt_dur(d, sizeof d, bi->left_min); snprintf(est, sizeof est, lang_tr("ABOUT %s LEFT"), d); }
     draw_text(&c, X + (W - text_w(est, 2)) / 2, Y + 110, 2, 0x9fd8e2, est);
     rect_fill(&c, X + 20, Y + 138, W - 40, 1, 0x1c2f36);
     for (int i = 0; i < nr; i++) {
@@ -10013,7 +10053,7 @@ static const char *const STAGE_WORDS[4] = { "FRY", "JUVENILE", "ADULT", "ELDER" 
 /* the detail modal (a tap on a badge / name / strip): what to show until
  * the next tap. caption[0] == 0 means no modal. */
 static char g_ms_caption[72], g_ms_title[16];
-static char g_ms_caption2[32];       /* the caption's second line (the fry checklist's sentences), or empty */
+static char g_ms_caption2[48];       /* (translated where it is written, drawn as built) */       /* the caption's second line (the fry checklist's sentences), or empty */
 static char g_ms_sub[32];            /* a line under the caption (the fry checklist's progress), or empty */
 static bool g_ms_lit;
 static const icon_t *g_ms_icon;      /* the badge's art, or NULL */
@@ -10067,10 +10107,10 @@ static bool give_line(const tank_t *t, int fish, char *out, size_t n) {
     if (!g || fish < 0 || fish >= t->n_fish) return false;
     int look = give_look(t, fish);
     char who[20];                                   /* "THE TRIANGLE TANK" / "THE TANK NEXT DOOR": 18 at most (GIVEN TO + it fits the line's 32) */
-    if (g->peer_badge >= 0 && g->peer_badge < LINK_BADGES) snprintf(who, sizeof who, "THE %s TANK", BADGE_WORDS[g->peer_badge]);
-    else snprintf(who, sizeof who, "THE TANK NEXT DOOR");
-    if (look == GV_LEAVING) { snprintf(out, n, "GIVEN TO %s", who); return true; }
-    if (look == GV_ASKING)  { snprintf(out, n, "ASKING %s", who); return true; }
+    if (g->peer_badge >= 0 && g->peer_badge < LINK_BADGES) snprintf(who, sizeof who, lang_tr("THE %s TANK"), lang_tr(BADGE_WORDS[g->peer_badge]));
+    else snprintf(who, sizeof who, "%s", lang_tr("THE TANK NEXT DOOR"));
+    if (look == GV_LEAVING) { snprintf(out, n, lang_tr("GIVEN TO %s"), who); return true; }
+    if (look == GV_ASKING)  { snprintf(out, n, lang_tr("ASKING %s"), who); return true; }
     if (g->said_uid == t->fish[fish].uid && t->clock < g->said_until) {
         static const char *const SAID[] = { "THEY SAID NO THANKS", "THEIR TANK IS FULL", "NO ANSWER CAME", "", "CANNOT BE GIVEN RIGHT NOW" };
         snprintf(out, n, "%s", SAID[g->said_reason <= LINK_GIVE_NO_OTHER ? g->said_reason : LINK_GIVE_NO_OTHER]);
@@ -10148,13 +10188,13 @@ static void bm_line_to(const tank_t *t, int why, const char *nm, char *o, size_t
     switch (why) {
     case BOWL_NO_LAST_TWO: snprintf(o, n, "THE LAST TWO FISH STAY"); break;
     case BOWL_NO_FRY_NAME: snprintf(o, n, "%s", render_fry_first_line(t)); break;
-    case BOWL_NO_BUSY:     snprintf(o, n, "THE BOWL HAS %s", progression_bowl_name()); break;
+    case BOWL_NO_BUSY:     snprintf(o, n, lang_tr("THE BOWL HAS %s"), progression_bowl_name()); break;
     case BOWL_NO_AWAY:     snprintf(o, n, "VISITING NEXT DOOR"); break;
-    case BOWL_NO_GIVING:   snprintf(o, n, "%s IS BEING GIVEN", nm); break;
+    case BOWL_NO_GIVING:   snprintf(o, n, lang_tr("%s IS BEING GIVEN"), nm); break;
     case BOWL_NO_FULL:     snprintf(o, n, "THIS TANK IS FULL"); break;
-    case BOWL_NO_KIND:     snprintf(o, n, "%s CAN'T LIVE HERE", nm); break;
+    case BOWL_NO_KIND:     snprintf(o, n, lang_tr("%s CAN'T LIVE HERE"), nm); break;
     case BOWL_NO_WRITE:    snprintf(o, n, "THAT DID NOT WORK. TRY AGAIN"); break;
-    case BOWL_NO_NOTE:     snprintf(o, n, "%s CAN'T COME IN YET", nm); break;   /* (this tank gave it away once: its gift note still stands) */
+    case BOWL_NO_NOTE:     snprintf(o, n, lang_tr("%s CAN'T COME IN YET"), nm); break;   /* (this tank gave it away once: its gift note still stands) */
     default:               snprintf(o, n, "CAN'T MOVE RIGHT NOW"); break;
     }
 }
@@ -10218,7 +10258,7 @@ static void bm_paint(ctx_t *c, const tank_t *t, int step, int X, int Y, int W, i
     rect_fill(c, X, Y, W, H, 0x0e2233);
     rect_fill(c, X, Y, W, 26, INK);
     char title[40];
-    if (step == RENDER_GM_BOWL) snprintf(title, sizeof title, "%s IS WAITING", nm); else snprintf(title, sizeof title, "TRAVEL BOWL");
+    if (step == RENDER_GM_BOWL) snprintf(title, sizeof title, lang_tr("%s IS WAITING"), nm); else snprintf(title, sizeof title, "TRAVEL BOWL");
     draw_text(c, X + (W - text_w(title, 2)) / 2, Y + 7, 2, 0xffffff, title);
     rect_edge(c, X, Y, W, H, EDGE); rect_edge(c, X + 1, Y + 1, W - 2, H - 2, INK);
     const int PX = X + 12, PY = Y + 36, PW = 100, PH = 84;
@@ -10227,7 +10267,7 @@ static void bm_paint(ctx_t *c, const tank_t *t, int step, int X, int Y, int W, i
     char a[40], b[40]; a[0] = b[0] = 0;
     int why = BOWL_OK;
     if (step == RENDER_GM_MOVE) {
-        char l[24]; snprintf(l, sizeof l, "PUT %s", nm);
+        char l[24]; snprintf(l, sizeof l, lang_tr("PUT %s"), nm);
         draw_text(c, FX, Y + 42, 2, 0xffffff, l);
         draw_text(c, FX, Y + 64, 2, 0xffffff, "IN THE");
         draw_text(c, FX, Y + 86, 2, 0xffffff, "TRAVEL BOWL?");
@@ -10321,8 +10361,13 @@ static void gm_arrow(ctx_t *c, int cx, int cy, int half, int dir, uint32_t rgb) 
     for (int i = 0; i <= half; i++) { int hh = half - i; rect_fill(c, cx + (dir > 0 ? -half / 2 + i : half / 2 - i), cy - hh, 1, 2 * hh + 1, rgb); }
 }
 static void gm_split(const char *s, char *a, char *b, int n) {   /* two lines at the space nearest the middle */
-    int len = (int)strlen(s), best = -1;
-    for (int i = 0; i < len; i++) if (s[i] == ' ' && (best < 0 || abs(i - len / 2) < abs(best - len / 2))) best = i;
+    int len = (int)strlen(s), best = -1, cells = 0, mid, at = 0, bat = 0;   /* the middle in glyph cells (an umlaut is two bytes) */
+    for (int i = 0; i < len; i++) cells += ((unsigned char)s[i] & 0xC0) != 0x80;
+    mid = cells / 2;
+    for (int i = 0; i < len; i++) {
+        if (s[i] == ' ' && (best < 0 || abs(at - mid) < abs(bat - mid))) { best = i; bat = at; }
+        at += ((unsigned char)s[i] & 0xC0) != 0x80;
+    }
     if (best < 0) { snprintf(a, n, "%s", s); b[0] = 0; return; }
     snprintf(a, n, "%.*s", best, s); snprintf(b, n, "%s", s + best + 1);
 }
@@ -10338,8 +10383,8 @@ static void gm_paint(ctx_t *c, const tank_t *t, int step) {
     if (step >= RENDER_GM_MOVE) { bm_paint(c, t, step, X, Y, W, H, GM_BTN_W, GM_BTN_H); return; }
     rect_fill(c, X, Y, W, H, 0x0e2233);
     rect_fill(c, X, Y, W, 26, INK);
-    char title[40]; snprintf(title, sizeof title, step == RENDER_GM_PICK ? "GIVE %s TO" : "GIVE %s?", nm);
-    draw_text(c, X + (W - text_w(title, 2)) / 2, Y + 7, 2, GOLD, title);
+    char title[40]; snprintf(title, sizeof title, lang_tr(step == RENDER_GM_PICK ? "GIVE %s TO" : "GIVE %s?"), nm);
+    draw_words(c, X + (W - words_w(title, 2)) / 2, Y + 7, 2, GOLD, title);   /* (a name in it) */
     rect_edge(c, X, Y, W, H, GOLD); rect_edge(c, X + 1, Y + 1, W - 2, H - 2, INK);
     if (step == RENDER_GM_PICK) {
         for (int s = 0; s < LINK_EDGES; s++) {   /* LINK_LEFT on top, its arrow at the left end; LINK_RIGHT under it, arrow right */
@@ -10352,9 +10397,9 @@ static void gm_paint(ctx_t *c, const tank_t *t, int step) {
             char lbl[40], val[24];
             home_fields(g_gm.peer[s], gm_tank_name(t, g_gm.peer[s]), "HOME", lbl, sizeof lbl, val, sizeof val);
             int tx = s ? RX + 16 : RX + 40, vx = tx, b = g_gm.badge[s];
-            draw_text(c, tx, RY + 10, 1, off ? 0xc8d6de : LBL, off ? "NOT LINKED NOW" : lbl);   /* (closed while up: which one, dim, no tap) */
+            draw_words(c, tx, RY + 10, 1, off ? 0xc8d6de : LBL, off ? lang_tr("NOT LINKED NOW") : lbl);   /* (closed while up: which one, dim, no tap) */
             if (b >= 0 && b < LINK_BADGES) { link_badge_draw(c, tx + 7, RY + 33, 7, b, off ? 90 : 255); vx += 24; }   /* the shape AND the name */
-            draw_text(c, vx, RY + 26, 2, off ? DIM : 0xffffff, val);
+            draw_words(c, vx, RY + 26, 2, off ? DIM : 0xffffff, val);
         }
         button(c, X + (W - GM_BTN_W) / 2, Y + H - GM_BTN_H - 12, GM_BTN_W, GM_BTN_H, 0x1c2f36, 0x9fd8e2, "BACK", 2);
         return;
@@ -10363,23 +10408,23 @@ static void gm_paint(ctx_t *c, const tank_t *t, int step) {
     rect_fill(c, PX, PY, PW, PH, 0x0a1824); rect_edge(c, PX, PY, PW, PH, 0x9fd8e2);
     const int FX = PX + PW + 12;
     draw_text(c, FX, Y + 36, 1, LBL, "NAME");
-    draw_text(c, FX, Y + 46, 2, 0xffffff, nm);
+    draw_words(c, FX, Y + 46, 2, 0xffffff, nm);           /* a name: as built */
     if (g_gm.edge >= 0 && g_gm.peer[g_gm.edge]) {     /* TO: the tank and its door */
         int e = g_gm.edge; char lbl[40], val[24];
         home_fields(g_gm.peer[e], gm_tank_name(t, g_gm.peer[e]), "TO", lbl, sizeof lbl, val, sizeof val);
-        draw_text(c, FX, Y + 72, 1, LBL, lbl);
+        draw_words(c, FX, Y + 72, 1, LBL, lbl);
         int vx = FX, b = g_gm.badge[e];
         if (b >= 0 && b < LINK_BADGES) { link_badge_draw(c, FX + 6, Y + 89, 6, b, 255); vx += 18; }
-        draw_text(c, vx, Y + 82, 2, 0xffffff, val);
-        gm_arrow(c, vx + text_w(val, 2) + 14, Y + 89, 7, e == LINK_RIGHT ? 1 : -1, 0xffffff);
+        draw_words(c, vx, Y + 82, 2, 0xffffff, val);
+        gm_arrow(c, vx + words_w(val, 2) + 14, Y + 89, 7, e == LINK_RIGHT ? 1 : -1, 0xffffff);
     }
-    char a[32], b[32];
-    if (step == RENDER_GM_CONFIRM) { snprintf(a, sizeof a, "IT WOULD LIVE THERE"); snprintf(b, sizeof b, "FOR GOOD"); }
-    else if (step == RENDER_GM_ASKING) { snprintf(a, sizeof a, "ASKING THEIR KEEPER"); b[0] = 0; }
-    else if (text_w(g_gm.line, 2) <= W - 24) { snprintf(a, sizeof a, "%s", g_gm.line); b[0] = 0; }
-    else gm_split(g_gm.line, a, b, sizeof a);
-    draw_text(c, X + (W - text_w(a, 2)) / 2, Y + 136, 2, 0xffffff, a);
-    if (b[0]) draw_text(c, X + (W - text_w(b, 2)) / 2, Y + 156, 2, 0xffffff, b);
+    char a[48], b[48];                               /* (translated whole, then split: a half is no key) */
+    if (step == RENDER_GM_CONFIRM) { snprintf(a, sizeof a, "%s", lang_tr("IT WOULD LIVE THERE")); snprintf(b, sizeof b, "%s", lang_tr("FOR GOOD")); }
+    else if (step == RENDER_GM_ASKING) { snprintf(a, sizeof a, "%s", lang_tr("ASKING THEIR KEEPER")); b[0] = 0; }
+    else if (words_w(lang_tr(g_gm.line), 2) <= W - 24) { snprintf(a, sizeof a, "%s", lang_tr(g_gm.line)); b[0] = 0; }
+    else gm_split(lang_tr(g_gm.line), a, b, sizeof a);
+    draw_words(c, X + (W - words_w(a, 2)) / 2, Y + 136, 2, 0xffffff, a);
+    if (b[0]) draw_words(c, X + (W - words_w(b, 2)) / 2, Y + 156, 2, 0xffffff, b);
     if (step == RENDER_GM_ASKING) rect_edge(c, X + 24, Y + 162, W - 48, 6, DIM);   /* the other keeper's time (its fill: live) */
     const int BY = Y + H - GM_BTN_H - 12, gap = W - 2 * GM_BTN_W - 24;
     if (step == RENDER_GM_CONFIRM) {
@@ -10392,6 +10437,7 @@ static uint32_t gm_key(const tank_t *t, int step) {
     const gift_book_t *g = gift_of(t);
     int i = gm_fish(t);
     uint32_t h = bake_hash(2166136261u, (uint32_t)step);
+    h = bake_hash(h, lang_now);                      /* (the words are the language's) */
     h = bake_hash(h, g_gm.uid); h = bake_hash_s(h, i >= 0 ? t->fish[i].name : ""); h = bake_hash(h, (uint32_t)(g_gm.edge + 1));
     h = bake_hash_s(h, g_gm.line);
     if (step == RENDER_GM_BOWL) { h = bake_hash_s(h, progression_bowl_name()); h = bake_hash(h, (uint32_t)progression_bowl_why(t)); }
@@ -10919,7 +10965,7 @@ void render_milestones(const tank_t *t, uint16_t *fb, int stride) {
         const fish_t *f = &t->fish[i];
         int top = MSP_ROW_Y0 + i * MSP_ROW_H;
         MS_ANIM(i);                                  /* the portrait */
-        draw_text(&c, 92, top + 2, 2, 0xffffff, f->name);
+        draw_words(&c, 92, top + 2, 2, 0xffffff, f->name);
         static const int GX[4] = { 96, 111, 129, 151 };   /* each glyph's own pitch: a 4 px gap as they grow */
         /* (0.4.1, abumaia on Discord: a fish with dark markings lit its stages almost as dark as the ones still to come - a
            stage it has reached wears a white outline then: not color alone) */
@@ -10962,7 +11008,7 @@ void render_milestones(const tank_t *t, uint16_t *fb, int stride) {
     }
     if (progression_bowl_has()) {                /* THE WAITING ROW (0.4.2): who is in the travel bowl, in words; a tap: its card */
         const int top = MSP_ROW_Y0 + (N_FISH_MAX - 1) * MSP_ROW_H;
-        char l[32]; snprintf(l, sizeof l, "%s WAITS IN THE BOWL", progression_bowl_name());
+        char l[32]; snprintf(l, sizeof l, lang_tr("%s WAITS IN THE BOWL"), progression_bowl_name());
         bowl_icon(&c, MSP_FISH_X - BOWL_ICON / 2, top + MSP_ROW_MID - BOWL_ICON / 2, true);
         draw_text(&c, 92, top + (MSP_ROW_H >= 40 ? 3 : 1), 2, 0xffffff, l);
         draw_text(&c, 92, top + (MSP_ROW_H >= 40 ? 22 : 17), 2, MSP_TEAL, "TAP HERE TO LET IT IN");
@@ -11018,8 +11064,8 @@ void render_milestones(const tank_t *t, uint16_t *fb, int stride) {
         const int H = 56 + n * 20 + 16;
         rect_fill(&c, X, Y, W, H, 0x04141a);
         rect_edge(&c, X, Y, W, H, MSP_TEAL); rect_edge(&c, X + 1, Y + 1, W - 2, H - 2, 0x1c2f36);
-        char title[24]; snprintf(title, sizeof title, "%s: HOW", g_ms_title);
-        draw_text(&c, X + (W - text_w(title, 3)) / 2, Y + 16, 3, 0xffffff, title);
+        char title[24]; snprintf(title, sizeof title, lang_tr("%s: HOW"), g_ms_title);
+        draw_words(&c, X + (W - words_w(title, 3)) / 2, Y + 16, 3, 0xffffff, title);
         for (int i = 0; i < n; i++) draw_text(&c, X + (W - text_w(tip[i], 2)) / 2, Y + 56 + i * 20, 2, MSP_TEAL, tip[i]);
     } else if (g_ms_caption[0]) {
         const int X = MSP_MODAL_X, W = MSP_MODAL_W;
@@ -11036,8 +11082,8 @@ void render_milestones(const tank_t *t, uint16_t *fb, int stride) {
             g_ms_caption2[0] = 0;                /* (its form: on MORE's FAMILY page since 0.4.2) */
             char gl[sizeof g_ms_sub];
             if (give_line(t, g_ms_row, gl, sizeof gl)) memcpy(g_ms_sub, gl, sizeof g_ms_sub);   /* GIVE has the line (0.4) */
-            else if (g_ms_sell_armed) snprintf(g_ms_sub, sizeof g_ms_sub, "TAP AGAIN TO SELL FOR %d", worth);   /* (the price left the button with the icons) */
-            else if (can) snprintf(g_ms_sub, sizeof g_ms_sub, "WORTH %d SAND DOLLARS", worth);
+            else if (g_ms_sell_armed) snprintf(g_ms_sub, sizeof g_ms_sub, lang_tr("TAP AGAIN TO SELL FOR %d"), worth);   /* (the price left the button with the icons) */
+            else if (can) snprintf(g_ms_sub, sizeof g_ms_sub, lang_tr("WORTH %d SAND DOLLARS"), worth);
             else if (g_ms_sell_asked) snprintf(g_ms_sub, sizeof g_ms_sub, "%s", f->away ? "VISITING NEXT DOOR" : !progression_keeps_two(t, g_ms_row) ? "KEEP AT LEAST TWO FISH" : render_fry_first_line(t));
             else g_ms_sub[0] = 0;                  /* (the line's room stays: the buttons never move) */
         }
@@ -11075,10 +11121,10 @@ void render_milestones(const tank_t *t, uint16_t *fb, int stride) {
         } else if (g_ms_fry)
             render_fish_preview(fb, stride, X + W / 2, Y + 48, 0.9f, g_ms_lit ? MSP_TEAL : MSP_DIM, g_ms_lit ? MSP_TEAL : MSP_DIM, g_ms_lit ? MSP_TEAL : MSP_DIM, NULL, FISH_ROOM_CARD, t->clock);
         else if (g_ms_tankrow && g_ms_k < 0) ms_school(t, fb, stride, X, Y, W);   /* TANK's tally: the school */
-        draw_text(&c, X + (W - text_w(g_ms_title, 3)) / 2, Y + 92, 3, g_ms_lit ? 0xffffff : MSP_TEAL, g_ms_title);
+        draw_words(&c, X + (W - words_w(g_ms_title, 3)) / 2, Y + 92, 3, g_ms_lit ? 0xffffff : MSP_TEAL, g_ms_title);   /* holds a name or already translated words */
         draw_text(&c, X + (W - text_w(g_ms_caption, 2)) / 2, Y + 124, 2, g_ms_lit ? MSP_TEAL : 0x5f8a92, g_ms_caption);
         int ly = card ? Y + MSP_CARD_SUB_Y - 4 : Y + 144;
-        if (g_ms_caption2[0]) { draw_text(&c, X + (W - text_w(g_ms_caption2, 2)) / 2, ly, 2, g_ms_lit ? MSP_TEAL : 0x5f8a92, g_ms_caption2); ly += 20; }
+        if (g_ms_caption2[0]) { draw_words(&c, X + (W - words_w(g_ms_caption2, 2)) / 2, ly, 2, g_ms_lit ? MSP_TEAL : 0x5f8a92, g_ms_caption2); ly += 20; }
         if (g_ms_sub[0]) draw_text(&c, X + (W - text_w(g_ms_sub, 2)) / 2, ly + 4, 2, g_ms_lit ? 0xffffff : MSP_TEAL, g_ms_sub);
         {   /* the arrows (2026-09-16): the previous / next of the group at the
                top corners, in the buttons' dress, only when there is a group */
@@ -11243,40 +11289,40 @@ static int ms_open(const tank_t *t, int row, bool tank_row, bool fry_row, int k,
     if (fry_row) {
         if (k < 0) {                                 /* the name: the tally, and when it comes */
             int met = 0; for (int i = 0; i < nreq; i++) met += req[i].met;
-            snprintf(g_ms_title, sizeof g_ms_title, "NEW FRY");
+            snprintf(g_ms_title, sizeof g_ms_title, "%s", lang_tr("NEW FRY"));
             bool away; int also, w = progression_breed_waits_for(t, &away, &also);
             if (w >= 0 && (progression_arrival_pending() || met == nreq)) {   /* SELECTIVE BREEDING (0.4.2 audit r2, SLP-1 / SPS-1): the steps
                                                                 are done but the pair cannot court yet - the fry waits for that fish, by name */
-                snprintf(g_ms_caption, sizeof g_ms_caption, "WAITING FOR %s", t->fish[w].name);
-                if (!away) snprintf(g_ms_caption2, sizeof g_ms_caption2, "TO GROW UP");
-                else if (also >= 0) snprintf(g_ms_caption2, sizeof g_ms_caption2, "AND %s TO COME HOME", t->fish[also].name);
-                else snprintf(g_ms_caption2, sizeof g_ms_caption2, "TO COME HOME");
+                snprintf(g_ms_caption, sizeof g_ms_caption, lang_tr("WAITING FOR %s"), t->fish[w].name);
+                if (!away) snprintf(g_ms_caption2, sizeof g_ms_caption2, "%s", lang_tr("TO GROW UP"));
+                else if (also >= 0) snprintf(g_ms_caption2, sizeof g_ms_caption2, lang_tr("AND %s TO COME HOME"), t->fish[also].name);
+                else snprintf(g_ms_caption2, sizeof g_ms_caption2, "%s", lang_tr("TO COME HOME"));
                 snprintf(g_ms_sub, sizeof g_ms_sub, "THEIR FRY COMES NEXT");
             } else if (staged) { snprintf(g_ms_caption, sizeof g_ms_caption, "EVERY STEP IS DONE. A FRY");   /* the spawning, 2026-09-24 */
-                          snprintf(g_ms_caption2, sizeof g_ms_caption2, "WILL BE BORN IN THE GRASS");
+                          snprintf(g_ms_caption2, sizeof g_ms_caption2, "%s", lang_tr("WILL BE BORN IN THE GRASS"));
                           snprintf(g_ms_sub, sizeof g_ms_sub, "ON ITS WAY"); }
             else { snprintf(g_ms_caption, sizeof g_ms_caption, "WHEN ALL NEEDS ARE MET, A");     /* Strato's words, 2026-09-14 */
-                   snprintf(g_ms_caption2, sizeof g_ms_caption2, "NEW FRY IS READY TO BE BORN");
-                   snprintf(g_ms_sub, sizeof g_ms_sub, "%d OF %d DONE", met, nreq); }
+                   snprintf(g_ms_caption2, sizeof g_ms_caption2, "%s", lang_tr("NEW FRY IS READY TO BE BORN"));
+                   snprintf(g_ms_sub, sizeof g_ms_sub, lang_tr("%d OF %d DONE"), met, nreq); }
             g_ms_lit = staged; g_ms_icon = NULL; g_ms_fish = -1; g_ms_fry = true;
         } else if (k < nreq) {                       /* a gate: the words, and where it stands */
             const fry_req_t *r = &req[k];
-            snprintf(g_ms_title, sizeof g_ms_title, "%s", r->title);
+            snprintf(g_ms_title, sizeof g_ms_title, "%s", lang_tr(r->title));
             snprintf(g_ms_caption, sizeof g_ms_caption, "%s", r->words);
-            snprintf(g_ms_caption2, sizeof g_ms_caption2, "%s", r->words2);
+            snprintf(g_ms_caption2, sizeof g_ms_caption2, "%s", lang_tr(r->words2));
             snprintf(g_ms_sub, sizeof g_ms_sub, "%s", r->progress);
             g_ms_lit = r->met; g_ms_icon = fry_req_icon(r->kind); g_ms_kind = r->kind;
             g_ms_fish = g_ms_icon ? -1 : progression_youngest(t);
         } else return MS_TAP_NONE;
     } else if (tank_row) {
         if (k < 0) {
-            snprintf(g_ms_title, sizeof g_ms_title, "TANK");
-            snprintf(g_ms_caption, sizeof g_ms_caption, "%d OF %d FISH SO FAR", t->n_fish, POP_CAP);
+            snprintf(g_ms_title, sizeof g_ms_title, "%s", lang_tr("TANK"));
+            snprintf(g_ms_caption, sizeof g_ms_caption, lang_tr("%d OF %d FISH SO FAR"), t->n_fish, POP_CAP);
             g_ms_lit = true; g_ms_icon = NULL; g_ms_fish = -1;
         } else {
             uint32_t bit = tank_badge(t, k)->bit; bool on = (t->tank_ms_bits & bit) != 0;
             g_ms_tpage = k / MSP_TANK_PER_ROW;       /* the arrows can cross pages: the row follows */
-            snprintf(g_ms_title, sizeof g_ms_title, on ? "TANK" : "NOT YET");
+            snprintf(g_ms_title, sizeof g_ms_title, "%s", lang_tr(on ? "TANK" : "NOT YET"));
             snprintf(g_ms_caption, sizeof g_ms_caption, "%s", TMS_NAMES[bit_index(bit)]);
             g_ms_lit = on; g_ms_icon = tank_badge(t, k)->icon; g_ms_fish = -1;
         }
@@ -11289,7 +11335,7 @@ static int ms_open(const tank_t *t, int row, bool tank_row, bool fry_row, int k,
             g_ms_lit = true; g_ms_icon = NULL; g_ms_fish = row;
         } else {
             uint32_t bit = FISH_BADGES[k].bit; bool on = (f->ms_bits & bit) != 0;
-            snprintf(g_ms_title, sizeof g_ms_title, "%s", on ? f->name : "NOT YET");
+            snprintf(g_ms_title, sizeof g_ms_title, "%s", on ? f->name : lang_tr("NOT YET"));
             snprintf(g_ms_caption, sizeof g_ms_caption, "%s", MS_NAMES[bit_index(bit)]);
             g_ms_lit = on; g_ms_icon = FISH_BADGES[k].icon; g_ms_fish = -1;
         }
@@ -11345,7 +11391,7 @@ bool render_collection_arrow(bool right, int *x, int *y) {
 static void fmt_dur(char *out, size_t n, uint32_t s) {
     if (s < 60) snprintf(out, n, "%u S", (unsigned)s);
     else if (s < 3600) snprintf(out, n, "%u MIN", (unsigned)(s / 60));
-    else snprintf(out, n, "%u H %u MIN", (unsigned)(s / 3600), (unsigned)(s % 3600 / 60));
+    else snprintf(out, n, lang_tr("%u H %u MIN"), (unsigned)(s / 3600), (unsigned)(s % 3600 / 60));
 }
 /* a fish left and the slots shifted (progression: a sale, a gift): the keeper page's card and its armed SELL follow their
    fish; the card of the one that left closes (the 11-02 sweep: SELL armed by row sold the fish that slid into it) */
@@ -11360,7 +11406,7 @@ static void fmt_met(char *out, size_t n, uint32_t met) {
     int64_t now = clock_port_now_unix();
     if (!met || now <= 0 || now < met) { snprintf(out, n, "ON THIS GLASS"); return; }   /* (a board without a clock) */
     uint32_t d = (uint32_t)((now - met) / 86400);
-    if (d == 0) snprintf(out, n, "TODAY"); else if (d == 1) snprintf(out, n, "YESTERDAY"); else snprintf(out, n, "%u DAYS AGO", (unsigned)d);
+    if (d == 0) snprintf(out, n, "TODAY"); else if (d == 1) snprintf(out, n, "YESTERDAY"); else snprintf(out, n, lang_tr("%u DAYS AGO"), (unsigned)d);
 }
 static void entry_fish(fish_t *f, const coll_entry_t *e) {
     memset(f, 0, sizeof *f);
@@ -11388,15 +11434,15 @@ static void entry_card_draw(ctx_t *c, uint16_t *fb, int stride, const coll_entry
     static const char *const STAGE_W[4] = { "FRY", "JUVENILE", "ADULT", "ELDER" };
     char home[24], form[24], met[24], here[24], visits[24];
     char hlbl[40]; home_fields(e->home, e->home_name, "HOME", hlbl, sizeof hlbl, home, sizeof home);
-    snprintf(form, sizeof form, "%s %s", SHAPE_NAMES[e->shape % SHAPE_N], FINS_NAMES[e->fins % FINS_N]);
+    snprintf(form, sizeof form, "%s %s", lang_tr(SHAPE_NAMES[e->shape % SHAPE_N]), lang_tr(FINS_NAMES[e->fins % FINS_N]));
     fmt_met(met, sizeof met, e->met_unix); fmt_dur(here, sizeof here, e->here_s);
-    snprintf(visits, sizeof visits, "%u VISIT%s", (unsigned)e->visits, e->visits == 1 ? "" : "S");
-    struct { const char *lbl, *val; } FL[4] = { { "NAME", f.name }, { hlbl, home }, { "FORM", form }, { "STAGE", STAGE_W[e->stage & 3] } };
+    snprintf(visits, sizeof visits, lang_tr(e->visits == 1 ? "%u VISIT" : "%u VISITS"), (unsigned)e->visits);   /* (a format each: the plural is the language's) */
+    struct { const char *lbl, *val; } FL[4] = { { lang_tr("NAME"), f.name }, { hlbl, home }, { lang_tr("FORM"), form }, { lang_tr("STAGE"), lang_tr(STAGE_W[e->stage & 3]) } };
     for (int i = 0; i < 4; i++) {
         int fy = Y + 33 + i * 26;
-        draw_text(c, FX, fy, 1, LBL, FL[i].lbl);
+        draw_words(c, FX, fy, 1, LBL, FL[i].lbl);
         int vx = FX;                                  /* (no shape: a collected fish's home is its waters, for good) */
-        draw_text(c, vx, fy + 10, 2, 0xffffff, FL[i].val);
+        draw_words(c, vx, fy + 10, 2, 0xffffff, FL[i].val);
     }
     /* its history here: first met, visits, time in this water, fry */
     draw_text(c, PX, PY + PH + 6, 1, LBL, "FIRST MET");
@@ -11406,7 +11452,7 @@ static void entry_card_draw(ctx_t *c, uint16_t *fb, int stride, const coll_entry
     draw_text(c, PX, PY + PH + 34, 1, LBL, "VISITS");
     draw_text(c, PX, PY + PH + 43, 2, 0xffffff, visits);
     if (e->fry) {
-        char fr[24]; snprintf(fr, sizeof fr, "%u FRY HERE", (unsigned)e->fry);
+        char fr[24]; snprintf(fr, sizeof fr, lang_tr("%u FRY HERE"), (unsigned)e->fry);
         draw_text(c, FX, Y + 167, 1, LBL, "FAMILY");
         draw_text(c, FX, Y + 176, 2, 0xffffff, fr);
     }
@@ -11418,21 +11464,21 @@ static void entry_card_draw(ctx_t *c, uint16_t *fb, int stride, const coll_entry
     snprintf(m1, sizeof m1, "P<FISH<<%s<<%08X", f.name, (unsigned)e->uid);
     for (int j = (int)strlen(m1); j < cols; j++) m1[j] = '<';
     m1[cols] = 0;
-    draw_text(c, X + 10, Y + H - 13, 1, 0xc8d6de, m1);
+    draw_words(c, X + 10, Y + H - 13, 1, 0xc8d6de, m1);
 }
 /* the page's words and pips in the foot, left of CLOSE (the bowl: two lines in UPGRADES' place, the pips under the grid) */
 static void coll_pager(ctx_t *c, int pg, int np) {
     char line[32];
 #if defined(TANK_ROUND)
-    char l2[24]; snprintf(line, sizeof line, "PAGE %d", pg + 1); snprintf(l2, sizeof l2, "OF %d", np);
+    char l2[24]; snprintf(line, sizeof line, lang_tr("PAGE %d"), pg + 1); snprintf(l2, sizeof l2, lang_tr("OF %d"), np);
     draw_text(c, 114 + (116 - text_w(line, 2)) / 2, MSP_CLOSE_Y, 2, 0xffffff, line);
     draw_text(c, 114 + (116 - text_w(l2, 2)) / 2, MSP_CLOSE_Y + 16, 2, 0xffffff, l2);
     int bx0 = (PAGE_W - (np * COLL_PIP - 4)) / 2, by = COLL_Y0 + 3 * COLL_CH + 3;
 #else
-    snprintf(line, sizeof line, "PAGE %d OF %d", pg + 1, np);
+    snprintf(line, sizeof line, lang_tr("PAGE %d OF %d"), pg + 1, np);
     int ty = MSP_CLOSE_Y + (MSP_CLOSE_H - 14) / 2, tx = 32;   /* (as far in as CLOSE stands from the right) */
     draw_text(c, tx, ty, 2, 0xffffff, line);
-    char widest[32]; snprintf(widest, sizeof widest, "PAGE %d OF %d", np, np);   /* (the pips stand still page to page) */
+    char widest[32]; snprintf(widest, sizeof widest, lang_tr("PAGE %d OF %d"), np, np);   /* (the pips stand still page to page) */
     int bx0 = tx + text_w(widest, 2) + 12, by = ty + 4;
 #endif
     for (int p = 0; p < np; p++) {
@@ -11446,7 +11492,7 @@ void render_collection(const tank_t *t, uint16_t *fb, int stride) {
     char line[32]; int n = collection_count(), np = collection_pages();
     if (g_coll_page >= np) g_coll_page = np - 1;
     draw_text(&c, (PAGE_W - text_w("VISITOR COLLECTION", 2)) / 2, 22, 2, 0xe8c872, "VISITOR COLLECTION");
-    snprintf(line, sizeof line, "%d OF %d COLLECTED", n, COLL_MAX);
+    snprintf(line, sizeof line, lang_tr("%d OF %d COLLECTED"), n, COLL_MAX);
     draw_text(&c, (PAGE_W - text_w(line, 1)) / 2, 42, 1, MSP_TEAL, line);
     if (np > 1) {
         crit_nav_box(&c, COLL_NAV_X, COLL_NAV_Y, -1, 0x9fd8e2);
@@ -11461,7 +11507,7 @@ void render_collection(const tank_t *t, uint16_t *fb, int stride) {
         rect_edge(&c, cx + 6, cy + 4, COLL_CW - 12, COLL_CH - 12, 0x3f6a72);
         fish_t f; entry_fish(&f, e);
         render_fish_portrait(fb, stride, cx + COLL_CW / 2.0f, cy + 30, 0.9f, &f, COLL_CW - 26, t->clock + j * 0.7f);
-        draw_text(&c, cx + (COLL_CW - text_w(f.name, 2)) / 2, cy + 52, 2, 0xffffff, f.name);
+        draw_words(&c, cx + (COLL_CW - words_w(f.name, 2)) / 2, cy + 52, 2, 0xffffff, f.name);
     }
     button(&c, MSP_CLOSE_X, MSP_CLOSE_Y, MSP_CLOSE_W, MSP_CLOSE_H, 0x1c2f36, MSP_TEAL, "CLOSE", 2);
     if (g_coll_sel >= 0 && g_coll_sel < n) {           /* its passport, the page dimmed under it */
@@ -11574,6 +11620,7 @@ void render_notice(const tank_t *t, uint16_t *fb, int stride, int kind, int fish
     rect_fill(&c, X, Y, W, H, 0x04141a);
     rect_edge(&c, X, Y, W, H, MSP_TEAL); rect_edge(&c, X + 1, Y + 1, W - 2, H - 2, 0x1c2f36);
     char title[FISH_NAME_MAX + 16] = "THE TANK", caption[40] = "";
+    bool named = false;                                       /* title is a fish name: as typed */
     const char *caption2 = NULL;                              /* a second line: the title and both move up */
     const icon_t *ic = NULL;
     const fish_t *f = fish >= 0 && fish < t->n_fish ? &t->fish[fish] : NULL;
@@ -11581,7 +11628,7 @@ void render_notice(const tank_t *t, uint16_t *fb, int stride, int kind, int fish
         if (kind == 7) {                                      /* NOTICE_WRONG_BOARD (0.3.9.3): this version is another board's */
             const char *w = pt_board_words(board_port_hw());
             snprintf(title, sizeof title, "WRONG VERSION");
-            snprintf(caption, sizeof caption, "THIS IS THE %s", w ? w : "BOARD");
+            snprintf(caption, sizeof caption, lang_tr("THIS IS THE %s"), w ? w : "BOARD");
             caption2 = "CHECK FOR UPDATES FIXES IT";
         } else {
             snprintf(title, sizeof title, "AI MODEL DAMAGED");
@@ -11609,7 +11656,7 @@ void render_notice(const tank_t *t, uint16_t *fb, int stride, int kind, int fish
         }
     } else if (kind == 4) {                                   /* NOTICE_UPDATED (2026-09-30): the first boot of a new release */
         snprintf(title, sizeof title, "UPDATED");
-        snprintf(caption, sizeof caption, "YOUR TANK IS NOW V%s", PT_RELEASE);
+        snprintf(caption, sizeof caption, lang_tr("YOUR TANK IS NOW V%s"), PT_RELEASE);
         /* a tick in a ring, teal: the shape says it, not the hue */
         const int R = 22, PX = X + W / 2, PY = Y + 48;
         ring(&c, PX, PY, R, MSP_TEAL); ring(&c, PX, PY, R - 1, MSP_TEAL);
@@ -11624,7 +11671,7 @@ void render_notice(const tank_t *t, uint16_t *fb, int stride, int kind, int fish
         rect_fill(&c, PX + PW, PY + 8, 5, PH - 16, 0x9fb4b8);
         rect_fill(&c, PX + 4, PY + 4, 7, PH - 8, 0xf25b65);
     } else if (kind == 2) {                                   /* NOTICE_STAGE */
-        if (f) { snprintf(title, sizeof title, "%s", f->name);
+        if (f) { snprintf(title, sizeof title, "%s", f->name); named = true;
                  snprintf(caption, sizeof caption, "IS NOW %s %s", f->stage == STAGE_ADULT || f->stage == STAGE_ELDER ? "AN" : "A", STAGE_WORDS[f->stage & 3]);
                  render_fish_preview(fb, stride, X + W / 2, Y + 48, f->size * 1.6f, f->color, f->fin, f->accent, f, FISH_ROOM_CARD, t->clock); }
     } else if (kind == 1) {                                   /* NOTICE_TANK_MILESTONE */
@@ -11639,12 +11686,13 @@ void render_notice(const tank_t *t, uint16_t *fb, int stride, int kind, int fish
     } else {                                                  /* NOTICE_MILESTONE */
         for (int k = 0; k < 6; k++) if (FISH_BADGES[k].bit == bit) ic = FISH_BADGES[k].icon;
         int bi = 0; while (bi < 31 && !(bit & (1u << bi))) bi++;
-        if (f) snprintf(title, sizeof title, "%s", f->name);
+        if (f) { snprintf(title, sizeof title, "%s", f->name); named = true; }
         snprintf(caption, sizeof caption, "%s", bi < MS_FISH_COUNT ? MS_NAMES[bi] : "");
         if (!ic && f) render_fish_preview(fb, stride, X + W / 2, Y + 48, f->size * 1.6f, f->color, f->fin, f->accent, f, FISH_ROOM_CARD, t->clock);
     }
     if (ic) blit_icon_scaled(&c, X + (W - ic->w * 2) / 2, Y + 16 + (32 - ic->w), ic, 2, true);
-    draw_text(&c, X + (W - text_w(title, 3)) / 2, Y + (caption2 ? 70 : 92), 3, 0xffffff, title);
+    if (named) draw_words(&c, X + (W - words_w(title, 3)) / 2, Y + (caption2 ? 70 : 92), 3, 0xffffff, title);
+    else       draw_text(&c, X + (W - text_w(title, 3)) / 2, Y + (caption2 ? 70 : 92), 3, 0xffffff, title);
     draw_text(&c, X + (W - text_w(caption, 2)) / 2, Y + (caption2 ? 104 : 124), 2, MSP_TEAL, caption);
     if (caption2) draw_text(&c, X + (W - text_w(caption2, 2)) / 2, Y + 126, 2, MSP_TEAL, caption2);
     if (frac_left < 0) frac_left = 0;
@@ -11767,8 +11815,8 @@ static void shop_foot(ctx_t *c) {
 }
 static void fry_hours(char *out, size_t n) {   /* "NEW FRY IN 14 H" / "IN 40 MIN" */
     float s = progression_fry_new_in_s();
-    if (s >= 3600) snprintf(out, n, "NEW FRY IN %d H", (int)((s + 1799) / 3600));
-    else snprintf(out, n, "NEW FRY IN %d MIN", (int)(s / 60) + 1);
+    if (s >= 3600) snprintf(out, n, lang_tr("NEW FRY IN %d H"), (int)((s + 1799) / 3600));
+    else snprintf(out, n, lang_tr("NEW FRY IN %d MIN"), (int)(s / 60) + 1);
 }
 static void fry_draw(uint16_t *fb, int stride, float x, float y, float size, const fry_offer_t *o, double clock) {
     fish_t f; memset(&f, 0, sizeof f);
@@ -11851,7 +11899,7 @@ static void shop_fry_modal(ctx_t *c, const tank_t *t, uint16_t *fb, int stride) 
     char line[32]; snprintf(line, sizeof line, "%d", SD_PRICE_FRY);
     price_tag(c, X + (W - 20 - text_w(line, 2)) / 2, Y + 138, SD_PRICE_FRY, go ? 0xffffff : MSP_QUIET);
     if (!room) snprintf(line, sizeof line, progression_fish_held(t) >= POP_CAP ? "THE TANK IS FULL" : tank_light_off(t) ? "LIGHT ON TO NAME THE FRY" : "WELCOME THE NEW FRY");   /* (a place held for a gift or a fry next door: full) */
-    else if (!can) snprintf(line, sizeof line, "YOU HAVE %d", (int)t->sd_balance);
+    else if (!can) snprintf(line, sizeof line, lang_tr("YOU HAVE %d"), (int)t->sd_balance);
     else line[0] = 0;
     if (line[0]) draw_text(c, X + (W - text_w(line, 2)) / 2, Y + 160, 2, MSP_QUIET, line);
     fry_hours(line, sizeof line);
@@ -11869,8 +11917,8 @@ static const char *shelf_line(const tank_t *t, int item, char *out, size_t n) {
     bool shelved = (t->sd_shelved & SD_ITEMS[item].bit) != 0;
     if (item == 8 && !SD_PUMPKIN_IN_SHOP) return "NOT IN THE SHOP NOW";
     if (!shelved) return tank_decor_locked(t, item) ? "LOCKED IN PLACE" : NULL;   /* (0.3.9: why a hold on it opens nothing; MOVE is the way to its page) */
-    if (item == 3) { snprintf(out, n, "GROWING  %d%%", (int)(tank_coral_growth(t) * 100 / CORAL_FULL + 0.5f)); return out; }
-    if (item == 4) { snprintf(out, n, "GROWING  %d%%", (int)(tank_cluster_growth(t) * 100 / CLUSTER_FULL + 0.5f)); return out; }
+    if (item == 3) { snprintf(out, n, lang_tr("GROWING  %d%%"), (int)(tank_coral_growth(t) * 100 / CORAL_FULL + 0.5f)); return out; }
+    if (item == 4) { snprintf(out, n, lang_tr("GROWING  %d%%"), (int)(tank_cluster_growth(t) * 100 / CLUSTER_FULL + 0.5f)); return out; }
     if (item == 0) return "GROWING";
     return NULL;
 }
@@ -12101,7 +12149,7 @@ void render_shop(const tank_t *t, uint16_t *fb, int stride) {
             char line[32]; snprintf(line, sizeof line, "%d", SD_PRICE_BG);
             int pw = 20 + text_w(line, 2);
             price_tag(&c, X + (W - pw) / 2, Y + 164, SD_PRICE_BG, can ? 0xffffff : MSP_QUIET);
-            if (!can) { snprintf(line, sizeof line, "YOU HAVE %d", (int)t->sd_balance); draw_text(&c, X + (W - text_w(line, 2)) / 2, Y + 184, 2, MSP_QUIET, line); }
+            if (!can) { snprintf(line, sizeof line, lang_tr("YOU HAVE %d"), (int)t->sd_balance); draw_words(&c, X + (W - words_w(line, 2)) / 2, Y + 184, 2, MSP_QUIET, line); }
             if (can) { button(&c, bx, by, MSP_HOW_W, MSP_HOW_H, MSP_TEAL, MSP_TEAL, "UNLOCK", 2);
                        draw_text(&c, bx + (MSP_HOW_W - text_w("UNLOCK", 2)) / 2, by + (MSP_HOW_H - 14) / 2, 2, MSP_INK, "UNLOCK"); }
             else button(&c, bx, by, MSP_HOW_W, MSP_HOW_H, 0x1c2f36, MSP_DIM, "UNLOCK", 2);
@@ -12169,7 +12217,7 @@ void render_shop(const tank_t *t, uint16_t *fb, int stride) {
         char line[32]; snprintf(line, sizeof line, "%d", it->price);
         int pw = 20 + text_w(line, 2);
         price_tag(&c, X + (W - pw) / 2, Y + 164, it->price, can ? 0xffffff : MSP_QUIET);
-        if (!can) { snprintf(line, sizeof line, "YOU HAVE %d", (int)t->sd_balance);
+        if (!can) { snprintf(line, sizeof line, lang_tr("YOU HAVE %d"), (int)t->sd_balance);
                     draw_text(&c, X + (W - text_w(line, 2)) / 2, Y + 184, 2, MSP_QUIET, line); }
         if (can) { button(&c, bx, by, MSP_HOW_W, MSP_HOW_H, MSP_TEAL, MSP_TEAL, "UNLOCK", 2);
                    draw_text(&c, bx + (MSP_HOW_W - text_w("UNLOCK", 2)) / 2, by + (MSP_HOW_H - 14) / 2, 2, MSP_INK, "UNLOCK"); }
@@ -12425,7 +12473,7 @@ static void set_gfx_icon(ctx_t *c, int x, int cy, int level, uint32_t rgb) {
 static void set_tile_box(ctx_t *c, int which, bool on, const char *what, const char *word) {
     int x, y, w, h; render_settings_box(which, &x, &y, &w, &h);
     button(c, x, y, w, h, on ? MSP_TEAL : 0x1c2f36, on ? MSP_TEAL : MSP_DIM, "", 2);
-    draw_text_8px(c, x + 50, y + 6, on ? MSP_INK : MSP_QUIET, what);
+    draw_text_8px(c, x + 50, y + 6, on ? MSP_INK : MSP_QUIET, lang_tr(what));
     draw_text(c, x + 50, y + 18, 2, on ? MSP_INK : 0xffffff, word);
 }
 static void set_tiles(ctx_t *c, const tank_t *t) {
@@ -12472,11 +12520,19 @@ static void gfx_page_draw(ctx_t *c) {
     if (render_gfx_waiting()) { draw_text(c, (PAGE_W - text_w("ONE MOMENT", 2)) / 2, GFXP_NOTE_Y, 2, 0xffffff, "ONE MOMENT"); s_gfx_busy_seen = true; }
     button(c, GFXP_BACK_X, SET_NAV_Y, GFXP_BACK_W, SET_NAV_SQ, 0x1c2f36, MSP_TEAL, "BACK", 2);
 }
+/* language chip after the title, both centred (the bowl and watch clip the
+ * line's ends); a tap steps to the next language (lang.h) */
+static int set_lang_x(void) { return (PAGE_W + text_w("SETTINGS", 3) + 8 - SET_LANG_W) / 2; }
 void render_settings(const tank_t *t, uint16_t *fb, int stride, int bright_pct, int volume) {
     ctx_t c = ctx_page(fb, stride);
     if (s_gfxp) { gfx_page_draw(&c); return; }   /* its GRAPHICS face */
     rect_fill(&c, -PAGE_X, -PAGE_Y, TANK_W, TANK_H, MSP_INK);
-    draw_text(&c, (PAGE_W - text_w("SETTINGS", 3)) / 2, SET_TITLE_Y, 3, 0xffffff, "SETTINGS");
+    {
+        int lx = set_lang_x(), ly = SET_TITLE_Y + 10 - SET_LANG_H / 2;
+        draw_text(&c, lx - 8 - text_w("SETTINGS", 3), SET_TITLE_Y, 3, 0xffffff, "SETTINGS");
+        button(&c, lx, ly, SET_LANG_W, SET_LANG_H, 0x1c2f36, MSP_TEAL, "", 2);
+        draw_words(&c, lx + (SET_LANG_W - words_w(lang_code(lang_now), 2)) / 2, ly + (SET_LANG_H - 14) / 2, 2, 0xffffff, lang_code(lang_now));
+    }
     set_slider(&c, SET_ROW1_Y, "BRIGHTNESS", SET_BRT_MIN, bright_pct);
     set_slider(&c, SET_ROW2_Y, "VOLUME", 0, volume);
     /* LIGHTS OUT: < the choice > */
@@ -12546,6 +12602,7 @@ int render_settings_tap(float x, float y, int *value) {
         }
         return SET_TAP_NONE;
     }
+    if (y < SET_SEG_Y(SET_ROW1_Y) - 12 && x >= set_lang_x() - 8 && x < set_lang_x() + SET_LANG_W + 8) return SET_TAP_LANG;
     /* the row bands: from a little above each segment down to the next row
        (fingers report low); the tile row's stops at the foot's band */
     int seg = set_segment(x, 3), two = set_segment(x, 2);
@@ -12680,6 +12737,9 @@ int render_settings_touch(tank_t *t, float x, float y, bool down, int *value) {
                                                                   says it - a loop patching after a nibble, or not planned yet, is not this page's
                                                                   (the second review: a keeper who opens the page and touches nothing never sees it) */
                 r = SET_TAP_GFX_PAGE; *value = 1;
+            } else if (h == SET_TAP_LANG) {                    /* next language */
+                lang_now = (uint8_t)((lang_now + 1) % LANG_N); tank_emit(TEV_WHEEL_TICK, -1); progression_settings_changed();
+                r = SET_TAP_LANG; *value = lang_now;
             } else if (h == SET_TAP_CLOSE || h == SET_TAP_UPDATES || h == SET_TAP_LINK) { r = h; *value = v; }
         }
     }
@@ -12765,13 +12825,13 @@ void render_link_sd_line(const char *l1, const char *l2, double clock, float sec
 void render_link_sd_news(int kind, int edge, int amount, int verdict, double clock) {
     char a[40], b[40] = "";
     switch (kind) {
-    case TL_SD_SENDING:  snprintf(a, sizeof a, "SENDING %d SAND DOLLARS", amount); break;
-    case TL_SD_SENT:     snprintf(a, sizeof a, "SENT %d SAND DOLLARS", amount); snprintf(b, sizeof b, "THEY HAVE THEM NOW"); render_link_coin_spin(edge, clock); break;
-    case TL_SD_GOT:      snprintf(a, sizeof a, "GOT %d SAND DOLLARS", amount); snprintf(b, sizeof b, "FROM NEXT DOOR"); render_link_coin_spin(edge, clock); break;
+    case TL_SD_SENDING:  snprintf(a, sizeof a, lang_tr("SENDING %d SAND DOLLARS"), amount); break;
+    case TL_SD_SENT:     snprintf(a, sizeof a, lang_tr("SENT %d SAND DOLLARS"), amount); snprintf(b, sizeof b, "THEY HAVE THEM NOW"); render_link_coin_spin(edge, clock); break;
+    case TL_SD_GOT:      snprintf(a, sizeof a, lang_tr("GOT %d SAND DOLLARS"), amount); snprintf(b, sizeof b, "FROM NEXT DOOR"); render_link_coin_spin(edge, clock); break;
     case TL_SD_BACK:     snprintf(a, sizeof a, verdict == SDG_V_FULL ? "THEIR TANK HAS TOO MANY" : "THEY COULD NOT TAKE THEM");   /* (BAD, OLD: the plain words) */
-                         snprintf(b, sizeof b, "YOUR %d CAME BACK", amount); break;
+                         snprintf(b, sizeof b, lang_tr("YOUR %d CAME BACK"), amount); break;
     case TL_SD_BUSY:     snprintf(a, sizeof a, "STILL SENDING THE LAST ONE"); snprintf(b, sizeof b, "TRY AGAIN SOON"); break;
-    case TL_SD_BACK_LATE: snprintf(a, sizeof a, "NOBODY TOOK THEM"); snprintf(b, sizeof b, "YOUR %d CAME BACK", amount); break;
+    case TL_SD_BACK_LATE: snprintf(a, sizeof a, "NOBODY TOOK THEM"); snprintf(b, sizeof b, lang_tr("YOUR %d CAME BACK"), amount); break;
     case TL_SD_NO_DOOR:  snprintf(a, sizeof a, "THE DOOR CLOSED"); snprintf(b, sizeof b, "NOTHING WAS SENT"); break;
     case TL_SD_NO_FUNDS: snprintf(a, sizeof a, "NOT ENOUGH SAND DOLLARS"); snprintf(b, sizeof b, "NOTHING WAS SENT"); break;
     case TL_SD_NO_SAVE:  snprintf(a, sizeof a, "SOMETHING WENT WRONG"); snprintf(b, sizeof b, "NOTHING WAS SENT"); break;
@@ -13073,7 +13133,8 @@ void render_advanced(uint16_t *fb, int stride, int pick_mah, int pick_ma, int se
     char txt[40];
     rect_fill(&c, -PAGE_X, -PAGE_Y, TANK_W, TANK_H, MSP_INK);
     text_centre(&c, SET_TITLE_Y, 3, 0xffffff, "ADVANCED");
-    draw_text_8px(&c, (PAGE_W - (13 * 6 - 1)) / 2, SET_TITLE_Y + 25, MSP_QUIET, "FOR GROWN-UPS");
+    const char *grown = lang_tr("FOR GROWN-UPS");
+    draw_text_8px(&c, (PAGE_W - ((int)strlen(grown) * 6 - 1)) / 2, SET_TITLE_Y + 25, MSP_QUIET, grown);
     /* TOUCH */
     draw_text(&c, SET_LABEL_X, SET_ROW1_Y, 2, MSP_TEAL, "TOUCH");
     button(&c, SET_SEG_X, SET_SEG_Y(SET_ROW1_Y), SET_SPAN_W, SET_SEG_H, 0x1c2f36, MSP_TEAL, "CALIBRATE", 2);
@@ -13090,13 +13151,13 @@ void render_advanced(uint16_t *fb, int stride, int pick_mah, int pick_ma, int se
     if (fast) adv_warn_sign(&c, sx + 8, y + (SET_SEG_H - 15) / 2, 17, MSP_INK);   /* faster than the board's own: the sign rides along */
     draw_text(&c, sx + (fast ? 22 : 0), y + (SET_SEG_H - 14) / 2, 2, MSP_INK, txt);
     set_arrow(&c, SET_SEG_X + SET_SPAN_W - SET_ARW_W, y, true, pick_mah < sz[n - 1]);
-    if (stock) snprintf(txt, sizeof txt, "STANDARD - CHARGES AT %d MA", pick_ma);
-    else       snprintf(txt, sizeof txt, "CHARGES AT %d MA", pick_ma);
+    if (stock) snprintf(txt, sizeof txt, lang_tr("STANDARD - CHARGES AT %d MA"), pick_ma);
+    else       snprintf(txt, sizeof txt, lang_tr("CHARGES AT %d MA"), pick_ma);
     draw_text(&c, SET_LABEL_X, y + SET_SEG_H + 10, 2, MSP_QUIET, txt);
     if (pick_mah != set_mah) {                    /* a size picked, not in use yet: SET applies it (the warning first, when it is faster) */
-        snprintf(txt, sizeof txt, "SET %d MAH", pick_mah);
+        snprintf(txt, sizeof txt, lang_tr("SET %d MAH"), pick_mah);
         lit_button(&c, SET_SEG_X, ADV_SET_Y, SET_SPAN_W, ADV_SET_H, txt);
-        snprintf(txt, sizeof txt, "NOW %d MAH", set_mah);
+        snprintf(txt, sizeof txt, lang_tr("NOW %d MAH"), set_mah);
         draw_text(&c, SET_LABEL_X, ADV_SET_Y + (ADV_SET_H - 14) / 2, 2, MSP_QUIET, txt);
     } else draw_text(&c, SET_LABEL_X, y + SET_SEG_H + 32, 2, MSP_QUIET, "MATCH THE SIZE ON YOUR BATTERY");
     button(&c, SET_CLOSE_X, SET_FOOT_Y, MSP_CLOSE_W, MSP_CLOSE_H, 0x1c2f36, MSP_TEAL, "BACK", 2);
@@ -13126,14 +13187,14 @@ void render_battery_warning(uint16_t *fb, int stride, int cell_mah, int charge_m
     }
     int y = SET_TITLE_Y + 42;
     text_centre(&c, y, 2, 0xffffff, "ONLY FOR A BIGGER BATTERY."); y += 30;
-    snprintf(txt, sizeof txt, "THE TANK WILL CHARGE AT %d MA.", charge_ma);
+    snprintf(txt, sizeof txt, lang_tr("THE TANK WILL CHARGE AT %d MA."), charge_ma);
     text_centre(&c, y, 2, MSP_TEAL, txt); y += 22;
     text_centre(&c, y, 2, MSP_TEAL, "A SMALLER BATTERY CHARGED THIS"); y += 22;
     text_centre(&c, y, 2, MSP_TEAL, "FAST CAN GET HOT, SWELL UP"); y += 22;
     text_centre(&c, y, 2, MSP_TEAL, "OR CATCH FIRE."); y += 30;
     text_centre(&c, y, 2, 0xffffff, "READ THE SIZE PRINTED ON IT.");
     {   /* the box: [x]  MY BATTERY IS 800 MAH / OR BIGGER */
-        snprintf(txt, sizeof txt, "MY BATTERY IS %d MAH", cell_mah);
+        snprintf(txt, sizeof txt, lang_tr("MY BATTERY IS %d MAH"), cell_mah);
         int bs = ADV_WARN_BOX, gap = 14, tw = text_w(txt, 2), x0 = (PAGE_W - bs - gap - tw) / 2, by = ADV_WARN_BOX_Y;
         rect_fill(&c, x0, by, bs, bs, checked ? MSP_TEAL : 0x1c2f36);
         rect_edge(&c, x0, by, bs, bs, MSP_TEAL); rect_edge(&c, x0 + 1, by + 1, bs - 2, bs - 2, MSP_TEAL);
@@ -13194,7 +13255,7 @@ void render_touch_cross(uint16_t *fb, int stride, int i, int n, int tx, int ty) 
     char txt[32];
     rect_fill(&c, -PAGE_X, -PAGE_Y, TANK_W, TANK_H, MSP_INK);
     touch_cross(&c, tx, ty, MSP_TEAL);
-    snprintf(txt, sizeof txt, "TAP THE CROSS  %d OF %d", i + 1, n);
+    snprintf(txt, sizeof txt, lang_tr("TAP THE CROSS  %d OF %d"), i + 1, n);
     text_centre(&c, ty - PAGE_Y < PAGE_H / 2 ? PAGE_H - 60 : 46, 2, 0xffffff, txt);
 }
 void render_touch_check(uint16_t *fb, int stride, int tx, int ty, float secs_left, float secs_total) {
@@ -13206,7 +13267,7 @@ void render_touch_check(uint16_t *fb, int stride, int tx, int ty, float secs_lef
     text_centre(&c, y, 2, 0xffffff, "TAP THIS CROSS TO KEEP"); y += 22;
     text_centre(&c, y, 2, 0xffffff, "THE NEW TOUCH"); y += 28;
     int s = (int)ceilf(secs_left < 0 ? 0 : secs_left);
-    snprintf(txt, sizeof txt, "THE OLD ONE COMES BACK IN %d", s);
+    snprintf(txt, sizeof txt, lang_tr("THE OLD ONE COMES BACK IN %d"), s);
     text_centre(&c, y, 2, MSP_QUIET, txt); y += 24;
     int bw = 240, bx = (PAGE_W - bw) / 2;                    /* the time left, a bar that shrinks */
     float f = secs_total > 0 ? secs_left / secs_total : 0; if (f < 0) f = 0;
@@ -13472,21 +13533,21 @@ static void sh_plate(ctx_t *c, int cx, int y, const char *name) {
     int n = (int)strlen(name); if (n > 15) n = 15;
     const char *nl = strchr(name, '\n');
     if (nl) { int a = (int)(nl - name); memcpy(l1, name, (size_t)(a < 15 ? a : 15)); snprintf(l2, sizeof l2, "%s", nl + 1); }   /* (the keeper's two lines) */
-    else if (text_w(name, 2) <= maxw) memcpy(l1, name, (size_t)n);
+    else if (words_w(name, 2) <= maxw) memcpy(l1, name, (size_t)n);
     else {
         int cut = -1;                                      /* at a space, the nearest the middle that leaves both lines whole */
         for (int i = 1; i < n; i++) if (name[i] == ' ' && i <= fit && n - i - 1 <= fit && (cut < 0 || abs(i - n / 2) < abs(cut - n / 2))) cut = i;
         if (cut > 0) { memcpy(l1, name, (size_t)cut); memcpy(l2, name + cut + 1, (size_t)(n - cut - 1)); }
         else { int k = (n + 1) / 2; if (k > fit) k = fit; memcpy(l1, name, (size_t)k); memcpy(l2, name + k, (size_t)(n - k > fit ? fit : n - k)); }   /* (one long word: halves) */
     }
-    int tw = text_w(l1, 2) > text_w(l2, 2) ? text_w(l1, 2) : text_w(l2, 2);
+    int tw = words_w(l1, 2) > words_w(l2, 2) ? words_w(l1, 2) : words_w(l2, 2);   /* (a name: untranslated) */
     int w = tw + 4, h = l2[0] ? 34 : 18;
     if (w < 30) w = 30;
     int x = cx - w / 2;
     rect_fill(c, x, y, w, h, SH_BRASS);
     rect_edge(c, x, y, w, h, 0x7a6435);
-    draw_text(c, x + 2 + (tw - text_w(l1, 2)) / 2, y + 2, 2, 0x2c2412, l1);
-    if (l2[0]) draw_text(c, x + 2 + (tw - text_w(l2, 2)) / 2, y + 18, 2, 0x2c2412, l2);   /* (2 px between the lines - Strato: they touched) */
+    draw_words(c, x + 2 + (tw - words_w(l1, 2)) / 2, y + 2, 2, 0x2c2412, l1);
+    if (l2[0]) draw_words(c, x + 2 + (tw - words_w(l2, 2)) / 2, y + 18, 2, 0x2c2412, l2);   /* (2 px between the lines - Strato: they touched) */
 }
 static void sh_pic(ctx_t *c, int x, int y, const uint16_t *pic, int w, int h, bool dim) {
     for (int j = 0; j < h; j++)
@@ -13541,7 +13602,7 @@ static void sh_arrow(ctx_t *c, int x, int y, bool right, bool live) {
 }
 static void sh_pager(ctx_t *c, int cx, int y, int page, int pages) {
     char t[16];
-    snprintf(t, sizeof t, "%d OF %d", page, pages);
+    snprintf(t, sizeof t, lang_tr("%d OF %d"), page, pages);
     int tw = text_w(t, 2);
     sh_arrow(c, cx - tw / 2 - 12 - SH_ARW_W, y, false, page > 1);
     draw_text(c, cx - tw / 2, y + (MSP_CLOSE_H - 14) / 2, 2, pages > 1 ? 0xffffff : MSP_QUIET, t);
@@ -13704,15 +13765,15 @@ void render_shelf(uint16_t *fb, int stride, const shelf_slot_t slot[8], int page
     sh_wall(&c);
     const bool moving = g_sh_moving;
     if (moving) {                                          /* MOVE: the title names the tank in hand */
-        char t[32]; snprintf(t, sizeof t, "MOVE %s", g_sh_move_name);
-        draw_text(&c, (TANK_W - text_w(t, 2)) / 2, SH_TITLE_Y + 4, 2, 0xffffff, t);
+        char t[48]; snprintf(t, sizeof t, lang_tr("MOVE %s"), g_sh_move_name);
+        draw_words(&c, (TANK_W - words_w(t, 2)) / 2, SH_TITLE_Y + 4, 2, 0xffffff, t);   /* (with a name: untranslated) */
     } else {
     const int tx = (TANK_W - text_w("MY TANKS", 3)) / 2;   /* (alone since 0.4.2: the padlock is in the icon foot) */
     if (progression_bowl_has()) {                          /* THE TRAVEL BOWL (0.4.2): a fish waits in it - said here, where the keeper
                                                               picks the tank it goes to, in the title's place and at the name
                                                               plates' size (two lines in the title's box, the padlock's height;
                                                               the longest name runs 6 px into the padlock's 14 px gap) */
-        char l[24]; snprintf(l, sizeof l, "%s WAITS", progression_bowl_name());
+        char l[24]; snprintf(l, sizeof l, lang_tr("%s WAITS"), progression_bowl_name());
         const int mx = tx + text_w("MY TANKS", 3) / 2;
         draw_text(&c, mx - text_w(l, 2) / 2, SH_TITLE_Y - 5, 2, 0xffffff, l);
         draw_text(&c, mx - text_w("IN THE BOWL", 2) / 2, SH_TITLE_Y + 11, 2, 0xffffff, "IN THE BOWL");
@@ -13976,7 +14037,7 @@ void render_shelf_rename(uint16_t *fb, int stride, const shelf_slot_t *s, const 
     rect_fill(&c, NK_PX0, NK_PLATE_Y, NK_PW, NK_PH, SH_BRASS); rect_edge(&c, NK_PX0, NK_PLATE_Y, NK_PW, NK_PH, 0x7a6435);
     for (int k = 0; k < 2; k++) {
         int ty = NK_PLATE_Y + 9 + k * (NK_LH + 12), tx = NK_PX0 + 12;
-        draw_text(&c, tx, ty, NK_S, 0x2c2412, r->line[k]);
+        draw_words(&c, tx, ty, NK_S, 0x2c2412, r->line[k]);
         if (k == r->row) {
             for (int i = 0; i < SHR_N; i++) rect_fill(&c, tx + i * NK_GW, ty + NK_LH + 3, NK_GW - NK_S - 1, 2, 0x7a6435);   /* its seven places */
             int n = (int)strlen(r->line[k]);
@@ -13994,7 +14055,8 @@ void render_shelf_rename(uint16_t *fb, int stride, const shelf_slot_t *s, const 
     for (int f = 0; f < 6; f++) {
         int x, y, w, h; nk_fn_box(FK[f].key, &x, &y, &w, &h);
         if (FK[f].key == SHK_DONE) lit_button(&c, x, y, w, h, "DONE");
-        else if (FK[f].key == SHK_BACK) button(&c, x, y, w, h, 0x16262c, 0x3d5d66, "BACK", 2);   /* (it leaves the page: quieter) */
+        else if (FK[f].key == SHK_BACK) { button(&c, x, y, w, h, 0x16262c, 0x3d5d66, "", 2);   /* (it leaves the page: quieter) */
+            draw_words(&c, x + (w - words_w("BACK", 2)) / 2, y + (h - 14) / 2, 2, 0xffffff, "BACK"); }   /* as given: ZURÜCK is too wide for the key */
         else button(&c, x, y, w, h, 0x1c2f36, MSP_TEAL, FK[f].lbl, 2);
         if (FK[f].key == SHK_SPACE) rect_fill(&c, x + 10, y + h / 2 + 10, w - 20, 3, MSP_TEAL);   /* the space bar's bar */
         if (FK[f].key == SHK_MORE) for (int i = 0; i < 3; i++) rect_fill(&c, x + w / 2 - 10 + i * 8, y + h - 10, 4, 4, i == r->page ? MSP_TEAL : 0x3d5d66);   /* which page */
@@ -14020,15 +14082,15 @@ void render_shelf_card(uint16_t *fb, int stride, const shelf_slot_t *s, const ch
     int tx = mx + 16 + SH_TW + 14, ty = my + 18;
     char t[48];
     { char nm[24]; snprintf(nm, sizeof nm, "%s", s->name); for (char *p = nm; *p; p++) if (*p == '\n') *p = ' ';   /* (its two lines as one) */
-      draw_text(&c, tx, ty, 2, 0xffffff, nm); ty += 24; }                /* (every line scale 2 since 0.3.9.3: the 6 px ones read as specks) */
+      draw_words(&c, tx, ty, 2, 0xffffff, nm); ty += 24; }                /* (every line scale 2 since 0.3.9.3: the 6 px ones read as specks) */
     draw_text(&c, tx, ty, 2, MSP_TEAL, kind); ty += 18;
     if (s->experimental) { sh_flask(&c, tx, ty + 2, MSP_QUIET); draw_text(&c, tx + 10, ty, 2, MSP_QUIET, "EXPERIMENTAL"); ty += 18; }
     const bool glass = s->state == SHELF_NOW;              /* the tank on the glass (0.3.9.3): its name and RENAME, nothing to swap or rest */
     g_shc_glass = glass;
-    if (glass) snprintf(t, sizeof t, "ON THE GLASS"); else snprintf(t, sizeof t, "SHELVED %d DAY%s", shelf_days, shelf_days == 1 ? "" : "S");
+    if (glass) snprintf(t, sizeof t, "ON THE GLASS"); else snprintf(t, sizeof t, lang_tr(shelf_days == 1 ? "SHELVED %d DAY" : "SHELVED %d DAYS"), shelf_days);
     draw_text(&c, tx, ty, 2, MSP_TEAL, t); ty += 18;
-    if (g_sh_jelly) { snprintf(t, sizeof t, "%s THEME", g_sh_jelly); draw_text(&c, tx, ty, 2, MSP_TEAL, t); }   /* (jellies keep no age: their look instead) */
-    else if (age_days >= 0) { snprintf(t, sizeof t, "%d DAYS OLD", age_days); draw_text(&c, tx, ty, 2, MSP_TEAL, t); }
+    if (g_sh_jelly) { snprintf(t, sizeof t, lang_tr("%s THEME"), g_sh_jelly); draw_text(&c, tx, ty, 2, MSP_TEAL, t); }   /* (jellies keep no age: their look instead) */
+    else if (age_days >= 0) { snprintf(t, sizeof t, lang_tr("%d DAYS OLD"), age_days); draw_text(&c, tx, ty, 2, MSP_TEAL, t); }
     int y = my + 16 + top + 14;                            /* TIME: DORMANT | PAUSED */
     if (glass) {                                           /* (in its place: what the shelf does with it) */
         const char *l1 = "SWAP IN ANOTHER TANK", *l2 = "TO PUT THIS ONE AWAY";
@@ -14102,7 +14164,7 @@ void render_shelf_remove(uint16_t *fb, int stride, const shelf_slot_t *s, int re
     int tx = mx + 16 + SH_TW + 14, ty = my + 18;
     char nm[24]; snprintf(nm, sizeof nm, "%s", s->name); for (char *p = nm; *p; p++) if (*p == '\n') *p = ' ';
     draw_text(&c, tx, ty, 2, 0xffffff, "REMOVE"); ty += 22;
-    draw_text(&c, tx, ty, 2, 0xffffff, nm); ty += 22;
+    draw_words(&c, tx, ty, 2, 0xffffff, nm); ty += 22;
     draw_text(&c, tx, ty, 2, MSP_TEAL, "FROM THE SHELF?");
     /* what the refund is for (0.4.1, audit P6): only what this tank has, singular or plural - "+20 FOR ITS PIECES",
        "+60 FOR ITS PIECES" / "AND CRITTERS", "+90 FOR ITS PIECES," / "CRITTERS AND BACKGROUNDS"; nothing bought: PIECES,
@@ -14111,21 +14173,22 @@ void render_shelf_remove(uint16_t *fb, int stride, const shelf_slot_t *s, int re
     const char *w3[3]; int m = 0;
     for (int k = 0; k < 3; k++) if (n && n[k] > 0) w3[m++] = KN[k][n[k] > 1];
     char t[40], t2[40] = "";
-    if (m == 0) snprintf(t, sizeof t, "+%d FOR ITS PIECES", refund);
-    else if (m == 1) snprintf(t, sizeof t, "+%d FOR ITS %s", refund, w3[0]);
-    else if (m == 2) { snprintf(t, sizeof t, "+%d FOR ITS %s", refund, w3[0]); snprintf(t2, sizeof t2, "AND %s", w3[1]); }
-    else { snprintf(t, sizeof t, "+%d FOR ITS %s,", refund, w3[0]); snprintf(t2, sizeof t2, "%s AND %s", w3[1], w3[2]); }
-    if (g_sh_jelly) { snprintf(t, sizeof t, "+0"); snprintf(t2, sizeof t2, "MAKE A NEW ONE ANY TIME"); }
-    else if (g_sh_xt) { snprintf(t, sizeof t, "+0"); snprintf(t2, sizeof t2, "GET IT AGAIN FOR FREE"); }   /* (0.4.2: paid for once - nothing back, and the library has it again for nothing) */   /* J4: sold for nothing, and the library has it again */
+    for (int k = 0; k < m; k++) w3[k] = lang_tr(w3[k]);   /* (formats and words translated, the lines drawn as built: lang.h) */
+    if (m == 0) snprintf(t, sizeof t, lang_tr("+%d FOR ITS PIECES"), refund);
+    else if (m == 1) snprintf(t, sizeof t, lang_tr("+%d FOR ITS %s"), refund, w3[0]);
+    else if (m == 2) { snprintf(t, sizeof t, lang_tr("+%d FOR ITS %s"), refund, w3[0]); snprintf(t2, sizeof t2, lang_tr("AND %s"), w3[1]); }
+    else { snprintf(t, sizeof t, lang_tr("+%d FOR ITS %s,"), refund, w3[0]); snprintf(t2, sizeof t2, lang_tr("%s AND %s"), w3[1], w3[2]); }
+    if (g_sh_jelly) { snprintf(t, sizeof t, "+0"); snprintf(t2, sizeof t2, "%s", lang_tr("MAKE A NEW ONE ANY TIME")); }
+    else if (g_sh_xt) { snprintf(t, sizeof t, "+0"); snprintf(t2, sizeof t2, "%s", lang_tr("GET IT AGAIN FOR FREE")); }   /* (0.4.2: paid for once - nothing back, and the library has it again for nothing) */   /* J4: sold for nothing, and the library has it again */
     int y = my + 16 + top + 14 + (t2[0] ? 0 : 10);             /* (one refund line: the three centered in the four) */
-    char l1x[40]; snprintf(l1x, sizeof l1x, "THIS TANK AND ITS %s", g_sh_xt ? g_sh_xt : "");
-    const char *l1 = g_sh_jelly ? "THIS TANK AND ITS JELLIES" : g_sh_xt ? l1x : "THIS TANK AND ITS FISH", *l2 = "ARE GONE FOR GOOD.";
-    draw_text(&c, mx + (SHC_W - text_w(l1, 2)) / 2, y, 2, 0xffffff, l1); y += 20;
+    char l1x[40]; snprintf(l1x, sizeof l1x, lang_tr("THIS TANK AND ITS %s"), g_sh_xt ? lang_tr(g_sh_xt) : "");
+    const char *l1 = g_sh_jelly ? lang_tr("THIS TANK AND ITS JELLIES") : g_sh_xt ? l1x : lang_tr("THIS TANK AND ITS FISH"), *l2 = "ARE GONE FOR GOOD.";
+    draw_words(&c, mx + (SHC_W - words_w(l1, 2)) / 2, y, 2, 0xffffff, l1); y += 20;   /* (built: lang.h) */
     draw_text(&c, mx + (SHC_W - text_w(l2, 2)) / 2, y, 2, 0xffffff, l2); y += 20;
-    int w = 16 + 6 + text_w(t, 2), x = mx + (SHC_W - w) / 2;
+    int w = 16 + 6 + words_w(t, 2), x = mx + (SHC_W - w) / 2;
     blit_icon(&c, x, y - 1, &icon_shop_sand_dollar_16, 255);
-    draw_text(&c, x + 22, y, 2, MSP_TEAL, t);
-    if (t2[0]) draw_text(&c, mx + (SHC_W - text_w(t2, 2)) / 2, y + 20, 2, MSP_TEAL, t2);
+    draw_words(&c, x + 22, y, 2, MSP_TEAL, t);
+    if (t2[0]) draw_words(&c, mx + (SHC_W - words_w(t2, 2)) / 2, y + 20, 2, MSP_TEAL, t2);
     int bmx, bmy, rx, rw; shm_btns(&bmx, &bmy, &y, &rx, &rw);
     const int bw = SHM_BW;
     button(&c, mx + 16, y, bw, MSP_CLOSE_H, 0x1c2f36, MSP_TEAL, "BACK", 2);
@@ -14166,7 +14229,7 @@ void render_loading(uint16_t *fb, int stride, const char *name, double clock, co
         if (age == 0) rect_fill(&c, bx - 4, by - 4, 2, 2, 0xffffff);         /* (its glint) */
     }
     char nm[24]; snprintf(nm, sizeof nm, "%s", name ? name : ""); for (char *p = nm; *p; p++) if (*p == '\n') *p = ' ';
-    draw_text(&c, (TANK_W - text_w(nm, 2)) / 2, cy + R + 26, 2, 0xffffff, nm);
+    draw_words(&c, (TANK_W - words_w(nm, 2)) / 2, cy + R + 26, 2, 0xffffff, nm);
     if (!line) line = "FILLING THE TANK";
     draw_text(&c, (TANK_W - text_w(line, 2)) / 2, cy + R + 48, 2, MSP_TEAL, line);
 }
@@ -14206,17 +14269,19 @@ int render_shelf_card_tap(float x, float y) {
  * shelves bottom right; LAST CHECKED under the title (the list works with
  * no Wi-Fi). */
 static int sh_wrap(ctx_t *c, int x, int y, int maxw, int pitch, int max_lines, uint32_t rgb, const char *s) {
-    char line[64]; int n = 0, lines = 0, maxc = maxw / 6;
+    char line[128]; int n = 0, nc = 0, lines = 0, maxc = maxw / 6;   /* n bytes, nc cells: an umlaut is two bytes, one cell */
     if (maxc > 63) maxc = 63;
     while (*s && lines < max_lines) {
         const char *w = s; while (*w == ' ') w++;
         const char *e = w; while (*e && *e != ' ') e++;
-        int wl = (int)(e - w);
-        if (n && n + 1 + wl > maxc) { line[n] = 0; draw_text(c, x, y, 1, rgb, line); y += pitch; lines++; n = 0; continue; }
-        if (n) line[n++] = ' ';
-        memcpy(line + n, w, (size_t)wl); n += wl; s = e;
+        int wl = (int)(e - w), wc = 0;
+        for (const char *p = w; p < e; p++) wc += ((unsigned char)*p & 0xC0) != 0x80;
+        if (wl > 63) wl = wc = 63;                                    /* (no word is that long; the buffer stays whole) */
+        if (n && (nc + 1 + wc > maxc || n + 1 + wl >= (int)sizeof line)) { line[n] = 0;   /* (bytes bounded too: server text) */ draw_words(c, x, y, 1, rgb, line); y += pitch; lines++; n = nc = 0; continue; }
+        if (n) { line[n++] = ' '; nc++; }
+        memcpy(line + n, w, (size_t)wl); n += wl; nc += wc; s = e;
     }
-    if (n && lines < max_lines) { line[n] = 0; draw_text(c, x, y, 1, rgb, line); lines++; }
+    if (n && lines < max_lines) { line[n] = 0; draw_words(c, x, y, 1, rgb, line); lines++; }
     return lines;
 }
 /* THE LIBRARY's pages (0.4.2: four kinds of tank, two rows a page): the caller passes the page's rows; this is the pager's count */
@@ -14234,7 +14299,7 @@ void render_library(uint16_t *fb, int stride, const library_row_t *row, int n, i
         sh_tank(&c, x0, y, SH_TW, SH_IH, r->thumb, r->locked);
         int tx = x0 + SH_TW + 12, tw = x1 - bw - 10 - tx;
         draw_text(&c, tx, y + 2, 2, r->locked ? MSP_QUIET : 0xffffff, r->name);
-        int ln = sh_wrap(&c, tx, y + 24, tw, 11, (SH_BOX_H - 38) / 11, r->locked ? MSP_QUIET : MSP_TEAL, r->line);   /* as many lines as the picture is tall */
+        int ln = sh_wrap(&c, tx, y + 24, tw, 11, (SH_BOX_H - 38) / 11, r->locked ? MSP_QUIET : MSP_TEAL, lang_tr(r->line));   /* as many lines as the picture is tall */
         int tagy = y + 24 + ln * 11 + 6;
         if (r->experimental) { sh_flask(&c, tx, tagy - 1, MSP_QUIET); draw_text(&c, tx + 10, tagy, 1, MSP_QUIET, "EXPERIMENTAL"); }
         else if (r->installed) draw_text(&c, tx, tagy, 1, MSP_QUIET, "INSTALLED");
@@ -14537,9 +14602,10 @@ int render_breed_tap(tank_t *t, float x, float y) {
     return g_bp.on ? RENDER_BT_SECOND : g_bp.a ? RENDER_BT_FIRST : RENDER_BT_UNMARKED;
 }
 static void bp_line(ctx_t *c, int X, int W, int y, const char *s, uint32_t rgb) {
-    if (text_w(s, 2) <= W - 24) { draw_text(c, X + (W - text_w(s, 2)) / 2, y, 2, rgb, s); return; }
+    s = lang_tr(s);                              /* (translated whole, then split: lang.h) */
+    if (words_w(s, 2) <= W - 24) { draw_words(c, X + (W - words_w(s, 2)) / 2, y, 2, rgb, s); return; }
     char a[40], b[40]; gm_split(s, a, b, sizeof a);
-    draw_text(c, X + (W - text_w(a, 2)) / 2, y - 10, 2, rgb, a); draw_text(c, X + (W - text_w(b, 2)) / 2, y + 10, 2, rgb, b);
+    draw_words(c, X + (W - words_w(a, 2)) / 2, y - 10, 2, rgb, a); draw_words(c, X + (W - words_w(b, 2)) / 2, y + 10, 2, rgb, b);
 }
 void render_breed_card(const tank_t *t, uint16_t *fb, int stride) {
     if (!g_bp.on) return;
@@ -14568,7 +14634,7 @@ void render_breed_card(const tank_t *t, uint16_t *fb, int stride) {
     char line[48];
     if (!g_bp.set) {
         const fish_t *yf = ia >= 0 && t->fish[ia].stage < STAGE_ADULT ? &t->fish[ia] : ib >= 0 && t->fish[ib].stage < STAGE_ADULT ? &t->fish[ib] : NULL;
-        if (yf) snprintf(line, sizeof line, "THEIR FRY ONCE %s GROWS UP", yf->name); else snprintf(line, sizeof line, "THEIR FRY COMES NEXT");
+        if (yf) snprintf(line, sizeof line, lang_tr("THEIR FRY ONCE %s GROWS UP"), yf->name); else snprintf(line, sizeof line, "THEIR FRY COMES NEXT");
         bp_line(c, X, W, Y + 156, line, 0xffffff);
         snprintf(line, sizeof line, "%d", SD_PRICE_PAIR);
         int pw = text_w(line, 2) + 22;
@@ -14580,7 +14646,7 @@ void render_breed_card(const tank_t *t, uint16_t *fb, int stride) {
     } else {
         int young, st = progression_breed_state(t, &young);
         if (ia < 0 || ib < 0) snprintf(line, sizeof line, "WAITING FOR THEM TO COME HOME");
-        else if (st == BREED_WAITING && young >= 0) snprintf(line, sizeof line, "WAITING FOR %s TO GROW UP", t->fish[young].name);
+        else if (st == BREED_WAITING && young >= 0) snprintf(line, sizeof line, lang_tr("WAITING FOR %s TO GROW UP"), t->fish[young].name);
         else if (st == BREED_FULL) snprintf(line, sizeof line, "THE TANK IS FULL - A FRY NEEDS ROOM");
         else snprintf(line, sizeof line, "THE NEXT FRY IS THEIRS");
         bp_line(c, X, W, Y + 172, line, 0xffffff);

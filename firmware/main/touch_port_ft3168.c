@@ -681,7 +681,7 @@ void touch_port_poll(tank_t *t) {
                                                   : r == SET_TAP_LIGHT ? "lights out" : r == SET_TAP_SCREEN ? "screen (1 = turned)"
                                                   : r == SET_TAP_FEED ? "auto feed (1 = on)" : r == SET_TAP_ROTATE ? "rotation (1 = locked)"
                                                   : r == SET_TAP_UPDATES ? "UPDATES" : r == SET_TAP_LINK ? "LINK" : r == SET_TAP_GFX ? "graphics quality (1 low .. 3 high)"
-                                                  : r == SET_TAP_VIG ? "vignette (1 = on)" : r == SET_TAP_GFX_PAGE ? "the GRAPHICS page (1 = opened, 0 = BACK)" : "idle seconds", v);
+                                                  : r == SET_TAP_VIG ? "vignette (1 = on)" : r == SET_TAP_GFX_PAGE ? "the GRAPHICS page (1 = opened, 0 = BACK)" : r == SET_TAP_LANG ? "language" : "idle seconds", v);
         if (r == SET_TAP_CLOSE && s_set_from_shelf) { s_set = false; s_set_from_shelf = false; s_shelf_return = true; spent_lift_set(&s_back); }   /* opened by MY TANKS's cog (0.4.2, Strato 11-12): CLOSE goes back there (main.c takes it) */
         else if (r == SET_TAP_CLOSE) { s_set = false; s_ms = !s_jelly; spent_lift_set(&s_back); }   /* back to the milestones page (2026-09-16); the release is spent
                                                                        (a jelly tank has no keeper page: back to the jellies) */

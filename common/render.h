@@ -683,6 +683,7 @@ enum { SET_TAP_NONE = 0, SET_TAP_CLOSE = 1, SET_TAP_BRIGHT = 2, SET_TAP_VOLUME =
                                       (render_vignette) - the platform saves it as a DEVICE setting ("vigoff" = !value) */
        SET_TAP_GFX_PAGE = 16,      /* the GRAPHICS tile opened its page (*value 1) or the page's BACK came back (*value 0): the
                                       settings page is still the one up - nothing for the platform to do but say so */
+       SET_TAP_LANG = 17,          /* the language chip (lang.h): *value = the language; applied and marked for the save */
        SET_TAP_GFX = 14 };         /* the GRAPHICS page's QUALITY row (0.4.2; the tile itself until the page): the setting already changed (render_gfx_level;
                                       the drawing takes it up at the next frame); *value = the level now - the platform saves it as a DEVICE setting */
 /* the settings page's foot buttons and tiles, where they are drawn (PAGE coordinates) */
@@ -775,6 +776,9 @@ void render_settings_cancel(void);              /* forget the press in hand (the
  * pixel size of one font dot (2 = caption, 3 = button). */
 int  render_text_w(const char *s, int scale);
 void render_text(uint16_t *fb, int stride, int x, int y, int scale, uint32_t rgb, const char *s);
+/* as render_text, untranslated: for fish names (lang.h) */
+int  render_name_w(const char *s, int scale);
+void render_name(uint16_t *fb, int stride, int x, int y, int scale, uint32_t rgb, const char *s);
 void render_rect(uint16_t *fb, int stride, int x, int y, int w, int h, uint32_t rgb);
 void render_rect_blend(uint16_t *fb, int stride, int x, int y, int w, int h, uint32_t rgb, int alpha);   /* alpha 0..255 */
 void render_rect_edge(uint16_t *fb, int stride, int x, int y, int w, int h, uint32_t rgb);
@@ -1112,6 +1116,8 @@ bool render_crab_collect_hit(const tank_t *t, float x, float y);   /* the crab c
 #define SET_VOL_X(pct) SET_BRT_X(pct)
 /* the old text foot's two places (UPDATES | CLOSE until 0.4.2): the ADVANCED page's CANCEL / BACK stand there */
 #define SET_UPD_W     112
+#define SET_LANG_W    56             /* the language chip after the title */
+#define SET_LANG_H    36
 #if TANK_WORN                        /* the watch: UPDATES 114..226 and CLOSE 242..334, clear of the lower corners */
 #define SET_UPD_X     114
 #undef  SET_CLOSE_X

@@ -1,6 +1,7 @@
 #include "progression.h"
 #include "tank_events.h"
 #include "version.h"
+#include "lang.h"
 #include <stddef.h>
 #include <string.h>
 #include <math.h>
@@ -195,7 +196,10 @@ typedef struct {
     /* the order of the pieces (0.3.6, later the same day): a rank per slot
      * (castle, coral, cluster, pumpkin, plant). Older saves read zeros: the
      * old fixed order. */
-    uint8_t  decor_rank[DECOR_SLOTS], pad_rank[3];
+    uint8_t  decor_rank[DECOR_SLOTS];
+    /* UI language + 1 (lang.h), in decor_rank's padding (always written as
+     * zeros, still 1912 B). 0 = never chosen: English. */
+    uint8_t  lang1, pad_rank[2];
 } save_t;
 /* the smallest PTK2 save (pre-upkeep, 2026-08-30): anything shorter is not
  * ours. Every later build wrote sizeof(save_t) of its day - 448, 1112, 1304,
@@ -284,7 +288,7 @@ SAVE_AT(sh_snack_pay, 1880); SAVE_AT(sd_snacks_paid, 1884); SAVE_AT(sh_snack_coo
 _Static_assert(sizeof(save_t) >= 1896, "SAVE LAYOUT LOCK: save_t only ever grows");   /* 1892 of fields, padded to 8 */
 SAVE_AT(pumpkin_x, 1892); SAVE_AT(pumpkin_z1, 1896); SAVE_AT(pad_pk, 1897);                            /* the pumpkin lantern, 0.3.6 */
 _Static_assert(sizeof(save_t) >= 1904, "SAVE LAYOUT LOCK: save_t only ever grows");   /* 1900 of fields, padded to 8 */
-SAVE_AT(decor_rank, 1900); SAVE_AT(pad_rank, 1905);                                                    /* the pieces' order, 0.3.6 */
+SAVE_AT(decor_rank, 1900); SAVE_AT(lang1, 1905); SAVE_AT(pad_rank, 1906);                              /* the pieces' order, 0.3.6; the language (lang.h) */
 _Static_assert(sizeof(save_t) >= 1912, "SAVE LAYOUT LOCK: save_t only ever grows");   /* 1908 of fields, padded to 8 */
 /* (the next field: SAVE_AT(its_name, 1908 or its type's alignment past it);) */
 /* NVS budget: the save is one blob in the nvs partition (0x9000, 0x6000 =
@@ -464,13 +468,13 @@ const char *const *progression_sd_earn_lines(void) {
     static char lines[SD_EARN_LINES][30]; static const char *ptr[SD_EARN_LINES + 1]; static bool made;
     if (!made) {
         /* <= 25 chars each: the modal is 336 px wide at scale 2 */
-        snprintf(lines[0], 30, "+%d  EVERY MEAL EATEN", SD_MEAL);
-        snprintf(lines[1], 30, "+%d/%d/%d  A FISH GROWS UP", SD_STAGE_JUV, SD_STAGE_ADULT, SD_STAGE_ELDER);
-        snprintf(lines[2], 30, "+%d  A NEW FRY IS BORN", SD_BIRTH);
-        snprintf(lines[3], 30, "+%d  A FISH FULLY TRUSTS", SD_TRUST);
-        snprintf(lines[4], 30, "+%d  %d ALGAE COLONIES", SD_CHORE, SD_CHORE_EVERY);
-        snprintf(lines[5], 30, "+%d  %d CM OF GRASS CUT", SD_CHORE, SD_TRIM_CM);
-        snprintf(lines[6], 30, "+%d  THE SEAHORSE SNACKS", SD_SNACK);
+        snprintf(lines[0], 30, lang_tr("+%d  EVERY MEAL EATEN"), SD_MEAL);
+        snprintf(lines[1], 30, lang_tr("+%d/%d/%d  A FISH GROWS UP"), SD_STAGE_JUV, SD_STAGE_ADULT, SD_STAGE_ELDER);
+        snprintf(lines[2], 30, lang_tr("+%d  A NEW FRY IS BORN"), SD_BIRTH);
+        snprintf(lines[3], 30, lang_tr("+%d  A FISH FULLY TRUSTS"), SD_TRUST);
+        snprintf(lines[4], 30, lang_tr("+%d  %d ALGAE COLONIES"), SD_CHORE, SD_CHORE_EVERY);
+        snprintf(lines[5], 30, lang_tr("+%d  %d CM OF GRASS CUT"), SD_CHORE, SD_TRIM_CM);
+        snprintf(lines[6], 30, lang_tr("+%d  THE SEAHORSE SNACKS"), SD_SNACK);
         for (int i = 0; i < SD_EARN_LINES; i++) ptr[i] = lines[i];
         ptr[SD_EARN_LINES] = NULL; made = true;
     }
@@ -706,17 +710,17 @@ int progression_next_fry(const tank_t *t, fry_req_t out[FRY_REQ_MAX], bool *stag
         case FRY_REQ_TRUST:
             snprintf(r->title, sizeof r->title, "TRUST");
             snprintf(r->words, sizeof r->words, "ALL FISH MUST HAVE TRUST");
-            snprintf(r->words2, sizeof r->words2, "OF AT LEAST %d OUT OF 10", need);
+            snprintf(r->words2, sizeof r->words2, lang_tr("OF AT LEAST %d OUT OF 10"), need);
             if (r->met) snprintf(r->progress, sizeof r->progress, "EVERY FISH DOES");
             else { int tenths = (int)(g[i].have * 10 + 0.5f);
-                   snprintf(r->progress, sizeof r->progress, "LOWEST NOW %d.%d", tenths / 10, tenths % 10); }
+                   snprintf(r->progress, sizeof r->progress, lang_tr("LOWEST NOW %d.%d"), tenths / 10, tenths % 10); }
             break;
         case FRY_REQ_FEED:
             snprintf(r->title, sizeof r->title, "MEALS");
             snprintf(r->words, sizeof r->words, "FEED THE FISH AT LEAST");
-            snprintf(r->words2, sizeof r->words2, "%d TIMES IN ALL", need);
+            snprintf(r->words2, sizeof r->words2, lang_tr("%d TIMES IN ALL"), need);
             if (r->met) snprintf(r->progress, sizeof r->progress, "DONE");
-            else snprintf(r->progress, sizeof r->progress, "%d OF %d SO FAR", have, need);
+            else snprintf(r->progress, sizeof r->progress, lang_tr("%d OF %d SO FAR"), have, need);
             break;
         case FRY_REQ_HOLD:
             snprintf(r->title, sizeof r->title, "HOLD");
@@ -729,23 +733,23 @@ int progression_next_fry(const tank_t *t, fry_req_t out[FRY_REQ_MAX], bool *stag
             snprintf(r->title, sizeof r->title, "GROW");
             snprintf(r->words, sizeof r->words, "THE YOUNGEST FISH MUST");
             snprintf(r->words2, sizeof r->words2, need >= STAGE_ADULT_AGE ? "GROW INTO AN ADULT" : "GROW INTO A JUVENILE");
-            snprintf(r->progress, sizeof r->progress, "%s IS %s", f->name, STAGE_WORDS[f->stage & 3]);
+            snprintf(r->progress, sizeof r->progress, lang_tr("%s IS %s"), f->name, lang_tr(STAGE_WORDS[f->stage & 3]));
             break; }
         case FRY_REQ_CHANGE: {
             const fish_t *f = &t->fish[t->n_fish - 1];
             snprintf(r->title, sizeof r->title, "CHANGE");
-            snprintf(r->words, sizeof r->words, "%s'S PERSONALITY", f->name);
+            snprintf(r->words, sizeof r->words, lang_tr("%s'S PERSONALITY"), f->name);
             snprintf(r->words2, sizeof r->words2, "MUST START TO SHIFT");
             if (r->met) snprintf(r->progress, sizeof r->progress, "DONE");
-            else snprintf(r->progress, sizeof r->progress, "%d%% THERE", (int)(r->frac * 100 + 0.5f));
+            else snprintf(r->progress, sizeof r->progress, lang_tr("%d%% THERE"), (int)(r->frac * 100 + 0.5f));
             break; }
         case FRY_REQ_GLASS: {
             int pct = (int)(g[i].have * 100 + 0.5f), limit = (int)(ALGAE_DIRTY * 100 + 0.5f);
             snprintf(r->title, sizeof r->title, "GLASS");
-            snprintf(r->words, sizeof r->words, "NO MORE THAN %d%%", limit);          /* Strato's words, 2026-09-16 */
+            snprintf(r->words, sizeof r->words, lang_tr("NO MORE THAN %d%%"), limit);          /* Strato's words, 2026-09-16 */
             snprintf(r->words2, sizeof r->words2, "ALGAE COVERAGE");
             if (r->met) snprintf(r->progress, sizeof r->progress, "CURRENTLY CLEAN ENOUGH");
-            else snprintf(r->progress, sizeof r->progress, "%d%% COVERED NOW", pct);
+            else snprintf(r->progress, sizeof r->progress, lang_tr("%d%% COVERED NOW"), pct);
             break; }
         }
     }
@@ -761,7 +765,7 @@ int progression_next_fry(const tank_t *t, fry_req_t out[FRY_REQ_MAX], bool *stag
         snprintf(r->words, sizeof r->words, "ONE GRASS BED MUST GROW");
         snprintf(r->words2, sizeof r->words2, "TALL ENOUGH TO HIDE IN");
         if (r->met) snprintf(r->progress, sizeof r->progress, "A NURSERY BED IS READY");
-        else snprintf(r->progress, sizeof r->progress, "TALLEST BED %d%% THERE", (int)(r->frac * 100 + 0.5f));
+        else snprintf(r->progress, sizeof r->progress, lang_tr("TALLEST BED %d%% THERE"), (int)(r->frac * 100 + 0.5f));
     }
     return n;
 }
@@ -858,6 +862,7 @@ static bool load_save(tank_t *t, int64_t *saved_unix) {
     tank_screen_set(t, sv.screen_turned != 0);
     t->orient_lock = (sv.orient & 1) != 0; if (t->orient_lock) t->orient_inv = (sv.orient & 2) != 0;
     t->autofeed_off = sv.autofeed_off != 0;
+    lang_now = sv.lang1 && sv.lang1 <= LANG_N ? (uint8_t)(sv.lang1 - 1) : lang_default;
     t->light_override = false; t->light_on = true;   /* never restored (2026-09-15): a saved
                                                       * override once froze a tank in permanent day */
     t->feed_spot_x = sv.feed_spot_x; t->player_feedings = sv.player_feedings;
@@ -1128,6 +1133,7 @@ bool progression_save(tank_t *t) {
     sv.screen_turned = t->screen_turned;
     sv.orient = (uint8_t)(t->orient_lock ? 1 | (t->orient_inv ? 2 : 0) : 0);
     sv.autofeed_off = t->autofeed_off;
+    sv.lang1 = (uint8_t)(lang_now + 1);
     sv.arrival_pending = s_arrival_pending; sv.n_fish = (uint8_t)t->n_fish;
     sv.feed_spot_x = t->feed_spot_x; sv.player_feedings = t->player_feedings;
     sv.hold_approaches = t->hold_approaches; sv.tank_ms_bits = t->tank_ms_bits;

@@ -21,7 +21,64 @@ permissions:
   contents: write
 
 jobs:
+  # one job per board (docs/BOARDS.md), in parallel: the same tree on top of
+  # each board's sdkconfig fragment, each in its own build dir
+  firmware:
+    name: firmware (${{ matrix.name }})
+    if: github.repository == 'mediacutlet/pocket-tank'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - { name: "the 1.8", board: amoled18, dir: build, command: "idf.py build" }
+          - { name: "the round board (1.75C)", board: round175c, dir: build-round, command: "idf.py -B build-round -DSDKCONFIG=build-round/sdkconfig \"-DSDKCONFIG_DEFAULTS=sdkconfig.defaults;sdkconfig.round\" build" }
+          - { name: "the watch (2.06)", board: watch206, dir: build-watch, command: "idf.py -B build-watch -DSDKCONFIG=build-watch/sdkconfig \"-DSDKCONFIG_DEFAULTS=sdkconfig.defaults;sdkconfig.watch\" build" }
+          - { name: "the square (2.16)", board: square216, dir: build-square, command: "idf.py -B build-square -DSDKCONFIG=build-square/sdkconfig \"-DSDKCONFIG_DEFAULTS=sdkconfig.defaults;sdkconfig.square\" build" }
+    env:
+      IDF_VERSION: v5.4.1
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0          # git describe wants the tags
+      - name: Signing key
+        env:
+          OTA_SIGNING_KEY: ${{ secrets.OTA_SIGNING_KEY }}
+        run: |
+          test -n "$OTA_SIGNING_KEY" || { echo "no OTA_SIGNING_KEY secret"; exit 1; }
+          mkdir -p firmware/keys
+          printf '%s\n' "$OTA_SIGNING_KEY" > firmware/keys/ota_signing_key.pem
+      # restore only: a tag run reuses main's ccache (installer.yml saves it) and never writes its own
+      - uses: actions/cache/restore@v4
+        with:
+          path: .ccache
+          key: ccache-${{ matrix.board }}-idf-${{ env.IDF_VERSION }}-${{ github.sha }}
+          restore-keys: ccache-${{ matrix.board }}-idf-${{ env.IDF_VERSION }}-
+      - name: Build (signed) - ${{ matrix.name }}
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: ${{ env.IDF_VERSION }}
+          target: esp32s3
+          path: firmware
+          extra_docker_args: -e IDF_CCACHE_ENABLE=1 -e CCACHE_DIR=/app/${{ github.repository }}/.ccache -e CCACHE_MAXSIZE=400M
+          command: ccache -z && ${{ matrix.command }} && ccache -s
+      - name: Drop the signing key
+        if: always()
+        run: rm -f firmware/keys/ota_signing_key.pem
+      # only what tools/make_ota_manifest.py reads: the signed pocket_tank.bin (+ the rest of the flash set)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.dir }}
+          if-no-files-found: error
+          retention-days: 1
+          path: |
+            firmware/${{ matrix.dir }}/flasher_args.json
+            firmware/${{ matrix.dir }}/*.bin
+            firmware/${{ matrix.dir }}/bootloader/bootloader.bin
+            firmware/${{ matrix.dir }}/partition_table/partition-table.bin
+
   ota:
+    needs: firmware
     if: github.repository == 'mediacutlet/pocket-tank'
     runs-on: ubuntu-latest
     steps:
@@ -32,42 +89,10 @@ jobs:
       # annotated tag itself, or the note below is the commit's message
       - name: The tag's own message
         run: git fetch --force origin "refs/tags/${GITHUB_REF_NAME}:refs/tags/${GITHUB_REF_NAME}"
-      - name: Signing key
-        env:
-          OTA_SIGNING_KEY: ${{ secrets.OTA_SIGNING_KEY }}
-        run: |
-          test -n "$OTA_SIGNING_KEY" || { echo "no OTA_SIGNING_KEY secret"; exit 1; }
-          mkdir -p firmware/keys
-          printf '%s\n' "$OTA_SIGNING_KEY" > firmware/keys/ota_signing_key.pem
-      - name: Build (signed) - the 1.8
-        uses: espressif/esp-idf-ci-action@v1
+      - uses: actions/download-artifact@v4
         with:
-          esp_idf_version: v5.4.1
-          target: esp32s3
-          path: firmware
-      # the other boards (docs/BOARDS.md): the same tree on top of their
-      # sdkconfig fragment, each in its own build dir
-      - name: Build (signed) - the round board (1.75C)
-        uses: espressif/esp-idf-ci-action@v1
-        with:
-          esp_idf_version: v5.4.1
-          target: esp32s3
-          path: firmware
-          command: idf.py -B build-round -DSDKCONFIG=build-round/sdkconfig "-DSDKCONFIG_DEFAULTS=sdkconfig.defaults;sdkconfig.round" build
-      - name: Build (signed) - the watch (2.06)
-        uses: espressif/esp-idf-ci-action@v1
-        with:
-          esp_idf_version: v5.4.1
-          target: esp32s3
-          path: firmware
-          command: idf.py -B build-watch -DSDKCONFIG=build-watch/sdkconfig "-DSDKCONFIG_DEFAULTS=sdkconfig.defaults;sdkconfig.watch" build
-      - name: Build (signed) - the square (2.16)
-        uses: espressif/esp-idf-ci-action@v1
-        with:
-          esp_idf_version: v5.4.1
-          target: esp32s3
-          path: firmware
-          command: idf.py -B build-square -DSDKCONFIG=build-square/sdkconfig "-DSDKCONFIG_DEFAULTS=sdkconfig.defaults;sdkconfig.square" build
+          pattern: build*
+          path: firmware        # each board's artifact lands in firmware/<its build dir>
       - name: OTA image + manifest
         run: |
           TAG="${GITHUB_REF_NAME}"
@@ -77,7 +102,6 @@ jobs:
           done
           ls -la ota
           test "$(ls ota/latest-*.json | wc -l)" -eq 4 || { echo "expected four board manifests"; exit 1; }
-          rm -f firmware/keys/ota_signing_key.pem
       - name: Attach to the release
         env:
           GH_TOKEN: ${{ github.token }}

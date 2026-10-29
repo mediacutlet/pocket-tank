@@ -97,4 +97,16 @@ void adv_render(uint16_t *fb, int stride);
 int  adv_pick(void);
 void adv_cross_target(int i, float *x, float *y);   /* cross i's centre, frame px */
 void adv_check_target(float *x, float *y);
+
+/* (this fork) THE BATTERY ROW is for a board whose charger the firmware sets: the AXP2101 on upstream's
+ * boards. No 320 x 240 board has one - no AXP2101 answers there, so battery_port_set_cell returns false,
+ * and nothing in the firmware reaches the CYD's own LiPo charger - so there the page offers the TOUCH row alone, and
+ * no tap reaches a size, SET or the warning. Shown, the row would read the 1.8's numbers (the stock chain
+ * above falls through to them) and "set" a charge current nothing applies, a smaller one included.
+ * A plain 0 / 1, so a C `if` on it keeps both branches compiled in every world. */
+#ifdef CONFIG_POCKET_TANK_320X240
+#define ADV_BATTERY_ROW 0
+#else
+#define ADV_BATTERY_ROW 1
+#endif
 #endif

@@ -1,6 +1,7 @@
 /* audio_port.h - the device side of the sound design (docs/AUDIO.md):
- * the mixer in common/audio.c fed to the ES8311 over I2S, the NS4150B amp
- * on GPIO46, the codec's analog rail (ALDO1) up only while something
+ * the mixer in common/audio.c fed to the ES8311 over I2S, the power amp
+ * (the board's, board_pins.h), the codec's analog rail (ALDO1, where a PMIC
+ * switches it) up only while something
  * plays. A player task on core 1 (the LLM core) renders 10 ms blocks; the
  * tank task only calls audio_port_play, which enqueues and returns.
  *

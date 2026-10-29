@@ -350,8 +350,13 @@ static void run(tank_t *t, char *line) {
     } else if (!strcmp(c, "advanced")) {        /* the hidden ADVANCED page (0.3.9.2) without the BOOT chord: advanced [off] */
         bool on = argc < 2 || strcmp(argv[1], "off");
         if (on) touch_port_open_advanced(); else adv_close();
+#if ADV_BATTERY_ROW
         ESP_LOGI(TAG, "advanced page %s | battery %d mAh -> %d mA (the board's own %d mAh) | touch %s", on ? "up (BACK ends it)" : "closed",
                  adv_cell(), adv_charge_ma(adv_cell()), ADV_CELL_STOCK, touch_fit_is_none(adv_touch_fit()) ? "the board's own map" : "the keeper's map");
+#else   /* (this fork) a 320 x 240 board's page is TOUCH alone (advanced.h): no size to report */
+        ESP_LOGI(TAG, "advanced page %s | touch %s | no battery row (no charger to set)", on ? "up (BACK ends it)" : "closed",
+                 touch_fit_is_none(adv_touch_fit()) ? "the board's own map" : "the keeper's map");
+#endif
     } else if (!strcmp(c, "milestones")) {
         bool on = argc < 2 || strcmp(argv[1], "off");
         touch_port_show_milestones(on); ESP_LOGI(TAG, "milestones page %s", on ? "up (CLOSE button ends it)" : "closed");
@@ -542,7 +547,9 @@ static void run(tank_t *t, char *line) {
                  m, m & 1 ? " +touch" : "", m & 2 ? " +panel" : "", m & 4 ? " +imu" : "", m & 8 ? " +qspi held low" : "", m ? "" : " nothing extra");
     } else if (!strcmp(c, "deepsleep")) {
         int n = argc > 1 ? atoi(argv[1]) : 0;
+#if !CONFIG_POCKET_TANK_SLEEP_NONE && !CONFIG_POCKET_TANK_SLEEP_SCREEN && !CONFIG_POCKET_TANK_SLEEP_LIGHT   /* deepsleep (main.c's SLEEP_MODE_DEEP) */
         ESP_LOGI(TAG, "%s - the USB port vanishes until the wake", n > 0 ? "5 s grace, then deep sleep with the timer" : "the keeper's sleep: the grace, then power-off (the PWR key boots it)");
+#endif                                          /* the other sleep modes say what they do themselves (main.c) */
         vTaskDelay(pdMS_TO_TICKS(50));
         device_sleep(n);
     } else if (!strcmp(c, "keytime")) {
@@ -567,7 +574,9 @@ static void run(tank_t *t, char *line) {
         while (battery_port_key_poll()) { }
         ESP_LOGI(TAG, "pwrpin: over, %d changes, reads %d", changes, last);
     } else if (!strcmp(c, "poweroff")) {
+#if !CONFIG_POCKET_TANK_SLEEP_NONE && !CONFIG_POCKET_TANK_SLEEP_SCREEN && !CONFIG_POCKET_TANK_SLEEP_LIGHT
         ESP_LOGI(TAG, "power-off now (the PWR key or USB boots it) - the USB port vanishes");
+#endif
         vTaskDelay(pdMS_TO_TICKS(50));
         device_poweroff();
     } else if (!strcmp(c, "snd")) {

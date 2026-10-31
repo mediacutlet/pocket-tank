@@ -104,7 +104,7 @@ static bool s_prefetch_pending; static uint16_t *s_prefetch_fb; static unsigned 
  * is primed for its next frame. A whole page says render_touch_all. */
 #define GRASS_CACHE_ON 0                                /* the back grass from a cached scene, refreshed every GRASS_CACHE_MS (2026-10-24; director `grasscache`) */
 #define GRASS_CACHE_MS 160
-#define GRASS_LOOP_ON 1                                 /* THE GRASS LOOP (0.3.9.3, render.c): the back grass baked into a loop of moments of its sway; director `grassloop` */
+#define GRASS_LOOP_ON 0                                 /* THE GRASS LOOP (0.3.9.3, render.c): the back grass baked into a loop of moments of its sway; director `grassloop` */
 #define GRASS_LOOP_BUDGET (2816u * 1024)                /* PSRAM for its moments, at most - and never past the plan's headroom (gl_alloc) */
 #if defined(TANK_SQUARE)                                /* its moments, stepped one a frame (render_grass_loop_lock): the board's frame rate x half the */
 #define GRASS_LOOP_MOMENTS 64                           /* sway's 7 s, so the sway keeps about its period - the square ~17.5 fps, */

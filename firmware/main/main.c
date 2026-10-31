@@ -597,6 +597,14 @@ static uint16_t *s_sh_thumbs;                                 /* the page's eigh
 static void shelf_close(void) { touch_port_show_shelf(false); s_sh_card = -1; s_sh_lib = false; s_sh_ren = false; s_sh_rm = false; s_sh_moving = false; }
 static void shelf_toggle(void) {
     if (touch_port_shelf()) { shelf_close(); ESP_LOGI(TAG, "BOOT twice: MY TANKS closed"); return; }
+    if (setup_active() && touch_port_touch_lock()) {          /* a page that opens by itself (a new tank's welcome after its swap-in, a fry's
+                                                                 birth flow) on the locked glass took no tap and kept MY TANKS shut: no way back
+                                                                 (2026-10-31, a keeper's TANK 2 stuck on its welcome). BOOT twice unlocks it here */
+        touch_port_set_touch_lock(false); nvs_u8_put("tlock", 0); s_shelf_baked = false;
+        tank_emit(TEV_CONFIRM, -1);
+        ESP_LOGI(TAG, "BOOT twice over a page on the locked glass: touch unlocked");
+        return;
+    }
     if (setup_active() || touch_port_confirm_up()) { ESP_LOGI(TAG, "BOOT twice: not over a naming / placement page or the reset prompt"); return; }
     touch_port_dismiss();                                     /* any page closes first */
     s_shelf_want = true; s_sh_page = shelf_now()->pos / 8; s_sh_card = -1; s_sh_lib = false;
@@ -1206,10 +1214,10 @@ static void tank_task(void *arg) {
                 const notice_t *nt = notice_current();
                 if (nt) render_notice(&tank, fb[cur], TANK_W, nt->kind, nt->fish, nt->bit, 1.0f - nt->age / NOTICE_UP_S);
             }
-            if (touch_port_lock_hint() && !touch_port_shelf())   /* a touch on the locked glass: the way back */
-                render_touch_lock_hint(fb[cur], TANK_W);
             if (setup_active())                  /* first-run setup: over the tank, under the prompt */
                 render_setup(&tank, fb[cur], TANK_W, tank.clock);
+            if (touch_port_lock_hint() && !touch_port_shelf())   /* a touch on the locked glass: the way back (over a setup page, */
+                render_touch_lock_hint(fb[cur], TANK_W);         /* whose panel hid it) */
             if (touch_port_confirm_up())         /* reset prompt: over everything, fish still swim */
                 render_confirm_reset(fb[cur], TANK_W, touch_port_confirm_frac());
             if (loading) { render_loading(fb[cur], TANK_W, shelf_now()->name, tank.clock); if (USE_RESTORE) render_touch_all(); }   /* (over everything: the whole frame) */

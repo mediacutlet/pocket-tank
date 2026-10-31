@@ -39,6 +39,12 @@ static uint32_t xr(tank_t *t) {
 float tank_randf(tank_t *t, float lo, float hi) {
     return lo + (hi - lo) * (float)(xr(t) & 0xffffff) / 16777215.0f;
 }
+static bool box_clear_beds(const tank_t *t, float x0, float x1, float y1);   /* SWIM DEPTH (below) */
+static float depth_hash(const tank_t *t, float x, float y, uint32_t salt);
+static uint8_t critter_depth_roll(const tank_t *t, float x, uint32_t salt) {   /* a floor critter's want against the grass: a fifth behind, a third through */
+    float r = depth_hash(t, x, 0, salt);
+    return r < 0.22f ? FISH_DEPTH_BEHIND : r < 0.55f ? FISH_DEPTH_THROUGH : FISH_DEPTH_FRONT;
+}
 static float clampf(float v, float lo, float hi) {
     return v < lo ? lo : v > hi ? hi : v;
 }
@@ -239,6 +245,7 @@ void tank_make_fish(tank_t *t, int slot, int preset, float sociable, float bold,
     f->goal.id = GOAL_EXPLORE; f->goal.urgency = 3; f->goal.confidence = 1; f->goal.runner_up = GOAL_COUNT;
     f->goal_age = 0; f->ask_age = 99; f->dart_timer = 0; f->dart_x = f->x; f->dart_y = f->y; f->hesitate = 0;
     f->bored = 0; f->goal_prev = GOAL_COUNT; f->zone_last = -1; f->explore_set = false; f->breather = 0;
+    f->gdepth = FISH_DEPTH_FRONT; f->gdepth_want = 0xff; f->gdepth_rest = FISH_DEPTH_BEHIND; f->pdepth = FISH_DEPTH_FRONT; f->pdepth_want = 0xff;
     /* its own order of first visits - from the slot, not the tank's RNG, so a
      * seeded run (the selftests) draws the same numbers it did before */
     for (int z = 0; z < 6; z++) f->zone_seen[z] = -(float)((slot * 37 + z * 13) % 60);
@@ -1087,6 +1094,7 @@ static void snail_tick(tank_t *t, float dt) {
             /* at each end it picks its lane for the walk back: in front of the IN FRONT pieces, or behind
                them (from the clock's bits, not the tank's RNG: a seeded run is the same run) */
             if (turned && tank_floor_clear(t, t->snail_x, 21)) t->snail_front = ((((uint32_t)(t->clock * 997.0f) * 2654435761u) >> 20) % 10) < 6;   /* 60/40 in front (LANE_FRONT_ODDS), and only in the clear - never a pop (10-24) */
+            if (turned) t->snail_gdepth_want = critter_depth_roll(t, t->snail_x, 0x3c1u);   /* SWIM DEPTH: and its depth against the grass for the walk */
         }
     }
     snail_clamp(&t->snail_x, &t->snail_y, SNAIL_FLOOR_Y + t->snail_dy);
@@ -1223,6 +1231,7 @@ static void urchin_tick(tank_t *t, float dt) {
         t->urchin_to = tank_randf(t, urchin_lo(), urchin_hi());
         float r = tank_randf(t, 0, 1);                                                           /* the roll is always drawn: the RNG's run is the same with or without a piece */
         if (tank_floor_clear(t, t->urchin_x, 19)) t->urchin_front = r < LANE_FRONT_ODDS;       /* its lane for this move (a keeper's ask, 10-24), only in the clear */
+        t->urchin_gdepth_want = critter_depth_roll(t, t->urchin_to, 0x3c2u);                    /* SWIM DEPTH: its depth against the grass for it */
     }
     float d = t->urchin_to - t->urchin_x;
     t->urchin_x += (d > 0 ? 1 : -1) * fminf(fabsf(d), URCHIN_PX_S * 0.7f * dt);
@@ -1346,6 +1355,14 @@ bool tank_crab_hit(const tank_t *t, float x, float y) {
     if (!(t->sd_unlocks & SD_ITEM_CRAB) || t->cr_x < 0) return false;
     return tank_dist(t->cr_x, CR_FLOOR_Y - t->cr_y - 10, x, y) <= CR_TAP_RADIUS;
 }
+/* a sand dollar held up (0.3.9.4, Dragonshadow on Discord: "The snail is in the way. I can only tap the snail ... then
+   have the shrimp come over and block me. Before I can tap the coin it disappears"): while the crab holds one its tap
+   comes FIRST - before the fish, the snail, the shrimp and the rest - on the crab or round the coin over its head
+   (28 px over its feet; the circle reaches the 1.8's high reading of a floor tap) */
+bool tank_crab_find_hit(const tank_t *t, float x, float y) {
+    if (t->cr_find <= 0) return false;
+    return tank_crab_hit(t, x, y) || tank_dist(t->cr_x, CR_FLOOR_Y - t->cr_y - 28, x, y) <= CR_TAP_RADIUS;
+}
 /* a pellet resting on the floor, the nearest; -1 = none */
 static int crab_pellet(const tank_t *t) {
     int best = -1; float bd = 1e9f;
@@ -1385,6 +1402,7 @@ static void crab_set_walk(tank_t *t, float to, int mode) {
     t->cr_next_dig = mode == CR_WALK && t->cr_cave < 0 && dig;
     if (tank_floor_clear(t, t->cr_x, CR_HALF_W)) t->cr_lane_front = t->cr_next_dig || r < LANE_FRONT_ODDS;
     else if (!t->cr_lane_front) t->cr_next_dig = false;
+    t->cr_gdepth_want = t->cr_next_dig ? FISH_DEPTH_FRONT : critter_depth_roll(t, t->cr_x, 0x3c3u);   /* SWIM DEPTH: a dig in front, as its lane */
     crab_mode(t, mode);
 }
 /* going for pellet f: a shrimp of the school after it, on the sand within CR_SHOO_PX of its body's edge - claws up, the
@@ -1785,6 +1803,30 @@ static bool sh_frond_ok(const tank_t *t, int b, int i) {
     float bx0; int n; veg_bed_base(t, b, &bx0, &n);
     return i >= 0 && i < n && t->veg_h[b][i] >= SH_MIN_H;
 }
+/* SWIM DEPTH (0.3.9.4): is a box clear of every bed of grass / every piece? (an animal's depth changes only there: nothing pops
+   through a frond or a piece). The pieces by their footprint and height (render.c's sprites) */
+static bool box_clear_beds(const tank_t *t, float x0, float x1, float y1) {
+    for (int b = 0; b < tank_veg_beds(t); b++) {
+        if (t->veg_growth[b] < VEG_BARE) continue;
+        float bx0, bx1, top; int n; tank_veg_bed(t, b, &bx0, &bx1, &top, &n);
+        if (x1 > bx0 - 8 && x0 < bx1 + 8 && y1 > top) return false;
+    }
+    return true;
+}
+static bool box_clear_pieces(const tank_t *t, float x0, float x1, float y1) {
+    static const int P[5] = { 2, 3, 4, 8, 9 }, H[5] = { 164, 92, 120, 82, 208 };   /* the castle, coral, reef cluster, pumpkin, volcano */
+    for (int k = 0; k < 5; k++) {
+        if (!tank_decor_in(t, P[k])) continue;
+        float cx = tank_decor_x(t, P[k]), hw = tank_decor_half_w(P[k]) + 4;
+        if (x1 > cx - hw && x0 < cx + hw && y1 > TANK_BOT - 16 - H[k]) return false;
+    }
+    return true;
+}
+/* ... and a roll of its own (a hash, as the lanes': the tank's random stream untouched) */
+static float depth_hash(const tank_t *t, float x, float y, uint32_t salt) {
+    uint32_t h = ((uint32_t)(t->clock * 997.0f) ^ (uint32_t)(x * 31.0f) * 2654435761u ^ (uint32_t)(y * 17.0f) * 40503u ^ salt) * 2654435761u;
+    return ((h >> 12) & 0xffff) / 65536.0f;
+}
 static bool sh_frond_front(const tank_t *t, int b, int i) { (void)i; return tank_bed_z(t, b) == DECOR_Z_FRONT; }
 /* the coil's spot on a blade: the spine's x (no sway: the renderer adds it)
  * and part of the way up the blade from the root line */
@@ -1857,6 +1899,7 @@ static void sh_take(tank_t *t, const sh_cand_t *c) {
     t->sh_aref = c->kind == SH_ANCHOR_POST ? tank_decor_x(t, c->item) : 0;
     t->sh_front = c->front != 0;                                           /* its lane switches as it lets go, not mid-hold */
     t->sh_tx = c->x; t->sh_ty = c->y;
+    t->sh_gdepth_want = c->kind == SH_ANCHOR_BLADE ? FISH_DEPTH_THROUGH : FISH_DEPTH_FRONT;   /* SWIM DEPTH: coiled on a blade, through the grass */
 }
 /* an anchor to hold, from here: the NEAREST wins, a blade before a post (and
  * a taller blade a little sooner), with a little chance in it, so it hops
@@ -2019,10 +2062,19 @@ static void sh_snack(tank_t *t, float dt) {
         return;
     }
 }
+static void seahorse_depth(tank_t *t) {             /* SWIM DEPTH: drifting, its own roll (once a drift); its depth taken up clear of every bed */
+    if (t->sh_mode == SH_DRIFT && !t->sh_drift_rolled) {
+        float r = depth_hash(t, t->sh_x, t->sh_y, 0x5e4u);
+        t->sh_gdepth_want = r < 0.2f ? FISH_DEPTH_BEHIND : r < 0.5f ? FISH_DEPTH_THROUGH : FISH_DEPTH_FRONT;
+    }
+    t->sh_drift_rolled = t->sh_mode == SH_DRIFT;
+    if (t->sh_gdepth != t->sh_gdepth_want && box_clear_beds(t, t->sh_x - 20, t->sh_x + 20, t->sh_y + 30)) t->sh_gdepth = t->sh_gdepth_want;
+}
 static void seahorse_tick(tank_t *t, float dt) {
     if (!(t->sd_unlocks & SD_ITEM_SEAHORSE)) return;
     if (t->sh_x < 0) tank_seahorse_place(t);
     t->sh_s += dt;
+    seahorse_depth(t);
     sh_snack(t, dt);                                               /* in the dark too: the fish eat then (0.3.7) */
     bool finger = t->hold_active && t->hold_time >= HOLD_ATTRACT_S;
     if (finger) {                                                  /* the one thing that moves it at once */
@@ -2154,6 +2206,8 @@ static void shrimp_goal(tank_t *t, bool refusing) {
         t->shrimp_tx = x1 - x0 > 16 ? tank_randf(t, x0 + 8, x1 - 8) : (x0 + x1) * 0.5f;
         t->shrimp_ty = fminf(top + tank_randf(t, -8, 10), FOOD_FLOOR_Y - SHRIMP_RISE_MIN);
         t->shrimp_tt = tank_randf(t, 22, 32);                           /* the drift up is slow; then a while at the top */
+        { float r2 = depth_hash(t, t->shrimp_tx, t->shrimp_ty, 0x5a1u);   /* SWIM DEPTH: up a bed, through it mostly */
+          t->shr_gdepth_want = r2 < 0.6f ? FISH_DEPTH_THROUGH : FISH_DEPTH_FRONT; t->shr_pdepth_want = FISH_DEPTH_FRONT; }
         return;
     }
     if ((refusing || r < SHRIMP_RISE_P + 0.62f) && beds > 0) {     /* the grass: the school's cover */
@@ -2164,6 +2218,14 @@ static void shrimp_goal(tank_t *t, bool refusing) {
     t->shrimp_ty = refusing || tank_randf(t, 0, 1) < 0.8f ? FOOD_FLOOR_Y - tank_randf(t, 12, 26)
                                                           : FOOD_FLOOR_Y - tank_randf(t, 30, 64);   /* a swim up into open water */
     t->shrimp_tt = tank_randf(t, 6, 11);
+    {   /* SWIM DEPTH (0.3.9.4): at the foot of the grass, tucked in behind or through it most of the time; out on the sand and in
+           open water, in front; now and then behind the pieces on the way */
+        float r2 = depth_hash(t, t->shrimp_tx, t->shrimp_ty, 0x5a2u), r3 = depth_hash(t, t->shrimp_ty, t->shrimp_tx, 0x5a3u);
+        bool cover = false; int nb = tank_veg_beds(t);
+        for (int b = 0; b < nb && !cover; b++) { float x0, x1; tank_veg_bed(t, b, &x0, &x1, NULL, NULL); cover = t->shrimp_tx >= x0 && t->shrimp_tx <= x1; }
+        t->shr_gdepth_want = !cover ? FISH_DEPTH_FRONT : r2 < 0.35f ? FISH_DEPTH_BEHIND : r2 < 0.75f ? FISH_DEPTH_THROUGH : FISH_DEPTH_FRONT;
+        t->shr_pdepth_want = r3 < (cover ? 0.25f : 0.10f) ? FISH_DEPTH_BEHIND : FISH_DEPTH_FRONT;
+    }
 }
 /* the grass's top over x: the bed under it, or the beds' average over open
  * sand. A pellet that has sunk below it is the shrimp's to take, still falling
@@ -2216,6 +2278,15 @@ static void shrimp_tick(tank_t *t, float dt) {
             if (d < best) { best = d; fp = k; }
         }
     t->shrimp_fp = (int8_t)fp;
+    {   /* SWIM DEPTH: the school's depth - in front chasing a pellet, hiding when fleeing the crab, else its goal's; taken up
+           only with the whole school clear of every bed / piece */
+        float bx0 = 1e9f, bx1 = -1e9f, by1 = -1e9f;
+        for (int i = 0; i < n; i++) { bx0 = fminf(bx0, t->shrimp[i].x - 12); bx1 = fmaxf(bx1, t->shrimp[i].x + 12); by1 = fmaxf(by1, t->shrimp[i].y + 6); }
+        uint8_t gw = fp >= 0 ? FISH_DEPTH_FRONT : flee ? FISH_DEPTH_BEHIND : t->shr_gdepth_want;
+        uint8_t pw = fp >= 0 ? FISH_DEPTH_FRONT : flee ? FISH_DEPTH_BEHIND : t->shr_pdepth_want;
+        if (t->shr_gdepth != gw && box_clear_beds(t, bx0, bx1, by1)) t->shr_gdepth = gw;
+        if (t->shr_pdepth != pw && box_clear_pieces(t, bx0, bx1, by1)) t->shr_pdepth = pw;
+    }
     float gx = fp >= 0 ? t->food[fp].x : t->shrimp_tx;
     float gy = fp < 0 ? t->shrimp_ty : t->food[fp].floor_s > 0 ? FOOD_FLOOR_Y - 2 : t->food[fp].y;   /* on the floor, or still sinking */
     float spread = 40 + n * 9;                                    /* the school's width: 76 px for 4, 130 for 10 */
@@ -3015,6 +3086,60 @@ static void hold_ring_point(const tank_t *t, float ph, float r, float *x, float 
     *y = t->hold_y + s * (s >= 0 ? room[1] : room[3]);
     tank_glass_clamp(x, y, 22);
 }
+/* SWIM DEPTH (0.3.9.4, docs/swim-depth.md; Strato: the goal and the temperament choose it, no new model): how a
+   fish carries out its goal against the back grass. Resting it tucks into the grass (mysiak: "Maybe they could hide
+   at least while resting"), inspecting it weaves through, fleeing it hides; it feeds and plays at the bubbles in
+   front, where the keeper sees it; exploring mostly in front. A shy fish hides more */
+static float depth_roll(const tank_t *t, const fish_t *f, uint32_t salt) {   /* (its own hash, as the lanes': the tank's random stream untouched) */
+    uint32_t h = ((uint32_t)(t->clock * 997.0f) ^ (uint32_t)(f->x * 31.0f) * 2654435761u ^ (uint32_t)(f->y * 17.0f) * 40503u ^ salt) * 2654435761u;
+    return ((h >> 12) & 0xffff) / 65536.0f;
+}
+static uint8_t depth_pick(tank_t *t, const fish_t *f, goal_id_t g) {
+    (void)t;
+    float shy = 1.0f - clampf(f->bold, 0, 1), r = depth_roll(t, f, 0x9e37u), pb, pt;   /* behind, through: the rest IN FRONT */
+    switch (g) {
+    case GOAL_REST:          pb = 0.30f + 0.25f * shy; pt = 0.45f; break;
+    case GOAL_INSPECT_REEF:  pb = 0.15f + 0.15f * shy; pt = 0.55f; break;
+    case GOAL_FLEE_SHADOW:   pb = 0.85f; pt = 0.15f; break;
+    case GOAL_DART_PLAY:     pb = 0.05f; pt = 0.45f; break;
+    case GOAL_EXPLORE: case GOAL_FOLLOW_FRIEND: pb = 0.05f + 0.15f * shy; pt = 0.15f + 0.10f * shy; break;
+    default:                 return FISH_DEPTH_FRONT;
+    }
+    return r < pb ? FISH_DEPTH_BEHIND : r < pb + pt ? FISH_DEPTH_THROUGH : FISH_DEPTH_FRONT;
+}
+/* ... and against the pieces (phase 2): behind them only in passing - fleeing, poking round the reef, now and then
+   exploring; never at rest, never feeding (Strato's D2: a fish behind the castle vanishes, the kids must find it) */
+static uint8_t pdepth_pick(tank_t *t, const fish_t *f, goal_id_t g) {
+    float shy = 1.0f - clampf(f->bold, 0, 1), r = depth_roll(t, f, 0x7f4au), pb;
+    switch (g) {
+    case GOAL_FLEE_SHADOW:   pb = 0.85f; break;
+    case GOAL_INSPECT_REEF:  pb = 0.40f + 0.20f * shy; break;
+    case GOAL_EXPLORE: case GOAL_FOLLOW_FRIEND: pb = 0.15f + 0.25f * shy; break;
+    case GOAL_DART_PLAY:     pb = 0.20f; break;
+    default:                 return FISH_DEPTH_FRONT;   /* REST, SEEK_FOOD, VISIT_BUBBLES */
+    }
+    return r < pb ? FISH_DEPTH_BEHIND : FISH_DEPTH_FRONT;
+}
+/* ... clear of every piece in the tank (each one's footprint and height: render.c's sprites) */
+static bool pieces_clear(const tank_t *t, const fish_t *f) {
+    static const int P[5] = { 2, 3, 4, 8, 9 }, H[5] = { 164, 92, 120, 82, 208 };   /* the castle, coral, reef cluster, pumpkin, volcano */
+    float hw = 34 * f->size + 6, hh = 26 * f->size + 6;
+    for (int k = 0; k < 5; k++) {
+        if (!tank_decor_in(t, P[k])) continue;
+        if (fabsf(tank_decor_x(t, P[k]) - f->x) < hw + tank_decor_half_w(P[k]) + 4 && f->y + hh > TANK_BOT - 16 - H[k]) return false;
+    }
+    return true;
+}
+/* ... clear of every bed of back grass (a frond would pop over or off it if the depth changed here) */
+static bool grass_clear(const tank_t *t, const fish_t *f) {
+    float hw = 34 * f->size + 6, hh = 26 * f->size + 6;
+    for (int b = 0; b < tank_veg_beds(t); b++) {
+        if (t->veg_growth[b] < VEG_BARE) continue;   /* (every bed: the sword plant IN FRONT too, 0.3.9.4) */
+        float x0, x1, top; int n; tank_veg_bed(t, b, &x0, &x1, &top, &n);
+        if (f->x + hw > x0 - 8 && f->x - hw < x1 + 8 && f->y + hh > top) return false;
+    }
+    return true;
+}
 static void update_fish(tank_t *t, int idx, float dt) {
     fish_t *f = &t->fish[idx];
     /* drives (prototype rates, speed rescaled by the same 0.55) */
@@ -3058,7 +3183,15 @@ static void update_fish(tank_t *t, int idx, float dt) {
         if (f->energy >= BREATHER_TO || t->night || f->goal.id == GOAL_FLEE_SHADOW || (t->ravenous && f->hunger > 6.5f)) f->breather = 0;
         else f->breather += dt;
     } else if (!t->night && f->energy < BREATHER_AT && f->goal.id != GOAL_FLEE_SHADOW && !(t->ravenous && f->hunger > 6.5f))
-        f->breather = dt;
+        { f->breather = dt; f->gdepth_rest = depth_pick(t, f, GOAL_REST) == FISH_DEPTH_THROUGH ? FISH_DEPTH_THROUGH : FISH_DEPTH_BEHIND; }
+    /* SWIM DEPTH: its depth taken up in the clear of every bed (a breather hides at its own); the first one at once
+       (a start: the boot show brings the fish in) */
+    if (f->gdepth_want == 0xff) { f->gdepth_want = depth_pick(t, f, f->goal.id); f->gdepth = f->gdepth_want; }
+    { uint8_t want = f->breather > 0 ? f->gdepth_rest : f->gdepth_want;
+      if (f->gdepth != want && grass_clear(t, f)) f->gdepth = want; }
+    if (f->pdepth_want == 0xff) { f->pdepth_want = pdepth_pick(t, f, f->goal.id); f->pdepth = f->pdepth_want; }
+    { uint8_t want = f->breather > 0 || f->goal.id == GOAL_REST ? FISH_DEPTH_FRONT : f->pdepth_want;
+      if (f->pdepth != want && pieces_clear(t, f)) f->pdepth = want; }
     /* a canopy is a place to hide: a fish inside one calms faster (below) */
     bool hidden = false;
     for (int b = 0; b < tank_veg_beds(t) && !hidden; b++)
@@ -3485,6 +3618,11 @@ void tank_tick(tank_t *t, float dt, advisor_fn advise) {
     crab_tick(t, dt);
     seahorse_tick(t, dt);
     shrimp_tick(t, dt);
+    {   /* SWIM DEPTH phase 3c: the floor critters take up their depth against the grass clear of every bed (as the lanes: never a pop) */
+        if (t->snail_gdepth != t->snail_gdepth_want && box_clear_beds(t, t->snail_x - 22, t->snail_x + 22, TANK_H)) t->snail_gdepth = t->snail_gdepth_want;
+        if (t->urchin_gdepth != t->urchin_gdepth_want && box_clear_beds(t, t->urchin_x - 20, t->urchin_x + 20, TANK_H)) t->urchin_gdepth = t->urchin_gdepth_want;
+        if (t->cr_gdepth != t->cr_gdepth_want && box_clear_beds(t, t->cr_x - 26, t->cr_x + 26, TANK_H)) t->cr_gdepth = t->cr_gdepth_want;
+    }
 
     /* bubbles rise */
     for (int i = 0; i < MAX_BUBBLE; i++) {
@@ -3531,6 +3669,8 @@ void tank_tick(tank_t *t, float dt, advisor_fn advise) {
                 if (g.id == GOAL_EXPLORE) f->explore_set = false;   /* pick a fresh destination */
                 f->goal = g;
                 f->goal_age = 0;
+                f->gdepth_want = depth_pick(t, f, g.id);   /* SWIM DEPTH: how it goes about it */
+                f->pdepth_want = pdepth_pick(t, f, g.id);
                 /* visible deliberation, scaled by how torn the advisor was */
                 bool calm = g.id != GOAL_FLEE_SHADOW && g.urgency < 8 && g.confidence < 0.6f;
                 f->hesitate = calm ? (0.6f - g.confidence) * 2.5f : 0;

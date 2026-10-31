@@ -376,6 +376,13 @@ int      render_grass_loop_ready(void);       /* moments baked and current */
 void     render_grass_loop_lock(int moments);
 int      render_grass_loop_moment(void);      /* the last frame's moment (stepping), -1 before one */
 void     render_grass_loop_arena(int *used_kb, int *cap_kb);   /* the fine moments' differences: KB used of KB held */
+bool     render_grass_loop_patching(void);   /* THE PATCH (0.3.9.4): the loop stale inside boxes only - served with them repainted, rebaked inside them */
+int      render_grass_loop_boxes(int box[][4]);   /* ... the boxes (x0, y0, x1, y1 each; up to 6) */
+bool     render_grass_loop_dump(int j, uint16_t *px, uint32_t *mask, int *y0, int *rows);   /* (the tests) moment j as the loop holds it: its rows and its grass mask */
+void     render_set_grass_loop_task(bool on);   /* THE SECOND CORE: the platform bakes the slices itself, between frames (render_grass_loop_bake_slice under its lock) */
+int      render_grass_loop_bake_slice(const tank_t *t);
+void     render_grass_loop_debug_budget(int us);   /* (the tests) a frame's budget for the bake's slices (0: as built) */
+void     render_grass_loop_debug_abort(void);   /* (the tests) THE PATCH's fallback forced: the ring refuses the next splice, the fine moments bake whole */
 bool     render_grass_cache_on(void);
 int      render_grass_cache_ms(void);
 void     render_grass_cache_prof(int64_t *us, int *n);
@@ -518,6 +525,7 @@ void render_fish_portrait(uint16_t *fb, int stride, float x, float y, float size
 #define URCHIN_CARD_H 194
 #define CRAB_CARD_W 336          /* the strawberry crab's (0.3.9): the urchin's size */
 #define CRAB_CARD_H 194
+bool render_crab_collect_hit(const tank_t *t, float x, float y);   /* the crab card's COLLECT (a sand dollar held up, 0.3.9.4) */
 #define SEAHORSE_CARD_W 336
 #define SEAHORSE_CARD_H 188
 /* the milestones page (the bowl has its own rows and buttons: render.c) */
@@ -739,8 +747,33 @@ typedef struct {
 } library_row_t;
 /* LOADING (0.3.9.3): a tank's first seconds after a SWAP IN or a power-on, while its grass loop is first baked: the
  * platform shows render_loading and bakes at full speed (render_grass_loop_bake_more: up to n moments, 0 = not ready to
- * bake yet - draw a tank frame so the scene and the loop's look settle) until render_grass_loop_warming says false */
-void render_loading(uint16_t *fb, int stride, const char *name, float clock);
+ * bake yet - draw a tank frame so the scene and the loop's look settle) until render_grass_loop_warming says false; line
+ * under the name: NULL = FILLING THE TANK (a SWAP IN), else e.g. WAKING THE TANK */
+void render_loading(uint16_t *fb, int stride, const char *name, float clock, const char *line);
+/* THE BOOT SHOW (common/boot_show.c): the pieces in the tank back to front (their count), the day scene with some
+ * left out (hide: a bit per item), the grass loop's baked band nearest the clock (rows from *y0; NULL: none yet) */
+/* SWIM DEPTH (0.3.9.4): the block a fish BEHIND or THROUGH the grass works in (render_depth_buf_bytes of PSRAM; NULL:
+ * every fish IN FRONT, as before) */
+size_t render_depth_buf_bytes(void);
+void render_set_depth_buf(void *buf);
+void render_depth_off(bool off);
+bool render_piece_covers(int item, int x, int y);
+#define PC_SHADOW_NEAR 3                 /* a piece's CONTACT SHADOW: its body shifted this far down and right, hard ... */
+#define PC_SHADOW_FAR  6                 /* ... and this far, soft (render.c pc_contact_shadow; the fronds over the rim take it too, 0.3.9.4) */
+bool render_bed_leaf(int x, int y);   /* (tests: the sword plant IN FRONT's leaves, last frame) */
+void render_debug_live_mask(bool on);
+void render_debug_rim_off(bool off);
+void render_debug_page_animals(bool show);   /* (tests: the creatures drawn under a placement page, which hides them since 0.3.9.4 - the layering checks) */
+void render_debug_grass_mask(bool on);  /* (tests: keep the frame's grass mask - the loop's, at its moment - for render_debug_grass_at) */
+bool render_debug_grass_at(int x, int y);
+#define DEP_ROOT_Y ((int)FISH_FLOOR_Y - 8)            /* (the grass comes back over an animal above this row only: below it the pebbles' edge and the roots) */   /* swim depth: the grass comes back over an animal down to this row; its feet and shadow stay over the roots */    /* (the A/B: a piece's contact shadow NOT falling on the fronds painted over its rim, as before 0.3.9.4) */   /* (tests: a piece drawn live on its page records its mask too, so render_piece_covers reads it) */
+int  render_debug_piece_grass(int item, int *bands, int *fines, void *(*alloc)(size_t), void (*release)(void *));   /* (director pkcheck) */   /* (tests: a piece's own body, as the last frame recorded it) */
+void render_depth_prof(int64_t *us, int *fish);   /* the depth's own work since the last call, and how many fish did it */   /* (the sim's grass tests: every fish IN FRONT) */
+void render_proto_veg_layer(int layer);   /* (exploration: the sim's --depth-shot) */
+int  render_boot_pieces(const tank_t *t, int items[DECOR_SLOTS]);
+void render_boot_scene(const tank_t *t, uint16_t *dst, uint32_t hide);
+void render_boot_scene_done(const tank_t *t);   /* after the last render_boot_scene: the tank's own scene and masks back */
+const uint16_t *render_boot_grass(const tank_t *t, int *y0);
 bool render_grass_loop_warming(void);
 int  render_grass_loop_bake_more(const tank_t *t, int n);
 void render_shelf_set_move(bool on, int i, const char *name);   /* MOVE (0.3.9.3): a tank in hand - the page's slot i lifted (-1: it is on another page) */
@@ -752,6 +785,12 @@ void render_shelf(uint16_t *fb, int stride, const shelf_slot_t slot[8], int page
 enum { SHELF_TAP_NONE, SHELF_TAP_CLOSE, SHELF_TAP_LIBRARY, SHELF_TAP_PREV, SHELF_TAP_NEXT, SHELF_TAP_TOUCH_LOCK, SHELF_TAP_SLOT0 = 10 };
 int  render_shelf_tap(float x, float y);                           /* SHELF_TAP_*, a slot = SHELF_TAP_SLOT0 + i (frame coordinates) */
 void render_shelf_card(uint16_t *fb, int stride, const shelf_slot_t *s, const char *kind, int shelf_days, int age_days);
+/* SWAP IN tapped (0.3.9.4): the card's button pulses and says SWAPPING (t: seconds since the tap, < 0 off) for
+ * SWAP_PULSE_S x 1, then the glass fades out over SWAP_FADE_S (render_fade) and the swap runs in the dark */
+#define SWAP_PULSE_S 0.35f
+#define SWAP_FADE_S  0.30f
+void render_shelf_card_swapping(float t);
+void render_fade(uint16_t *fb, int stride, int light);   /* the frame at light/256 */
 /* MORE: REMOVE (0.3.9.3) - the panel (part 1 its backdrop, drawn once; 2 the panel, every frame while the hold fills: hold
    0..1) and its places: BACK, HOLD TO SELL (held SHM_HOLD_S), outside it */
 #define SHM_HOLD_S 2.0f

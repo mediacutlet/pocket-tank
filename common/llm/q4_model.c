@@ -596,8 +596,19 @@ static void matmul_batch(float *out, const int8_t *xq, const float *xs, int n_to
             int in = (i0 + ii) * n;
             for (int t = 0; t < n_tok; t++) acc[t] = 0;
             for (int g = 0; g < ngroups; g++) {
-                unpack_group(wg, w->q + ((in + g * gs) >> 1), gs);
                 float ws = half_to_float(w->s[(in + g * gs) / gs]);
+#if Q4_PK
+                if (n_tok < 4) {                  /* a small batch (THE TWO-PASS DECISION's [goal, " urgency"]): the packed
+                                                     kernel per token on the group as it lies in flash - fetched once, never
+                                                     unpacked (measured 2026-10-31: the unpack made a 2-token pass cost MORE
+                                                     than two forwards, 860 ms against 2 x 430 on the 1.8) */
+                    const uint8_t *wp = w->q + ((in + g * gs) >> 1);
+                    for (int t = 0; t < n_tok; t++)
+                        acc[t] += (float)dot_q4pk_64(wp, xq + t * n + g * gs) * ws * xs[t * sg + g];
+                    continue;
+                }
+#endif
+                unpack_group(wg, w->q + ((in + g * gs) >> 1), gs);
                 const int8_t *x = xq + g * gs;
                 int t = 0;
 #if Q4_PIE
@@ -639,12 +650,15 @@ static bool ensure_batch(q4_model_t *m, int n) {
     return m->bx && m->bxb && m->bq && m->bhb && m->bhb2 && m->bxq_q && m->bxq_s && m->bhq_q && m->bhq_s && m->btile;
 }
 
-float *q4_model_prefill(q4_model_t *m, const int *toks, int n) {
+/* the batched pass, from position pos0: the prompt's prefill is pos0 = 0; THE TWO-PASS
+ * DECISION (2026-10-31) continues at pos0 = the prompt's length with the goal and the
+ * tokens known to follow it, attending over the cache below them */
+static float *prefill_at(q4_model_t *m, const int *toks, int n, int pos0) {
     if (!m || !toks) return NULL;
     const q4_config_t *c = &m->c; int gs = m->gs;
     int dim = c->dim, kv_dim = (dim / c->n_heads) * c->n_kv_heads, kv_mul = c->n_heads / c->n_kv_heads;
     int hidden = c->hidden_dim, head_size = dim / c->n_heads;
-    if (n <= 0 || n > c->seq_len - 1 || !ensure_batch(m, n)) return NULL;
+    if (n <= 0 || pos0 < 0 || pos0 + n > c->seq_len - 1 || !ensure_batch(m, n)) return NULL;
     for (int t = 0; t < n; t++) if (toks[t] < 0 || toks[t] >= c->vocab_size) return NULL;
     /* embeddings */
     for (int t = 0; t < n; t++)
@@ -657,6 +671,7 @@ float *q4_model_prefill(q4_model_t *m, const int *toks, int n) {
     int64_t p0 = QPROF_MARK();
     for (int l = 0; l < c->n_layers; l++) {
         int loff = l * c->seq_len * kv_dim;
+        float *kc = m->key_cache + loff + pos0 * kv_dim, *vc = m->value_cache + loff + pos0 * kv_dim;   /* this batch's cache rows */
         for (int t = 0; t < n; t++) {
             rmsnorm(m->bxb + t * dim, m->bx + t * dim, m->rms_att + l * dim, dim);
             qa.q = m->bxq_q + t * dim; qa.s = m->bxq_s + t * (dim / gs);
@@ -666,14 +681,14 @@ float *q4_model_prefill(q4_model_t *m, const int *toks, int n) {
         /* q for all tokens; k,v straight into the cache rows */
         matmul_batch(m->bq, m->bxq_q, m->bxq_s, n, &m->wq[l], dim, dim, gs, m->btile);
         /* k/v: out must be contiguous per token at stride d=kv_dim -> cache rows are exactly that */
-        matmul_batch(m->key_cache + loff,   m->bxq_q, m->bxq_s, n, &m->wk[l], dim, kv_dim, gs, m->btile);
-        matmul_batch(m->value_cache + loff, m->bxq_q, m->bxq_s, n, &m->wv[l], dim, kv_dim, gs, m->btile);
+        matmul_batch(kc, m->bxq_q, m->bxq_s, n, &m->wk[l], dim, kv_dim, gs, m->btile);
+        matmul_batch(vc, m->bxq_q, m->bxq_s, n, &m->wv[l], dim, kv_dim, gs, m->btile);
         QPROF_ADD(0, p0);
         for (int t = 0; t < n; t++) {
-            float *q = m->bq + t * dim, *k = m->key_cache + loff + t * kv_dim;
+            float *q = m->bq + t * dim, *k = kc + t * kv_dim;
             for (int i = 0; i < dim; i += 2) {
                 int hd = i % head_size;
-                const float *cs = m->rope_cs + ((size_t)t * (head_size / 2) + hd / 2) * 2;
+                const float *cs = m->rope_cs + ((size_t)(pos0 + t) * (head_size / 2) + hd / 2) * 2;
                 float fcr = cs[0], fci = cs[1];
                 int rotn = i < kv_dim ? 2 : 1;
                 for (int vv = 0; vv < rotn; vv++) {
@@ -683,17 +698,18 @@ float *q4_model_prefill(q4_model_t *m, const int *toks, int n) {
                 }
             }
             QPROF_ADD(3, p0);
-            /* causal attention for token t */
+            /* causal attention for token t: over the cache below it, this batch's rows included */
+            const int last = pos0 + t;
             for (int h = 0; h < c->n_heads; h++) {
                 float *qh = q + h * head_size, *att = m->att + h * c->seq_len;
-                for (int p = 0; p <= t; p++) {
+                for (int p = 0; p <= last; p++) {
                     float *kk = m->key_cache + loff + p * kv_dim + (h / kv_mul) * head_size, sc = 0;
                     for (int i = 0; i < head_size; i++) sc += qh[i] * kk[i];
                     att[p] = sc / sqrtf((float)head_size);
                 }
-                softmax(att, t + 1);
+                softmax(att, last + 1);
                 float *xb = m->bxb + t * dim + h * head_size; memset(xb, 0, head_size * 4);
-                for (int p = 0; p <= t; p++) {
+                for (int p = 0; p <= last; p++) {
                     float *vv = m->value_cache + loff + p * kv_dim + (h / kv_mul) * head_size, a = att[p];
                     for (int i = 0; i < head_size; i++) xb[i] += a * vv[i];
                 }
@@ -733,6 +749,8 @@ float *q4_model_prefill(q4_model_t *m, const int *toks, int n) {
     matmul(m->logits, &m->xq, &m->wcls, dim, c->vocab_size, gs);
     return m->logits;
 }
+float *q4_model_prefill(q4_model_t *m, const int *toks, int n) { return prefill_at(m, toks, n, 0); }
+float *q4_model_prefill_at(q4_model_t *m, const int *toks, int n, int pos0) { return prefill_at(m, toks, n, pos0); }
 
 int64_t q4_model_bench(q4_model_t *m, int which, int n_tok, int64_t (*clock_us)(void)) {
     const q4_config_t *c = &m->c; int gs = m->gs;
@@ -798,8 +816,21 @@ int q4_model_generate(q4_model_t *m, const int *prompt, int n_prompt, int *out, 
 int q4_model_decide(q4_model_t *m, const int *prompt, int n_prompt,
                     const int *cand, int n_cand, float temp, uint32_t *rng,
                     float *probs_out, int *out, int max_out) {
+    return q4_model_decide_follow(m, prompt, n_prompt, cand, n_cand, temp, rng, probs_out, out, max_out, NULL, 0);
+}
+/* THE TWO-PASS DECISION (2026-10-31): a decision was the prompt's batched prefill (one pass
+ * over the weights) and then a forward per generated token - the goal, the literal " urgency",
+ * the digit: three passes. The middle token is known before it is generated, so the pick
+ * and the tokens known to follow it go as ONE batched pass (prefill_at), and the next token
+ * is read from its logits: two passes. Without follow tokens, or when the batch has no
+ * memory, the token-by-token path as before. */
+int q4_model_decide_follow(q4_model_t *m, const int *prompt, int n_prompt,
+                    const int *cand, int n_cand, float temp, uint32_t *rng,
+                    float *probs_out, int *out, int max_out,
+                    const int *follow, int n_follow) {
     if (!out || max_out < 0 || !token_ids_valid(m, prompt, n_prompt) ||
         !token_ids_valid(m, cand, n_cand)) return 0;
+    if (n_follow > 0 && !token_ids_valid(m, follow, n_follow)) return 0;
     int n = 0;
     float *logits = q4_model_prefill(m, prompt, n_prompt);
     if (!logits) for (int p = 0; p < n_prompt; p++) {
@@ -820,6 +851,16 @@ int q4_model_decide(q4_model_t *m, const int *prompt, int n_prompt,
         for (int i = 0; i < n_cand; i++) { acc += p[i]; if (r < acc) { pick = i; break; } pick = i; }
     } else for (int i = 1; i < n_cand; i++) if (p[i] > p[pick]) pick = i;
     int pos = n_prompt - 1, token = cand[pick];
+    if (n_follow > 0 && n_follow <= 6 && n_follow + 1 < max_out && n_prompt + 1 + n_follow <= m->c.seq_len - 1) {
+        int cont[8]; cont[0] = token;
+        for (int i = 0; i < n_follow; i++) cont[1 + i] = follow[i];
+        float *lg = prefill_at(m, cont, 1 + n_follow, n_prompt);   /* the pick and its followers: one pass */
+        if (lg) {
+            for (int i = 0; i <= n_follow; i++) out[n++] = cont[i];
+            pos = n_prompt + n_follow;                               /* the last follower's position */
+            token = argmax(lg, m->c.vocab_size);                     /* ... and the token after it */
+        }
+    }
     while (token != 1 && n < max_out) {
         out[n++] = token;
         if (n >= max_out) break;              /* don't pay a forward for tokens we won't keep */

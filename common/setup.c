@@ -22,6 +22,9 @@
 static bool s_active;
 static bool s_birth;           /* the birth flow (three pages about s_fish), not the first run */
 static bool s_place;           /* the placement page (one page about s_item) */
+static bool s_moved;           /* ... and its piece has been dragged, re-ranked, re-depthed or recolored on it: drawn LIVE until the page
+                                  closes (render_tank). Until then it stays in the scene as it was - opening a page, reading it and DONE
+                                  cost nothing (0.3.9.4, Strato on the square: a page up dropped the frame rate "to a crawl") */
 static bool s_rename;          /* the rename page (one page about s_fish: the letter wheel, CANCEL / DONE) */
 static char s_old_name[FISH_NAME_MAX + 1];   /* ... the name it came in with (CANCEL puts it back) */
 static int  s_renamed;         /* a rename page just closed: the fish's slot + 1, until the platform takes it */
@@ -75,7 +78,7 @@ int  setup_take_renamed(void) { int f = s_renamed - 1; s_renamed = 0; return f; 
 void setup_begin_place(tank_t *t, int item) {
     if (!tank_decor_placeable(item)) return;
     s_active = true; s_birth = false; s_place = true; s_rename = false; s_item = item; s_fish = -1; s_page = SETUP_PG_PLACE; s_slot = 0; s_down = false;
-    s_sell_armed = false;
+    s_sell_armed = false; s_moved = false;
     stage(t);
 }
 int setup_poll_birth(tank_t *t) {
@@ -94,6 +97,7 @@ bool setup_birth_due(void) {                               /* a welcome up, or o
 bool setup_active(void) { return s_active; }
 bool setup_is_birth(void) { return s_active && s_birth; }
 bool setup_is_place(void) { return s_active && s_place; }
+bool setup_place_live(void) { return s_active && s_place && s_moved; }
 int  setup_item(void)     { return s_active && s_place ? s_item : -1; }
 int  setup_fish(void) { return s_active && (page_is_name() || page_is_look() || s_birth) ? page_fish() : -1; }
 /* the rename page closes: DONE keeps the wheel's name (tidied; nothing left =
@@ -269,8 +273,8 @@ int setup_hit(float x, float y) {
             if (in_box(x, y, SETUP_TOP_LOCK_X, SETUP_TOP_BTN_Y, SETUP_PL_BTN_W, SETUP_BTN_H, m)) return SETUP_HIT_LOCK;
         }
         else if (in_box(x, y, SETUP_TOP_NEXT_X, SETUP_TOP_BTN_Y, SETUP_TOP_BTN_W, SETUP_BTN_H, m)) return SETUP_HIT_NEXT;
-        if (s_place && s_item != 0 && in_box(x, y, SETUP_ORD_X0, SETUP_ORD_Y, SETUP_ORD_W, SETUP_BTN_H, 6)) return SETUP_HIT_BCK;   /* (the plant's three tiles fill the row: no arrows) */
-        if (s_place && s_item != 0 && in_box(x, y, SETUP_ORD_X1, SETUP_ORD_Y, SETUP_ORD_W, SETUP_BTN_H, 6)) return SETUP_HIT_FWD;
+        if (s_place && in_box(x, y, SETUP_ORD_X0, SETUP_ORD_Y, SETUP_ORD_W, SETUP_BTN_H, 6)) return SETUP_HIT_BCK;   /* (every piece, the sword plant too) */
+        if (s_place && in_box(x, y, SETUP_ORD_X1, SETUP_ORD_Y, SETUP_ORD_W, SETUP_BTN_H, 6)) return SETUP_HIT_FWD;
         if (!s_place && in_box(x, y, SETUP_TOP_BACK_X, SETUP_TOP_BTN_Y, SETUP_TOP_BTN_W, SETUP_BTN_H, m)) return SETUP_HIT_BACK;
     } else {
         if (in_box(x, y, SETUP_NEXT_X, SETUP_BTN_Y, SETUP_BTN_W, SETUP_BTN_H, m)) return SETUP_HIT_NEXT;
@@ -354,13 +358,17 @@ void setup_activate(tank_t *t, int id) {
         }
         s_sell_armed = false;                           /* any other tap stands SELL down */
         if (id == SETUP_HIT_NEXT) { s_active = false; tank_emit(TEV_CONFIRM, -1); progression_save(t); }
-        else if (id == SETUP_HIT_BCK || id == SETUP_HIT_FWD) tank_decor_shift(t, s_item, id == SETUP_HIT_FWD ? 1 : -1);   /* the stack: a step; DONE saves it */
-        else if (id >= SETUP_HIT_Z0 && id < SETUP_HIT_Z0 + DECOR_Z_N)
+        else if (id == SETUP_HIT_BCK || id == SETUP_HIT_FWD) { if (tank_decor_shift(t, s_item, id == SETUP_HIT_FWD ? 1 : -1)) s_moved = true; }   /* the stack: a step; DONE saves it */
+        else if (id >= SETUP_HIT_Z0 && id < SETUP_HIT_Z0 + DECOR_Z_N) {
+            if (tank_decor_z(t, s_item) != id - SETUP_HIT_Z0) s_moved = true;
             tank_decor_set(t, s_item, tank_decor_x(t, s_item), id - SETUP_HIT_Z0);
-        else if (s_item == 3 && id >= SETUP_HIT_COLOR0 && id < SETUP_HIT_COLOR0 + CORAL_N)
+        } else if (s_item == 3 && id >= SETUP_HIT_COLOR0 && id < SETUP_HIT_COLOR0 + CORAL_N) {
+            if (tank_coral_rgb(t) != CORAL_PAL[id - SETUP_HIT_COLOR0]) s_moved = true;
             tank_coral_set_rgb(t, CORAL_PAL[id - SETUP_HIT_COLOR0]);   /* the coral wears it at once; DONE saves it */
-        else if (s_item == 4 && id >= SETUP_HIT_COLOR0 && id < SETUP_HIT_COLOR0 + CLUSTER_SCHEME_N)
+        } else if (s_item == 4 && id >= SETUP_HIT_COLOR0 && id < SETUP_HIT_COLOR0 + CLUSTER_SCHEME_N) {
+            if (tank_cluster_scheme(t) != id - SETUP_HIT_COLOR0) s_moved = true;
             tank_cluster_set_scheme(t, id - SETUP_HIT_COLOR0);
+        }
         return;
     }
     if (s_rename) {                                     /* one page: DONE keeps the name, CANCEL the old one; the wheel below */
@@ -410,12 +418,12 @@ void setup_touch(tank_t *t, float x, float y, bool down) {
             tank_set_bubble_x(t, x); s_spun = true;         /* the column comes to the finger */
         }
         if (s_page == SETUP_PG_PLACE && !h && y - PAGE_Y > place_y()) {
-            tank_decor_set(t, s_item, x, tank_decor_z(t, s_item)); s_spun = true;   /* the piece comes to the finger */
+            tank_decor_set(t, s_item, x, tank_decor_z(t, s_item)); s_spun = true; s_moved = true;   /* the piece comes to the finger */
         }
     } else if (down && s_page == SETUP_PG_BUBBLES && s_spun) {
         tank_set_bubble_x(t, x);                            /* ... and follows it */
     } else if (down && s_page == SETUP_PG_PLACE && s_spun) {
-        tank_decor_set(t, s_item, x, tank_decor_z(t, s_item));
+        tank_decor_set(t, s_item, x, tank_decor_z(t, s_item)); s_moved = true;
     } else if (down && page_is_name()) {                /* the wheel: vertical travel spins the letter */
         int h0 = setup_hit(s_px, s_py);
         if (h0 >= SETUP_HIT_SLOT0 && h0 < SETUP_HIT_SLOT0 + FISH_NAME_MAX) {
@@ -491,6 +499,10 @@ static void leaf_glyph(uint16_t *fb, int stride, int cx, int y_bot, int h, uint3
         int w = (int)(half * 2 + 0.5f); if (w < 1) w = 1;
         render_rect(fb, stride, cx - w / 2, y_bot - i, w, 1, rgb);
     }
+}
+/* a thin seagrass frond for the sword plant's depth tiles (0.3.9.4): 2 px wide, a gentle wave, the seagrass's green */
+static void frond_glyph(uint16_t *fb, int stride, int cx, int y_bot, int h, uint32_t rgb) {
+    for (int i = 0; i < h; i++) render_rect(fb, stride, cx + (int)lroundf(1.6f * sinf(i * 0.28f + cx * 0.7f)), y_bot - i, 2, 1, rgb);
 }
 /* a little castle for the castle's depth tiles: two towers, a wall with
  * merlons, the arch - the stone tones of the real one */
@@ -586,34 +598,29 @@ static void depth_tile(const tank_t *t, uint16_t *fb, int stride, int x, int y, 
         if (z != DECOR_Z_BACK) castle_glyph(fb, stride, cx, yb, 0xa99b7b, 0xc4a95e);
         return;
     }
-    if (item == 4) {                                    /* the cluster: the same three readings as the coral's */
+    if (item == 4) {                                    /* the cluster: the castle's reading - the plants before it, or it before them (0.3.9.4,
+                                                           Strato: no fish in a piece's tiles - the fish choose their own depth now) */
         const cluster_scheme_t *sc = &CLUSTER_SCHEMES[tank_cluster_scheme(t)];
-        const int kx = cx - 18;
-        if (z == DECOR_Z_BACK) cluster_glyph(fb, stride, kx, yb, sc);
-        leaf_glyph(fb, stride, cx - 44, yb, lh, la);
-        if (z == DECOR_Z_MIDDLE) cluster_glyph(fb, stride, kx, yb, sc);
-        leaf_glyph(fb, stride, cx + 6, yb, lh, lb);
-        if (who) render_fish_portrait(fb, stride, (float)(cx + 26), (float)cy, 0.62f, who, clock);
-        if (z == DECOR_Z_FRONT) cluster_glyph(fb, stride, kx, yb, sc);
+        if (z == DECOR_Z_BACK) cluster_glyph(fb, stride, cx, yb, sc);
+        leaf_glyph(fb, stride, cx - 14, yb, lh, la); leaf_glyph(fb, stride, cx + 15, yb, lh, lb);
+        if (z != DECOR_Z_BACK) cluster_glyph(fb, stride, cx, yb, sc);
         return;
     }
-    if (item == 3) {                                    /* the coral, left of centre, the fish passing to its right: behind the
-                                                           grass and the fish / among the grass, the fish in front / over all */
+    if (item == 3) {                                    /* the coral: likewise */
         uint32_t rgb = tank_coral_rgb(t);
-        const int kx = cx - 20;
-        if (z == DECOR_Z_BACK) coral_glyph(fb, stride, kx, yb, rgb);
-        leaf_glyph(fb, stride, cx - 36, yb, lh, la);
-        if (z == DECOR_Z_MIDDLE) coral_glyph(fb, stride, kx, yb, rgb);
-        leaf_glyph(fb, stride, cx - 6, yb, lh, lb);
-        if (who) render_fish_portrait(fb, stride, (float)(cx + 14), (float)cy, 0.62f, who, clock);
-        if (z == DECOR_Z_FRONT) coral_glyph(fb, stride, kx, yb, rgb);
+        if (z == DECOR_Z_BACK) coral_glyph(fb, stride, cx, yb, rgb);
+        leaf_glyph(fb, stride, cx - 14, yb, lh, la); leaf_glyph(fb, stride, cx + 15, yb, lh, lb);
+        if (z != DECOR_Z_BACK) coral_glyph(fb, stride, cx, yb, rgb);
         return;
     }
-    if (z == DECOR_Z_BACK)  { leaf_glyph(fb, stride, cx - 8, yb, lh, la); leaf_glyph(fb, stride, cx + 8, yb, lh, lb); }
-    if (z == DECOR_Z_MIDDLE)  leaf_glyph(fb, stride, cx - 8, yb, lh, la);
-    if (who) render_fish_portrait(fb, stride, (float)cx, (float)cy, 0.62f, who, clock);
-    if (z == DECOR_Z_MIDDLE)  leaf_glyph(fb, stride, cx + 8, yb, lh, lb);
-    if (z == DECOR_Z_FRONT) { leaf_glyph(fb, stride, cx - 8, yb, lh, la); leaf_glyph(fb, stride, cx + 8, yb, lh, lb); }
+    /* the sword plant (0.3.9.4, Strato: "the sword plant should not be an outlier and should have the same layer stacking UI as
+       the other decorations"): its broad leaves read against the seagrass, as the castle's against the plants - not against a
+       fish, which chooses its own depth now (docs/swim-depth.md) */
+    (void)who; (void)cy; (void)clock;
+    const uint32_t sg = 0x3f8f5a;
+    if (z == DECOR_Z_BACK) { leaf_glyph(fb, stride, cx - 8, yb, lh, la); leaf_glyph(fb, stride, cx + 8, yb, lh, lb); }
+    for (int k = -2; k <= 2; k++) frond_glyph(fb, stride, cx + k * 9 - 1, yb, lh - 4 - (k & 1) * 6, sg);
+    if (z != DECOR_Z_BACK) { leaf_glyph(fb, stride, cx - 8, yb, lh, la); leaf_glyph(fb, stride, cx + 8, yb, lh, lb); }
 }
 /* an order arrow (the placement page): a chevron in a small button, lit or dim */
 static void ord_arrow(uint16_t *fb, int stride, int x, int y, bool right, bool on) {
@@ -682,8 +689,8 @@ void render_setup(const tank_t *t, uint16_t *fb, int stride, float clock) {
            is named on the hint line ("UNDER THE CORAL"). At the ends of the
            DEPTH row since 0.3.9; the plant (no stack, three tiles) has none */
         int below = tank_decor_neighbor(t, s_item, -1), above = tank_decor_neighbor(t, s_item, 1);
-        if (s_item != 0) { ord_arrow(fb, stride, SETUP_ORD_X0, SETUP_ORD_Y, false, below >= 0);
-                           ord_arrow(fb, stride, SETUP_ORD_X1, SETUP_ORD_Y, true, above >= 0); }
+        ord_arrow(fb, stride, SETUP_ORD_X0, SETUP_ORD_Y, false, below >= 0);   /* (the sword plant too since 0.3.9.4: a piece in the stack like the rest) */
+        ord_arrow(fb, stride, SETUP_ORD_X1, SETUP_ORD_Y, true, above >= 0);
         /* the relation, in the depth bar's own words (Strato 2026-10-17: "behind
            the coral" / "in front of the coral"); "THE" goes when the line is too
            long for where it sits (the hint line, or beside COLOR / LOOK) */
@@ -700,7 +707,8 @@ void render_setup(const tank_t *t, uint16_t *fb, int stride, float clock) {
         /* the DEPTH bar: one outlined box, three joined segments, the chosen
            one lit; a picture tile on each and the word under it */
         static const char *const zl[DECOR_Z_N] = { "BEHIND", "AMONG", "IN FRONT" };
-        static const char *const hint[DECOR_Z_N] = { "THE FISH SWIM IN FRONT OF IT", "THE FISH SWIM THROUGH IT", "THE FISH SWIM BEHIND IT" };
+        static const char *const hint[DECOR_Z_N] = { "BEHIND THE SEAGRASS", "", "IN FRONT OF THE SEAGRASS" };   /* (the sword plant:
+                                                                   against the seagrass, as the others against the plants - the fish choose their own) */
         static const char *const castle_hint[DECOR_Z_N] = { "THE PLANTS GROW IN FRONT OF IT", "", "IT STANDS IN FRONT OF THE PLANTS" };
         static const char *const coral_hint[DECOR_Z_N] = { "BEHIND THE GRASS AND THE FISH", "", "IN FRONT OF EVERYTHING" };
         int z = tank_decor_z(t, s_item), zi = tank_decor_z_index(s_item, z);

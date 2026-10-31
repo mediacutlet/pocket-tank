@@ -700,6 +700,16 @@ void touch_port_poll(tank_t *t) {
                 ESP_LOGI(TAG, "card tap at %.0f,%.0f -> milestones", s_px, s_py);         under its MORE button) = milestones page */
                 s_ms = true; goto released;
             }
+            if (s_sel == RENDER_CARD_CRAB && render_crab_collect_hit(t, s_px, s_py)) {   /* the crab card's COLLECT (0.3.9.4): the find taken, the card stays up */
+                tank_crab_tap(t, t->cr_x); s_sel_us = now;
+                ESP_LOGI(TAG, "crab card: COLLECT - the keeper took its sand dollar (%u so far)", (unsigned)t->cr_found);
+                goto released;
+            }
+            if (tank_crab_find_hit(t, s_px, s_py)) {   /* a sand dollar held up: before everything that swims or crawls in front (0.3.9.4) */
+                tank_crab_tap(t, s_px);
+                ESP_LOGI(TAG, "crab tapped: the keeper took its sand dollar (%u so far), first in line", (unsigned)t->cr_found);
+                goto released;
+            }
             /* fish first; only an empty tap reaches the water. 38 px radius
                (a fingertip on this 322 ppi panel covers ~60 px) against BOTH
                the press-time snapshot and the current position - whichever is

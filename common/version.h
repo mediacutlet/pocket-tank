@@ -22,9 +22,9 @@
 #define PT_RELEASE_MAJOR 0
 #define PT_RELEASE_MINOR 3
 #define PT_RELEASE_PATCH 9
-#define PT_RELEASE_HOTFIX 3                    /* a fourth part (2026-10-21): a fix between patches - 0.3.8.1 - that
+#define PT_RELEASE_HOTFIX 4                    /* a fourth part (2026-10-21): a fix between patches - 0.3.8.1 - that
                                                   must not burn the next number. 0 = none, and the string has three parts */
-#define PT_RELEASE       "0.3.9.3"
+#define PT_RELEASE       "0.3.9.4"
 #define PT_RELEASE_STAGE "alpha"               /* pre-1.0: shown beside the number */
 /* the packed number the tank compares (update.c newer(), the save's stamp):
  * a byte each, major.minor.patch.hotfix. Until 0.3.8 it was three bytes

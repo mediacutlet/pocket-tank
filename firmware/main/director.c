@@ -40,6 +40,8 @@ bool net_port_set_manifest_url(const char *url);
 #endif
 
 static const char *TAG = "director";
+static void *pk_alloc(size_t n) { return heap_caps_malloc(n, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT); }   /* (pkcheck's scratch frame) */
+static void pk_free(void *p) { heap_caps_free(p); }
 
 /* the real tank's save, parked while a staged tank (fresh / stages) lives in
  * its place: NVS blob "bk" beside progression's "save" in namespace "tank".
@@ -201,6 +203,8 @@ static void help(void) {
     ESP_LOGI(TAG, "fed [level=1] (everyone full, trickle back on) | set <hunger|energy|stress|curiosity|trust> <0-10> [fish name|idx]");
     ESP_LOGI(TAG, "feed [n=3] [x] (keeper drops pellets; trickle back on) | trickle on|off | pellets clear");
     ESP_LOGI(TAG, "algae <steps|clear> | veg <bed 0-2|all> <0.03-1> | light (toggle) | auto | sleep <hours> | save");
+    ESP_LOGI(TAG, "rim on|off (a piece's shadow on the fronds over its rim: the look's A/B, 0.3.9.4)");
+    ESP_LOGI(TAG, "shot <x0> <y0> <w> <h> (the last frame's pixels in the box, hex rows; tools/shot.py makes a picture)");
     ESP_LOGI(TAG, "STAGED TANKS (the real one is parked first): fresh (new tank, two fry) | stages (fry juv adult elder) | stage <fish|all> <fry|juv|adult|elder>");
     ESP_LOGI(TAG, "stash (park the real tank now) | restore (bring it back) | age <fish> <hours>");
     ESP_LOGI(TAG, "milestones [off] (the page, on cue; on the device: tap the open stats card)");
@@ -268,6 +272,46 @@ static void run(tank_t *t, char *line) {
         else ESP_LOGI(TAG, "no network saved (wifi set ssid=<name> pass=<secret>, or the wizard on the glass)");
     } else if (!strcmp(c, "shelf")) {                         /* shelf: as BOOT twice; shelf list|new|swap|pause|dormant|name|remove: stage MY TANKS (b-roll) */
         if (argc < 2) device_shelf_toggle(); else device_shelf_cmd(argc - 1, argv + 1);
+    } else if (!strcmp(c, "depth")) {                        /* SWIM DEPTH (0.3.9.4): `depth` the fish's; `depth <i> front|behind|through [bed]` sets
+                                                                 one now (staging: no clear-of-the-grass wait), `bed` puts it in the first bed's middle */
+        static const char *DN[3] = { "front", "behind", "through" };
+        if (!t) return;
+        if (argc >= 3) {
+            int i = atoi(argv[1]), d = !strcmp(argv[2], "behind") ? FISH_DEPTH_BEHIND : !strcmp(argv[2], "through") ? FISH_DEPTH_THROUGH : FISH_DEPTH_FRONT;
+            if (i >= 0 && i < t->n_fish) {
+                fish_t *f = &t->fish[i]; f->gdepth = f->gdepth_want = f->gdepth_rest = (uint8_t)d;
+                if (argc >= 4 && !strcmp(argv[3], "bed")) {
+                    float x0, x1, top; int n; tank_veg_bed(t, 0, &x0, &x1, &top, &n);
+                    f->x = (x0 + x1) / 2; f->y = top + (TANK_BOT - 16 - top) * 0.45f; f->speed = f->target_speed = 0;
+                }
+            }
+        }
+        for (int i = 0; i < t->n_fish; i++) ESP_LOGI(TAG, "depth: %d %s grass %s (wants %s), pieces %s (wants %s) at %.0f,%.0f", i, t->fish[i].name, DN[t->fish[i].gdepth % 3],
+                                                     t->fish[i].gdepth_want < 3 ? DN[t->fish[i].gdepth_want] : "-", DN[t->fish[i].pdepth % 3],
+                                                     t->fish[i].pdepth_want < 3 ? DN[t->fish[i].pdepth_want] : "-", t->fish[i].x, t->fish[i].y);
+        ESP_LOGI(TAG, "depth: shrimp %s / %s, seahorse %s, crab %s, snail %s, urchin %s (against the grass; the shrimp's second: the pieces)",
+                 DN[t->shr_gdepth % 3], DN[t->shr_pdepth % 3], DN[t->sh_gdepth % 3], DN[t->cr_gdepth % 3], DN[t->snail_gdepth % 3], DN[t->urchin_gdepth % 3]);
+        if (argc >= 3 && !strcmp(argv[1], "critters")) {      /* `depth critters front|behind|through`: every critter now (staging) */
+            uint8_t d = !strcmp(argv[2], "behind") ? FISH_DEPTH_BEHIND : !strcmp(argv[2], "through") ? FISH_DEPTH_THROUGH : FISH_DEPTH_FRONT;
+            t->shr_gdepth = t->shr_gdepth_want = t->sh_gdepth = t->sh_gdepth_want = d;
+            t->cr_gdepth = t->cr_gdepth_want = t->snail_gdepth = t->snail_gdepth_want = t->urchin_gdepth = t->urchin_gdepth_want = d;
+            ESP_LOGI(TAG, "depth: every critter %s the grass", argv[2]);
+        }
+    } else if (!strcmp(c, "pkcheck")) {                      /* pkcheck [item]: does the grass loop hold grass over a piece's body? (8 = the pumpkin) */
+        int item = argc > 1 ? atoi(argv[1]) : 8, b = 0, f = 0;
+        int worst = render_debug_piece_grass(item, &b, &f, pk_alloc, pk_free);
+        ESP_LOGI(TAG, "pkcheck: item %d - the loop holds grass on its body in %d bands and %d fine moments, at worst %d px (-1: no such piece / no loop)", item, b, f, worst);
+    } else if (!strcmp(c, "depthoff")) {                     /* depthoff on|off: SWIM DEPTH off (every animal in front, as before 0.3.9.4) - the A/B */
+        render_depth_off(argc > 1 && !strcmp(argv[1], "on"));
+        ESP_LOGI(TAG, "depthoff: swim depth %s", argc > 1 && !strcmp(argv[1], "on") ? "OFF - every animal in front, as before" : "on");
+    } else if (!strcmp(c, "pdepth")) {                       /* SWIM DEPTH phase 2: `pdepth <i> front|behind [x]` - against the pieces, now (staging);
+                                                                 x: put it there, at the pieces' middle height */
+        if (!t || argc < 3) return;
+        int i = atoi(argv[1]);
+        if (i < 0 || i >= t->n_fish) return;
+        fish_t *f = &t->fish[i]; f->pdepth = f->pdepth_want = !strcmp(argv[2], "behind") ? FISH_DEPTH_BEHIND : FISH_DEPTH_FRONT;
+        if (argc >= 4) { f->x = (float)atof(argv[3]); f->y = TANK_BOT - 70; f->speed = f->target_speed = 0; }
+        ESP_LOGI(TAG, "pdepth: %d %s %s the pieces at %.0f,%.0f", i, f->name, f->pdepth ? "behind" : "in front of", f->x, f->y);
     } else if (!strcmp(c, "touchlock")) { device_touch_lock(argc > 1 ? !strcmp(argv[1], "on") : -1);   /* THE TOUCH LOCK, as MY TANKS's padlock */
     } else if (!strcmp(c, "ota")) {                           /* update mode and its channel */
         const esp_partition_t *run = esp_ota_get_running_partition(), *boot = esp_ota_get_boot_partition();
@@ -425,6 +469,28 @@ static void run(tank_t *t, char *line) {
         for (int i = 0; i < n; i++) l += snprintf(line + l, sizeof line - l, "%s%s (%s, rank %d)", i ? " < " : "", SD_ITEMS[items[i]].name,
                                                     tank_decor_z(t, items[i]) == DECOR_Z_BACK ? "behind" : tank_decor_z(t, items[i]) == DECOR_Z_FRONT ? "in front" : "among", tank_decor_rank(t, items[i]));
         ESP_LOGI(TAG, "order, back to front: %s", n ? line : "(no pieces)");
+    } else if (!strcmp(c, "shot")) {                  /* shot <x0> <y0> <w> <h>: the last frame's pixels in that box, a row a line as RGB565 hex (tools: a
+                                                         picture of what the glass shows, for a look the sim cannot stage - 0.3.9.4, the pumpkin's edges) */
+        const uint16_t *f = device_last_frame();
+        int x0 = argc > 1 ? atoi(argv[1]) : 0, y0 = argc > 2 ? atoi(argv[2]) : 0, w = argc > 3 ? atoi(argv[3]) : 120, hh = argc > 4 ? atoi(argv[4]) : 120;
+        if (x0 < 0) x0 = 0;
+        if (y0 < 0) y0 = 0;
+        if (w > 200) w = 200;
+        if (x0 + w > TANK_W) w = TANK_W - x0;
+        if (y0 + hh > TANK_H) hh = TANK_H - y0;
+        if (!f || w <= 0 || hh <= 0) { ESP_LOGW(TAG, "shot: no frame yet, or an empty box"); return; }
+        static char line[4 * 200 + 1];
+        printf("shot %d %d %d %d\n", x0, y0, w, hh);
+        for (int y = y0; y < y0 + hh; y++) {
+            for (int x = 0; x < w; x++) { uint16_t v = f[y * TANK_W + x0 + x]; snprintf(line + 4 * x, 5, "%04x", (unsigned)((v >> 8) | (v << 8)) & 0xffffu); }   /* (the frame is byte-swapped for the panel) */
+            printf("shotrow %d %s\n", y, line);
+            if ((y & 7) == 7) vTaskDelay(1);
+        }
+        printf("shot end\n");
+    } else if (!strcmp(c, "rim")) {                   /* rim on|off: a piece's contact shadow falling on the fronds painted over its rim (0.3.9.4) - the look's A/B (not saved) */
+        static bool rim_off;
+        if (argc > 1) { rim_off = !strcmp(argv[1], "off"); render_debug_rim_off(rim_off); }
+        ESP_LOGI(TAG, "rim shade: %s", rim_off ? "OFF - the fronds bright over a piece's shadow, as before 0.3.9.4" : "on - a piece's shadow falls on the fronds behind it");
     } else if (!strcmp(c, "pumpkin")) {               /* pumpkin [on|off]: drawn and lit or not (not saved) - the frame-rate A/B; and its season */
         if (argc > 1) render_set_pumpkin_hidden(!strcmp(argv[1], "off"));
         ESP_LOGI(TAG, "pumpkin: %s, %s | %s | the display line every 10 s has the fps and the render ms",

@@ -606,11 +606,8 @@ static void wrap2(const char *src, char *l1, char *l2, size_t cap) {   /* two li
     snprintf(l2, cap, "%s", rest);
     if (strlen(rest) > lim) { l2[lim - 3] = '.'; l2[lim - 2] = '.'; l2[lim - 1] = '.'; l2[lim] = 0; }
 }
-void render_clock_sync(uint16_t *fb, int stride, float clock) {
-    page_bg(fb, stride);
-    text_c(fb, stride, 120, 3, C_TEXT, "WAKING UP");
-    text_c(fb, stride, 158, 2, C_CAPT, "CHECKING THE TIME");
-    spinner(fb, stride, CX, 224, clock);
+void render_clock_sync(uint16_t *fb, int stride, float clock) {   /* the loading screen's look (10-31): the tank's WAKING THE TANK follows on the same water */
+    render_loading(fb, stride, "WAKING UP", clock, "CHECKING THE TIME");
 }
 void render_update(uint16_t *fb, int stride, float clock) {
     page_bg(fb, stride);

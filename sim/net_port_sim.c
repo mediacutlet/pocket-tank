@@ -79,8 +79,8 @@ void net_sim_advance(float dt) {                     /* the sim's clock */
             if (!strcmp(rel, "none")) rel = PT_RELEASE;
             if (!strcmp(rel, "cable")) { rel = "0.9.9"; s_m.needs_cable = true; }
             if (!strcmp(rel, "downloadfail") || !strcmp(rel, "boardimage")) rel = "0.9.9";
-            snprintf(s_m.board, sizeof s_m.board, "%s", PT_BOARD);
-            if (!strcmp(rel, "otherboard")) { rel = "0.9.9"; snprintf(s_m.board, sizeof s_m.board, "%s", strcmp(PT_BOARD, "amoled18") ? "amoled18" : "round175c"); }
+            snprintf(s_m.board, sizeof s_m.board, "%s", update_target_board());   /* the URL names the board (0.3.9.3: the one it IS) */
+            if (!strcmp(rel, "otherboard")) { rel = "0.9.9"; snprintf(s_m.board, sizeof s_m.board, "%s", strcmp(update_target_board(), "amoled18") ? "amoled18" : "round175c"); }
             int a = 0, b = 0, c = 0, d = 0; sscanf(rel, "%d.%d.%d.%d", &a, &b, &c, &d);
             if (d) snprintf(s_m.release, sizeof s_m.release, "%d.%d.%d.%d", a, b, c, d);
             else   snprintf(s_m.release, sizeof s_m.release, "%d.%d.%d", a, b, c);

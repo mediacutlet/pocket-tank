@@ -413,6 +413,12 @@ static void act(int a) {
     }
 }
 static bool newer(const update_manifest_t *m) { return m->release_num > (uint32_t)PT_RELEASE_NUM; }
+/* the board whose version this tank should run (0.3.9.3): the board it IS, by
+ * the boot's chip probe, else this build's own. They differ when another
+ * board's version was installed (the 1.8's runs on every board): its own
+ * version is offered then, at any release, as long as the cable is not needed */
+const char *update_target_board(void) { const char *hw = board_port_hw(); return hw ? hw : PT_BOARD; }
+static bool crossgrade(void) { return strcmp(update_target_board(), PT_BOARD) != 0; }
 /* the save-format floor, in this build's packing: a manifest written before
  * 0.3.8.1 packed three bytes (version.h), and 0x10000 is where four-byte
  * numbers begin (0.1.0.0 would already be 0x00010000) */
@@ -443,9 +449,9 @@ void update_tick(float dt) {
         st = net_port_check_state(&m);
         if (st == NET_DONE && m) {
             s.m = *m; s.have_m = true;
-            if (strcmp(m->board, PT_BOARD) != 0)            /* another board's manifest (2026-10-02): never offered */
+            if (strcmp(m->board, update_target_board()) != 0)   /* another board's manifest (2026-10-02): never offered */
                 message("WRONG BOARD", "THIS UPDATE IS FOR", false, "ANOTHER BOARD. NOTHING CHANGED", NULL, 0, NULL, 0);
-            else if (!newer(m)) { message("UP TO DATE", "YOUR TANK HAS THE LATEST", false, "VERSION", NULL, 0, NULL, 0); s.step = STEP_UP_TO_DATE; }
+            else if (!crossgrade() && !newer(m)) { message("UP TO DATE", "YOUR TANK HAS THE LATEST", false, "VERSION", NULL, 0, NULL, 0); s.step = STEP_UP_TO_DATE; }
             else if (m->needs_cable || (min_from_num(m) && min_from_num(m) > (uint32_t)PT_RELEASE_NUM))
                 message("NEEDS THE CABLE", "THIS UPDATE IS INSTALLED", false, "FROM POCKETANK.COM/INSTALL", NULL, 0, NULL, 0);
             else go(STEP_OFFER, UPD_PG_OFFER);
@@ -661,11 +667,15 @@ void render_update(uint16_t *fb, int stride, float clock) {
         draw_keyboard(fb, stride);
         break;
     case UPD_PG_OFFER: {
-        text_c(fb, stride, 52, 3, C_TEXT, "UPDATE READY");
+        const char *own = crossgrade() ? pt_board_words(update_target_board()) : NULL;   /* this board's own version (0.3.9.3) */
+        if (own) snprintf(line, sizeof line, "%s VERSION", own);
+        text_c(fb, stride, 52, 3, C_TEXT, own ? line : "UPDATE READY");
         uint32_t bytes = s.m.app_size + (s.m.model_offered ? s.m.model_size : 0);
         snprintf(line, sizeof line, "VERSION %s %s, %.1f MB", s.m.release, PT_RELEASE_STAGE, bytes / 1048576.0);
         text_c(fb, stride, 92, 2, C_CAPT, line);
-        char l1[32], l2[32]; wrap2(s.m.note, l1, l2, sizeof l1);
+        char l1[32], l2[32];
+        if (own) { snprintf(l1, sizeof l1, "MADE FOR THIS BOARD"); snprintf(l2, sizeof l2, "YOUR FISH STAY"); }
+        else wrap2(s.m.note, l1, l2, sizeof l1);
         text_c(fb, stride, 138, 2, C_TEXT, l1);
         if (l2[0]) text_c(fb, stride, 160, 2, C_TEXT, l2);
         int secs = (int)(bytes / 120000) + 10;

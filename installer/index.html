@@ -144,6 +144,7 @@
       </li>
     </ol>
     <div class="install">
+      <span class="meta" data-pickfirst hidden>Pick your board above first.</span>
       <esp-web-install-button manifest="{{MANIFEST}}">
         <button slot="activate">Install Pocket Tank</button>
         <span slot="unsupported">This browser can't talk to USB devices. Use Chrome or Edge on a computer.</span>
@@ -160,6 +161,7 @@
     <p>To reset your tank, you don't need this page. Hold <kbd>BOOT</kbd>, tap the screen, and answer YES. You get two new baby fish.</p>
     <p>Board not starting, or want a clean wipe? This button erases everything, then installs fresh. <b>Your tank will be gone.</b></p>
     <div class="install">
+      <span class="meta" data-pickfirst hidden>Pick your board above first.</span>
       <esp-web-install-button class="fresh" manifest="{{MANIFEST_ERASE}}">
         <button slot="activate">Erase the board and install fresh</button>
         <span slot="unsupported">This browser can't talk to USB devices. Use Chrome or Edge on a computer.</span>
@@ -248,14 +250,48 @@
       if (m.built) document.querySelectorAll('[data-built]').forEach(e => e.textContent = m.built);
     } catch (e) { /* offline or blocked: the stamped values stay */ }
   }
+  /* No board is picked for the keeper (0.3.9.3): a remembered pick, or the 1.8
+     by default, put the 1.8's version on a Discord keeper's watch. The
+     buttons show once a board is picked. */
+  let picked = null;
   function choose(id) {
     const b = BOARDS.find(x => x.id === id) || BOARDS[0];
+    picked = b.id;
     installBtn.setAttribute('manifest', b.manifest);
     freshBtn.setAttribute('manifest', b.erase);
     document.querySelectorAll('.boards button').forEach(e => e.setAttribute('aria-checked', e.dataset.id === b.id));
-    try { localStorage.setItem('pt-board', b.id); } catch (e) { /* private window: not remembered */ }
+    document.querySelectorAll('esp-web-install-button').forEach(e => e.hidden = false);
+    document.querySelectorAll('[data-pickfirst]').forEach(e => e.hidden = true);
     stamp();
   }
+  /* The guard against another board's version (0.3.9.3). A tank since 0.3.9.3
+     tells the pop-up its boards in its name: "Pocket Tank|<the board it is>|
+     <the board its version is for>" (firmware director.c). The pop-up
+     (make_installer.py's edits) asks these two:
+     - checkSameFirmware: a tank running another board's version is not "up to
+       date" - the button installs this board's (never erasing, as always);
+     - wrongBoard: a tank that IS another board than the one picked gets no
+       install at all - the pop-up says which board it is, and the picker
+       moves to it. A tank before 0.3.9.3 tells neither: the version decides,
+       as before. */
+  const WORDS = { amoled18: 'the 1.8 inch', round175c: 'the 1.75 inch round', watch206: 'the 2.06 inch watch', square216: 'the 2.16 inch square' };
+  const boardsOf = info => { const p = String(info && info.name || '').split('|'); return { hw: p[1] || null, fw: p[2] || null }; };
+  const overrides = {
+    checkSameFirmware(manifest, info) {
+      const { fw } = boardsOf(info);
+      return info.firmware === manifest.name && (!fw || !manifest.board || fw === manifest.board);
+    },
+    wrongBoard(manifest, info) {
+      const { hw } = boardsOf(info), want = manifest.board;
+      if (!hw || !want || hw === want) return null;
+      if (!BOARDS.some(b => b.id === hw))
+        return [`This tank is ${WORDS[hw] || 'another board'}`, `Pocket Tank isn't out for this board yet. Nothing was installed.`];
+      if (picked !== hw) choose(hw);
+      return [`This tank is ${WORDS[hw]}`, `You picked ${WORDS[want] || 'another board'}, so nothing was installed. We picked ${WORDS[hw]} for you: close this and click Install again.`];
+    },
+  };
+  installBtn.overrides = overrides;
+  freshBtn.overrides = overrides;
   if (BOARDS.length > 1) {
     const list = document.querySelector('.boards');
     for (const b of BOARDS) {
@@ -268,8 +304,9 @@
     document.querySelector('[data-pick]').hidden = false;
     document.querySelector('[data-supported]').innerHTML = BOARDS.map(b =>
       `<p><b>Waveshare ${b.name.replace(/^Waveshare /, '')}</b>, ${NOTE[b.id] || ''}.</p>`).join('');
-    let saved = null; try { saved = localStorage.getItem('pt-board'); } catch (e) { }
-    choose(saved || BOARDS[0].id);
+    document.querySelectorAll('esp-web-install-button').forEach(e => e.hidden = true);
+    document.querySelectorAll('[data-pickfirst]').forEach(e => e.hidden = false);
+    stamp();
   } else stamp();
 </script>
 </body>

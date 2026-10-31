@@ -42,15 +42,17 @@ bool touch_fit_ok(const touch_fit_t *f) {
     }
     return true;
 }
-void touch_fit_apply(const touch_fit_t *f, float *x, float *y, bool turned) {
+void touch_fit_apply(const touch_fit_t *f, float *x, float *y, int q) {
     if (touch_fit_is_none(f)) return;
-    float ux = turned ? TANK_W - 1 - *x : *x, uy = turned ? TANK_H - 1 - *y : *y;
+    float ux = *x, uy = *y;
+    tank_quarter_to_upright(q, &ux, &uy);
     ux = f->ax * ux + f->bx; uy = f->ay * uy + f->by;
     if (ux < 0) ux = 0;
     if (ux > TANK_W - 1) ux = TANK_W - 1;
     if (uy < 0) uy = 0;
     if (uy > TANK_H - 1) uy = TANK_H - 1;
-    *x = turned ? TANK_W - 1 - ux : ux; *y = turned ? TANK_H - 1 - uy : uy;
+    tank_quarter_from_upright(q, &ux, &uy);
+    *x = ux; *y = uy;
 }
 /* one axis: target = a press + b, least squares; the rms of what is left */
 static bool fit_axis(const float *t, const float *p, int n, float *a, float *b, float *rms) {
@@ -67,15 +69,17 @@ static bool fit_axis(const float *t, const float *p, int n, float *a, float *b, 
     return true;
 }
 #define ADV_FIT_RMS_MAX 20.0f                              /* presses scattered wider than this are not a sitting: try again */
-bool touch_fit_solve(const float *tx, const float *ty, const float *px, const float *py, int n, bool turned, touch_fit_t *out) {
-    if (n < 3) return false;
-    touch_fit_t f; float rx, ry;
-    if (!fit_axis(tx, px, n, &f.ax, &f.bx, &rx) || !fit_axis(ty, py, n, &f.ay, &f.by, &ry)) return false;
-    if (rx > ADV_FIT_RMS_MAX || ry > ADV_FIT_RMS_MAX) return false;
-    if (turned) {                                          /* fitted on the picture turned over: the same map, upright */
-        f.bx = (TANK_W - 1) * (1 - f.ax) - f.bx;
-        f.by = (TANK_H - 1) * (1 - f.ay) - f.by;
+#define ADV_FIT_MAX 16
+bool touch_fit_solve(const float *tx, const float *ty, const float *px, const float *py, int n, int q, touch_fit_t *out) {
+    if (n < 3 || n > ADV_FIT_MAX) return false;
+    float utx[ADV_FIT_MAX], uty[ADV_FIT_MAX], upx[ADV_FIT_MAX], upy[ADV_FIT_MAX];   /* fitted on a turned picture: the same map, upright */
+    for (int i = 0; i < n; i++) {
+        utx[i] = tx[i]; uty[i] = ty[i]; tank_quarter_to_upright(q, &utx[i], &uty[i]);
+        upx[i] = px[i]; upy[i] = py[i]; tank_quarter_to_upright(q, &upx[i], &upy[i]);
     }
+    touch_fit_t f; float rx, ry;
+    if (!fit_axis(utx, upx, n, &f.ax, &f.bx, &rx) || !fit_axis(uty, upy, n, &f.ay, &f.by, &ry)) return false;
+    if (rx > ADV_FIT_RMS_MAX || ry > ADV_FIT_RMS_MAX) return false;
     if (!touch_fit_ok(&f)) return false;
     *out = f;
     return true;
@@ -97,7 +101,7 @@ void adv_check_target(float *x, float *y) { *x = TANK_W * 3 / 10; *y = TANK_H * 
 static int s_pg, s_cell = ADV_CELL_STOCK, s_pick = ADV_CELL_STOCK;
 static bool s_ticked;
 static touch_fit_t s_saved = { 1, 0, 1, 0 }, s_live = { 1, 0, 1, 0 }, s_new;
-static int s_i; static bool s_turned0;
+static int s_i; static int s_q0;
 static float s_tx[ADV_N_CROSS], s_ty[ADV_N_CROSS], s_px[ADV_N_CROSS], s_py[ADV_N_CROSS];
 static float s_t;                                          /* the page's clock: the warning's hold, a cross's wait, the check's time left */
 static const char *s_msg;
@@ -132,7 +136,7 @@ static int step_pick(int dir) {
         }
     s_pick = ADV_CELL_STOCK; return ADV_ACT_TICK;
 }
-int adv_touch(float x, float y, bool down, bool turned) {
+int adv_touch(float x, float y, bool down, int q) {
     if (s_pg == ADV_PG_NONE) return ADV_ACT_NONE;
     if (s_skip) { if (!down) s_skip = false; return ADV_ACT_NONE; }   /* the chord's finger: its lift is not a tap */
     if (down && !s_down) { s_down = true; s_dx = x; s_dy = y; return ADV_ACT_NONE; }
@@ -164,15 +168,15 @@ int adv_touch(float x, float y, bool down, bool turned) {
         bool own = !touch_fit_is_none(&s_saved);
         int h = render_touch_intro_tap(s_dx, s_dy, own);
         if (h == ADV_HIT_BACK) { s_msg = NULL; go(ADV_PG_MAIN); return ADV_ACT_TICK; }
-        if (h == ADV_HIT_START) { s_live = TOUCH_FIT_NONE; s_i = 0; s_turned0 = turned; s_msg = NULL; go(ADV_PG_CROSS); return ADV_ACT_TICK; }
+        if (h == ADV_HIT_START) { s_live = TOUCH_FIT_NONE; s_i = 0; s_q0 = q; s_msg = NULL; go(ADV_PG_CROSS); return ADV_ACT_TICK; }
         if (h == ADV_HIT_RESET && own) { s_saved = s_live = TOUCH_FIT_NONE; s_msg = "TOUCH BACK TO NORMAL"; return ADV_ACT_FIT; }
         return ADV_ACT_NONE; }
     case ADV_PG_CROSS: {                                   /* any press counts: where it LANDED (the finger's aim, before its roll) */
-        if (turned != s_turned0) { s_i = 0; s_turned0 = turned; s_t = 0; return ADV_ACT_NONE; }   /* the picture turned mid-sitting: start over */
+        if (q != s_q0) { s_i = 0; s_q0 = q; s_t = 0; return ADV_ACT_NONE; }   /* the picture turned mid-sitting: start over */
         adv_cross_target(s_i, &s_tx[s_i], &s_ty[s_i]);
         s_px[s_i] = s_dx; s_py[s_i] = s_dy; s_i++; s_t = 0;
         if (s_i < ADV_N_CROSS) return ADV_ACT_TICK;
-        if (!touch_fit_solve(s_tx, s_ty, s_px, s_py, ADV_N_CROSS, s_turned0, &s_new)) { touch_page("DID NOT WORK - TRY AGAIN"); return ADV_ACT_TICK; }
+        if (!touch_fit_solve(s_tx, s_ty, s_px, s_py, ADV_N_CROSS, s_q0, &s_new)) { touch_page("DID NOT WORK - TRY AGAIN"); return ADV_ACT_TICK; }
         s_live = s_new; go(ADV_PG_CHECK);                  /* the next press goes through the new map */
         return ADV_ACT_TICK; }
     case ADV_PG_CHECK: {

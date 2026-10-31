@@ -14,9 +14,9 @@ live piece over everything and keep the critters in the scene pass.
 
 | rank | painted | notes |
 |---|---|---|
-| 0 | the SCENE: the water, the sand, the pieces BEHIND (baked, with their contact shadows and the night glow), the back grass (a MIDDLE bed's EVEN fronds, a BACK bed's every frond) | rebuilt only on a bake |
+| 0 | the SCENE: the water, the sand, the pieces BEHIND (baked, with their contact shadows and the night glow), then the back grass - every frond of the seagrass (0.3.9.3: no weave; the seagrass always BEHIND, the sword plant BEHIND or IN FRONT), laid from THE GRASS LOOP's band and fine moment for the frame (render.c) | the scene rebuilt only on a bake; the loop rebaked when the grass's look changes, drawn live meanwhile |
 | 1 | the DEEP crab in a shelter BEHIND (ROOST / SHELTER, backed in or not) | drawn, then the back fronds of every bed crossing its rect painted over it again: under every frond |
-| 2 | a castle IN FRONT's arch: a MIDDLE bed's late (odd) fronds inside the opening | the early arch pass; a bed placed IN FRONT takes no part in it (it stands before the castle) |
+| 2 | (gone in 0.3.9.3: the early arch pass drew a MIDDLE bed's late fronds inside a castle IN FRONT's opening; a bed BEHIND shows through the open arch from rank 0) | a bed placed IN FRONT takes no part (it stands before the castle) |
 | 3 | the DEEP crab in a castle IN FRONT's arch | over the fronds seen through the opening |
 | 4 | the shrimp | |
 | 5 | the seahorse's back lane | |
@@ -24,11 +24,11 @@ live piece over everything and keep the critters in the scene pass.
 | 7 | the floor critters in their BACK lane: the crab (walk / rest), then the snail, then the urchin | the crab lowest: whatever passes is over it |
 | 8 | the pieces IN FRONT restored over all of the above (the castle: its front row only - the arch stays open) | |
 | 9 | the FRONT SLOT: the crab (in a volcano IN FRONT's cave or on its flank; its front lane on the sand; a dig, always), then the snail, then the urchin in their front lane | the crab lowest here too |
-| 10 | the front grass: a MIDDLE bed's ODD fronds (off the arch: those went at rank 2), then a bed placed IN FRONT with its every frond, WHOLE - across the arch too, unshaded | a MIDDLE bed's fronds keep off every piece IN FRONT's silhouette; a bed IN FRONT keeps off only the pieces ranked above it |
+| 10 | the front grass: the sword plant placed IN FRONT with its every frond, WHOLE - across the arch too, unshaded (drawn live every frame, at the loop's moment) | a bed IN FRONT keeps off only the pieces ranked above it |
 | 11 | a placement page's live piece | over everything; the front slot is off while one is up - a critter in its front lane goes to the TOP lane instead, so it stays before the live piece as it was before the baked one |
 | 12 | the pieces IN FRONT's overlays: crowns, the candle, the volcano's lava and embers, the pumpkin's face and flame | the lava and the pumpkin's face keep off every critter in the front slot - the crab, the snail, the urchin (g_guard / slot_covers in vo_store and pk_store) |
 | 13 | the TOP lane: the seahorse's front lane, the crab holding a sand dollar up; with a page up, the crab's, the snail's and the urchin's front lane | over the fronds, so the keeper sees the find |
-| 14 | the arch's shade through a castle IN FRONT | what was drawn in the opening this frame and left marked (a fish, a MIDDLE bed's late frond); a bed IN FRONT's fronds are final and keep their colour |
+| 14 | the arch's shade through a castle IN FRONT | what was drawn in the opening this frame and left marked (a fish); a bed IN FRONT's fronds are final and keep their color |
 
 ## What the matrix enumerates (2026-10-24, the second pass)
 
@@ -47,7 +47,7 @@ live piece over everything and keep the critters in the scene pass.
   same bed placed IN FRONT with its every frond, the piece itself; the
   light on and off.
 - The tint: a bed placed IN FRONT of the castle, its fronds crossing the
-  arch pixel for pixel the same colour with the castle standing as without
+  arch pixel for pixel the same color with the castle standing as without
   it (688 of 1323 were shaded before the fix), day and night.
 
 - The strict rule: a subject in front of a piece IN FRONT shows the piece
@@ -80,7 +80,7 @@ live piece over everything and keep the critters in the scene pass.
 ## Where the matrix would have caught today's reports
 
 The urchin behind a crab in its cave; the shrimp behind it; a frond behind
-it (the weave); the crab behind the fronds in a front castle's arch; the
+it (the weave, gone since 0.3.9.3); the crab behind the fronds in a front castle's arch; the
 lava over the crab in a front volcano's cave; the lava over the crab
 digging at the cave mouth. Each is one cell of the table. What the matrix
 found on its own, the same day: the pumpkin's carved face painted over a

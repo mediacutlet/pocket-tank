@@ -125,6 +125,50 @@ carry `tools/pt_boards.py`. A cable install of the wrong board's image is not
 caught on the board (the page's picker is the guard); it boots blank and the
 right install puts it back, the save untouched.
 
+### Another board's version (0.3.9.3)
+
+A Discord keeper (MISSI, 2026-10-30) installed the 1.8's version on a watch:
+it runs there, small and on its side, and the installer called the tank "up
+to date" because it compares versions only. The 1.8's image is the one that
+runs on every board; the other three draw nothing on a board not their own.
+Every image already knows its board at boot (the chip probe in
+`display_port_sh8601.c`); 0.3.9.3 puts that knowledge to work in four places:
+
+| piece | what it does |
+|---|---|
+| the board it is | `board_port_hw()` (`progression.h`): the probe's answer as a `PT_BOARD` id, NULL when it cannot tell (a dead bus, the 1.8's path taken on the PMIC alone). The 1.75 / 1.75-B reads as `round175c`. The sim: `PT_BOARD`, or `--hw <id>` |
+| the card | a cold start (not a wake) of a version on another board raises `NOTICE_WRONG_BOARD`: WRONG VERSION / THIS IS THE 2.06 WATCH / CHECK FOR UPDATES FIXES IT, up until a tap (the damaged model's card, the same triangle) |
+| over the air | `update_target_board()` (`update.c`): the board it is, else `PT_BOARD`. The manifest fetched is `latest-<that>.json`, the WRONG BOARD check and the download's marker check compare against it, and a target that is not `PT_BOARD` is offered at ANY release (the same one included): "2.06 WATCH VERSION / MADE FOR THIS BOARD / YOUR FISH STAY" |
+| the installer | the tank's Improv device name is `Pocket Tank|<the board it is>|<the board its version is for>` (`director.c`; the connect resets the board and the first question can beat the chip probe, so the answer waits for it, 2 s at most inside the pop-up's 4). The page's `overrides` (site/src/install, installer/index.html): `checkSameFirmware` is false when the version is another board's (the button installs, never erasing); `wrongBoard` stops a pick that is not the board the tank is - no install item, the pop-up names the board and the picker moves to it (`make_installer.py`'s two dialog edits). No board is preselected any more (a remembered pick or the 1.8 by default was how the watch got the 1.8's version) |
+| the layout | the save records the world it was laid out in (`lay_w/h/fx0/fx1`, the film grid, at 1940..1951). A tank loaded in another world is laid out again in proportion to the floor (a castle 80% across stays 80% across), the film resampled, the snail placed fresh. An older save past this floor, on a board other than the 1.8, is read as the 1.8's world |
+
+`fishsim --selftest-board [pfx]` (in `make check`) proves the layout, the card
+and the update path in every world; pfx writes the card and the offer page.
+A tank from before 0.3.9.3 tells the installer neither board: the version
+decides for it, as before. A brand-new board on Waveshare's demo answers
+nothing: the keeper's pick is all there is, which is why nothing is picked
+for them.
+
+### On a side (0.3.9.3)
+
+Keepers asked to stand the square and the pendant on any edge. Their
+pictures are square, so the way up is any of four: the picture's quarter
+turns clockwise, 0..3 (`tank_orient` in tank.h; 2 is the old flip). The
+watch and the 1.8 keep two ways (`TANK_QUARTER` reads a side as upright
+where the picture is not square).
+
+| piece | what it does |
+|---|---|
+| the IMU | `imu_port_sides()` on the square's and the pendant's own builds: the in-screen axis that is not "up" decides a side. The side's sign comes from the up axis (Z runs out of the glass on both). A new way up must carry gravity 1.3x the other in-screen axis for ~750 ms, so a tank near 45 degrees never flaps; flat holds. NVS `inv` stays the turned-over half (an older build reads it), `side` is the rest |
+| the panel | a quarter is the CO5300's own MADCTL (rows and columns exchanged), sent by the flush task between frames: no cost per frame. The square 0x00 (its upright 0xA0). Turned over is still the flush's 180; the fourth way up is both. THE PENDANT TURNS IN ITS FLUSH instead (round_flush, a stripe column read as one frame row in order: 24.6 fps on a side, as before): on its side the CO5300 takes no row address past 466, so the round glass's 6 px offset could never be drawn - a strip along the top with the USB on the left at every gap (Strato's photos 10-30; `turn probe on` paints the memory white and bands the four edges). Director `turn [0-3 \| madctl <hex> \| gap <x> <y> \| sign \| probe on\|off]` forces a side and tries others live |
+| touch | the calibration and the finger's low landing live upright; a tap is turned with the picture after them (`tank_quarter_from_upright`). The keeper's ADVANCED touch fit is fitted and applied upright too, on any side |
+| the lock | settings ROTATION freezes whichever of the four it has; the save's `orient` byte carries a side in bit 4 (an older build reads the turned-over half) |
+
+Seen on the glass 2026-10-30: both boards turn as intended all four ways,
+and taps on a side land where the finger is.
+The sim proves the lock on every side and the touch fit on every side
+(`--selftest-sleep`, `--selftest-advanced`).
+
 ## What the first feature under these rules found (2026-10-01)
 
 The fish card's RENAME and SELL were built this way. Two things turned up

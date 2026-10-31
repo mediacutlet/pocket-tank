@@ -28,6 +28,7 @@ bool net_port_set_manifest_url(const char *url);
 #include "codec_port.h"
 #include "audio_port.h"
 #include "imu_port.h"
+#include "update_mode.h"
 #include "audio.h"
 #include "notice.h"
 #include "esp_timer.h"
@@ -119,9 +120,9 @@ static void clear_pellets(tank_t *t) {
 static void show_state(const tank_t *t) {
     for (int i = 0; i < t->n_fish; i++) {
         const fish_t *f = &t->fish[i];
-        ESP_LOGI(TAG, "%d %-6s %-5s age %.1fh size %.2f hunger %.1f energy %.1f stress %.1f curiosity %.1f trust %.1f ms %03x  %s at %.0f,%.0f",
+        ESP_LOGI(TAG, "%d %-6s %-5s age %.1fh size %.2f hunger %.1f energy %.1f stress %.1f curiosity %.1f trust %.1f social %.3f (born %.2f) bold %.3f (born %.2f) ms %03x  %s at %.0f,%.0f",
                  i, f->name, STAGE_NAMES[f->stage], progression_age_s(t, i) / 3600.0f, f->size,
-                 f->hunger, f->energy, f->stress, f->curiosity, f->trust, (unsigned)f->ms_bits,
+                 f->hunger, f->energy, f->stress, f->curiosity, f->trust, f->sociable, f->sociable0, f->bold, f->bold0, (unsigned)f->ms_bits,
                  GOAL_NAMES[f->goal.id], f->x, f->y);
     }
     int pellets = 0, cells = 0;
@@ -265,6 +266,9 @@ static void run(tank_t *t, char *line) {
         if (argc > 1 && !strcmp(argv[1], "forget")) { net_port_creds_forget(); return; }
         if (net_port_creds_get(ssid, pass)) ESP_LOGI(TAG, "network: %s (%s)", ssid, pass[0] ? "with a password" : "open");
         else ESP_LOGI(TAG, "no network saved (wifi set ssid=<name> pass=<secret>, or the wizard on the glass)");
+    } else if (!strcmp(c, "shelf")) {                         /* shelf: as BOOT twice; shelf list|new|swap|pause|dormant|name|remove: stage MY TANKS (b-roll) */
+        if (argc < 2) device_shelf_toggle(); else device_shelf_cmd(argc - 1, argv + 1);
+    } else if (!strcmp(c, "touchlock")) { device_touch_lock(argc > 1 ? !strcmp(argv[1], "on") : -1);   /* THE TOUCH LOCK, as MY TANKS's padlock */
     } else if (!strcmp(c, "ota")) {                           /* update mode and its channel */
         const esp_partition_t *run = esp_ota_get_running_partition(), *boot = esp_ota_get_boot_partition();
         if (argc > 1 && !strcmp(argv[1], "check")) { if (!t) { ESP_LOGW(TAG, "already in update mode"); return; }
@@ -272,7 +276,7 @@ static void run(tank_t *t, char *line) {
         if (argc > 1 && !strcmp(argv[1], "calib")) { update_debug_calib(); ESP_LOGI(TAG, "ota calib: nine crosshairs, a press each (the log fits the mapping)"); return; }
         if (argc > 2 && !strcmp(argv[1], "flip")) {            /* update mode never reads the IMU: the crosshairs with the board the other way up */
             if (t) { ESP_LOGW(TAG, "ota flip: update mode only (the tank turns with the IMU)"); return; }
-            bool inv = !strcmp(argv[2], "on"); display_port_set_inverted(inv); touch_port_set_inverted(inv);
+            bool inv = !strcmp(argv[2], "on"); update_mode_hold_way(inv ? 2 : 0);
             ESP_LOGI(TAG, "ota flip %s: the picture is %s", inv ? "on" : "off", inv ? "turned over" : "upright"); return; }
         if (argc > 1 && !strcmp(argv[1], "kbd")) { update_debug_keyboard(); ESP_LOGI(TAG, "ota kbd: the keyboard page (calibration; the saved network is untouched)"); return; }
         if (argc > 1 && !strcmp(argv[1], "page")) { ESP_LOGI(TAG, "update mode: %s, page %d, %d characters typed", update_active() ? "active" : "not active", update_page(), (int)strlen(update_typed())); return; }   /* never the text: it may be the saved passphrase */
@@ -341,6 +345,16 @@ static void run(tank_t *t, char *line) {
             ESP_LOGI(TAG, "imu poll: g=[%6d %6d %6d] motion %5d %s", a[0], a[1], a[2], m, imu_port_moving() ? "MOVING" : "still");
             vTaskDelay(pdMS_TO_TICKS(250));
         }
+    } else if (!strcmp(c, "turn")) {            /* on a side (0.3.9.3): turn [0-3 | madctl <hex> | gap <x> <y> | sign] */
+        if (argc > 1 && argv[1][0] >= '0' && argv[1][0] <= '3' && !argv[1][1]) {
+            imu_port_seed_quarter(argv[1][0] - '0');   /* as if the IMU said so: it holds lying flat, a real turn takes over */
+        } else if (argc > 2 && !strcmp(argv[1], "madctl")) display_port_side_tune((int)strtol(argv[2], NULL, 16), -1, -1);
+        else if (argc > 3 && !strcmp(argv[1], "gap")) display_port_side_tune(-1, atoi(argv[2]), atoi(argv[3]));
+        else if (argc > 1 && !strcmp(argv[1], "sign")) imu_port_side_sign_flip();
+        else if (argc > 2 && !strcmp(argv[1], "probe")) { display_port_probe(!strcmp(argv[2], "on")); ESP_LOGI(TAG, "turn probe %s", argv[2]); }
+        int m, gx, gy; bool on; display_port_side_info(&m, &gx, &gy, &on);
+        ESP_LOGI(TAG, "turn: the IMU says %d, the picture shows %d%s | sides %s, side MADCTL 0x%02x, gap %d,%d", imu_port_quarter(), t->orient_q,
+                 t->orient_lock ? " (ROTATION locked)" : "", display_port_quarters() ? "on" : "off (not this build's own board)", m, gx, gy);
     } else if (!strcmp(c, "screen")) {          /* a worn tank's way up (tank.h tank_screen_*): screen [normal|turned] */
         if (argc > 1) { tank_screen_set(t, !strcmp(argv[1], "turned")); progression_settings_changed(); }
         ESP_LOGI(TAG, "screen: %s%s", tank_screen_turned(t) ? "TURNED" : "NORMAL", TANK_WORN ? "" : " - not a worn build: never turned");
@@ -499,6 +513,9 @@ static void run(tank_t *t, char *line) {
     } else if (!strcmp(c, "grasscache")) {           /* grasscache [0|1] [ms]: the back grass from a cached scene, rebuilt every ms (2026-10-24, not saved) */
         if (argc > 1) render_set_grass_cache_on(atoi(argv[1]) != 0, argc > 2 ? atoi(argv[2]) : 0);
         ESP_LOGI(TAG, "grasscache: %s, every %d ms", render_grass_cache_on() ? "ON" : "off", render_grass_cache_ms());
+    } else if (!strcmp(c, "grassloop")) {            /* grassloop [on|off]: the back grass from the loop (0.3.9.3, render.c THE GRASS LOOP; not saved) */
+        if (argc > 1) render_grass_loop_on(!strcmp(argv[1], "on"));
+        ESP_LOGI(TAG, "grassloop: %s", render_grass_loop_is_on() ? "ON" : "off");
     } else if (!strcmp(c, "vegthin")) {              /* vegthin 0|1: a COST PROBE - every third grass frond not drawn (the tank still has it) */
         extern int g_veg_thin; if (argc > 1) g_veg_thin = atoi(argv[1]);
         ESP_LOGI(TAG, "vegthin: %d", g_veg_thin);
@@ -769,7 +786,7 @@ static void improv_send(uint8_t type, const uint8_t *data, int n) {
      * answer away until the tank's next log line ended (seconds apart on a quiet tank): asked
      * four times, answered four times, not one answer taken. Seen in the bytes Chrome received
      * (a diagnostic page) after the tank's own trace showed it answering every ask. */
-    uint8_t p[120]; int k = 0;
+    uint8_t p[152]; int k = 0;
     if (n < 0 || n > (int)sizeof p - 12) return;
     p[k++] = '\n';
     memcpy(p + k, "IMPROV", 6); k += 6; p[k++] = 1; p[k++] = type; p[k++] = (uint8_t)n;
@@ -789,7 +806,7 @@ static void improv_state(void) {
     improv_send(1, &st, 1);
 }
 static void improv_result(uint8_t cmd, const char *const *strs, int n) {   /* an RPC result: cmd, len, then length-prefixed strings */
-    uint8_t d[96]; int k = 2;
+    uint8_t d[128]; int k = 2;                                /* (0.3.9.3: room for the boards in the name, a long build too) */
     for (int i = 0; i < n; i++) { int l = (int)strlen(strs[i]); if (k + 1 + l > (int)sizeof d) break; d[k++] = (uint8_t)l; memcpy(d + k, strs[i], l); k += l; }
     d[0] = cmd; d[1] = (uint8_t)(k - 2);
     improv_send(4, d, k);
@@ -828,7 +845,20 @@ static void improv_handle(void) {
         /* the version is the installer manifest's own string (make_installer.py release_version:
            "v0.3.0 alpha (build 1a2b3c4)"): the page hides its update item when the two are equal */
         char ver[48]; snprintf(ver, sizeof ver, "v" PT_RELEASE " " PT_RELEASE_STAGE " (build %s)", version_port_string());
-        const char *info[4] = { "Pocket Tank", ver, "esp32-s3", "Pocket Tank" };
+        /* the device name carries the boards (0.3.9.3): "Pocket Tank|<the board it is>|<the board this
+           version is for>" - the install page's guard reads them (a watch running the 1.8's version is
+           offered the watch's; a pick that is not this board is stopped). The dialog shows the part
+           before the first "|" (make_installer.py) */
+        /* The installer's connect resets the board and asks at once, from the early task, which can
+           be ahead of the chip probe in display_port_init: wait for it (2 s at most; the page asks
+           for 4 s - make_installer.py). The name is put together without printf: the early task's
+           stack is 3 KB, and it is alive while the display takes its internal RAM */
+        for (int i = 0; i < 40 && !board_port_probed(); i++) vTaskDelay(pdMS_TO_TICKS(50));
+        const char *hw = board_port_hw();
+        char name[48] = "Pocket Tank|";
+        strncat(name, hw ? hw : "", sizeof name - strlen(name) - 1);
+        strncat(name, "|" PT_BOARD, sizeof name - strlen(name) - 1);
+        const char *info[4] = { "Pocket Tank", ver, "esp32-s3", name };
         improv_result(3, info, 4);
     } else if (cmd == 4) {
         if (s_imp_radio) s_imp_form = true;

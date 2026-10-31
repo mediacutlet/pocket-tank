@@ -113,6 +113,20 @@ void render_fb_primed(const uint16_t *fb, unsigned epoch);
  * it and a centred card: the crab facing the glass at 2x, the pellets it has
  * found and what it is doing. */
 #define RENDER_CARD_CRAB 95
+/* the critter cards' arrows (0.3.9.3, Strato: "cycle through all the
+ * critters from this UI"): two small boxes inside a critter card's top
+ * corners, in the NEXT FISH arrow's dress - the left one steps back, the
+ * right one on, through the critters this tank has (snail, shrimp, urchin,
+ * seahorse, crab, wrapping round; the fish keep their own arrow). Dim with
+ * only one, where there is nowhere to go. render_critter_nav_hit is the tap
+ * test while critter card `card` is up: -1 the left box, +1 the right, 0
+ * neither (the boxes plus slop); render_critter_step the card it steps to
+ * (the same card with one critter, or for a card that is not a critter's). */
+#define RENDER_CRIT_NAV_W  34     /* the NEXT FISH arrow's box */
+#define RENDER_CRIT_NAV_IN 8      /* in from the card's corner */
+int  render_critter_nav_hit(int card, float x, float y);
+int  render_critter_step(const tank_t *t, int card, int dir);
+bool render_critter_here(const tank_t *t, int card);   /* that critter is in the tank (its card would draw) */
 void render_stats_card(const tank_t *t, int fish_idx, uint16_t *fb, int stride);
 /* Optional card cache (RENDER_CARD_W x RENDER_CARD_H uint16): with the scene
  * cache live, the card is redrawn at most 4x/s and blitted otherwise (~7 ms
@@ -342,6 +356,26 @@ void     render_set_touched_mask(uint32_t *buf);
  * its period; the prof gives the refreshes' time and count since the last call */
 void     render_set_grass_cache(uint16_t *buf, uint32_t *mask);
 void     render_set_grass_cache_on(bool on, int period_ms);
+/* THE GRASS LOOP (0.3.9.3, render.c): the back grass baked into a loop of bands of its sway (up to 16), and eight
+ * fine moments a band kept as their difference from it; a frame is primed with the scene above the grass's band
+ * and the band of its moment below, its fine moment laid over that. The platform hands over an allocator
+ * (64-byte aligned; PSRAM on the board) and a memory budget, then turns it on. render_grass_loop_parts is the
+ * prefetch's: the scene and the band for the frame at `clock`, and the epoch to hand render_fb_primed (false: no
+ * band ready - copy render_scene_buf as before). render_grass_loop_n and _ready count fine moments.
+ * render_grass_loop_lock(m): the loop plans m moments (0: as many as the budget holds) and STEPS one a frame - the
+ * grass moves with the frames, its sway's period m frames x 2 (0: the moment is the clock's). */
+void     render_set_grass_loop(void *(*alloc)(size_t), void (*release)(void *), size_t budget);
+void     render_grass_loop_on(bool on);
+bool     render_grass_loop_is_on(void);
+bool     render_grass_loop_parts(float clock, const uint16_t **scene, size_t *top_bytes, const uint16_t **band, size_t *band_off, size_t *band_bytes, unsigned *ep);
+void     render_grass_loop_prof(int *n, int *bakes, int64_t *us, int *rows);   /* moments, bakes and their time since the last call, the band's rows */
+void     render_grass_loop_bypass(bool on);   /* (the sim's tests: the loop kept but not used - the old drawing) */
+void     render_force_veg_clock(float c);     /* (... and the sway pinned to a moment; -1 = the frame's) */
+int      render_grass_loop_n(void);
+int      render_grass_loop_ready(void);       /* moments baked and current */
+void     render_grass_loop_lock(int moments);
+int      render_grass_loop_moment(void);      /* the last frame's moment (stepping), -1 before one */
+void     render_grass_loop_arena(int *used_kb, int *cap_kb);   /* the fine moments' differences: KB used of KB held */
 bool     render_grass_cache_on(void);
 int      render_grass_cache_ms(void);
 void     render_grass_cache_prof(int64_t *us, int *n);
@@ -417,7 +451,8 @@ enum { SET_TAP_NONE = 0, SET_TAP_CLOSE = 1, SET_TAP_BRIGHT = 2, SET_TAP_VOLUME =
                                    for the save - the platform only logs it (the picture turns on the next frame) */
        SET_TAP_FEED = 8,        /* AUTO FEED (0.3.2): *value 1 = ON; applied and marked for the save */
        SET_TAP_ROTATE = 9,      /* ROTATION (0.3.2): *value 1 = locked; applied and marked for the save */
-       SET_TAP_BRIGHT_LIVE = 10 };  /* the BRIGHTNESS slider under a finger (0.3.9): *value = the percent, the panel's to
+       SET_TAP_BRIGHT_LIVE = 10,
+       SET_TAP_TANKS = 11 };        /* MY TANKS (0.3.9.3): the platform opens the tank switcher (docs/tank-switcher.md) */  /* the BRIGHTNESS slider under a finger (0.3.9): *value = the percent, the panel's to
                                        show now; SET_TAP_BRIGHT follows with the last one when the finger lifts */
 void render_settings(const tank_t *t, uint16_t *fb, int stride, int bright_pct, int volume);
 /* THE ADVANCED PAGE's pictures and hit tests (0.3.9.2; the page itself is
@@ -685,5 +720,62 @@ void render_fish_portrait(uint16_t *fb, int stride, float x, float y, float size
 #else
 #define SET_UPD_X     (PAGE_BOWL ? 60 : 32)    /* the UPDATES button, bottom left (2026-09-30); in from the glass on the bowl */
 #endif
+
+/* ---- MY TANKS + THE LIBRARY: the tank switcher (docs/tank-switcher.md).
+ * ART FOR APPROVAL, 2026-10-29: the pages only, drawn from what the sim
+ * stages (--shelf-shot); nothing behind them yet. ---- */
+enum { SHELF_EMPTY, SHELF_NOW, SHELF_DORMANT, SHELF_PAUSED };
+typedef struct {
+    int state;                 /* SHELF_* */
+    const char *name;
+    bool experimental;
+    const uint16_t *thumb;     /* render_shelf_thumb_size, RGB565 (native order) */
+} shelf_slot_t;
+typedef struct {
+    const char *name, *line;   /* the tank type, its one plain line */
+    const uint16_t *thumb;
+    bool experimental, installed;
+    int price;                 /* sand dollars for the next tank of it, 0 = free */
+} library_row_t;
+/* LOADING (0.3.9.3): a tank's first seconds after a SWAP IN or a power-on, while its grass loop is first baked: the
+ * platform shows render_loading and bakes at full speed (render_grass_loop_bake_more: up to n moments, 0 = not ready to
+ * bake yet - draw a tank frame so the scene and the loop's look settle) until render_grass_loop_warming says false */
+void render_loading(uint16_t *fb, int stride, const char *name, float clock);
+bool render_grass_loop_warming(void);
+int  render_grass_loop_bake_more(const tank_t *t, int n);
+void render_shelf_set_move(bool on, int i, const char *name);   /* MOVE (0.3.9.3): a tank in hand - the page's slot i lifted (-1: it is on another page) */
+void render_shelf_set_touch_lock(bool on);     /* THE TOUCH LOCK (0.3.9.3): MY TANKS's padlock button drawn shut (taps locked) */
+void render_touch_lock_hint(uint16_t *fb, int stride);   /* a tap on a locked tank: TOUCH IS LOCKED / PRESS BOOT TWICE TO UNLOCK */
+void render_shelf_thumb_size(int *w, int *h);
+void render_shelf_thumb(const uint16_t *frame, uint16_t *thumb);   /* a whole frame -> its little-tank picture */
+void render_shelf(uint16_t *fb, int stride, const shelf_slot_t slot[8], int page, int pages);
+enum { SHELF_TAP_NONE, SHELF_TAP_CLOSE, SHELF_TAP_LIBRARY, SHELF_TAP_PREV, SHELF_TAP_NEXT, SHELF_TAP_TOUCH_LOCK, SHELF_TAP_SLOT0 = 10 };
+int  render_shelf_tap(float x, float y);                           /* SHELF_TAP_*, a slot = SHELF_TAP_SLOT0 + i (frame coordinates) */
+void render_shelf_card(uint16_t *fb, int stride, const shelf_slot_t *s, const char *kind, int shelf_days, int age_days);
+/* MORE: REMOVE (0.3.9.3) - the panel (part 1 its backdrop, drawn once; 2 the panel, every frame while the hold fills: hold
+   0..1) and its places: BACK, HOLD TO SELL (held SHM_HOLD_S), outside it */
+#define SHM_HOLD_S 2.0f
+enum { SHM_TAP_NONE, SHM_TAP_OUTSIDE, SHM_TAP_BACK, SHM_TAP_HOLD };
+void render_shelf_remove(uint16_t *fb, int stride, const shelf_slot_t *s, int refund, float hold, int part);
+int  render_shelf_remove_hit(float x, float y);
+/* a tank's RENAME (0.3.9.3): the keyboard's state (the name's two lines, the one being typed, the keys' page), its page
+ * (part 1 the backdrop - drawn once with the shelves; 2 the rest, every frame; 3 both) and its touch: a key acts when the
+ * finger lifts on the key it landed on (SHR_TICK); BACK / DONE end it (SHR_DONE: render_shelf_rename_name). The keys'
+ * places for tests and the director: render_shelf_rename_hit / _key_xy, the characters of a page _keys */
+typedef struct { char line[2][8]; int row, page; bool down; float px, py; } shelf_rename_t;   /* two lines of 7 */
+enum { SHR_NONE, SHR_TICK, SHR_CANCEL, SHR_DONE };
+enum { SHK_NONE, SHK_CHAR0 = 1, SHK_MORE = 20, SHK_DEL, SHK_SPACE, SHK_LINE, SHK_BACK, SHK_DONE, SHK_LINE1, SHK_LINE2, SHK_CLEAR };   /* SHK_CHAR0 + 0..13: a page's keys */
+void render_shelf_rename_begin(shelf_rename_t *r, const char *name);
+void render_shelf_rename(uint16_t *fb, int stride, const shelf_slot_t *s, const shelf_rename_t *r, int part, float clock);
+int  render_shelf_rename_touch(shelf_rename_t *r, float x, float y, bool down);
+void render_shelf_rename_name(const shelf_rename_t *r, char *out, size_t cap);   /* the name, stored form: "LINE 1\nLINE 2" */
+int  render_shelf_rename_hit(float x, float y);
+void render_shelf_rename_key_xy(int key, float *x, float *y);
+const char *render_shelf_rename_keys(int page);   /* a page's fourteen characters (0..2) */
+enum { SHC_TAP_NONE, SHC_TAP_OUTSIDE, SHC_TAP_DORMANT, SHC_TAP_PAUSED, SHC_TAP_SWAP, SHC_TAP_RENAME, SHC_TAP_MORE };
+int  render_shelf_card_tap(float x, float y);
+void render_library(uint16_t *fb, int stride, const library_row_t *row, int n, int wallet, const char *checked);
+enum { LIB_TAP_NONE, LIB_TAP_BACK, LIB_TAP_ROW0 = 10 };
+int  render_library_tap(float x, float y, int n);
 
 #endif

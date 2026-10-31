@@ -468,6 +468,12 @@ static void text_named(uint16_t *fb, int stride, int x, int y, const char *pre, 
 static uint32_t dim(uint32_t c, int pct) {              /* c toward the ink, pct% of it left */
     return ((c >> 16 & 255) * pct / 100) << 16 | ((c >> 8 & 255) * pct / 100) << 8 | (c & 255) * pct / 100;
 }
+/* a fish's own colour as the colour of its name on the dark panel: a dark fish (the ink accent comes through
+ * as a body) has its name in light gray instead - black on the panel could not be read (0.3.9.3, Strato) */
+static uint32_t name_rgb(uint32_t c) {
+    int luma = ((c >> 16 & 255) * 299 + (c >> 8 & 255) * 587 + (c & 255) * 114) / 1000;
+    return luma < 90 ? 0xd0d8db : c;
+}
 /* a chevron of 4x4 blocks, `up` pointing up, apex at (cx, y) */
 static void chevron(uint16_t *fb, int stride, int cx, int y, bool up, uint32_t rgb) {
     for (int i = 0; i < 5; i++) {
@@ -768,7 +774,7 @@ void render_setup(const tank_t *t, uint16_t *fb, int stride, float clock) {
         for (int i = 0; i < FISH_NAME_MAX; i++) {
             int x = NX + i * SL;
             bool cursor = i == n && ((int)(clock * 2) & 1);
-            render_rect(fb, stride, x, NY + 26, SL - 4, 2, cursor ? C_EDGE : i < n ? f->color : C_DIM);
+            render_rect(fb, stride, x, NY + 26, SL - 4, 2, cursor ? C_EDGE : i < n ? name_rgb(f->color) : C_DIM);
             if (i < n) { char ch[2] = { f->name[i], 0 }; render_text(fb, stride, x + 3, NY, 3, s_typed ? C_TEXT : C_CAPT, ch); }
         }
         if (grid) for (int k = 0; k <= SETUP_KEY_DEL; k++) {
@@ -805,7 +811,7 @@ void render_setup(const tank_t *t, uint16_t *fb, int stride, float clock) {
         for (int i = 0; i < FISH_NAME_MAX; i++) {
             int x = SETUP_SLOT_X + i * SETUP_SLOT_PX;
             bool on = i == s_slot, reach = i <= n;
-            uint32_t col = on ? f->color : reach ? dim(f->color, 55) : C_DIM;
+            uint32_t col = on ? name_rgb(f->color) : reach ? dim(name_rgb(f->color), 55) : C_DIM;
             int v = slot_val(f, i);
             if (v) { char ch[2] = { (char)('A' + v - 1), 0 }; render_text(fb, stride, x, SETUP_SLOT_Y, SETUP_SLOT_SCALE, col, ch); }
             render_rect(fb, stride, x, SETUP_SLOT_Y + SETUP_SLOT_H + 8, SETUP_SLOT_W, 4,
@@ -871,7 +877,7 @@ void render_setup(const tank_t *t, uint16_t *fb, int stride, float clock) {
         const fish_t *pb = f->parent_b >= 0 && f->parent_b < t->n_fish ? &t->fish[f->parent_b] : NULL;
         bool shop = f->parent_a < 0 && f->parent_b < 0;              /* bought (0.3.5): its look is the shop's */
         const char *na = shop ? "THE SHOP" : fish_name(t, f->parent_a), *nb = shop ? "THE SHOP" : fish_name(t, f->parent_b);
-        uint32_t ca = pa ? pa->color : shop ? C_CAPT : C_DIM, cb = pb ? pb->color : shop ? C_CAPT : C_DIM;
+        uint32_t ca = pa ? name_rgb(pa->color) : shop ? C_CAPT : C_DIM, cb = pb ? name_rgb(pb->color) : shop ? C_CAPT : C_DIM;
         panel(fb, stride);
         text_c(fb, stride, CX, SETUP_Y + 20, 3, C_TEXT, f->name);
         float ps = f->size * 2.0f;                                   /* a portrait, twice life size (a fry) ... */

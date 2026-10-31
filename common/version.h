@@ -17,13 +17,14 @@
  * records PT_RELEASE_NUM of the build that wrote it (progression.c). */
 #ifndef VERSION_H
 #define VERSION_H
+#include <string.h>
 
 #define PT_RELEASE_MAJOR 0
 #define PT_RELEASE_MINOR 3
 #define PT_RELEASE_PATCH 9
-#define PT_RELEASE_HOTFIX 2                    /* a fourth part (2026-10-21): a fix between patches - 0.3.8.1 - that
+#define PT_RELEASE_HOTFIX 3                    /* a fourth part (2026-10-21): a fix between patches - 0.3.8.1 - that
                                                   must not burn the next number. 0 = none, and the string has three parts */
-#define PT_RELEASE       "0.3.9.2"
+#define PT_RELEASE       "0.3.9.3"
 #define PT_RELEASE_STAGE "alpha"               /* pre-1.0: shown beside the number */
 /* the packed number the tank compares (update.c newer(), the save's stamp):
  * a byte each, major.minor.patch.hotfix. Until 0.3.8 it was three bytes
@@ -65,6 +66,13 @@
 #define PT_BOARD         "amoled18"
 #define PT_BOARD_NAME    "ESP32-S3-Touch-AMOLED-1.8"
 #endif
+/* a board id in the keeper's words, for the glass (0.3.9.3: the WRONG VERSION
+ * card, a board's own version offered by CHECK FOR UPDATES); NULL = unknown */
+static inline const char *pt_board_words(const char *id) {
+    if (!id) return NULL;
+    return !strcmp(id, "amoled18") ? "1.8 INCH" : !strcmp(id, "round175c") ? "1.75 ROUND" :
+           !strcmp(id, "watch206") ? "2.06 WATCH" : !strcmp(id, "square216") ? "2.16 SQUARE" : NULL;
+}
 #define PT_BOARD_MAGIC   "PTBOARD"             /* the image's board marker begins with these 8 bytes (with the NUL) */
 #define PT_BOARD_MARKER_OFFSET 0x120           /* ... at this offset in the app image: the image header (24) + the
                                                   first segment's header (8) + esp_app_desc_t (256) */

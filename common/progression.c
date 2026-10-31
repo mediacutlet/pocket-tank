@@ -221,6 +221,13 @@ typedef struct {
      * again, a find soon for every keeper who updates. Until then a boot
      * started the wait again at 2-4 h of awake time. */
     uint32_t cr_find_wait;
+    /* the world this tank was laid out in (0.3.9.3): its glass and its floor's
+     * span, in its own px, and its film grid. A tank that moves to another
+     * board (that board's version installed over the 1.8's, which runs on
+     * every board) is laid out again in proportion: a castle 80% of the way
+     * across stays 80% across. Older saves read zeros (see load_save). */
+    uint16_t lay_w, lay_h, lay_fx0, lay_fx1;
+    uint8_t  lay_cols, lay_rows, pad_lay[2];
 } save_t;
 /* the smallest PTK2 save (pre-upkeep, 2026-08-30): anything shorter is not
  * ours. Every later build wrote sizeof(save_t) of its day - 448, 1112, 1304,
@@ -322,7 +329,10 @@ SAVE_AT(cr_found, 1932); SAVE_AT(cr_found_paid, 1934);                          
 _Static_assert(sizeof(save_t) >= 1936, "SAVE LAYOUT LOCK: save_t only ever grows");   /* 1936 of fields */
 SAVE_AT(cr_find_wait, 1936);                                                                           /* the wait for its next find, 0.3.9.1 (main's 0.4 tail must reserve 1936..1939) */
 _Static_assert(sizeof(save_t) >= 1944, "SAVE LAYOUT LOCK: save_t only ever grows");   /* 1940 of fields, padded to 8 */
-/* (the next field: SAVE_AT(its_name, 1940 or its type's alignment past it);) */
+SAVE_AT(lay_w, 1940); SAVE_AT(lay_h, 1942); SAVE_AT(lay_fx0, 1944); SAVE_AT(lay_fx1, 1946);            /* the world it was laid out in, 0.3.9.3 (main's 0.4 tail must reserve 1940..1951) */
+SAVE_AT(lay_cols, 1948); SAVE_AT(lay_rows, 1949); SAVE_AT(pad_lay, 1950);                              /* (main's 0.4 tail must reserve 1940..1951) */
+_Static_assert(sizeof(save_t) >= 1952, "SAVE LAYOUT LOCK: save_t only ever grows");
+/* (the next field: SAVE_AT(its_name, 1952 or its type's alignment past it);) */
 /* NVS budget: the save is one blob in the nvs partition (0x9000, 0x6000 =
  * 6 pages of 4096 B; tools/make_installer.py pins the row). A page is 126
  * entries of 32 B, and NVS keeps one page free for its garbage collection:
@@ -870,10 +880,14 @@ void progression_fresh(tank_t *t) {
     mark_dirty();
 }
 
+/* the keeper's reset (BOOT 5 s + a tap): the tank on the glass only (D13,
+   the tank switcher) - the shelf, the wallet and the board's settings stay */
 void progression_reset(tank_t *t, uint32_t seed) {
+    progression_carry_t c; progression_carry_take(t, &c);
     persist_port_erase();
     tank_init(t, seed);
     progression_fresh(t);
+    progression_carry_give(t, &c);
     progression_save(t);
 }
 
@@ -883,6 +897,42 @@ void progression_set_age(tank_t *t, int idx, float seconds) {
     apply_stage(&t->fish[idx], s_age[idx], true);
     apply_growth(&t->fish[idx]);
     mark_dirty();
+}
+
+/* A tank laid out on another board's world (0.3.9.3): the 1.8's image runs on
+ * every board, so a keeper can live on a watch in the 1.8's 448 px world, then
+ * install the watch's own version (322 px of floor). Every spot on the floor
+ * moves in proportion to the floor (a castle 80% of the way across stays 80%
+ * across; the pieces' own clamps still hold them off the glass), the film is
+ * resampled onto this grid, and the snail starts again where a new snail
+ * would (it lives on the glass, which has another shape here).
+ *
+ * A save from before 0.3.9.3 has no world. Only the 1.8's image runs on other
+ * boards, so on any other board's version an older save with a spot past this
+ * floor came from the 1.8's world; anything else loads as it always did. */
+static bool lay_spot(float x) { return x > 0 && (x < TANK_FX0 || x > TANK_FX1); }
+static void relayout(tank_t *t, save_t *sv) {
+    if (!sv->lay_w && strcmp(PT_BOARD, "amoled18") != 0 &&
+        (lay_spot(sv->bubble_x) || lay_spot(sv->feed_spot_x) || lay_spot(sv->plant_x) || lay_spot(sv->castle_x) ||
+         lay_spot(sv->coral_x) || lay_spot(sv->cluster_x) || lay_spot(sv->pumpkin_x) || lay_spot(sv->volcano_x) ||
+         lay_spot(sv->urchin_x) || lay_spot(sv->cr_x))) {
+        sv->lay_w = 448; sv->lay_h = 368; sv->lay_fx0 = 0; sv->lay_fx1 = 448;   /* the 1.8's world (tank.h's rectangle) */
+        sv->lay_cols = 448 / 16; sv->lay_rows = 368 / 16;
+    }
+    if (!sv->lay_w || sv->lay_fx1 <= sv->lay_fx0 ||
+        (sv->lay_w == TANK_W && sv->lay_h == TANK_H && sv->lay_fx0 == TANK_FX0 && sv->lay_fx1 == TANK_FX1)) return;
+    const float k = (float)TANK_FW / (sv->lay_fx1 - sv->lay_fx0);
+    float *spots[] = { &sv->bubble_x, &sv->feed_spot_x, &sv->plant_x, &sv->castle_x, &sv->coral_x, &sv->cluster_x,
+                       &sv->pumpkin_x, &sv->volcano_x, &sv->urchin_x, &sv->cr_x };
+    for (size_t i = 0; i < sizeof spots / sizeof spots[0]; i++)
+        if (*spots[i] > 0) *spots[i] = fmaxf(1, TANK_FX0 + (*spots[i] - sv->lay_fx0) * k);   /* 0 = never placed: stays 0 */
+    sv->snail_x = sv->snail_y = 0;
+    int sc = sv->lay_cols, sr = sv->lay_rows;
+    if (sc > 0 && sr > 0 && sc * sr <= ALGAE_SAVE && (sc != ALGAE_COLS || sr != ALGAE_ROWS)) {   /* through the tank's own grid: no second copy on the stack */
+        for (int y = 0; y < ALGAE_ROWS; y++) for (int x = 0; x < ALGAE_COLS; x++)
+            t->algae[y * ALGAE_COLS + x] = sv->algae[(y * sr / ALGAE_ROWS) * sc + x * sc / ALGAE_COLS];
+        memcpy(sv->algae, t->algae, ALGAE_CELLS);
+    }
 }
 
 /* restore the saved tank into t; false = no usable save (t untouched).
@@ -899,6 +949,7 @@ static bool load_save(tank_t *t, int64_t *saved_unix) {
         memmove(&sv.ms_seen, &sv.bubble_x, sizeof sv.ms_seen + sizeof sv.tank_ms_seen);
         sv.bubble_x = 0;                       /* = the default column */
     }
+    relayout(t, &sv);                          /* another board's world: in proportion (0.3.9.3) */
     *saved_unix = sv.saved_unix; s_loaded_unix = sv.saved_unix;
     s_loaded_release = sv.saved_release;
     t->n_fish = 0;
@@ -930,7 +981,7 @@ static bool load_save(tank_t *t, int64_t *saved_unix) {
     t->light_tip_seen = sv.light_tip_seen != 0;
     t->tools_locked = sv.tools_locked != 0;
     tank_screen_set(t, sv.screen_turned != 0);
-    t->orient_lock = (sv.orient & 1) != 0; if (t->orient_lock) t->orient_inv = (sv.orient & 2) != 0;
+    t->orient_lock = (sv.orient & 1) != 0; if (t->orient_lock) t->orient_q = (uint8_t)TANK_QUARTER(((sv.orient & 2) ? 2 : 0) | ((sv.orient & 4) ? 1 : 0));   /* 4: on a side (0.3.9.3; an older build reads the turned-over half) */
     t->autofeed_off = sv.autofeed_off != 0;
     t->light_override = false; t->light_on = true;   /* never restored (2026-09-15): a saved
                                                       * override once froze a tank in permanent day */
@@ -1027,6 +1078,37 @@ float progression_boot(tank_t *t) {
 
 void progression_settings_changed(void) { mark_dirty(); }
 
+void progression_carry_take(const tank_t *t, progression_carry_t *c) {
+    memset(c, 0, sizeof *c);
+    c->sd_balance = t->sd_balance;
+    c->light_idle_s = (uint16_t)t->light_idle_s; c->light_auto = t->light_auto; c->light_tip_seen = t->light_tip_seen;
+    c->screen_turned = t->screen_turned; c->orient_lock = t->orient_lock; c->orient_q = t->orient_q;
+}
+void progression_carry_give(tank_t *t, const progression_carry_t *c) {
+    t->sd_balance = c->sd_balance;
+    t->light_idle_s = c->light_idle_s ? c->light_idle_s : LIGHT_IDLE_S;
+    t->light_auto = c->light_auto != 0; if (t->light_auto) t->light_manual_off = false;
+    t->light_tip_seen = c->light_tip_seen != 0;
+    tank_screen_set(t, c->screen_turned != 0);
+    t->orient_lock = c->orient_lock != 0; t->orient_q = t->orient_lock ? (uint8_t)TANK_QUARTER(c->orient_q) : 0;
+    mark_dirty();
+}
+bool progression_blob_set_saved_unix(void *blob, size_t len, int64_t unix) {
+    if (len < offsetof(save_t, saved_unix) + sizeof(int64_t)) return false;
+    uint32_t magic; memcpy(&magic, blob, sizeof magic);
+    if (magic != SAVE_MAGIC) return false;
+    memcpy((uint8_t *)blob + offsetof(save_t, saved_unix), &unix, sizeof unix);
+    return true;
+}
+
+uint32_t progression_blob_unlocks(const void *blob, size_t len) {
+    if (len < offsetof(save_t, sd_unlocks) + sizeof(uint32_t)) return 0;
+    uint32_t magic, u; memcpy(&magic, blob, sizeof magic);
+    if (magic != SAVE_MAGIC) return 0;
+    memcpy(&u, (const uint8_t *)blob + offsetof(save_t, sd_unlocks), sizeof u);
+    return u;
+}
+
 void progression_slept(tank_t *t, float seconds) {
     if (seconds <= 0) return;
     tank_tick_sleep(t, seconds);
@@ -1059,6 +1141,19 @@ float progression_wake(tank_t *t, int64_t now_unix) {
     return slept;
 }
 
+bool progression_near_friend(const tank_t *t, int i) {
+    float d; int j = tank_nearest_friend(t, i, &d);
+    return j >= 0 && d < SOCIAL_NEAR_PX * (t->fish[i].size + t->fish[j].size);
+}
+bool progression_finger_company(const tank_t *t, int i) {
+    if (!tank_at_finger(t, i)) return false;
+    for (int j = 0; j < t->n_fish; j++)
+        if (j != i && tank_at_finger(t, j) &&
+            tank_dist(t->fish[i].x, t->fish[i].y, t->fish[j].x, t->fish[j].y) < SOCIAL_NEAR_PX * SOCIAL_RING_X * (t->fish[i].size + t->fish[j].size))
+            return true;
+    return false;
+}
+
 void progression_tick(tank_t *t, float dt) {
     if (!s_booted) return;
     float aged = dt * progression_time_scale;                    /* growth: every awake second, lit or not */
@@ -1069,13 +1164,29 @@ void progression_tick(tank_t *t, float dt) {
         s_age[i] += aged;
         apply_stage(f, s_age[i], false);
         apply_growth(f);
-        /* trait drift, slow: calm + fed -> bolder/more social; startled -> shyer */
+        /* trait drift, slow: calm + fed -> bolder; startled -> shyer; and it
+         * settles back toward the temper it was born with (2026-10-29: calm +
+         * fed is most of a tended tank's day and stress > 7 almost never comes
+         * since the shadow went, so every fish ran to 0.95 within a lit day).
+         * The CHANGE gate's pressure keeps its old pace: it measures the
+         * experience, not how far the trait got to move. */
         float k = tended / (DRIFT_HOURS * 3600.0f);          /* full unit per DRIFT_HOURS of pressure */
         float pressure = 0;                                   /* what the traits WANTED to move, before the clamps */
         if (f->stress > 7) { f->bold = clampf(f->bold - k, 0.05f, 0.95f); pressure += k; }
-        else if (f->hunger < 4 && f->stress < 2) { f->bold = clampf(f->bold + k * 0.5f, 0.05f, 0.95f); pressure += k * 0.5f; }
-        if (f->goal.id == GOAL_FOLLOW_FRIEND) { f->sociable = clampf(f->sociable + k * 0.5f, 0.05f, 0.95f); pressure += k * 0.5f; }
-        else if (f->goal.id == GOAL_EXPLORE) { f->sociable = clampf(f->sociable - k * 0.2f, 0.05f, 0.95f); pressure += k * 0.2f; }
+        else if (f->hunger < 4 && f->stress < 2) { f->bold = clampf(f->bold + k * BOLD_CALM_GAIN, 0.05f, 0.95f); pressure += k * 0.5f; }
+        f->bold += (f->bold0 - f->bold) * k * TRAIT_SETTLE;
+        /* social (2026-10-29, Discord: every keeper's fish went SOLO): company
+         * warms a fish - following a friend, and every second spent nose to
+         * tail with one (at the food, in the grass, gathered at the keeper's
+         * finger: a hold is how a keeper brings a shy tank together) - and it
+         * settles back toward the temper it was born with. Exploring used to
+         * cool it, and the model only follows with a very social fish (7-9),
+         * so a middling fish never got the warmth back and sank to the floor;
+         * a social one ran to the ceiling. */
+        float warm = (f->goal.id == GOAL_FOLLOW_FRIEND ? SOCIAL_FOLLOW_GAIN : 0)
+                   + (progression_finger_company(t, i) ? SOCIAL_HOLD_GAIN : progression_near_friend(t, i) ? SOCIAL_NEAR_GAIN : 0);
+        if (warm > 0) { f->sociable = clampf(f->sociable + k * warm, 0.05f, 0.95f); pressure += k * warm; }
+        f->sociable += (f->sociable0 - f->sociable) * k * TRAIT_SETTLE;
         f->drift_acc += pressure;
         if (fabsf(f->bold - f->bold0) >= 0.11f || fabsf(f->sociable - f->sociable0) >= 0.11f) changed_someone = true;
 
@@ -1213,7 +1324,7 @@ bool progression_save(tank_t *t) {
     sv.light_tip_seen = t->light_tip_seen;
     sv.tools_locked = t->tools_locked;
     sv.screen_turned = t->screen_turned;
-    sv.orient = (uint8_t)(t->orient_lock ? 1 | (t->orient_inv ? 2 : 0) : 0);
+    sv.orient = (uint8_t)(t->orient_lock ? 1 | ((t->orient_q & 2) ? 2 : 0) | ((t->orient_q & 1) ? 4 : 0) : 0);
     sv.autofeed_off = t->autofeed_off;
     sv.arrival_pending = s_arrival_pending; sv.n_fish = (uint8_t)t->n_fish;
     sv.feed_spot_x = t->feed_spot_x; sv.player_feedings = t->player_feedings;
@@ -1249,6 +1360,8 @@ bool progression_save(tank_t *t) {
     sv.cr_x = (t->sd_unlocks & SD_ITEM_CRAB) && t->cr_x > 0 ? t->cr_x : 0; sv.cr_variant = t->cr_variant; sv.cr_eaten = t->cr_eaten;
     sv.cr_found = t->cr_found; sv.cr_found_paid = t->cr_found_paid;
     sv.cr_find_wait = 1u + (t->cr_find > 0 ? 0u : (uint32_t)fmaxf(0, t->cr_find_cool));   /* one held up: due again at the next load */
+    sv.lay_w = TANK_W; sv.lay_h = TANK_H; sv.lay_fx0 = TANK_FX0; sv.lay_fx1 = TANK_FX1;   /* this board's world (0.3.9.3) */
+    sv.lay_cols = ALGAE_COLS; sv.lay_rows = ALGAE_ROWS;
     if (t->sd_unlocks & SD_ITEM_SEAHORSE) {
         sv.sh_s = t->sh_s > 0 ? t->sh_s : 0; sv.sh_hitches = t->sh_hitches; sv.sh_trust_passed = t->sh_trust_passed;
         sv.sh_eaten = t->sh_eaten; sv.sh_snack_pay = t->sh_snack_pay; sv.sd_snacks_paid = t->sd_snacks_paid; sv.sh_snack_cool = t->sh_snack_cool > 0 ? t->sh_snack_cool : 0;

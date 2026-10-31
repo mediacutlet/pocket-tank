@@ -833,5 +833,17 @@ first boot on real glass, and the tank growing into a pet.
 
 ## License
 
-MIT, see [LICENSE](LICENSE). `model/llama2.c/` and `sim/lvgl/` are cloned
-separately and carry their own MIT licenses.
+Pocket Tank is free. Use it, change it, build it on your own board and share
+it, for any noncommercial purpose. That covers keepers, hobbyists, schools
+and clubs.
+
+Selling it, or selling anything built on it (flashed boards, kits, a
+crowdfunding campaign), needs written permission first:
+strato@pocketank.com. Just ask.
+
+The terms are the [PolyForm Noncommercial License 1.0.0](LICENSE). Versions up
+to v0.3.9.2 were released under MIT and stay under it; see [NOTICE](NOTICE).
+`model/llama2.c/` and `sim/lvgl/` are cloned separately and carry their own
+MIT licenses.
+
+Want to send a pull request? Read [CONTRIBUTING.md](CONTRIBUTING.md) first.

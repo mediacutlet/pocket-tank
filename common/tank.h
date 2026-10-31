@@ -408,8 +408,9 @@ typedef struct tank {
     bool     screen_turned;        /* a worn tank (TANK_WORN): settings SCREEN = TURNED (saved) */
     bool     orient_lock;          /* settings ROTATION = locked (0.3.2, saved): the picture keeps the way up it
                                     * had when the keeper locked it, however the tank is turned (tank_orient) */
-    bool     orient_inv;           /* the picture's way up now, true = turned over: the platform's live flip,
-                                    * or what the lock froze (saved with the lock) */
+    uint8_t  orient_q;             /* the picture's way up now, in quarter turns clockwise (0..3; 2 = turned
+                                    * over, 1 and 3 = on a side, the square and the pendant only): the
+                                    * platform's live reading, or what the lock froze (saved with the lock) */
     bool     autofeed_off;         /* settings AUTO FEED = OFF (0.3.2, saved): the tank's own trickle never
                                     * drops a pellet - feeding is the keeper's alone. Nobody dies of it; a
                                     * fish left starving in a lit tank slowly loses trust (progression.c) */
@@ -424,6 +425,9 @@ typedef struct tank {
     float    hold_time;            /* seconds the current hold has lasted */
     bool     hold_approached;      /* this hold already counted (hold_approaches); the
                                     * per-fish milestone is NOT gated on it */
+    float    hold_ph, hold_turn_s;  /* the fish round a held finger (0.3.9.3): where their loose ring has got to,
+                                     * and how long until it may turn back (tank.c HOLD_RING_*) */
+    int8_t   hold_dir;              /* ... which way it drifts */
     int      tap_count;            /* taps in the current burst */
     float    tap_burst_t;          /* seconds since last tap */
     float    tap_x, tap_y;
@@ -857,13 +861,21 @@ void  tank_light_auto(tank_t *t);
 bool  tank_screen_turned(const tank_t *t);
 void  tank_screen_set(tank_t *t, bool turned);
 /* The way up on a desk tank or the pendant (0.3.2, @brandonn5371's ask): the
- * picture follows the IMU's 180-degree flip unless settings' ROTATION is
- * locked. The platform hands tank_orient its live reading every frame and
- * shows what comes back: the reading itself, or - locked - the way up the
- * picture had at the lock (saved, so a locked tank boots the same way up).
- * tank_orient_lock is the settings page's toggle. */
-bool  tank_orient(tank_t *t, bool live_inverted);
+ * picture follows the IMU unless settings' ROTATION is locked. The platform
+ * hands tank_orient its live reading every frame - quarter turns clockwise,
+ * 0..3 - and shows what comes back: the reading itself, or - locked - the way
+ * up the picture had at the lock (saved, so a locked tank boots the same way
+ * up). tank_orient_lock is the settings page's toggle. A quarter on a side (1,
+ * 3) needs a square picture (0.3.9.3: the square and the pendant stood on a
+ * side); elsewhere it is read as its turned-over half (TANK_QUARTER). */
+#define TANK_QUARTER(q) ((TANK_W == TANK_H) ? ((q) & 3) : ((q) & 2))
+int   tank_orient(tank_t *t, int live_q);
 void  tank_orient_lock(tank_t *t, bool lock);
+/* a point between the picture and the glass held upright (q = the picture's
+ * quarter turns): the touch port's calibration lives upright, the taps on the
+ * picture as shown */
+void  tank_quarter_from_upright(int q, float *x, float *y);
+void  tank_quarter_to_upright(int q, float *x, float *y);
 
 /* Touch input (platform feeds these; sim = mouse, device = FT3168):
  *  tank_touch_hold: call EVERY FRAME while a finger rests on the glass at x,y.
@@ -962,6 +974,8 @@ void  tank_grow_algae(tank_t *t, int steps);
 float tank_dist(float ax, float ay, float bx, float by);
 int   tank_nearest_food(const tank_t *t, const fish_t *f, float *dist_out);
 int   tank_nearest_friend(const tank_t *t, int fish_idx, float *dist_out);
+/* fish i has come to a resting finger (the hold is drawing fish, and it is at the finger's edge) */
+bool  tank_at_finger(const tank_t *t, int fish_idx);
 float tank_randf(tank_t *t, float lo, float hi);
 /* roster preset count (6) and a preset's display name, for UI */
 int   tank_roster_count(void);
@@ -1143,9 +1157,10 @@ extern const uint32_t CORAL_PAL[CORAL_N];
 uint32_t tank_coral_rgb(const tank_t *t);          /* the colour, the default when unset */
 void     tank_coral_set_rgb(tank_t *t, uint32_t rgb);
 bool  tank_decor_placeable(int item);      /* SD item index: has an x and a layer */
-int   tank_decor_z_count(int item);        /* depths the item offers: 3 (BACK/MIDDLE/FRONT) or 2 (BACK/FRONT) */
+int   tank_decor_z_count(int item);        /* depths the item offers: 2 (BACK/FRONT) for every piece since 0.3.9.3 */
 int   tank_decor_z_at(int item, int i);    /* the i-th offered depth (the placement bar's segment i) */
 int   tank_decor_z_index(int item, int z); /* the inverse: which segment shows depth z */
+int   tank_bed_z(const tank_t *t, int b);   /* a bed's depth: the seagrass always BACK, the sword plant (b 3) BACK or FRONT */
 void  tank_decor_set(tank_t *t, int item, float x, int z);
 float tank_decor_x(const tank_t *t, int item);   /* the centre, default when unplaced */
 int   tank_decor_z(const tank_t *t, int item);

@@ -5,10 +5,10 @@
 set(COMMON ${CMAKE_CURRENT_LIST_DIR}/../../../common)
 idf_component_register(
     SRCS "${COMMON}/tank.c" "${COMMON}/advisor.c" "${COMMON}/render.c" "${COMMON}/icons.c" "${COMMON}/progression.c" "${COMMON}/setup.c"
-         "${COMMON}/audio.c" "${COMMON}/notice.c" "${COMMON}/sounds.c" "${COMMON}/battery.c" "${COMMON}/update.c" "${COMMON}/advanced.c"
+         "${COMMON}/audio.c" "${COMMON}/notice.c" "${COMMON}/sounds.c" "${COMMON}/battery.c" "${COMMON}/update.c" "${COMMON}/advanced.c" "${COMMON}/shelf.c"
          "persist_port_esp.c" "rtc_port_pcf85063.c"
     INCLUDE_DIRS "${COMMON}" "."
-    PRIV_REQUIRES nvs_flash esp_driver_i2c
+    PRIV_REQUIRES nvs_flash esp_driver_i2c esp_partition
 )
 # POP_CAP: the device ships a 5-fish ceiling until advisor latency is measured on
 # hardware (docs/progression-next.md); the sim shows all 6. N_FISH_MAX stays 6.

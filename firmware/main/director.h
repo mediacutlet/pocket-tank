@@ -25,3 +25,6 @@ int  device_sleep_cfg(int mask);       /* main.c: what the round board's deep sl
 void device_clock_log(void);           /* main.c: the clock - RTC chip or the internet's time (the clockless night), and what tonight will be */
 void device_poweroff(void);            /* main.c: save + PMIC cut now */
 void device_update_check(void);        /* main.c: as CHECK FOR UPDATES - save, restart into update mode (docs/OTA.md) */
+void device_touch_lock(int on);         /* main.c: THE TOUCH LOCK on (1) / off (0) / said (-1), kept as the padlock keeps it */
+void device_shelf_toggle(void);
+void device_shelf_cmd(int argc, char **argv);   /* main.c: `shelf list | new | swap <place> | pause <place> | dormant <place> | name <place> <line 1>[/<line 2>] | remove <place>` */        /* main.c: as BOOT twice - MY TANKS open / closed (the tank switcher) */

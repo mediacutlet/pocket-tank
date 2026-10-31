@@ -19,7 +19,7 @@ const char *const GOAL_NAMES[GOAL_COUNT] = {
 /* ---- the event bus (tank_events.h): one listener, synchronous ---- */
 const char *const TANK_EVENT_NAMES[TEV_COUNT] = {
     "tap", "feed", "light_on", "light_off", "wipe", "snip", "eat", "spook", "investigate", "bubbles",
-    "welcome", "wheel_tick", "confirm", "crab_find",
+    "welcome", "wheel_tick", "confirm", "crab_find", "crab_coin",
 };
 static tank_event_fn s_ev_fn; static void *s_ev_ud;
 void tank_events_set(tank_event_fn fn, void *ud) { s_ev_fn = fn; s_ev_ud = ud; }
@@ -283,6 +283,8 @@ void tank_new_population(tank_t *t) {
     t->n_fish = 2;
 }
 
+#define TEMPER_OWN 0.33f   /* the chance a fry rolls a trait of its own (tank_add_fish) */
+
 int tank_add_fish(tank_t *t, int parent_a, int parent_b) {
     if (t->n_fish >= N_FISH_MAX || t->n_fish >= ROSTER_N) return -1;
     int used[ROSTER_N] = {0};
@@ -294,8 +296,18 @@ int tank_add_fish(tank_t *t, int parent_a, int parent_b) {
     int ia = (parent_a >= 0 && parent_a < t->n_fish) ? parent_a : 0;
     int ib = (parent_b >= 0 && parent_b < t->n_fish) ? parent_b : (t->n_fish > 1 ? 1 : 0);
     const fish_t *pa = &t->fish[ia], *pb = &t->fish[ib];
-    float bold = clampf((pa->bold + pb->bold) * 0.5f + tank_randf(t, -0.15f, 0.15f), 0.05f, 0.95f);
-    float soc  = clampf((pa->sociable + pb->sociable) * 0.5f + tank_randf(t, -0.15f, 0.15f), 0.05f, 0.95f);
+    /* temper (2026-10-29, Strato: variety, not strong biases): each trait from
+     * the parents' BIRTH tempers - what drifted in them was their life, not
+     * their blood - blended at a ratio of its own +-0.15, and one trait in
+     * TEMPER_OWN rolled fresh in the founders' range (its own fish, like a
+     * founder). It was the drifted values' average +-0.15: a bold generation
+     * bred bold fry, and a family of five squeezed to the middle (spread 0.20
+     * -> 0.09 in eight generations; now 0.16, no more fish at the ends than
+     * the founders have - sim --selftest-temper). */
+    float bold = tank_randf(t, 0, 1) < TEMPER_OWN ? tank_randf(t, 0.1f, 0.9f)
+               : clampf(lerpf(pb->bold0, pa->bold0, tank_randf(t, 0, 1)) + tank_randf(t, -0.15f, 0.15f), 0.05f, 0.95f);
+    float soc  = tank_randf(t, 0, 1) < TEMPER_OWN ? tank_randf(t, 0.1f, 0.9f)
+               : clampf(lerpf(pb->sociable0, pa->sociable0, tank_randf(t, 0, 1)) + tank_randf(t, -0.15f, 0.15f), 0.05f, 0.95f);
     int slot = t->n_fish;
     tank_make_fish(t, slot, preset, soc, bold, STAGE_FRY);
     /* its look is the family's, not the preset's (2026-09-14): the body from
@@ -322,7 +334,7 @@ int tank_add_bought_fry(tank_t *t, uint32_t body, uint32_t accent) {
     if (!free_n) return -1;
     int preset = free_idx[(int)tank_randf(t, 0, free_n - 0.001f)];
     int slot = t->n_fish;
-    tank_make_fish(t, slot, preset, tank_randf(t, 0.25f, 0.75f), tank_randf(t, 0.25f, 0.75f), STAGE_FRY);
+    tank_make_fish(t, slot, preset, tank_randf(t, 0.1f, 0.9f), tank_randf(t, 0.1f, 0.9f), STAGE_FRY);   /* the founders' range (was 0.25..0.75) */
     tank_set_look(t, slot, body, accent);
     fish_t *f = &t->fish[slot];
     f->parent_a = f->parent_b = -1;
@@ -418,7 +430,7 @@ void tank_init(tank_t *t, uint32_t seed) {
     t->sh_s = 0; t->sh_hitches = 0; t->sh_trust_passed = 0;
     t->sh_eaten = 0; t->sh_snack_pay = 0; t->sh_snack_cool = 0; t->sd_snacks_paid = 0;
     t->sh_snap = -1; t->sh_snap_food = -1; t->sh_turn = 0;
-    t->plant_x = 0; t->plant_z = DECOR_Z_MIDDLE;
+    t->plant_x = 0; t->plant_z = DECOR_Z_BACK;
     t->castle_x = 0; t->castle_z = DECOR_Z_FRONT;
     t->coral_x = 0; t->coral_z = DECOR_Z_FRONT; t->coral_rgb = 0; t->coral_growth = 0; t->coral_acc = 0;
     t->cluster_x = 0; t->cluster_z = DECOR_Z_FRONT; t->cluster_scheme = 0; t->cluster_growth = 0; t->cluster_acc = 0;
@@ -437,12 +449,31 @@ void tank_init(tank_t *t, uint32_t seed) {
                                  * report holds ~0.3 s in, so ≈3 s of contact */
 #define HOLD_HUNGER_VETO 7.5f   /* this hungry, a fish ignores the finger */
 #define SPAWN_NEAR_PX   20.0f   /* past the courtship loop's reach: a parent this close is circling in the fronds */
-#define HOLD_APPROACH_FROM 60.0f /* a hold-approach must START at least this far out:
-                                 * a fish already under the finger earns nothing */
-#define HOLD_APPROACH_AT   30.0f /* ... and come in this close */
+/* round the finger, not under it (0.3.9.3, Metalus on the pendant: "the touch and hold hides all my fish
+ * under my finger"; Strato: not a defined point either - "swimming in a bit of a circular pattern around ...
+ * with a bit of a buffer ... with the ability to cross over to the other side", never "consistently group to
+ * the top of the finger"). The fish that come in swim a loose ring round the fingertip as one company: the
+ * ring drifts one way, then back after a while; each fish keeps a little behind the one before (close enough
+ * to stay nose to tail - the social warmth, SOCIAL_HOLD_GAIN), wanders in and out of its own radius, and now
+ * and then one crosses to the far side and comes back. Clamped to the glass by a wall or the sand. */
+#define HOLD_RING_R       64.0f  /* px from the touch point: the fingertip (~30) + a buffer + half a fish */
+#define HOLD_RING_WOBBLE  10.0f  /* ... in and out of it, each fish its own */
+#define HOLD_RING_W       0.07f  /* rad/s the places drift (~4 px/s: a fish shifts its spot now and then, not a lap) */
+#define HOLD_RING_GAP     0.62f  /* rad between a fish and its partner (~45 px: a body apart, past the separation's push, still company) */
+#define HOLD_GATHERED_PX  100.0f  /* a fish this close to a drawing finger has come to it (social warmth, 2026-10-29;
+                                   0.3.9.3: the ring's outer reach, 1.2 x (R + wobble) to the side; was 45 under the fingertip) */
+#define HOLD_APPROACH_FROM 140.0f /* a hold-approach must START at least this far out - past the ring:
+                                 * a fish already at the finger earns nothing (0.3.9.3: was 60 / 30, under the fingertip) */
+#define HOLD_APPROACH_AT   HOLD_GATHERED_PX   /* ... and come in this close: onto the ring */
 #define TRUST_PER_S        0.012f /* trust a fish earns a second under a resting finger (0.3.6: was 0.02;
                                    * Strato: "a bit slower" so the seahorse's double is worth having) */
 #define SEAHORSE_TRUST_X   2.0f   /* ... times this while the seahorse hangs on the finger */
+
+bool tank_at_finger(const tank_t *t, int i) {   /* (hold_time, not hold_active: the tick consumes the
+                                                   flag, and the time drops to 0 the frame the finger lifts) */
+    return t->hold_time >= HOLD_ATTRACT_S
+        && tank_dist(t->fish[i].x, t->fish[i].y, t->hold_x, t->hold_y) < HOLD_GATHERED_PX;
+}
 
 /* ---- hunger economy (2026-09-01) ----
  * The prototype's per-second metabolism (0.15 + 0.12*bold: fed to starving
@@ -1419,6 +1450,7 @@ int tank_crab_tap(tank_t *t, float fx) {
         t->cr_find = 0; if (t->cr_found < 65535) t->cr_found++;
         t->cr_find_cool = tank_randf(t, CR_FIND_NEXT_LO_S, CR_FIND_NEXT_HI_S);
         t->cr_poke = CR_POKE_S; t->cr_taps = 0; t->cr_tap_t = t->clock;
+        tank_emit(TEV_CRAB_COIN, -1);                                 /* (the coin, 0.3.9.3) */
         return 0;
     }
     t->cr_taps = (t->clock - t->cr_tap_t <= CR_TAP_GAP_S && t->cr_tap_t <= t->clock) ? (uint8_t)(t->cr_taps + 1) : 1;
@@ -1753,10 +1785,7 @@ static bool sh_frond_ok(const tank_t *t, int b, int i) {
     float bx0; int n; veg_bed_base(t, b, &bx0, &n);
     return i >= 0 && i < n && t->veg_h[b][i] >= SH_MIN_H;
 }
-static bool sh_frond_front(const tank_t *t, int b, int i) {
-    int z = tank_veg_kind(t, b) == VEG_KIND_SWORD ? tank_decor_z(t, 0) : DECOR_Z_MIDDLE;
-    return z == DECOR_Z_FRONT || (z == DECOR_Z_MIDDLE && (i & 1));
-}
+static bool sh_frond_front(const tank_t *t, int b, int i) { (void)i; return tank_bed_z(t, b) == DECOR_Z_FRONT; }
 /* the coil's spot on a blade: the spine's x (no sway: the renderer adds it)
  * and part of the way up the blade from the root line */
 static void sh_grip(const tank_t *t, int b, int i, float *x, float *y) {
@@ -2307,15 +2336,14 @@ void     tank_coral_set_rgb(tank_t *t, uint32_t rgb) { t->coral_rgb = rgb & 0xff
 /* the decor's spot and layer (see tank.h): item 0 is the plant, item 2 the castle, item 3 the coral, item 4 the cluster, item 8 the pumpkin, item 9 the volcano */
 bool  tank_decor_placeable(int item) { return item == 0 || item == 2 || item == 3 || item == 4 || item == 8 || item == 9; }
 float tank_decor_half_w(int item) { return item == 0 ? PLANT_HALF_W : item == 2 ? CASTLE_HALF_W : item == 3 ? CORAL_HALF_W : item == 4 ? CLUSTER_HALF_W : item == 8 ? PUMPKIN_HALF_W : item == 9 ? VOLCANO_HALF_W : 0; }
-/* only the plant weaves AMONG the fish; the castle and both corals are
- * BEHIND or IN FRONT (Strato, 2026-09-24: "remove the among option for
- * corals, it doesn't really make as much sense") */
-int   tank_decor_z_count(int item) { return item == 0 ? DECOR_Z_N : 2; }
-int   tank_decor_z_at(int item, int i) {
-    if (item != 0) return i <= 0 ? DECOR_Z_BACK : DECOR_Z_FRONT;
-    return i < 0 ? 0 : i >= DECOR_Z_N ? DECOR_Z_N - 1 : i;
-}
-int   tank_decor_z_index(int item, int z) { return item != 0 ? (z == DECOR_Z_BACK ? 0 : 1) : z; }
+/* every piece BEHIND or IN FRONT - the plant too since 0.3.9.3 (Strato: "we can let the weaving go ... either grass is
+   in front or behind"): its AMONG, the fronds woven with the fish, is gone; a saved AMONG loads BEHIND */
+int   tank_decor_z_count(int item) { (void)item; return 2; }
+int   tank_decor_z_at(int item, int i) { (void)item; return i <= 0 ? DECOR_Z_BACK : DECOR_Z_FRONT; }
+int   tank_decor_z_index(int item, int z) { (void)item; return z == DECOR_Z_FRONT ? 1 : 0; }
+/* the seagrass stays BEHIND the fish, where the keeper cannot move it (Strato 0.3.9.3: a held page for the beds would bring
+   back the edits the decoration LOCK just quieted, "to support something no one has asked for"); the sword plant is a piece */
+int   tank_bed_z(const tank_t *t, int b) { return b == 3 && t->plant_z == DECOR_Z_FRONT ? DECOR_Z_FRONT : DECOR_Z_BACK; }
 float tank_decor_x(const tank_t *t, int item) {
     if (item == 2) return t->castle_x > 0 ? t->castle_x : CASTLE_X_DEFAULT;
     if (item == 3) return t->coral_x > 0 ? t->coral_x : CORAL_X_DEFAULT;
@@ -2422,7 +2450,7 @@ bool tank_decor_shift(tank_t *t, int item, int dir) {
 }
 void tank_decor_reset(tank_t *t, int item) {
     { int s = tank_decor_slot(item); if (s >= 0) t->decor_rank[s] = 0; }
-    if (item == 0) { t->plant_x = 0; t->plant_z = DECOR_Z_MIDDLE; tank_veg_set(t, 3, VEG_START); }
+    if (item == 0) { t->plant_x = 0; t->plant_z = DECOR_Z_BACK; tank_veg_set(t, 3, VEG_START); }
     if (item == 2) { t->castle_x = 0; t->castle_z = DECOR_Z_FRONT; }
     if (item == 3) { t->coral_x = 0; t->coral_z = DECOR_Z_FRONT; t->coral_rgb = 0; t->coral_growth = 0; t->coral_acc = 0; }
     if (item == 4) { t->cluster_x = 0; t->cluster_z = DECOR_Z_FRONT; t->cluster_scheme = 0; t->cluster_growth = 0; t->cluster_acc = 0; }
@@ -2442,7 +2470,7 @@ void tank_decor_set(tank_t *t, int item, float x, int z) {
     if (item == 4) { t->cluster_x = x; t->cluster_z = z2; return; }
     if (item == 8) { t->pumpkin_x = x; t->pumpkin_z = z2; return; }
     if (item == 9) { t->volcano_x = x; t->volcano_z = z2; return; }
-    t->plant_x = x; t->plant_z = (uint8_t)z;
+    t->plant_x = x; t->plant_z = z == DECOR_Z_FRONT ? DECOR_Z_FRONT : DECOR_Z_BACK;   /* (its old AMONG: BEHIND, Strato 0.3.9.3) */
 }
 
 void tank_touch_hold(tank_t *t, float x, float y) {
@@ -2601,6 +2629,14 @@ static void touch_tick(tank_t *t, float dt) {
         float was = t->hold_time;
         t->hold_time += dt;
         bool draw_begins = was < HOLD_ATTRACT_S && t->hold_time >= HOLD_ATTRACT_S;
+        if (draw_begins) {                          /* the ring starts on the side the company comes from, and either way */
+            float sx = 0, sy = 0;
+            for (int i = 0; i < t->n_fish; i++) { sx += t->fish[i].x - t->hold_x; sy += t->fish[i].y - t->hold_y; }
+            t->hold_ph = atan2f(sy, sx); t->hold_dir = tank_randf(t, 0, 1) < 0.5f ? -1 : 1; t->hold_turn_s = tank_randf(t, 12, 26);
+        } else if (t->hold_time > HOLD_ATTRACT_S) {
+            t->hold_ph = norm_ang(t->hold_ph + t->hold_dir * HOLD_RING_W * dt);
+            if ((t->hold_turn_s -= dt) <= 0) { t->hold_dir = (int8_t)-t->hold_dir; t->hold_turn_s = tank_randf(t, 12, 26); }   /* a while one way, then back */
+        }
         for (int i = 0; i < t->n_fish; i++) {
             fish_t *f = &t->fish[i];
             float d = tank_dist(f->x, f->y, t->hold_x, t->hold_y);
@@ -2682,9 +2718,27 @@ void tank_light_auto(tank_t *t) { t->light_override = false; }
 /* the worn tank's way up (tank.h) */
 bool tank_screen_turned(const tank_t *t) { return TANK_WORN && t->screen_turned; }
 void tank_screen_set(tank_t *t, bool turned) { t->screen_turned = TANK_WORN && turned; }
-bool tank_orient(tank_t *t, bool live_inverted) {
-    if (!t->orient_lock) t->orient_inv = live_inverted;
-    return t->orient_inv;
+int tank_orient(tank_t *t, int live_q) {
+    if (!t->orient_lock) t->orient_q = (uint8_t)TANK_QUARTER(live_q);
+    return t->orient_q;
+}
+void tank_quarter_from_upright(int q, float *x, float *y) {
+    float ux = *x, uy = *y;
+    switch (TANK_QUARTER(q)) {
+    case 1: *x = uy; *y = TANK_W - 1 - ux; break;             /* turned clockwise: the glass's left edge is the picture's floor */
+    case 2: *x = TANK_W - 1 - ux; *y = TANK_H - 1 - uy; break;
+    case 3: *x = TANK_H - 1 - uy; *y = ux; break;
+    default: break;
+    }
+}
+void tank_quarter_to_upright(int q, float *x, float *y) {
+    float tx = *x, ty = *y;
+    switch (TANK_QUARTER(q)) {
+    case 1: *x = TANK_W - 1 - ty; *y = tx; break;
+    case 2: *x = TANK_W - 1 - tx; *y = TANK_H - 1 - ty; break;
+    case 3: *x = ty; *y = TANK_H - 1 - tx; break;
+    default: break;
+    }
 }
 void tank_orient_lock(tank_t *t, bool lock) { t->orient_lock = lock; }
 
@@ -2943,6 +2997,24 @@ static void eat_nearby_food(tank_t *t, fish_t *f) {
     }
 }
 
+/* a point on the loose ring round a held finger (HOLD_RING_*): wider than tall (a fish swims mostly level),
+ * and by a wall or the sand the ring folds onto the open side - smoothly, so a place never jumps across */
+static void hold_ring_point(const tank_t *t, float ph, float r, float *x, float *y) {
+    float room[4];                                   /* how far the ring may reach: right, down, left, up */
+    for (int s = 0; s < 4; s++) {
+        float px = t->hold_x + (s == 0 ? r * 1.2f : s == 2 ? -r * 1.2f : 0), py = t->hold_y + (s == 1 ? r * 0.85f : s == 3 ? -r * 0.85f : 0);
+        float cx = px, cy = py; tank_glass_clamp(&cx, &cy, 22);
+        room[s] = (s & 1) ? fabsf(cy - t->hold_y) : fabsf(cx - t->hold_x);
+    }
+    float c = cosf(ph), s = sinf(ph);
+    if (room[2] < 45 && room[0] >= 45) c = fabsf(c);
+    else if (room[0] < 45 && room[2] >= 45) c = -fabsf(c);
+    if (room[3] < 40 && room[1] >= 40) s = fabsf(s);
+    else if (room[1] < 40 && room[3] >= 40) s = -fabsf(s);
+    *x = t->hold_x + c * (c >= 0 ? room[0] : room[2]);
+    *y = t->hold_y + s * (s >= 0 ? room[1] : room[3]);
+    tank_glass_clamp(x, y, 22);
+}
 static void update_fish(tank_t *t, int idx, float dt) {
     fish_t *f = &t->fish[idx];
     /* drives (prototype rates, speed rescaled by the same 0.55) */
@@ -3076,6 +3148,8 @@ static void update_fish(tank_t *t, int idx, float dt) {
     /* touch: spooked fish bolt from the tap site; trusting fish drift to a
      * resting finger (reflex-layer, independent of the advisor's goal) */
     float touch_speed = -1;
+    bool ringing = false;                        /* on the ring round a held finger (HOLD_RING_*): turns at its ends come quickly */
+    bool paddling = false; float pad_x = 0, pad_y = 0;   /* ... and near its place there: nose on the finger, fins to the place */
     if (t->startled && f->goal.id != GOAL_FLEE_SHADOW) {
         float d = tank_dist(f->x, f->y, t->startle_x, t->startle_y);
         if (d < STARTLE_RADIUS * 1.6f) {
@@ -3109,12 +3183,44 @@ static void update_fish(tank_t *t, int idx, float dt) {
         float d = tank_dist(f->x, f->y, t->hold_x, t->hold_y);
         if (d < HOLD_RADIUS) {
             float w = (f->trust - 4.0f) / 6.0f;          /* 0..1 with trust */
-            float to = atan2f(t->hold_y - f->y, t->hold_x - f->x);
-            if (d > 28) desired = norm_ang(desired + norm_ang(to - desired) * (0.5f + 0.45f * w));
-            /* far fish cross the tank at a cruise, not a drift; close in
-             * they slow to arrive and hover */
-            float far = d > 120 ? 1.0f : d / 120.0f;
-            touch_speed = d > 28 ? lerpf(14, 30, w) + far * lerpf(10, 20, w) : 4;
+            /* its place on the loose ring (HOLD_RING_*): a little behind the fish before it, its own drift
+             * along and in and out, and now and then the far side (the sine gate: ~1 minute in 8) */
+            /* in pairs (four fish or more: two pairs either side of the finger, so it is surrounded and every
+             * fish has its company); each its own slow sway along the ring and in and out */
+            int rank = 0, m = 0;
+            for (int i = 0; i < t->n_fish; i++) if (t->fish[i].trust >= 4.0f && t->fish[i].hunger < HOLD_HUNGER_VETO) { m++; if (i < idx) rank++; }
+            int groups = m >= 4 ? m / 2 : 1, g = rank / 2 < groups - 1 ? rank / 2 : groups - 1, k = rank - g * 2;
+            if (groups == 1) k = rank;
+            float ph = t->hold_ph + g * 6.2832f / groups - t->hold_dir * k * HOLD_RING_GAP + 0.15f * sinf(t->clock * 0.17f + f->wander * 4.1f);
+            bool crossing = sinf(t->clock * 0.11f + f->wander * 6.3f + idx * 1.7f) > 0.93f;
+            if (crossing) ph += 3.14159f;
+            float r = HOLD_RING_R + HOLD_RING_WOBBLE * sinf(t->clock * 0.23f + f->wander * 5.3f + idx);
+            float wx, wy; hold_ring_point(t, ph, r, &wx, &wy);   /* its place */
+            /* the way there: round the ring, never under the fingertip - a place more than ~50 degrees on is
+             * reached by the ring itself (the crossing excepted: that one swims straight over) */
+            float fa = atan2f((f->y - t->hold_y) / 0.85f, (f->x - t->hold_x) / 1.2f);
+            float dph = norm_ang(atan2f((wy - t->hold_y) / 0.85f, (wx - t->hold_x) / 1.2f) - fa);
+            if (!crossing && fabsf(dph) >= 0.9f) hold_ring_point(t, fa + (dph > 0 ? 0.9f : -0.9f), r, &wx, &wy);
+            float ds = tank_dist(f->x, f->y, wx, wy), to = atan2f(wy - f->y, wx - f->x);
+            if (d > HOLD_RING_R + 50) {                  /* far fish cross the tank at a cruise, not a drift, to their side of it */
+                desired = norm_ang(desired + norm_ang(to - desired) * (0.5f + 0.45f * w));
+                float far = d > 170 ? 1.0f : (d - HOLD_RING_R) / 112.0f;
+                touch_speed = lerpf(14, 30, w) + far * lerpf(10, 20, w);
+            } else {                                     /* at the finger: its attention stays on it (Strato, 0.3.9.3 on the glass:
+                                                            "if it swam past it would quickly turn around back to where it was
+                                                            focusing its attention") - a short swim to its place when it has
+                                                            slipped, then it faces the finger again and hangs there */
+                ringing = true;
+                if (ds > 45) {                           /* far from its place (the far side, a crossing): a quick swim */
+                    desired = norm_ang(desired + norm_ang(to - desired) * 0.8f);
+                    touch_speed = 22;
+                } else {                                 /* near it: the nose stays on the finger, the fins do the moving */
+                    float tf = atan2f(t->hold_y - f->y, t->hold_x - f->x);
+                    desired = norm_ang(desired + norm_ang(tf - desired) * 0.9f);
+                    touch_speed = clampf((d - r) * 0.3f, 0, 3);
+                    paddling = true; pad_x = wx; pad_y = wy;
+                }
+            }
         }
     } else if (t->greet_timer > 0 && f->trust >= 7.0f && f->goal.id != GOAL_FLEE_SHADOW &&
                f->goal.id != GOAL_SEEK_FOOD) {
@@ -3167,7 +3273,7 @@ static void update_fish(tank_t *t, int idx, float dt) {
      * radius let four content fish stack on one landmark like a pile of
      * cards (2026-09-01). Now a body length, weighted by how close they are;
      * a fleeing fish keeps its line. */
-    if (f->goal.id != GOAL_FLEE_SHADOW)
+    if (f->goal.id != GOAL_FLEE_SHADOW && !paddling)   /* (a fish paddling at the finger keeps its nose on it: its place is a body apart already) */
         for (int i = 0; i < t->n_fish; i++) {
             if (i == idx) continue;
             float d = tank_dist(f->x, f->y, t->fish[i].x, t->fish[i].y), r = 36 * f->size;
@@ -3196,13 +3302,17 @@ static void update_fish(tank_t *t, int idx, float dt) {
     const float TURN_SETTLE  = 1.3f;     /* s after a turn before the next can begin */
     if (!f->facing) f->facing = cosf(f->heading) < 0 ? -1 : 1;
     bool urgent = agile || (t->ravenous && f->hunger > 6.5f) || (t->startled && touch_speed >= 55);
-    bool behind = cosf(desired) * f->facing < -BEHIND_BAND;
+    /* a breather settled in its fronds has nowhere to go: it hovers on the side it came in on (0.3.9.3, the
+     * square's "fish spinning in the corner" - within 10 px of its spot the steering let go, the old way lay
+     * behind it, and it turned, drifted off, steered back and turned again: ~30 turns in 100 s) */
+    bool behind = !(settled && f->breather > 0) && cosf(desired) * f->facing < -BEHIND_BAND;
     if (behind) f->behind += dt;
     else f->behind = f->behind > 0 ? 0 : fminf(0, f->behind + dt);
     /* hanging about its spot (the goal's point within ~30 px) a fish is in
      * no hurry: the lane swinging past it is a glance, not a turn */
     bool at_spot = tg.valid && tank_dist(f->x, f->y, tg.x, tg.y) < 30;
-    float commit = urgent ? 0 : lerpf(2.0f, 0.3f, clampf((f->speed - 10) * (1 / 25.0f), 0, 1)) + (at_spot ? 1.2f : 0);
+    float commit = urgent ? 0 : ringing ? 0.2f    /* at the finger: a fish that slipped past turns back to it at once */
+                 : lerpf(2.0f, 0.3f, clampf((f->speed - 10) * (1 / 25.0f), 0, 1)) + (at_spot ? 1.2f : 0);
     if (behind && f->behind >= commit) {
         f->facing = (int8_t)-f->facing;
         f->heading = norm_ang(3.14159f - f->heading);   /* the climb or dive kept */
@@ -3236,6 +3346,10 @@ static void update_fish(tank_t *t, int idx, float dt) {
     float brake = 1 - 0.6f * (1 - fabsf(f->yaw)) * ahc * w;
     f->x += (hc + (f->yaw * ahc - hc) * w) * f->speed * brake * dt;
     f->y += sinf(f->heading) * f->speed * brake * dt + sinf(t->clock * 1.4f + f->wander) * dt * 1.7f;
+    if (paddling) {                              /* to its place at the finger without turning: a fin's few px a second */
+        float px = pad_x - f->x, py = pad_y - f->y, pd = sqrtf(px * px + py * py);
+        if (pd > 1) { float v = fminf(pd * 0.9f, 9.0f) * dt / pd; f->x += px * v; f->y += py * v; }
+    }
 
     /* hard bounds. The side glass mirrors a heading only while it points
      * INTO the glass: the facing lags the mirror, and a second bounce on the

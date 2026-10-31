@@ -1,5 +1,7 @@
 set(SRCS main.c director.c brightness.c batlog.c codec_port.c advisor_llm_esp.c battery_port_axp2101.c imu_port_qmi8658.c
          update_mode.c net_port_esp.c model_trailer.c)
+# sd_spike.c (the tank switcher's step 2 test, `sd test`) is left out of 0.3.9.3 (docs/release-0.3.9.3.md D2): it comes
+# back with the packages (step 4) - list it here and restore its three hooks in main.c / director.c
 if(CONFIG_POCKET_TANK_DISPLAY_SH8601)
     list(APPEND SRCS display_port_sh8601.c)
 else()
@@ -19,7 +21,7 @@ idf_component_register(
     SRCS ${SRCS}
     INCLUDE_DIRS "."
     REQUIRES tankcore llm esp_partition spi_flash esp_timer esp_driver_spi esp_driver_i2c esp_driver_i2s esp_driver_gpio esp_driver_usb_serial_jtag esp_lcd nvs_flash esp_app_format
-             esp_wifi esp_netif esp_event esp_http_client esp_https_ota app_update json mbedtls bootloader_support
+             esp_wifi esp_netif esp_event esp_http_client esp_https_ota app_update json mbedtls bootloader_support fatfs sdmmc esp_driver_sdspi
     EMBED_FILES "tokenizer.bin" "../../assets/sounds/sounds.bin"
 )
 # the board marker (net_port_esp.c, version.h PT_BOARD_MARKER_OFFSET): nothing

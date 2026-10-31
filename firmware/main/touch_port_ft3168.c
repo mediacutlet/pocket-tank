@@ -63,7 +63,7 @@ static bool s_pill;                               /* main.c drew the battery pil
 static bool s_bat; static int64_t s_bat_us;       /* the battery page up, and since when (it closes itself) */
 #define BATTERY_PAGE_US (30LL * 1000000)
 #define CONFIRM_TIMEOUT_US (20LL * 1000000)
-static bool s_inverted;                           /* screen 180-flipped: mirror into tank space */
+static int  s_q;                                  /* the picture's quarter turns (tank_orient): 2 = flipped, 1 / 3 = on a side */
 /* Fingers land a little BELOW where the eye aims - the pad rolls onto the
  * glass under the fingertip (phones shift their hit targets down for the
  * same reason; Strato saw it on the swatch rows, 2026-09-13). Reported
@@ -73,7 +73,8 @@ static int s_bias_y = 10;
 void touch_port_set_bias(int px) { s_bias_y = px; }
 int  touch_port_bias(void) { return s_bias_y; }
 
-void touch_port_set_inverted(bool inverted) { s_inverted = inverted; }
+void touch_port_set_inverted(bool inverted) { s_q = inverted ? 2 : 0; }
+void touch_port_set_quarter(int q) { s_q = TANK_QUARTER(q); }
 extern i2c_master_bus_handle_t board_i2c_bus(void);
 extern bool board_is_v2(void);
 
@@ -366,13 +367,16 @@ static void cal_point(float rx, float ry, float *tx, float *ty);
 /* an upright raw report -> the finger's point on the picture as shown: calibrated, then turned with the picture */
 static void cal_view(float rx, float ry, float *tx, float *ty) {
     cal_point(rx, ry, tx, ty);
-    if (s_inverted) { *tx = TANK_W - 1 - *tx; *ty = TANK_H - 1 - *ty; }
+    tank_quarter_from_upright(s_q, tx, ty);
 }
 static void cal_point(float rx, float ry, float *tx, float *ty) {                 /* a raw tank-space report -> where the finger is */
+    /* the viewer's "down" and "right" on the upright glass: turned over they are its up and left, on a side
+       (0.3.9.3) its left / right and down / up (tank_quarter_from_upright) */
+    static const int8_t DOWN[4][2] = { { 0, 1 }, { -1, 0 }, { 0, -1 }, { 1, 0 } }, RIGHT[4][2] = { { 1, 0 }, { 0, 1 }, { -1, 0 }, { 0, -1 } };
     float land = (float)s_bias_y + (board_is_round() || board_is_v2() || board_is_square() ? CAL_LAND : 0);
-    ry -= s_inverted ? -land : land;                  /* the finger's own low landing is the viewer's "down": turned, that is the panel's up */
-    if (board_is_watch()) rx -= s_inverted ? -CAL_W_LAND_X : CAL_W_LAND_X;   /* ... and on a wrist it lands toward the tapping hand */
-    if (board_is_square()) rx -= s_inverted ? -CAL_S_LAND_X : CAL_S_LAND_X;  /* ... the square in a hand too */
+    float side = board_is_watch() ? CAL_W_LAND_X : board_is_square() ? CAL_S_LAND_X : 0;
+    rx -= land * DOWN[s_q][0] + side * RIGHT[s_q][0];   /* the finger's own low landing is the viewer's "down"; on a wrist, and the */
+    ry -= land * DOWN[s_q][1] + side * RIGHT[s_q][1];   /* square in a hand, it lands toward the tapping hand too: the viewer's right */
     if (board_is_round()) ry = (ry + CAL_R_Y_OFF) / CAL_R_Y_GAIN;
     else if (board_is_watch()) { rx = (rx + CAL_W_X_OFF) / CAL_W_X_GAIN; ry = (ry + CAL_W_Y_OFF) / CAL_W_Y_GAIN; }
     else if (board_is_v2()) { rx = (rx + CAL_X_OFF) / CAL_X_GAIN; ry = (ry + CAL_Y_OFF) / CAL_Y_GAIN; }
@@ -408,8 +412,9 @@ static void map_touch(uint16_t px, uint16_t py, float *tx, float *ty) {
     if (rx > s_raw_x1) s_raw_x1 = rx;
     if (ry < s_raw_y0) s_raw_y0 = ry;
     if (ry > s_raw_y1) s_raw_y1 = ry;
-    cal_view((float)rx, (float)ry, tx, ty);
-    touch_fit_apply(adv_touch_fit(), tx, ty, s_inverted);   /* the keeper's own map (0.3.9.2, the ADVANCED page): none unless one was kept */
+    cal_point((float)rx, (float)ry, tx, ty);
+    touch_fit_apply(adv_touch_fit(), tx, ty, 0);       /* the keeper's own map (0.3.9.2, the ADVANCED page), upright: none unless one was kept */
+    tank_quarter_from_upright(s_q, tx, ty);            /* ... then turned with the picture */
 }
 /* The STROKE's reach to the glass (2026-10-01). The panel's report runs out
  * before the glass does: its raw 0..max lands, through the map above, on x
@@ -466,7 +471,7 @@ static float edge_stretch1(float v, float lo, float hi, float max, float band, f
 static void edge_stretch(float x, float y, float *ox, float *oy) {
     float x0, y0, x1, y1;                         /* the panel's reach: its raw extremes through the same map (the bias is live) */
     cal_view(0, 0, &x0, &y0); cal_view(TANK_W - 1, TANK_H - 1, &x1, &y1);
-    if (x0 > x1) { float k = x0; x0 = x1; x1 = k; }   /* turned: the far corner is the near one */
+    if (x0 > x1) { float k = x0; x0 = x1; x1 = k; }   /* turned: the far corner is the near one (on a side the axes trade too) */
     if (y0 > y1) { float k = y0; y0 = y1; y1 = k; }
     *ox = edge_stretch1(x, x0, x1, TANK_W - 1, EDGE_BAND_X, EDGE_SNAP_X); *oy = edge_stretch1(y, y0, y1, TANK_H - 1, EDGE_BAND_Y, EDGE_SNAP_Y);
 }
@@ -488,6 +493,15 @@ static void stroke_point(bool landed, float tx, float ty, float *dx, float *dy) 
     if (*dy > TANK_H - 1) *dy = TANK_H - 1;
 }
 static bool s_upd; static int s_upd_act;                 /* the UPDATES page (2026-09-30) */
+static bool s_shelf;                                      /* MY TANKS (the tank switcher): BOOT twice opens it */
+static bool s_shelf_tap; static float s_shelf_tx, s_shelf_ty;   /* its last tap, for main.c */
+static bool s_fdown; static float s_fingx, s_fingy;           /* the finger this poll (touch_port_finger) */
+bool touch_port_finger(float *x, float *y) { *x = s_fingx; *y = s_fingy; return s_fdown; }
+static bool s_tlock; static int64_t s_tlock_us;           /* THE TOUCH LOCK, and the last touch on the locked glass (its note) */
+#define TOUCH_LOCK_HINT_US 2000000
+void touch_port_set_touch_lock(bool on) { s_tlock = on; s_tlock_us = 0; }
+bool touch_port_touch_lock(void) { return s_tlock; }
+bool touch_port_lock_hint(void) { return s_tlock && s_tlock_us && esp_timer_get_time() - s_tlock_us < TOUCH_LOCK_HINT_US; }
 bool touch_port_read_raw(float *x, float *y) {
     uint16_t px[1], py[1];
     if (!panel_read(px, py)) return false;
@@ -506,12 +520,19 @@ void touch_port_poll(tank_t *t) {
      * flipped screen: mirror both, so downstream gestures live in displayed space */
     float tx = s_lx, ty = s_ly;
     if (touched) map_touch(x[0], y[0], &tx, &ty);           /* calibrated (above); the release keeps the last position */
+    s_fdown = touched; s_fingx = tx; s_fingy = ty;                /* (the finger as it is: a page that tracks it, MY TANKS's RENAME wheel) */
     if (touched && !s_down) {
         audio_port_prewarm();                   /* the release's cue plays warm */
         s_press_us = now; s_px = tx; s_py = ty;
         /* snapshot the school: the user aims at where a fish WAS - by release
            a darting fish has moved and the finger hid it the whole time */
         for (int i = 0; i < t->n_fish && i < N_FISH_MAX; i++) { s_fx[i] = t->fish[i].x; s_fy[i] = t->fish[i].y; }
+    }
+    if (s_tlock && !s_shelf) {                               /* THE TOUCH LOCK: the finger goes nowhere - the note says how to get back */
+        if (touched) s_tlock_us = now;                       /* (held: the note stays up, then 2 s past the lift) */
+        if (touched != s_down && s_log) ESP_LOGI(TAG, "touch locked: the %s ignored", touched ? "press" : "lift");
+        s_down = touched; s_held_page = false;
+        return;
     }
     bool su = setup_active();                                /* before the touch: BEGIN's release is not a tank tap */
     if (s_set && !s_cf && !su) {                             /* the settings page owns the glass: segments, LIGHTS OUT's arrows, CLOSE */
@@ -521,10 +542,11 @@ void touch_port_poll(tank_t *t) {
                                                   : r == SET_TAP_FEED ? "auto feed (1 = on)" : r == SET_TAP_ROTATE ? "rotation (1 = locked)" : "idle seconds", v);
         if (r == SET_TAP_CLOSE) { s_set = false; s_ms = true; s_back = true; }   /* back to the milestones page (2026-09-16); the release is spent */
         else if (r == SET_TAP_UPDATES) { s_set = false; s_upd = true; s_back = true; ESP_LOGI(TAG, "updates page up"); }
+        else if (r == SET_TAP_TANKS) { s_set_what = r; s_set_val = 0; ESP_LOGI(TAG, "settings: MY TANKS"); }
         else if (r == SET_TAP_BRIGHT || r == SET_TAP_BRIGHT_LIVE || r == SET_TAP_VOLUME || r == SET_TAP_LIGHT || r == SET_TAP_IDLE || r == SET_TAP_FEED || r == SET_TAP_ROTATE) { s_set_what = r; s_set_val = v; }
     }
     if (adv_up() && !s_cf && !su) {                          /* the ADVANCED page (0.3.9.2): its taps, the crosses, the check */
-        int r = adv_touch(tx, ty, touched, s_inverted);
+        int r = adv_touch(tx, ty, touched, s_q);
         if (r == ADV_ACT_BACK) { s_set = true; s_back = true; ESP_LOGI(TAG, "advanced: BACK -> settings"); }
         else if (r == ADV_ACT_TICK) tank_emit(TEV_WHEEL_TICK, -1);
         else if (r) s_adv_act = r;                           /* main saves it (and tells the charger) */
@@ -548,7 +570,7 @@ void touch_port_poll(tank_t *t) {
     }
     { int rf = setup_take_renamed();                         /* a rename closed (2026-10-01): back to the milestones page, the fish's card up */
       if (rf >= 0) { s_ms = true; s_set = false; s_shop = false; s_sel = -1; render_milestones_show_fish(t, rf); } }
-    bool modal = s_ms || s_set || s_shop || s_cf || su || s_bat || s_upd || adv_up();   /* a page or a prompt owns the glass */
+    bool modal = s_ms || s_set || s_shop || s_cf || su || s_bat || s_upd || s_shelf || adv_up();   /* a page or a prompt owns the glass */
     if (touched) {                                           /* stroke = wipe/slash, reaching the glass (stroke_point above) */
         float dx, dy; stroke_point(!s_down, tx, ty, &dx, &dy);
         if (!s_down) { s_dx0 = s_dx1 = dx; s_frames = 0; s_raw_px = x[0]; s_raw_py = y[0]; }
@@ -593,6 +615,10 @@ void touch_port_poll(tank_t *t) {
             s_sel = -1; goto released;
         }
         if (s_bat) { s_bat = false; ESP_LOGI(TAG, "battery page closed"); goto released; }   /* any release closes it */
+        if (s_shelf) {                                              /* MY TANKS: main.c knows what is up (the shelf, a card, the library) and acts */
+            if (held_us < 350000 && dx * dx + dy * dy < 24 * 24) { s_shelf_tap = true; s_shelf_tx = s_px; s_shelf_ty = s_py; }
+            goto released;
+        }
         if (held_us < 350000 && dx * dx + dy * dy < 24 * 24) {
             if (notice_current()) {                                 /* (the lights-out notice lets its tap through: notice.h) */
                 bool took = notice_dismiss(); ESP_LOGI(TAG, "tap %s the announcement", notice_current() ? "held by" : "closed"); if (took) goto released; }
@@ -662,6 +688,14 @@ void touch_port_poll(tank_t *t) {
                 ESP_LOGI(TAG, "next fish tap at %.0f,%.0f -> card %d (%s)", s_px, s_py, s_sel, t->fish[s_sel].name);
                 goto released;
             }
+            if (render_critter_here(t, s_sel) && render_critter_nav_hit(s_sel, s_px, s_py)) {   /* a critter card's arrows (0.3.9.3):
+                                                                                      back or on through the critters, its 10 s again */
+                int dir = render_critter_nav_hit(s_sel, s_px, s_py), was = s_sel;
+                s_sel = render_critter_step(t, s_sel, dir); s_sel_us = now;
+                if (s_sel != was) tank_emit(TEV_WHEEL_TICK, -1);
+                ESP_LOGI(TAG, "critter arrow %s at %.0f,%.0f -> card %d", dir < 0 ? "left" : "right", s_px, s_py, s_sel);
+                goto released;
+            }
             if (s_sel >= 0 && s_sel != RENDER_CARD_SNAIL && s_sel != RENDER_CARD_SHRIMP && s_sel != RENDER_CARD_URCHIN && s_sel != RENDER_CARD_SEAHORSE && s_sel != RENDER_CARD_CRAB && RENDER_CARD_HIT(s_px, s_py)) {   /* a tap ON the card (or the slop
                 ESP_LOGI(TAG, "card tap at %.0f,%.0f -> milestones", s_px, s_py);         under its MORE button) = milestones page */
                 s_ms = true; goto released;
@@ -723,9 +757,12 @@ released:
 int touch_port_selected(void) { return s_sel; }
 bool touch_port_milestones(void) { return s_ms; }
 void touch_port_show_milestones(bool on) { if (s_ms && !on) render_milestones_leave(); s_ms = on; }
-void touch_port_dismiss(void) { adv_close(); s_sel = -1; if (s_ms) render_milestones_leave(); if (s_shop) render_shop_leave(); s_ms = false; s_set = false; s_shop = false; s_bat = false; s_upd = false; }
+void touch_port_dismiss(void) { adv_close(); s_sel = -1; if (s_ms) render_milestones_leave(); if (s_shop) render_shop_leave(); s_ms = false; s_set = false; s_shop = false; s_bat = false; s_upd = false; s_shelf = false; }
 bool touch_port_updates(void) { return s_upd; }
 void touch_port_show_updates(bool on) { s_upd = on; if (on) { s_ms = false; s_set = false; s_shop = false; s_sel = -1; s_bat = false; } }
+bool touch_port_shelf(void) { return s_shelf; }
+void touch_port_show_shelf(bool on) { s_shelf = on; s_shelf_tap = false; }
+bool touch_port_take_shelf_tap(float *x, float *y) { if (!s_shelf_tap) return false; s_shelf_tap = false; *x = s_shelf_tx; *y = s_shelf_ty; return true; }
 int  touch_port_take_update(void) { int r = s_upd_act; s_upd_act = 0; return r; }
 
 /* ---- reset confirm prompt ---- */

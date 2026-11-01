@@ -53,8 +53,7 @@ Against upstream's main (`git log upstream/main..main`):
   board that button stands between the version and CLOSE, a single BOOT
   press waits 0.4 s for a second before it sleeps, and a finger held still
   for 5 s on a touch-locked glass opens MY TANKS, whose padlock undoes the
-  lock - or, over a page MY TANKS cannot open over, undoes it itself
-  (*MY TANKS*).
+  lock (*MY TANKS*).
 - **A second 320 x 240 board.** `CONFIG_POCKET_TANK_WST_320X240` builds the
   same tank for the Waveshare ESP32-S3-Touch-LCD-2, contributed by adampog
   (*The Waveshare ESP32-S3-Touch-LCD-2*). Both boards select
@@ -114,11 +113,13 @@ also carries keeps its own: ESP Web Tools in `installer/vendor/`
   included. The fork means to send none, but one is open: pull request #15,
   opened 2026-10-01 from the fork's `main`. A pull request follows its
   branch, so every push of `main` to `origin` offers upstream whatever
-  `main` then holds, `LICENSE-MIT-CYD`'s files included. Its last update
-  (`4d913b5`, the v0.3.9.2 sync) came before upstream had a
-  `CONTRIBUTING.md`. Whether to close it or keep it is LM's to settle
-  before the next push of `main`; step 9 of *Syncing with upstream* checks
-  it, and `NOTICE-CYD`'s *CONTRIBUTING UPSTREAM* says which.
+  `main` then holds, `LICENSE-MIT-CYD`'s files included. Until the
+  v0.3.9.5 sync its head was `4d913b5` (the v0.3.9.2 sync), from before
+  upstream had a `CONTRIBUTING.md`; the push of that sync's `main`
+  (2026-11-01) moved it to `daf18df`, after upstream had one. Whether to
+  close it or keep it is LM's to settle before the next push of `main`;
+  step 9 of *Syncing with upstream* checks it, and `NOTICE-CYD`'s
+  *CONTRIBUTING UPSTREAM* says which.
 
 **Never label an upstream file MIT.** A path upstream ever had, in any
 commit or tag, is upstream's, however much of it the fork has rewritten - and
@@ -308,24 +309,31 @@ does reaches the tank or opens a page, and a touch only shows TOUCH IS
 LOCKED. Upstream's way back is BOOT twice; on a 320 x 240 board **a finger
 held still on the glass for 5 s** opens MY TANKS as well, and the padlock
 undoes the lock there. The lock is the board's (NVS `tank/tlock`): it stays
-through a restart, a swap and a reset of the tank. A locked board still
-wakes from the dark on a touch.
+through the tank's own restarts (a SWAP IN) and a reset of the tank, and
+a locked board still wakes from the dark on a touch. Since 0.3.9.6 **a
+hard boot unlocks it**: any start that is not the firmware's own restart
+or a wake from deep sleep. On the CYD that is pulling the power (the cable
+out, with no cell on the socket - or the cell out as well), the RESET
+button (on the ESP32-S3 the chip's enable pin, a power-on reset), a flash
+over the cable, a crash or a watchdog. The 5 s hold is the everyday way;
+a hard boot is the way when nothing on the glass answers.
 
 Two pages can come up on a locked glass by themselves: a fry's welcome,
 when one is born, and the first-run setup, after SWAP IN on a NEW TANK.
-Each waits for a finger, MY TANKS will not open over either (nor does
-BOOT twice), and the lock keeps every touch from the page. Over those
-pages, and over the reset prompt, the 5 s hold therefore undoes the lock
-itself, and the page then answers; the finger that held is spent, so its
-lift taps nothing. The TOUCH IS LOCKED note is drawn over the page, not
-under it. Lock the glass again from MY TANKS afterwards.
+MY TANKS will not open over either, nor does BOOT twice. Since 0.3.9.6
+the lock lets those pages take their taps (upstream's fix), so each
+answers a finger as on an unlocked glass, and the lock is still on when it
+closes. BOOT's chord for the reset prompt is refused on a locked glass,
+and a prompt that is up anyway (the director's `reset` opens one) answers
+NO by itself after 20 s.
 
 Where the tanks live: the tank on the glass where it always has (NVS
 `tank/save`), its name and place in NVS `frame`; each shelved tank in a
 24 KB slot of the `storage` partition, past its first 64 KB (*Building and
-flashing*). In 0.3.9.5 a swap restarts straight into the other tank:
-upstream's loading screen and the show of the tank building itself up are
-switched off with the grass loop (*Still open*).
+flashing*). Since 0.3.9.6 every start by day plays upstream's show of the
+tank building itself up - FILLING THE TANK after a SWAP IN, the light
+coming up after any other start - and the loading screen stands in for it
+only when the show finds no memory (*What the port changes*).
 
 ### Settings
 
@@ -340,7 +348,7 @@ switched off with the grass loop (*Still open*).
 | SLEEP | NEVER / SCREEN / LIGHT | what every way into sleep does, on every 320 x 240 board: NEVER ignores it, SCREEN darkens the glass with the chip awake, LIGHT darkens it and light-sleeps. LIGHT is the factory default; a choice is kept in NVS and applies from the next sleep (*Sleeping and waking*) |
 
 At the foot: the release over the build id, small and dim, on two lines
-cut short of the next button ("V0.3.9.5 ALPHA", "BUILD 4D913B5C3D"), then
+cut short of the next button ("V0.3.9.6 ALPHA", "BUILD 4D913B5C3D"), then
 MY TANKS (*MY TANKS*), then CLOSE. There is no UPDATES button.
 
 ### The ADVANCED page
@@ -415,7 +423,7 @@ On the glass, with no tool in hand:
 | a finger held still for about three seconds | the fish that trust you come over |
 | a finger held still on a decoration you own, 0.7 s | its placement page, with SELL |
 | a swipe along the milestones page's TANK row | the next page of the tank's badges, when it has more than one |
-| a finger held still 5 s on a touch-locked glass | MY TANKS, whose padlock undoes the lock; over a fry's welcome, the first-run setup or the reset prompt, the lock undone at once (*MY TANKS*) |
+| a finger held still 5 s on a touch-locked glass | MY TANKS, whose padlock undoes the lock (*MY TANKS*) |
 
 The movement gestures need an IMU. The CYD has none on the board: a
 QMI8658 or an MPU-6050 breakout on its I2C socket (VCC 3V3, GND, SDA IO16,
@@ -728,6 +736,66 @@ presses for MY TANKS (0.3.9.3) cost nothing on its boards, where BOOT alone
 does nothing; here BOOT alone is the sleep key, so a single press sleeps only
 once the window for a second has passed (`s_btn_sleep_due`, `main.c`), and
 one held longer than the window sleeps at its release, as before.
+
+**The grass loop runs on the CYD as on upstream's boards** (0.3.9.6, which
+turned it back on after 0.3.9.5 parked it; nothing in it is the fork's). The
+back grass is baked into a loop of moments of its sway, and each frame by day
+takes the moment the clock has reached; the night, and a loop being baked
+again, draw the grass live. On a 320 x 240 board:
+
+- **Its size.** 88 moments (`GRASS_LOOP_MOMENTS`: `main.c` names the square
+  and the watch, and every other board takes the 1.8's), in at most 2816 KB
+  of PSRAM (`GRASS_LOOP_BUDGET`). A band is the rows from the tallest back
+  frond's tip down to the sand - 240 at most, the whole tank, 150 KB.
+- **Its memory**, planned in the simulator with the firmware's own rule
+  (`gl_alloc` takes a block only while PSRAM keeps that block plus 1.2 MB
+  free): 2.82 MB on a new tank, 2.94 MB with the beds at 0.4, 2.96 MB from
+  0.7 up to full grass, in 38 blocks, nothing refused. Of the ~4.9 MB the
+  CYD had free at 0.3.9.5 that leaves ~1.9 MB; the boot show's 187 KB (a
+  frame and a landing map) comes out of it and goes back when the show
+  ends. Below ~4.2 MB free the plan shrinks (fewer bands, a smaller arena)
+  and is still whole at 3.4 MB. Upstream's "a very tall grass kept live"
+  is that plan giving up for want of memory: the CYD's band is never more
+  than 240 rows and does not reach it. Internal RAM: nothing at run time -
+  the loop's blocks are all PSRAM, and the bake task's 16 KB stack was
+  already started in 0.3.9.5 - but 1.3 KB more static RAM in the image
+  (`.dram0.bss` 57,456 to 58,760 bytes), most of it the director's new
+  `glcheck` (`colh[TANK_W]`).
+- **Its core.** The bake runs on core 1 (the `bake` task), a slice at a
+  time and only inside the window of a frame's flush (`s_bake_deadline`,
+  the flush's running average); the CYD's 30 ms SPI send is a wide window.
+  The tank task on core 0 lays the band into the frame and sends it as
+  before.
+- **Its display path** is unchanged. The bands are drawn by the frame's own
+  code, so with `PT_FB_SWAP` they are in the panel's byte order already, and
+  `display_port_spi.c` copies the frame into its DMA stripes unswapped. The
+  320 x 240 world's pages - the boot show's frames, loop on and off, among
+  them - match byte for byte between the plain and the `PT_FB_SWAP=1` build.
+- **Its cost to a frame**, on the host (`--bench`, the 320 x 240 world,
+  three runs each): a full canopy drawn live took 186-198 us a frame at
+  0.3.9.5 and 186-194 us at 0.3.9.6 with the loop off; laid from the loop,
+  once whole, ~32 us (68-71 us with the stats card's 36). At nubs, 37-39
+  us became 25. The grass was ~85% of a full canopy's frame. The CYD drew
+  a frame in 5 to 14 ms and sent it in 30, so the estimate is a drawing of
+  a few ms and the send deciding the rate, near the 25 fps ceiling
+  (`FRAME_MIN_MS`). Unmeasured on the glass (*Still open*).
+- **Its one-pixel A/B.** The loop's frames match the live ones but for one
+  pixel at a frond's tip, one green of the grass against another a step of
+  the 565 colour apart (day, moment 7 of 104), the same in 0.3.9.5 and
+  0.3.9.6. It is the grass's own - not the castle's, the sword plant's or
+  the seahorse's: each taken out of the staging, it stays - and what draws
+  it apart is not found. `--selftest-grassloop` allows four such pixels a
+  frame on this world (`GL_CYD_NEAR`) and nothing else.
+
+**The boot show** comes back with the loop: the tank built up piece by piece
+on every start by day - FILLING THE TANK, the water rising, after a SWAP IN;
+the light coming up after any other start - with the grass drawn live when
+the loop is off or has no memory (0.3.9.6). It is the tank's own pixels at
+full frame, so it needs no layout of its own on 320 x 240
+(`--boot-show`, `--boot-show-fill`; about 5 s at the boards' 11 fps). The
+loading screen, laid out for 320 x 240 in 0.3.9.5's sync, stands in only
+when the show finds no memory. A wake from the dark is not a start: the
+tank lights where it was, with no show.
 
 **The stats card cannot write past the frame.** It is copied into the frame
 row by row with no clipping; at 258 px tall on a 240 px frame it wrote past
@@ -1066,27 +1134,30 @@ there needs the IMU's INT line wired (below).
   240 px tank. Worth a look on the glass.
 - **MY TANKS has not been on the glass** (0.3.9.5's sync): the shelves, the
   cards, the keyboard and the touch lock's 5 s hold are laid out and checked
-  in the simulator only, and the hold over a fry's welcome (it undoes the
-  lock there) only by reading the code: `main.c` is not in the simulator.
+  in the simulator only, and the hold only by reading the code: `main.c` is
+  not in the simulator. So are 0.3.9.6's two ways out of the lock - a fry's
+  welcome and a new tank's setup taking taps while locked, and a hard boot
+  (RESET, or the power pulled) unlocking.
   A SWAP IN restarts the board in software, which keeps the chip's timer
   as deep sleep does, so the tank that comes back should have lived its
   time on the shelf; nobody has seen it do so here.
-- **The grass loop is off in 0.3.9.5** on every board (`GRASS_LOOP_ON 0`,
-  `main.c`: upstream's "until the loop is fixed and proven"), and with it
-  the loading screen and the boot show, which wait on the loop's first
-  bake and use its memory. The bake task still starts: a 16 KB stack in
-  internal RAM on core 1, taking the render lock every 4 ms to find
-  nothing to do. The boot log's "starting the tank task: internal heap"
-  line is the number to read. On the 320 x 240 world the loop's frames
-  differ from the live ones by one step of the 565 colour at the tip of a
-  tallest frond, and `--selftest-grassloop` allows four such pixels a frame
-  there (`GL_CYD_NEAR`): when upstream turns the loop back on, the A/B
-  wants to be exact here too before the CYD runs it.
-- **The frame rate after 0.3.9.4's swim depth and shadows** is unmeasured.
-  On the host the 320 x 240 world's frame with a full canopy went from ~155
-  to ~200 us (the 1.8's world: 208 to 248). The CYD drew a frame in 5 to
-  14 ms and sent it in 30: drawing ~28% dearer is at worst ~4 ms a frame,
-  about 21 fps down to 19.
+- **The grass loop has not run on the glass** (0.3.9.6's sync; off on every
+  board in 0.3.9.5). Its memory and its cost to a frame are the
+  simulator's (*What the port changes*). What to read in the log on the
+  first boot: the "starting the tank task: internal heap" line (it was
+  59 KB at 0.3.9.5; the image holds 1.3 KB more static RAM); "loading: the
+  boot show is over ... fps" after the show; then, every few seconds, the
+  display lines - the frame rate, the draw and the send, "grass loop: 88
+  moments, band N rows, diffs a of b KB", "core 1 baked ... slices" - and
+  no "grass loop: ... refused" or "no loop - the plan gave up". The
+  director's `glcheck` compares every baked moment with its neighbours (a
+  flicker shows as pixels that differ from both). Two things only the board
+  can say: whether the bake on core 1 slows the send it shares the PSRAM bus
+  with, and whether the sway looks smooth at the CYD's frame rate.
+- **The frame rate with the loop** is unmeasured. Before it, 0.3.9.4's swim
+  depth and shadows made the host's full-canopy frame ~28% dearer (155 to
+  200 us), at worst ~4 ms a frame on the CYD, about 21 fps down to 19; the
+  loop takes ~85% of that frame off the host's (*What the port changes*).
 - **`HOLD_APPROACH_FROM` 120** comes from the simulator, where one fish in
   four came in to a finger held mid-tank. Whether the FIRST HOLD APPROACH
   badge and the fry's HOLD step come in fair time is a check on the glass.
@@ -1327,18 +1398,31 @@ upstream's text but for one block.
      without a PMIC upstream's code sleeps at the first press. The 320 x
      240's single press waits out the window (`s_btn_sleep_due`);
    - a way back only BOOT gives (v0.3.9.3's touch lock): the CYD in its case
-     needs one on the glass (the 5 s hold, `touch_port_take_lock_open`),
-     and it has to work over every page upstream's way refuses to open
-     over. MY TANKS will not open over a setup page, and a fry's welcome
-     comes up by itself on a locked glass; there the hold undoes the lock
-     (`main.c`). Look for the pages that can appear with nobody touching;
+     needs one on the glass (the 5 s hold, `touch_port_take_lock_open`).
+     Look for the pages that can appear with nobody touching: a fry's
+     welcome and a new tank's setup come up by themselves on a locked glass,
+     and MY TANKS will not open over them. 0.3.9.5's sync made the hold
+     undo the lock over them; 0.3.9.6 lets them take their taps through the
+     lock, so the fork's branch went and the hold is left for the plain
+     locked tank;
+   - a fix upstream makes for a case the fork already fixed its own way
+     (that one, 0.3.9.6): take upstream's and cut the fork's back to what
+     upstream's leaves uncovered on the CYD - one rule, not two, and fewer
+     lines to meet at the next sync;
+   - a rule keyed on how the board started (0.3.9.6: a hard boot unlocks the
+     touch lock, by `esp_reset_reason`): on the ESP32-S3 the RESET button is
+     the chip's enable pin, a power-on reset, so on the CYD it counts as a
+     hard boot, as pulling the power and a flash over the cable do, and a
+     SWAP IN (`esp_restart`) does not. Read what each reason is on this
+     chip (`esp_system/port/soc/esp32s3/reset_reason.c`) before deciding a
+     rule needs a CYD branch - this one did not;
    - a widget upstream adds at a fixed size onto a page the fork scales:
      v0.3.9.3's critter arrows (a 34 px box) covered the start of the
      seahorse card's scaled text column. `--critter-cards <prefix>` draws
      every critter's card - the snapshot set has only the snail's and the
-     crab's - and `--shelf-shot` in the 320 x 240 world adds two pages for
+     crab's - and `--shelf-shot` in the 320 x 240 world adds a page for
      this world alone, `_shelf_locked_now3` (the NOW tag beside the
-     padlock) and `_lock_hint_birth` (the note over a fry's welcome);
+     padlock);
    - a rule that reads a save by where its pieces stand: v0.3.9.3's
      relayout takes a save from before 0.3.9.3 with a spot past the floor
      for the 1.8's world. The 1.8's fixtures do that on the 320 px floor
@@ -1351,9 +1435,17 @@ upstream's text but for one block.
      seahorse's snack sum (a fish, hungry after ten minutes of sleep, ate
      one of the pellets on the small tank), the sword plant's leaves on the
      pumpkin (54-63 px here, 100 asked), the padlock inside a 40 px rounded
-     corner (the CYD's glass is square), the grass loop's A/B (a shade at a
-     frond's tip). Each has a 320 x 240 branch in `sim/main.c` with its
+     corner (the CYD's glass is square), the grass loop's A/B (a shade at
+     a frond's tip). Each has a 320 x 240 branch in `sim/main.c` with its
      reason;
+   - an upstream selftest staged on fronds the 320 px floor does not have:
+     0.3.9.6's `--selftest-grasspatch` nibbles bed 1's fronds 0 and 4, and
+     bed 1 has three here, so the case made two boxes, not three, and
+     failed its own staging check. A staging moved for this world has to be
+     shown to catch the bug it was written for: the first choice (bed 2's
+     fronds 0 and 4) passed with 0.3.9.5's splice put back; bed 0's fronds
+     0 and 4 with bed 2's last frond fails there, as upstream's does on the
+     1.8;
    - the IMU's interface grows: v0.3.9.3's quarter turns (`imu_port_sides`,
      `imu_port_quarter`, the way up seeded from NVS `inv` and `side`) went
      into `imu_port.c` by hand, the side's sign from each chip's own axes,
@@ -1403,12 +1495,20 @@ upstream's text but for one block.
    make -C sim 320X240=1 OUT=fishsim-320x240-swap BUILD=build-320x240-swap EXTRA_CFLAGS=-DPT_FB_SWAP=1
    ```
 
+   The pages: `--snapshot`, `--shelf-shot`, `--place-shot`,
+   `--crab-card-shot`, and since 0.3.9.6's sync the boot show's frames
+   (`--boot-show`, `--boot-show-fill`, and `--boot-show` again with
+   `PT_LOOP_OFF=1`), `--urchin-frond-shot`, `--pumpkin-fish-shot` and
+   `--selftest-front-keep <prefix>` with `PT_FRONT_KEEP_PLAIN=1` - 449 pages
+   at 0.3.9.6.
+
 5. **Upstream's four worlds against upstream's own tree.** Build upstream's
    simulator in a worktree of `upstream/main` (it needs its own `sim/lvgl`),
    write each world's pages with `--snapshot <prefix>` from `fishsim`,
    `fishsim-round`, `fishsim-watch` and `fishsim-square` in both trees -
    and since 0.3.9.5's sync `--shelf-shot`, `--place-shot` and
-   `--crab-card-shot` too, whose pages the fork scaled - and compare them with
+   `--crab-card-shot` too, whose pages the fork scaled, and since 0.3.9.6's
+   the boot show's and the depth pages step 4 lists - and compare them with
    `cmp`. The only difference expected is the build line, which prints the
    tree's own `git describe`; any other page that differs is the fork
    reaching an upstream board.
@@ -1464,7 +1564,8 @@ upstream's text but for one block.
            print(p["number"], p["head"]["label"], p["head"]["sha"][:12], p["title"])'
    ```
 
-   On 2026-10-31 it printed #15, `lmoiseichuk:main` at `4d913b5`. One
+   On 2026-10-31 it printed #15, `lmoiseichuk:main` at `4d913b5`; on
+   2026-11-01, after the v0.3.9.5 sync's push, the same at `daf18df`. One
    whose head is `lmoiseichuk:main` takes this sync - upstream's code,
    the fork's changes and `LICENSE-MIT-CYD`'s files - when `main` is
    pushed. Close it, or keep it, before the push, and make `NOTICE-CYD`'s

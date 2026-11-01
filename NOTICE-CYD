@@ -106,10 +106,14 @@ grants him the right to use, change, license and distribute it for any
 purpose, commercial ones included.
 
 One pull request from this fork is open there: #15, opened on 2026-10-01
-from the fork's main branch, and still open on 2026-10-31. A pull request
+from the fork's main branch, and still open on 2026-11-01. A pull request
 follows the branch it comes from, so whatever is pushed to the fork's main
 is offered to upstream through it, the files in LICENSE-MIT-CYD's list
-included. Its last update brought it to the fork's main as of upstream's
-v0.3.9.2 (4d913b5), before upstream had a CONTRIBUTING.md and while all of
-Pocket Tank was under the MIT License. A CYD file offered there stays MIT
-here; upstream would hold the rights CONTRIBUTING.md names in it as well.
+included. Until 2026-11-01 its head was the fork's main as of upstream's
+v0.3.9.2 (4d913b5), from before upstream had a CONTRIBUTING.md, while all
+of Pocket Tank was under the MIT License. On 2026-11-01 the push of the
+fork's main as of upstream's v0.3.9.5 (daf18df) moved it there, after
+upstream had a CONTRIBUTING.md: the port's files as they stood then, this
+file and LICENSE-MIT-CYD among them, are offered to upstream through it. A
+CYD file offered there stays MIT here; upstream would hold the rights
+CONTRIBUTING.md names in it as well.

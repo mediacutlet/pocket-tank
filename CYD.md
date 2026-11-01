@@ -68,34 +68,90 @@ touch hooks. Their simulator pages are byte for byte upstream's; their
 firmware builds, and has been read against upstream's, not run on one of
 those boards.
 
-## The licence (from upstream's 0.3.9.3)
+## Licence
 
-With 0.3.9.3 upstream changed its licence: from that release on, Pocket
-Tank is under the PolyForm Noncommercial License 1.0.0 (`LICENSE`), and
-v0.3.9.2 and earlier stay under MIT (`NOTICE`, which keeps the MIT text).
-The fork keeps both files as upstream has them. What that means here, as
-the two files read - a summary, not advice, and the choice is LM's:
+The tree holds code under two licences, in three layers (`NOTICE-CYD` says
+what they mean together - a summary; the licence texts are what count):
 
-- Until this merge the fork was MIT code: upstream's up to v0.3.9.2 and the
-  fork's own work. From it on, the fork carries upstream code under PolyForm
-  Noncommercial: using, changing and sharing it for any noncommercial
-  purpose is allowed; selling it, or anything built on it, needs Strato's
-  written permission (strato@pocketank.com).
-- Whoever gets any part of it from the fork must get the licence's terms,
-  or their URL, and upstream's three `Required Notice:` lines at the head
-  of `LICENSE`. A copy of the fork that keeps `LICENSE` as it is carries
-  both.
-- The fork's own additions (the CYD port, this page) are LM's work, and
-  how they are licensed on their own is LM's to say; a firmware image built
-  from this tree contains upstream's 0.3.9.3 code and passes on under
-  upstream's terms.
-- Code that came under MIT stays under it: upstream says so of its own MIT
-  contributions (`NOTICE`), and adampog's Touch-LCD-2 came to the fork
-  (2026-10-08) before the change.
-- `CONTRIBUTING.md` is about pull requests to upstream. The fork sends none
-  (*Syncing with upstream*), so it asks nothing of the fork today.
-- Staying on v0.3.9.2 keeps the fork all MIT, without MY TANKS and what
-  follows it.
+| Layer | Licence | Copyright | Its text |
+|---|---|---|---|
+| upstream, up to and including v0.3.9.2 | MIT | MediaCutlet | `NOTICE` |
+| upstream, from v0.3.9.3 on ("the release after v0.3.9.2") | PolyForm Noncommercial 1.0.0 | Strato Doumanis | `LICENSE`, under its three `Required Notice:` lines |
+| the CYD port: the files `LICENSE-MIT-CYD` lists, and LM's changes inside upstream's files as far as they can be separated | MIT | Leonid Moiseichuk | `LICENSE-MIT-CYD` |
+
+- The firmware as a whole - what anyone clones, builds or flashes from this
+  tree - contains upstream's code from v0.3.9.3 on, so it may be used,
+  changed and shared for noncommercial purposes only. Commercial use needs
+  Strato's written permission (strato@pocketank.com).
+- Whoever gets any part of it must get PolyForm's terms, or their URL, and
+  the three `Required Notice:` lines. A copy that keeps `LICENSE` as it is
+  carries both, and `NOTICE-CYD` repeats the lines word for word.
+- The CYD port's own files may be reused under MIT alone, apart from the
+  rest of the tree.
+- `LICENSE`, `NOTICE` and `CONTRIBUTING.md` are upstream's and are never
+  edited here: PolyForm's Notices clause wants them passed on as they are,
+  and an edit would conflict at every sync. The fork's part is in
+  `LICENSE-MIT-CYD` and `NOTICE-CYD`, files upstream does not have.
+- adampog's Touch-LCD-2 (pull request #2, merged 2026-10-08) came to the
+  fork while it was all MIT code. It is adampog's, so the files it touched
+  are not in `LICENSE-MIT-CYD`'s list.
+- `CONTRIBUTING.md` is about pull requests to upstream: one would give
+  Strato a right to the contribution for any purpose, commercial ones
+  included. The fork sends none (*Syncing with upstream*).
+
+**Never label an upstream file MIT.** A path upstream ever had, in any
+commit or tag, is upstream's, however much of it the fork has rewritten - and
+so is a file the fork renamed or split out of one: `imu_port.c` and
+`imu_qmi8658.c` hold upstream's `imu_port_qmi8658.c`, and changes upstream
+makes to that file are carried into them by hand. Such a file gets no SPDX
+header and stays out of `LICENSE-MIT-CYD`, whatever share of its lines is
+LM's. PolyForm allows no sublicensing: the fork cannot offer upstream's code
+from v0.3.9.3 on under MIT, and a header that said so would be wrong.
+
+**Keeping `LICENSE-MIT-CYD`'s list current.** The list is computed, never
+written from memory. At every sync, and after adding a file of the fork's
+own:
+
+```sh
+git fetch upstream
+comm -23 <(git ls-tree -r --name-only HEAD | sort) \
+         <(for c in $(git rev-list upstream/main --tags); do git ls-tree -r --name-only "$c"; done | sort -u) |
+while read -r f; do
+  echo "== $f"
+  git log --follow -M --diff-filter=AR --name-status --format='   %h %an' -- "$f" | grep -v '^$'
+  git blame -w -C -C -C --line-porcelain HEAD -- "$f" | sed -n 's/^author /   lines: /p' | sort | uniq -c
+done
+```
+
+It prints each path at HEAD that no upstream commit or tag ever had (the
+fork makes no tags; every tag here is upstream's), how it came to be (`A`
+added, `R` renamed from the path on its left), and whose lines it holds,
+with lines copied from other files traced to them (`-C -C -C`). Reading it:
+
+- **Added by LM, from no upstream path, every line LM's:** in the list. A
+  source file - C, a header, a script, a Kconfig or sdkconfig fragment,
+  CMake - takes `SPDX-License-Identifier: MIT` and
+  `SPDX-FileCopyrightText: 2026 Leonid Moiseichuk` at its head, in its own
+  comment syntax, code untouched. A file with no comments, or binary, or
+  documentation (this page) is in the list only.
+- **Renamed or split from an upstream path:** upstream's. Out.
+- **A few lines of an upstream author** in a file otherwise LM's: check
+  each blamed commit with `git merge-base --is-ancestor <commit> v0.3.9.2`.
+  All of them in v0.3.9.2 or earlier means MIT throughout: in the list, the
+  header naming `SPDX-FileCopyrightText: 2026 MediaCutlet` too, and
+  `LICENSE-MIT-CYD` saying which lines (`imu_mpu6050.c`'s I2C helpers,
+  `orientation.c`'s and `sleep_setting.c`'s NVS lines). One from v0.3.9.3
+  on: out.
+- **Lines of another contributor** (adampog's `display_port_spi.c` and
+  `sdkconfig.defaults.wst`): not LM's to license. Out.
+- **Generated** (`sim/testdata/saves/2026-10-08-1328-cyd.sav`, written by
+  the CYD build from upstream's v0.2.0 fixture): out.
+- `LICENSE-MIT-CYD` and `NOTICE-CYD` print too: they are the notices, not
+  files of the port, and stay out of the list.
+
+A file that leaves the list because upstream now has the path too loses
+its header in the same commit; a file the fork deletes leaves the list with
+it.
 
 ## Using it
 
@@ -1290,7 +1346,23 @@ upstream's text but for one block.
      in `main.c` is checked only by a firmware build (0.3.9.5's sync left a
      stray brace there). Run `tools/build_cyd.sh` before the long sim runs.
 
-3. **The simulator, in all five worlds:**
+3. **The licence.** Upstream's `LICENSE`, `NOTICE` and `CONTRIBUTING.md`
+   come in as upstream has them and are never edited here. See whether this
+   release changed them:
+
+   ```sh
+   git diff main upstream/main -- LICENSE NOTICE CONTRIBUTING.md
+   ```
+
+   Anything printed is read before the merge goes further: a `Required
+   Notice:` line added or changed goes into `NOTICE-CYD` word for word, and
+   a new licence, or a new release where one ends, changes `NOTICE-CYD`'s
+   layers and the table in *Licence*. Then, whether or not they changed,
+   re-run the file-list command in *Licence* and bring `LICENSE-MIT-CYD`'s
+   list and the SPDX headers in line with what it prints: a path upstream
+   now has as well is upstream's from this sync on.
+
+4. **The simulator, in all five worlds:**
 
    ```sh
    make -C sim check-all          # the 1.8, the round board, the watch, the square, then the 320 x 240
@@ -1308,7 +1380,7 @@ upstream's text but for one block.
    make -C sim 320X240=1 OUT=fishsim-320x240-swap BUILD=build-320x240-swap EXTRA_CFLAGS=-DPT_FB_SWAP=1
    ```
 
-4. **Upstream's four worlds against upstream's own tree.** Build upstream's
+5. **Upstream's four worlds against upstream's own tree.** Build upstream's
    simulator in a worktree of `upstream/main` (it needs its own `sim/lvgl`),
    write each world's pages with `--snapshot <prefix>` from `fishsim`,
    `fishsim-round`, `fishsim-watch` and `fishsim-square` in both trees -
@@ -1326,14 +1398,14 @@ upstream's text but for one block.
    in upstream's own tree (v0.3.4's sync). And without `POCKET_TANK_SAVE`
    each run writes the sim's own save, `~/.cache/pocket-tank/tank.sav`.
 
-5. **The six firmware images build:** `tools/build_cyd.sh` with no port;
+6. **The six firmware images build:** `tools/build_cyd.sh` with no port;
    the Touch-LCD-2 with `idf.py` into `build_wst`, as
    *The Waveshare ESP32-S3-Touch-LCD-2* shows;
    and the 1.8, the round board, the watch and the square with `idf.py`, each
    into its own build directory as README.md's
    [*Run it on real hardware*](README.md#run-it-on-real-hardware) shows.
 
-6. **Back up the CYD's NVS - the tank's save - before flashing it:**
+7. **Back up the CYD's NVS - the tank's save - before flashing it:**
 
    ```sh
    esptool.py --chip esp32s3 -p <port> -b 921600 read_flash 0x9000 0x6000 nvs_before_<release>.bin
@@ -1344,11 +1416,11 @@ upstream's text but for one block.
    `esptool.py --chip esp32s3 -p <port> write_flash 0x9000
    nvs_before_<release>.bin` (*Recovering a board*).
 
-7. **Flash the CYD** with `tools/build_cyd.sh <port>` and check it on the
+8. **Flash the CYD** with `tools/build_cyd.sh <port>` and check it on the
    glass: the tank loads the save it had, the pages and the settings rows
    answer, and it sleeps and wakes.
 
-8. **Only then fast-forward main:**
+9. **Only then fast-forward main:**
 
    ```sh
    git switch main

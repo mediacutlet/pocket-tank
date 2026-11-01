@@ -1,0 +1,87 @@
+Pocket Tank on the CYD
+LM's fork of Pocket Tank, by StratoBuilds (https://github.com/mediacutlet/pocket-tank)
+
+THREE LAYERS
+
+This tree holds code under two licences, in three layers. Upstream's
+LICENSE, NOTICE and CONTRIBUTING.md are kept exactly as upstream ships them;
+this file adds the fork's part and changes nothing in theirs.
+
+1. Upstream, up to and including v0.3.9.2: the MIT License.
+   Copyright (c) 2026 MediaCutlet
+   Pocket Tank as released up to and including v0.3.9.2, and code
+   contributed to it under the MIT License, stay under the MIT License.
+
+2. Upstream, from v0.3.9.3 on: the PolyForm Noncommercial License 1.0.0.
+   NOTICE puts the change at "the release after v0.3.9.2", which is
+   v0.3.9.3. Its Required Notice lines, repeated here word for word as the
+   licence asks of anyone passing on any part of the software:
+
+Required Notice: Copyright (c) 2026 Strato Doumanis
+Required Notice: Pocket Tank, by StratoBuilds. Free for everyone at https://pocketank.com
+Required Notice: For any commercial use, ask first: strato@pocketank.com
+
+3. The CYD port: the MIT License.
+   Copyright (c) 2026 Leonid Moiseichuk
+   The fork's own work: the files listed in LICENSE-MIT-CYD, and LM's
+   changes inside upstream's files as far as they can be separated from
+   upstream's code. It does not cover upstream's code.
+
+WHAT THAT MEANS, IN PLAIN WORDS
+
+A summary; the licence texts are what count.
+
+- The firmware as a whole - what anyone clones, builds or flashes from this
+  tree - contains upstream's code from v0.3.9.3 on. So it may be used,
+  changed and shared only for noncommercial purposes, under PolyForm
+  Noncommercial 1.0.0. Commercial use - selling it, or anything built on
+  it - needs Strato Doumanis's written permission: strato@pocketank.com
+- Whoever passes on any part of it must pass on PolyForm's terms (LICENSE,
+  or https://polyformproject.org/licenses/noncommercial/1.0.0) and the three
+  Required Notice lines above. A copy that keeps LICENSE as it is carries
+  both.
+- PolyForm allows no sublicensing, so the fork cannot offer upstream's code
+  from v0.3.9.3 on under MIT, and does not. An upstream file the fork has
+  changed stays under upstream's terms; the fork never labels one MIT.
+- The CYD port's own files, listed in LICENSE-MIT-CYD, may be reused under
+  the MIT License alone, apart from the rest of the tree - in another
+  project, commercial or not - keeping the copyright and permission notice
+  in LICENSE-MIT-CYD. Three of them carry a few lines from upstream's MIT
+  releases (layer 1, copyright MediaCutlet); their headers say so, and
+  NOTICE holds that MIT text.
+
+WHERE THE TEXTS ARE
+
+  LICENSE           upstream's: PolyForm Noncommercial 1.0.0, under its
+                    three Required Notice lines
+  NOTICE            upstream's: the licence change, and the MIT License that
+                    covers v0.3.9.2 and earlier
+  CONTRIBUTING.md   upstream's: the terms of a pull request to upstream
+  LICENSE-MIT-CYD   the fork's: the MIT License for the CYD port, and the
+                    list of its files
+  NOTICE-CYD        the fork's: this file
+  CYD.md            the fork's guide; its "Licence" section says how the
+                    list in LICENSE-MIT-CYD is kept current
+
+THIRD-PARTY CODE
+
+model/llama2.c/ and sim/lvgl/ are not part of this repository: they are
+cloned separately and carry their own MIT licenses. ESP-IDF, and the
+components idf.py fetches into firmware/managed_components/, come with
+their own licences too.
+
+OTHER CONTRIBUTORS
+
+The Waveshare ESP32-S3-Touch-LCD-2 support was contributed to the fork by
+adampog (pull request #2, merged 2026-10-08), while the fork was all MIT
+code. adampog keeps the copyright in that work; the files it touched are
+not in LICENSE-MIT-CYD's list.
+
+CONTRIBUTING UPSTREAM
+
+A pull request sent to upstream falls under upstream's CONTRIBUTING.md: it
+licenses the contribution to Strato Doumanis under PolyForm Noncommercial
+1.0.0 and grants him the right to use, change, license and distribute it
+for any purpose, commercial ones included. The fork sends none today. A
+CYD file sent there would stay MIT here, and upstream would hold those
+rights in it as well.

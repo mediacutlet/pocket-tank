@@ -1,3 +1,7 @@
+/*
+ * SPDX-License-Identifier: MIT
+ * SPDX-FileCopyrightText: 2026 Leonid Moiseichuk
+ */
 /* imu_chip.h — what imu_port needs from one accelerometer chip.
  *
  * imu_port.c holds the orientation and handling logic (the flip vote, the

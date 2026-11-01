@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# SPDX-FileCopyrightText: 2026 Leonid Moiseichuk
 # The 2.8" ESP32-S3 CYD (ES3C28P): layered over sdkconfig.defaults by
 # tools/build_cyd.sh. 16 MB flash and 8 MB octal PSRAM, as the AMOLED board.
 CONFIG_POCKET_TANK_CYD_320X240=y

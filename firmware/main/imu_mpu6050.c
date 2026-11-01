@@ -1,3 +1,10 @@
+/*
+ * SPDX-License-Identifier: MIT
+ * SPDX-FileCopyrightText: 2026 Leonid Moiseichuk
+ * SPDX-FileCopyrightText: 2026 MediaCutlet
+ * MediaCutlet's are a few lines from upstream's MIT releases (v0.3.9.2 and
+ * earlier); LICENSE-MIT-CYD says which.
+ */
 /* imu_mpu6050.c — an MPU-6050 as imu_port's accelerometer (see imu_chip.h).
  *
  * The stand-in for the CYD while its QMI8658C is on the way: a GY-521-style

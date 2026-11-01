@@ -1,3 +1,7 @@
+/*
+ * SPDX-License-Identifier: MIT
+ * SPDX-FileCopyrightText: 2026 Leonid Moiseichuk
+ */
 /* sleep_setting.h - (this fork) the keeper's choice of what a 320x240 board
  * - the CYD, the Touch-LCD-2 - does when something asks it to sleep: BOOT's
  * short press, the face-down gesture, the PWR key where there is one, the

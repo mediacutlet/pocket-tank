@@ -1,3 +1,10 @@
+/*
+ * SPDX-License-Identifier: MIT
+ * SPDX-FileCopyrightText: 2026 Leonid Moiseichuk
+ * SPDX-FileCopyrightText: 2026 MediaCutlet
+ * MediaCutlet's are a few lines from upstream's MIT releases (v0.3.9.2 and
+ * earlier); LICENSE-MIT-CYD says which.
+ */
 /* orientation.c - see orientation.h. */
 #include "orientation.h"
 #include "nvs_flash.h"

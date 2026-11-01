@@ -1,3 +1,7 @@
+/*
+ * SPDX-License-Identifier: MIT
+ * SPDX-FileCopyrightText: 2026 Leonid Moiseichuk
+ */
 /* ui.h - the pages' measurements, taken from the 448 x 368 page they were
  * designed on and scaled to the page this build draws.
  *

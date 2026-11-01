@@ -1,0 +1,66 @@
+The CYD port of Pocket Tank: the MIT License, and what it covers
+
+This licence covers the CYD port, LM's own work in this fork of Pocket Tank:
+
+  - the files listed below, and
+  - LM's changes inside upstream's files, as far as they can be separated
+    from upstream's code.
+
+It does NOT cover upstream's code - Pocket Tank, by StratoBuilds - which
+stays under upstream's terms: the PolyForm Noncommercial License 1.0.0
+(LICENSE) from v0.3.9.3 on, the MIT License in NOTICE up to and including
+v0.3.9.2. An upstream file the fork has changed is still upstream's file, and
+stays under upstream's terms. NOTICE-CYD says what the layers mean together.
+
+The CYD port's own files. The list is computed from git, not written from
+memory: each is a path that no upstream commit or tag ever had, added by the
+fork's own commits and renamed from no upstream file, with every line LM's
+(CYD.md, "Licence", has the command and how to read it).
+
+  CYD.md
+  common/ui.h
+  firmware/main/imu_chip.h
+  firmware/main/orientation.h
+  firmware/main/sdkconfig.rename
+  firmware/main/sleep_setting.h
+  firmware/sdkconfig.defaults.cyd
+  tools/build_cyd.sh
+
+Three more are LM's but for a few lines from upstream's MIT releases
+(v0.3.9.2 and earlier). Those lines stay copyright MediaCutlet under the MIT
+License in NOTICE, so these files are MIT throughout, and their headers name
+both:
+
+  firmware/main/imu_mpu6050.c     the I2C register helpers wr8 and rdn, TAG,
+                                  the device handle and its configuration,
+                                  from upstream's imu_port_qmi8658.c; two
+                                  FreeRTOS includes from main.c
+  firmware/main/orientation.c     the NVS open lines of upstream's
+  firmware/main/sleep_setting.c   brightness.c, and three includes from
+                                  persist_port_esp.c
+
+Every file above but CYD.md carries an SPDX-License-Identifier header;
+CYD.md is documentation and is listed here only.
+
+----------------------------------------------------------------------------
+MIT License
+
+Copyright (c) 2026 Leonid Moiseichuk
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.

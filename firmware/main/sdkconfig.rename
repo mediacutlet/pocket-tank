@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# SPDX-FileCopyrightText: 2026 Leonid Moiseichuk
 # (this fork, 2026-10-08) The 320x240 boards' old names, formatted as ESP-IDF's
 # own rename files are: CONFIG_OLD_NAME CONFIG_NEW_NAME. kconfgen reads this
 # file when it loads an sdkconfig and carries an old name across to the new

@@ -1,4 +1,6 @@
 #!/bin/bash
+# SPDX-License-Identifier: MIT
+# SPDX-FileCopyrightText: 2026 Leonid Moiseichuk
 # build_cyd.sh - build, and optionally flash, the 2.8" ESP32-S3 CYD (ES3C28P).
 #
 #   tools/build_cyd.sh                      # build only

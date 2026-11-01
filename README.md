@@ -15,6 +15,8 @@
 >
 > Using it, building and flashing it, and syncing the fork with upstream:
 > **[CYD.md](CYD.md)**.
+>
+> Licences: upstream's code is under PolyForm Noncommercial 1.0.0 from v0.3.9.3 (MIT up to v0.3.9.2), the CYD port's own files under MIT - **[NOTICE-CYD](NOTICE-CYD)**.
 
 **A tiny language model keeps a fish tank alive on an $8 chip.**
 The ESP32-S3 board, with screen and battery used in this project is actually around $35.

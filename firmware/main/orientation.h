@@ -1,3 +1,7 @@
+/*
+ * SPDX-License-Identifier: MIT
+ * SPDX-FileCopyrightText: 2026 Leonid Moiseichuk
+ */
 /* orientation.h - the keeper's choice of which way up the screen is, for a
  * board with no IMU to decide it (the 2.8" CYD). The settings page's SCREEN
  * row sets it; it is kept in NVS beside the brightness ("tank"/"flip") and

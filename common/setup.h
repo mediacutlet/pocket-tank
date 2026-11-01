@@ -82,6 +82,7 @@ int  setup_take_renamed(void);
 bool setup_active(void);
 bool setup_is_birth(void);               /* the birth flow, not the first run */
 bool setup_is_place(void);               /* the placement page */
+bool setup_place_live(void);             /* ... and its piece has been changed on it (dragged, re-ranked, re-depthed, recolored): it is drawn live, out of the scene */
 int  setup_item(void);                   /* the placement page's SD item (-1 = none) */
 int  setup_fish(void);                   /* the fish the current page is about (-1 = none) */
 void setup_cancel(tank_t *t);            /* drop the pages; the save still says pending */

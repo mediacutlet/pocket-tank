@@ -12,8 +12,8 @@
  *                 manifest override - the test channel), chan (the radio
  *                 channel the saved network last answered on, 0.3.9). Its
  *                 own namespace: the tank's reset wipes "tank", never this.
- *   the manifest  OTA_MANIFEST_URL (a GitHub Release's "latest" asset), one
- *                 per board: latest-<PT_BOARD>.json. Small JSON: release,
+ *   the manifest  OTA_MANIFEST_BASE + the board (a GitHub Release's "latest" asset), one
+ *                 per board: latest-<board>.json. Small JSON: release,
  *                 board, build, min_from, app{url,size,sha256}, note,
  *                 needs_cable, model{version,size,url}. A manifest naming
  *                 another board is refused (common/update.c)
@@ -54,9 +54,10 @@
 
 static const char *TAG = "net";
 #define WIFI_NVS_NS   "wifi"
-#ifndef OTA_MANIFEST_URL
-#define OTA_MANIFEST_URL "https://github.com/mediacutlet/pocket-tank/releases/latest/download/latest-" PT_BOARD ".json"
-#endif
+/* the release channel: latest-<board>.json, the board this tank IS (0.3.9.3,
+ * update_target_board: another board's version installed here fetches this
+ * board's own) */
+#define OTA_MANIFEST_BASE "https://github.com/mediacutlet/pocket-tank/releases/latest/download/latest-"
 /* the board marker: in .rodata_custom_desc, which the linker places right
  * after esp_app_desc_t - a fixed offset in the image (PT_BOARD_MARKER_OFFSET;
  * tools/make_ota_manifest.py and make_installer.py read it back from the .bin) */
@@ -91,7 +92,12 @@ void net_port_creds_forget(void) {
 const char *net_port_manifest_url(void) {                   /* the director's override, else the release channel */
     static char url[NET_URL_MAX + 1];
     if (nvs_get_str_ns("url", url, sizeof url) && url[0]) return url;
+#ifdef OTA_MANIFEST_URL
     return OTA_MANIFEST_URL;
+#else
+    snprintf(url, sizeof url, OTA_MANIFEST_BASE "%s.json", update_target_board());
+    return url;
+#endif
 }
 bool net_port_set_manifest_url(const char *url) {           /* NULL / "" = back to the default */
     nvs_handle_t h; if (nvs_open(WIFI_NVS_NS, NVS_READWRITE, &h) != ESP_OK) return false;
@@ -401,14 +407,15 @@ static void do_install(void) {
         int got = esp_https_ota_get_image_len_read(s_ota);
         if (!board_checked && got >= 4096) {                 /* the marker is in the first sector, written by now */
             pt_board_marker_t mk; board_checked = true;
+            const char *want = update_target_board();       /* the board this IS (0.3.9.3), not always this build's */
             bool ok = esp_partition_read(slot, PT_BOARD_MARKER_OFFSET, &mk, sizeof mk) == ESP_OK
-                   && !memcmp(mk.magic, PT_BOARD_MAGIC, sizeof mk.magic) && !strncmp(mk.board, PT_BOARD, sizeof mk.board);
+                   && !memcmp(mk.magic, PT_BOARD_MAGIC, sizeof mk.magic) && !strncmp(mk.board, want, sizeof mk.board);
             if (!ok) {
                 mk.board[sizeof mk.board - 1] = 0;
-                ESP_LOGE(TAG, "download: the image is for board \"%s\", this is %s - refused", memcmp(mk.magic, PT_BOARD_MAGIC, 8) ? "(no marker)" : mk.board, PT_BOARD);
+                ESP_LOGE(TAG, "download: the image is for board \"%s\", this is %s - refused", memcmp(mk.magic, PT_BOARD_MAGIC, 8) ? "(no marker)" : mk.board, want);
                 esp_https_ota_abort(s_ota); s_ota = NULL; s_err = NET_ERR_BOARD; s_state = NET_FAILED; return;
             }
-            ESP_LOGI(TAG, "download: the image is for %s - this board", PT_BOARD);
+            ESP_LOGI(TAG, "download: the image is for %s - this board%s", want, strcmp(want, PT_BOARD) ? " (its own version, over the 1.8's)" : "");
         }
         s_percent = total > 0 ? (int)((int64_t)got * 99 / total) : 0;
         int64_t now = esp_timer_get_time();

@@ -69,6 +69,38 @@ elder 8 h; lights-off pauses aging), size = stage scale × meal bonus; silent.*
 and calm; social drifts up while following friends, down while solo exploring —
 one trait unit per ~6 h of pressure. Trust (touch) also persists.*
 
+*Changed 2026-10-29 (Discord: every keeper's fish went SOLO): exploring no
+longer cools social. The model follows only at social 7-9 (the cliff in
+progression-next.md), so a middling fish never earned the warmth back and sank
+to the floor, while a social one ran to the ceiling. Now company warms a fish
+and social settles back toward the birth temper (`TRAIT_SETTLE`, the gap
+shrinks ~e-fold in 8 lit hours); a tank already at the floor climbs back by
+itself and its fish follow friends again. Company is following a friend
+(`SOCIAL_FOLLOW_GAIN`) and every second nose to tail with another fish
+(`SOCIAL_NEAR_GAIN`, centers within `SOCIAL_NEAR_PX` x the two sizes) - small
+gains, since the model follows almost always at 7+ and a big one runs away -
+and, much stronger, fish gathered together at a held finger (`SOCIAL_HOLD_GAIN`,
+Strato: the keeper's way to bring a shy tank together): ten minutes of a hold
+~+0.06 a fish in a pair (measured on the 1.8 at half this gain: +0.033 in 12
+min, doubled), about half a step of the bar, and ~a step in a full tank. `fishsim --selftest-drift` (~6
+min, not in `make check`) runs 72 lit hours on the model, then ten real minutes
+alone against ten of a hold.*
+
+*Changed 2026-10-29 (later, Strato: "all of my fish are bold" - variety, not
+strong biases): bold had the same ratchet - fed + calm (39% of fish-time in the
+sim) raised it at 0.25 a lit hour and stress > 7 (0.0% since the shadow went)
+was the only way down, so every fish sat at 0.95 within a lit day. Now bold
+settles to its birth temper too (`TRAIT_SETTLE`) and fed + calm raises it at
+`BOLD_CALM_GAIN` (a sixth of the old rate): a well-kept fish ends ~a step bolder
+than it was born. The CHANGE gate's pressure keeps the old pace. Fry (tank.c
+`tank_add_fish`) inherit each trait from the parents' BIRTH tempers (what
+drifted was their life), blended at a ratio of their own +-0.15, and one trait
+in three (`TEMPER_OWN`) rolls fresh in the founders' 0.1-0.9: the old average
+of the drifted values +-0.15 bred bold from bold and squeezed a family of five
+to the middle (spread 0.20 -> 0.09 in eight generations; now 0.16, with no more
+fish at the ends than founders). Shop fry roll 0.1-0.9 (was 0.25-0.75).
+`fishsim --selftest-temper` (in `make check`) breeds the generations.*
+
 - In, but **kept simple**: two drifting traits only — **bold** and **social**
   (0–9). Slow drift (days), small event-driven nudges, always recoverable.
 - These traits enter the model's state string (schema v2) so the LLM expresses

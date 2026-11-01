@@ -70,7 +70,7 @@ int  net_port_scan_state(void);
 int  net_port_scan_results(net_ap_t *out, int max);          /* after NET_DONE: strongest first, names unique */
 void net_port_connect_start(const char *ssid, const char *pass);
 int  net_port_connect_state(void);
-void net_port_check_start(void);                            /* fetch the manifest (the platform knows the URL) */
+void net_port_check_start(void);                            /* fetch the manifest (the platform knows the URL: update_target_board's) */
 int  net_port_check_state(const update_manifest_t **m);     /* NET_DONE: *m valid until the next call */
 void net_port_install_start(void);                          /* download, verify, arm the other slot */
 int  net_port_install_state(int *percent);                  /* NET_BUSY with the percent; NET_DONE = ready to restart */
@@ -155,4 +155,8 @@ void update_text(uint16_t *fb, int stride, int x, int y, int scale, uint32_t rgb
 
 /* the platform's one-line reason for the log */
 const char *net_err_name(int err);
+/* the board whose version this tank should run (0.3.9.3): the board it is, by
+ * its chips, else this build's PT_BOARD - the manifest fetched, the image's
+ * marker checked against it */
+const char *update_target_board(void);
 #endif

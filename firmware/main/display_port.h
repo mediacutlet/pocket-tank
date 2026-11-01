@@ -25,6 +25,15 @@ void display_port_sleep(void);
 void display_port_wake(void);
 /* true = present the frame rotated 180 degrees (device held upside down) */
 void display_port_set_inverted(bool inverted);
+/* the picture's quarter turns clockwise, 0..3 (tank_orient): 2 is the flip
+ * above; 1 and 3 only where display_port_quarters (the square's and the
+ * pendant's own builds, 0.3.9.3) - elsewhere a side is ignored */
+void display_port_set_quarter(int q);
+bool display_port_quarters(void);
+/* director `turn`: try another MADCTL / gap for a side (-1 keeps one), and read them back */
+void display_port_side_tune(int madctl, int gx, int gy);
+void display_port_side_info(int *madctl, int *gx, int *gy, bool *on);
+void display_port_probe(bool on);   /* director `turn probe on|off`: the edges' colour bands (display_port_sh8601.c) */
 /* panel brightness 0..255 (DCS 0x51; the init sequence starts at 255). Kept
  * across display_port_wake, which re-inits the panel. */
 void    display_port_set_brightness(uint8_t level);
@@ -50,6 +59,7 @@ void display_port_deep_sleep_pins(bool tp_awake_high);   /* tp_awake_high: the t
 void display_port_deep_sleep_bus(void);   /* the round board: the QSPI clock + data lines driven low and held - a powered panel's inputs never float */
 void display_port_deep_standby(void);   /* the CO5300's 4Fh deep standby (~3 uA vs sleep-in's ~135); only a reset ends it */
 bool board_has_expander(void);                  /* the 1.8, positively: its IO expander answered (and no ES7210 - the 1.75 has both) */
+void board_sd_select(bool on);                  /* the 1.8's TF card select (EXIO7), for sd_spike.c; nothing on the other boards */
 /* the 1.75 / 1.75-B (BETA, 2026-10-17): the round board with an expander, an
  * RTC and its resets on 39 / 40. board_is_round() is true on it too. */
 bool board_is_175(void);
@@ -61,6 +71,9 @@ bool board_is_watch(void);
 /* the SQUARE (Waveshare 2.16, 480 x 480), GPIO resets like the round board's;
  * its own build (TANK_SQUARE) is a tank that IS the panel, sent unturned */
 bool board_is_square(void);
+/* the boot's chip probe has run (0.3.9.3): before it, board_port_hw() (progression.h)
+ * cannot tell - the installer's early question waits for it (director.c) */
+bool board_port_probed(void);
 void display_port_set_madctl(uint8_t v);         /* the square: the panel's orientation register (0x36), live */
 uint8_t display_port_madctl(void);
 int  board_pwr_sense_pin(void);                 /* the GPIO that is high while the PWR key is down (the 1.75C: 3, the watch: 10), -1 = none */

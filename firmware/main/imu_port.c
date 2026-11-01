@@ -24,6 +24,9 @@
  * in-screen axis, so lying flat or held sideways still holds last state. */
 #define FLIP_THRESH        3500   /* ~0.21 g at +-2g full scale (16384 counts/g) */
 #define FLIP_HOLD_POLLS    3      /* ~750 ms the other way up before flipping */
+/* on a side (0.3.9.3): a new way up must carry gravity 1.3x the other in-screen axis
+ * (~52 degrees from the last), so a tank tilted near 45 degrees never flaps between two */
+#define SIDE_MARGIN_X10    13
 /* motion = the sum over healthy axes of |a - a_prev| between two polls
  * (250 ms apart). A table reads a few tens of counts of noise; a hand
  * holding still a few hundred; a pick-up thousands. */
@@ -46,8 +49,10 @@ static const char *TAG = "imu";
 /* the chip that answered, through imu_chip.h. NULL = no IMU, and every
  * function below is a no-op. */
 static const struct imu_chip *s_chip;
-static bool s_inverted;
-static int s_streak;              /* consecutive polls voting for a flip */
+static int s_q;                   /* the way up, in quarter turns clockwise of the picture: 0 upright, 2 inverted, 1 / 3 on a side */
+static bool s_sides;              /* the square and the pendant (0.3.9.3): a side counts too */
+static int s_side_sign = 1;       /* gravity's pull along the other in-screen axis that reads + with the glass's left edge down (q 1) */
+static int s_streak, s_want;      /* consecutive polls voting for the same new way up, and which */
 static int64_t s_next_us;
 static int16_t s_prev[3]; static bool s_have_prev;
 static int64_t s_moved_us; static int s_motion; static int16_t s_last[3];
@@ -91,7 +96,7 @@ void imu_port_poll(int64_t now_us) {
     const int up = s_chip->up_axis, sign = s_chip->up_sign;
     const int side = 3 - up - s_chip->out_axis;
     static int logged;
-    if (logged < 3) { logged++; ESP_LOGI(TAG, "g=[%d %d %d] inverted=%d", a[0], a[1], a[2], (int)s_inverted); }
+    if (logged < 3) { logged++; ESP_LOGI(TAG, "g=[%d %d %d] quarter=%d", a[0], a[1], a[2], s_q); }
     /* handling: movement since the last poll, railed channels ignored */
     if (s_have_prev) {
         int m = 0;
@@ -147,16 +152,48 @@ void imu_port_poll(int64_t now_us) {
         ESP_LOGW(TAG, "axis %c railed (sensor damage?) - flip runs on the up axis alone",
                  "XYZ"[side]);
     }
-    bool dominant = RAILED(other) || (v > 0 ? v : -v) > (other > 0 ? other : -other);
-    bool wants_flip = dominant && (s_inverted ? (v > FLIP_THRESH) : (v < -FLIP_THRESH));
-    s_streak = wants_flip ? s_streak + 1 : 0;      /* flat / sideways: hold state */
+    int av = v > 0 ? v : -v, ao = other > 0 ? other : -other;
+    int want = -1;                                 /* flat, or between two ways up: hold state */
+    if (RAILED(other) || av > ao) {
+        if (av > FLIP_THRESH && (!s_sides || RAILED(other) || av * 10 > ao * SIDE_MARGIN_X10)) want = v > 0 ? 0 : 2;
+    } else if (s_sides && ao > FLIP_THRESH && ao * 10 > av * SIDE_MARGIN_X10) {
+        want = other * s_side_sign > 0 ? 1 : 3;    /* on a side (0.3.9.3) */
+    }
+    if (want < 0 || want == s_q) { s_streak = 0; return; }
+    s_streak = want == s_want ? s_streak + 1 : 1; s_want = want;
     if (s_streak >= FLIP_HOLD_POLLS) {
-        s_inverted = !s_inverted; s_streak = 0;
-        ESP_LOGI(TAG, "orientation: %s", s_inverted ? "inverted" : "upright");
+        s_q = want; s_streak = 0;
+        static const char *const QN[4] = { "upright", "on its side (the left edge down)", "inverted", "on its side (the right edge down)" };
+        ESP_LOGI(TAG, "orientation: %s", QN[s_q]);
     }
 }
 
-bool imu_port_inverted(void) { return s_inverted; }
+bool imu_port_inverted(void) { return s_q == 2; }
+int  imu_port_quarter(void) { return s_q; }
+/* upstream's 0.3.9.3, carried into the split: there the side's sign comes from
+ * the up axis alone, because both of upstream's chips have Z out of the glass
+ * and reading + face up. Here each chip names its own out-of-glass axis and
+ * sign (imu_chip.h), so the glass's right is the cross product of the two:
+ * right = up x out, with up = up_sign * e[up_axis] and out = out_up_sign *
+ * e[out_axis]. e[i] x e[j] is +e[k] when (i, j, k) runs 0-1-2 in order (XY->Z,
+ * YZ->X, ZX->Y) and -e[k] the other way round. For upstream's boards (out = +Z)
+ * this is their (up is Y ? +1 : -1) * up_sign exactly. The glass's left edge
+ * down puts gravity's pull - the reading's sign - on that right. */
+void imu_port_sides(bool on) {
+    s_sides = on;
+    if (s_chip) {
+        const int up = s_chip->up_axis, out = s_chip->out_axis;
+        const bool in_order = (out - up + 3) % 3 == 1;      /* (up, out, side) is 0-1-2, 1-2-0 or 2-0-1 */
+        s_side_sign = (in_order ? 1 : -1) * s_chip->up_sign * s_chip->out_up_sign;
+    }
+    if (!on && (s_q & 1)) s_q = 0;
+}
+void imu_port_side_sign_flip(void) { s_side_sign = -s_side_sign; ESP_LOGI(TAG, "side sign now %+d", s_side_sign); }
+/* the way up it had before the restart (a swap, a flash, a power-on): kept until gravity clearly says
+   otherwise, as the flip always has - a tank reclined on a desk never says, and came up upright (Strato,
+   2026-10-29, after a swap: "i need to do a quick flip of the tank up and down") */
+void imu_port_seed_inverted(bool inv) { s_q = inv ? 2 : 0; s_streak = 0; }
+void imu_port_seed_quarter(int q) { s_q = s_sides ? (q & 3) : (q & 2); s_streak = 0; }
 void imu_port_last(int16_t out[3], int *motion) { for (int i = 0; i < 3; i++) out[i] = s_last[i]; if (motion) *motion = s_motion; }
 bool imu_port_handled(void) { return s_handled_us && esp_timer_get_time() - s_handled_us < IMU_MOTION_HOLD_US; }
 bool imu_port_moving(void) { return s_moved_us && esp_timer_get_time() - s_moved_us < IMU_MOTION_HOLD_US; }

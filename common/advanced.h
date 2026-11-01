@@ -66,11 +66,11 @@ typedef struct { float ax, bx, ay, by; } touch_fit_t;   /* upright frame: x' = a
 bool touch_fit_is_none(const touch_fit_t *f);
 bool touch_fit_ok(const touch_fit_t *f);  /* inside the bounds a real panel needs (gain 0.85..1.15, offset within 60 px) */
 /* a point on the picture as shown (turned or not) through a map fitted upright */
-void touch_fit_apply(const touch_fit_t *f, float *x, float *y, bool turned);
+void touch_fit_apply(const touch_fit_t *f, float *x, float *y, int q);   /* q: the picture's quarter turns (tank_orient) */
 /* the least-squares map that takes the presses to the targets, both in the picture as shown when the
    presses were taken (turned = it was turned over), returned in the upright frame; false = not a map
    a panel could need (touch_fit_ok) or too few points */
-bool touch_fit_solve(const float *tx, const float *ty, const float *px, const float *py, int n, bool turned, touch_fit_t *out);
+bool touch_fit_solve(const float *tx, const float *ty, const float *px, const float *py, int n, int q, touch_fit_t *out);
 
 /* ---- the page ---- */
 enum { ADV_PG_NONE = 0, ADV_PG_MAIN, ADV_PG_WARN, ADV_PG_TOUCH, ADV_PG_CROSS, ADV_PG_CHECK };
@@ -91,7 +91,7 @@ enum { ADV_ACT_NONE = 0,
        ADV_ACT_CELL,                      /* a size was SET (adv_cell()): save it, tell the charger */
        ADV_ACT_FIT,                       /* the touch map changed for good (adv_touch_fit()): save it */
        ADV_ACT_TICK };                    /* a step or a cross taken: the platform's little click, nothing to save */
-int  adv_touch(float x, float y, bool down, bool turned);
+int  adv_touch(float x, float y, bool down, int q);
 void adv_render(uint16_t *fb, int stride);
 /* for tests and the director */
 int  adv_pick(void);

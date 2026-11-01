@@ -39,7 +39,7 @@ bool    persist_port_load(void *buf, size_t max, size_t *got); /* the saved blob
                                                             * build wrote (*got = it); a NEWER build's longer one
                                                             * loads its first max bytes (*got = max); false = nothing */
 bool    persist_port_save(const void *buf, size_t len);
-bool    persist_port_erase(void);                          /* EVERY saved tank, parked copies included */
+bool    persist_port_erase(void);                          /* the tank on the glass (and a parked copy); the shelf and the board keys stay (D13) */
 int64_t clock_port_now_unix(void);                         /* 0 if unknown */
 /* the release (version.h PT_RELEASE_NUM) of the build that wrote the save
  * the last load read - 0 for a save from before release numbers, or none */
@@ -47,6 +47,12 @@ uint32_t progression_loaded_release(void);
 int64_t  progression_loaded_unix(void);                    /* the loaded save's wall-clock stamp, 0 = none (a clockless board seeds its clock from it) */
 const char *version_port_string(void);                     /* the build's git describe (device: the app
                                                             * descriptor; sim: PT_VERSION) - the settings page */
+/* the board the tank is running on, told from its chips at boot, as a release
+ * board id (version.h PT_BOARD) - NULL when it cannot be told. Not PT_BOARD when
+ * another board's version was installed (0.3.9.3: the 1.8's image runs on every
+ * board): the WRONG VERSION card, and CHECK FOR UPDATES offers this board's.
+ * The sim: PT_BOARD, or --hw <id>. */
+const char *board_port_hw(void);
 
 /* call after tank_init: restores the saved tank (or creates a new population)
  * and lives through the time since the save was written - since 2026-09-16
@@ -66,6 +72,21 @@ float progression_boot(tank_t *t);
  * eight-hour sleep should be worth 2 hours of growth") */
 #define SLEEP_GROWTH_FRAC 0.25f
 float progression_wake(tank_t *t, int64_t now_unix);
+/* the tank switcher (common/shelf.c): what the board shares goes with a swap -
+ * the wallet and the board's settings (docs/tank-switcher.md "The shared
+ * data"; the tool LOCK and AUTO FEED stay each tank's own, D14) - taken from
+ * the tank leaving the glass and given to the one that comes in */
+typedef struct {
+    int32_t  sd_balance;
+    uint16_t light_idle_s;
+    uint8_t  light_auto, light_tip_seen, screen_turned, orient_lock, orient_q, pad;
+} progression_carry_t;
+void progression_carry_take(const tank_t *t, progression_carry_t *c);
+void progression_carry_give(tank_t *t, const progression_carry_t *c);
+/* a stored save's saved_unix rewritten in place (the shelf: the wake then lives the time on the shelf) */
+bool progression_blob_set_saved_unix(void *blob, size_t len, int64_t unix);
+/* a stored save's pieces: its sd_unlocks (0 for a blob that is not a save) - the shelf's REMOVE values them */
+uint32_t progression_blob_unlocks(const void *blob, size_t len);
 /* live through one stretch of device sleep: tank_tick_sleep, growth at
  * SLEEP_GROWTH_FRAC, and the tank's "first full night's sleep" milestone once
  * a single stretch reaches FULL_NIGHT_S (progression_wake's path; the director's
@@ -77,6 +98,12 @@ void progression_slept(tank_t *t, float seconds);
 void progression_settings_changed(void);
 /* call every frame after tank_tick */
 void progression_tick(tank_t *t, float dt);
+/* fish i is nose to tail with another (the company that warms social) */
+bool progression_near_friend(const tank_t *t, int i);
+/* fish i is warmed by the keeper's finger: nose to tail with another there, or (0.3.9.3) round it
+ * with another - the fish circle a held finger a body apart, not piled under it (tank.c HOLD_RING_*),
+ * and a ring neighbour is company: SOCIAL_RING_X the nose-to-tail distance */
+bool progression_finger_company(const tank_t *t, int i);
 /* call on light-off / shutdown (autosaves on events + heartbeat anyway) */
 /* Save the current tank. False means the port rejected the write; the state
  * remains dirty so the periodic saver will retry. */
@@ -340,6 +367,23 @@ const char *const *progression_sd_earn_lines(void);
 /* trait drift: one full unit (0.11 of the 0..1 trait) per this many hours of
  * sustained pressure */
 #define DRIFT_HOURS      2.0f
+/* social (2026-10-29): company warms it, and it settles back to the birth temper.
+ * The gains stay small against the settle - the model follows almost always at
+ * social 7+, so a big follow gain is a runaway to the ceiling - except company
+ * the keeper brings: fish gathered together at a held finger */
+#define SOCIAL_FOLLOW_GAIN 0.08f /* per DRIFT_HOURS spent following a friend */
+#define SOCIAL_NEAR_GAIN   0.04f /* per DRIFT_HOURS spent nose to tail with another fish */
+#define SOCIAL_HOLD_GAIN   2.0f  /* ... the two of them gathered at the keeper's finger
+                                  * (ten minutes of it: ~half a step of the 0..9 bar for a
+                                  * pair, a step for a full tank; 1.0 measured on the 1.8
+                                  * 10-29 was a third of a step a pair - too slow to see) */
+#define SOCIAL_NEAR_PX     20.0f /* "nose to tail": centers closer than this x the two sizes */
+#define SOCIAL_RING_X      1.6f  /* ... and round a held finger, this much further (0.3.9.3) */
+#define TRAIT_SETTLE       0.25f /* bold's and social's pull back to the birth temper, per
+                                  * DRIFT_HOURS (the gap shrinks ~e-fold in 8 lit hours) */
+#define BOLD_CALM_GAIN     0.08f /* bold per DRIFT_HOURS fed + calm (was 0.5: every fish at 0.95
+                                  * in a lit day); against the settle a well-kept fish sits
+                                  * ~a step bolder than it was born */
 #define DRIFT_CHANGE     0.11f  /* CHANGE gate: this much accumulated drift pressure on the
                                  * youngest fish (~26 lit minutes fed and calm, or following) */
 

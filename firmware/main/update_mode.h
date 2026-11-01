@@ -17,7 +17,14 @@
 #include <stdint.h>
 void update_mode_request(void);            /* save the tank FIRST; this restarts the board */
 bool update_mode_pending(void);            /* at boot: asked for? (reads and clears the word) */
-void update_mode_run(uint16_t *fb);        /* the loop; returns on BACK, restarts on an install */
+void update_mode_run(uint16_t *fb, int way_up);   /* the loop; returns on BACK, restarts on an install */
+/* way_up (0.3.9.3, iamsebastijan: "screen rotation doesn't work in the Updates
+ * view"): the way up the tank showed before the restart - its quarter turns
+ * (tank_orient), + UPD_WAY_FIXED when it was not the IMU's to change (the
+ * ROTATION lock, the watch's SCREEN setting). Unfixed, the pages turn with
+ * the IMU as the tank does; main.c keeps it in NVS ("uq") */
+#define UPD_WAY_FIXED 4
+void update_mode_hold_way(int q);          /* director `ota flip`: this way up, whatever the IMU says */
 /* Provisioning at install (2026-10-03). A boot the installer page caused
  * (a reset over USB) on a tank with no network saved does not start the
  * tank yet: the glass stays black, the radio is free, and the page's Wi-Fi

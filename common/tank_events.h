@@ -24,6 +24,7 @@ enum {
     TEV_WHEEL_TICK,   /* the letter wheel moved one detent */
     TEV_CONFIRM,      /* BEGIN / DONE: a setup or birth flow was completed */
     TEV_CRAB_FIND,    /* the crab's dig came up with a sand dollar (0.3.9.1: a cue for the keeper to look) */
+    TEV_CRAB_COIN,    /* the keeper took the sand dollar the crab held up (0.3.9.3: Strato's coin sound) */
     TEV_COUNT
 };
 extern const char *const TANK_EVENT_NAMES[TEV_COUNT];

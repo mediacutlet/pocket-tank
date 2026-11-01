@@ -43,14 +43,20 @@
  * (advisor_core_damaged). Once per start; it stays up until a tap (a keeper
  * who looked away would miss six seconds) and comes back at the next start
  * until a reinstall fixes the model. The fish keep doing what the model says:
- * the notice tells the keeper, it does not decide for the fish. */
+ * the notice tells the keeper, it does not decide for the fish.
+ *
+ * NOTICE_WRONG_BOARD (0.3.9.3, a Discord keeper put the 1.8's version on a
+ * watch): the 1.8's image runs on every board, small and on its side, and
+ * the boot's chip probe knows the board (board_port_hw). When that is not the
+ * board this version is for, a cold start (not a wake from sleep) says so and
+ * names the fix; it waits for a tap, as the damaged model does. */
 #ifndef NOTICE_H
 #define NOTICE_H
 #include <stdbool.h>
 #include <stdint.h>
 #include "tank.h"
 
-enum { NOTICE_MILESTONE, NOTICE_TANK_MILESTONE, NOTICE_STAGE, NOTICE_LOW_BATTERY, NOTICE_UPDATED, NOTICE_LIGHTS_OUT, NOTICE_MODEL_DAMAGED };
+enum { NOTICE_MILESTONE, NOTICE_TANK_MILESTONE, NOTICE_STAGE, NOTICE_LOW_BATTERY, NOTICE_UPDATED, NOTICE_LIGHTS_OUT, NOTICE_MODEL_DAMAGED, NOTICE_WRONG_BOARD };
 typedef struct { int kind; int fish; uint32_t bit; float age; } notice_t;
 
 #define NOTICE_UP_S   6.0f
@@ -65,6 +71,7 @@ bool notice_dismiss(void);                 /* a tap: true = the notice took it (
 void notice_low_battery(void);             /* platform: the gauge fell to the threshold */
 void notice_updated(void);                 /* platform: the first boot of a new release (after notice_sync) */
 void notice_model_damaged(void);           /* platform: the AI model is damaged (after notice_sync): once per start */
+void notice_wrong_board(void);             /* platform: this version is another board's (after notice_sync): a cold start's */
 int  notice_take_cue(void);                /* SND_* for a notice that just came up, else -1 */
 int  notice_pending(void);                 /* queued, not counting the one up */
 

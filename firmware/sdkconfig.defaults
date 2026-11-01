@@ -60,3 +60,7 @@ CONFIG_POCKET_TANK_AUDIO_ES8311=y
 CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU1=n
 CONFIG_ESP32S3_DATA_CACHE_64KB=y
 CONFIG_ESP32S3_DATA_CACHE_LINE_64B=y
+
+# the tank switcher (docs/tank-switcher.md): the SD card library uses long names (/pocketank/tanks/...); off, FAT is 8.3 only
+CONFIG_FATFS_LFN_HEAP=y
+CONFIG_FATFS_MAX_LFN=255

@@ -223,6 +223,10 @@ typedef enum {
 
 extern const char *const GOAL_NAMES[GOAL_COUNT];   /* schema.md lowercase names */
 
+/* SWIM DEPTH (0.3.9.4, Strato 10-31: "its a decision the fish makes. To swim in front, behind, or through"): a
+ * fish IN FRONT of the back grass, BEHIND every frond, or THROUGH it (every other frond over it). A decoration's
+ * depth orders the decorations; the fish's own is this. docs/swim-depth.md */
+enum { FISH_DEPTH_FRONT = 0, FISH_DEPTH_BEHIND = 1, FISH_DEPTH_THROUGH = 2 };
 typedef enum { STAGE_FRY, STAGE_JUV, STAGE_ADULT, STAGE_ELDER } stage_t;
 extern const char *const STAGE_NAMES[4];           /* schema.md v2 stage tokens */
 extern const char *const TRAINED_NAMES[N_TRAINED_NAMES]; /* mira bolt kelp nori */
@@ -324,6 +328,12 @@ typedef struct {
                              * because the fish is spent (energy under BREATHER_AT by day), 0 = none.
                              * The advisor keeps its goal; the body answers it again with its wind back.
                              * Not saved: a boot starts fresh. */
+    uint8_t gdepth, gdepth_want, gdepth_rest;   /* SWIM DEPTH (0.3.9.4): this fish against the back grass - FISH_DEPTH_*,
+                             * the one its goal and temperament chose (depth_pick: 0xff = not yet), the one
+                             * a breather hides at; taken up only in the clear of every bed. Not saved */
+    uint8_t pdepth, pdepth_want;   /* ... and against the pieces (phase 2): FISH_DEPTH_FRONT or _BEHIND, whatever
+                             * a piece's own depth (that orders the pieces); taken up only in the clear of
+                             * every piece. Never BEHIND at rest (D2: a resting fish stays in sight) */
     bool   hold_far;        /* was HOLD_APPROACH_FROM+ px from the finger when this hold's draw
                              * began (transient): only such a fish can earn a hold-approach */
     float  zone_seen[6];    /* tank clock when the fish was last in each zone */
@@ -428,8 +438,9 @@ typedef struct tank {
     bool     screen_turned;        /* a worn tank (TANK_WORN): settings SCREEN = TURNED (saved) */
     bool     orient_lock;          /* settings ROTATION = locked (0.3.2, saved): the picture keeps the way up it
                                     * had when the keeper locked it, however the tank is turned (tank_orient) */
-    bool     orient_inv;           /* the picture's way up now, true = turned over: the platform's live flip,
-                                    * or what the lock froze (saved with the lock) */
+    uint8_t  orient_q;             /* the picture's way up now, in quarter turns clockwise (0..3; 2 = turned
+                                    * over, 1 and 3 = on a side, the square and the pendant only): the
+                                    * platform's live reading, or what the lock froze (saved with the lock) */
     bool     autofeed_off;         /* settings AUTO FEED = OFF (0.3.2, saved): the tank's own trickle never
                                     * drops a pellet - feeding is the keeper's alone. Nobody dies of it; a
                                     * fish left starving in a lit tank slowly loses trust (progression.c) */
@@ -444,6 +455,9 @@ typedef struct tank {
     float    hold_time;            /* seconds the current hold has lasted */
     bool     hold_approached;      /* this hold already counted (hold_approaches); the
                                     * per-fish milestone is NOT gated on it */
+    float    hold_ph, hold_turn_s;  /* the fish round a held finger (0.3.9.3): where their loose ring has got to,
+                                     * and how long until it may turn back (tank.c HOLD_RING_*) */
+    int8_t   hold_dir;              /* ... which way it drifts */
     int      tap_count;            /* taps in the current burst */
     float    tap_burst_t;          /* seconds since last tap */
     float    tap_x, tap_y;
@@ -619,6 +633,9 @@ typedef struct tank {
                                     * front, like the snail's front lane (a hold on an odd frond or a piece IN
                                     * FRONT). Chosen with each hold (Strato 10-15: a seahorse can swim to a
                                     * different z-layer and anchor) */
+    uint8_t  sh_gdepth, sh_gdepth_want, sh_drift_rolled;   /* SWIM DEPTH phase 3 (0.3.9.4): against the back grass - THROUGH coiled on a blade, in front
+                                    * holding a piece or the sand, its own roll drifting; taken up clear of every bed (its lane
+                                    * stays its choice against the pieces). Not saved */
     uint8_t  sh_mode;              /* SH_PERCH / SH_DRIFT / SH_HITCH (tank.h, below) */
     int8_t   sh_facing;            /* +1 = its snout points right */
     bool     sh_hitched;           /* at the finger's edge now: the trust boost is on */
@@ -707,6 +724,11 @@ typedef struct tank {
     uint8_t  shrimp_taps;          /* quick taps on the school in a row (the third scares them; not saved) */
     float    shrimp_tap_t;         /* seconds since the last one */
     float    shrimp_flee;          /* seconds left of the school's flight from the crab (0.3.9.1): SHRIMP_FLEE_X its cruise, food ignored (not saved) */
+    uint8_t  cr_gdepth, cr_gdepth_want, snail_gdepth, snail_gdepth_want, urchin_gdepth, urchin_gdepth_want;   /* SWIM DEPTH phase 3c (0.3.9.4): the
+                                   floor critters against the back grass, wanted with each lane's roll, taken up clear of every bed (their LANES
+                                   stay their choice against the pieces; the sword plant IN FRONT stays over them). Not saved */
+    uint8_t  shr_gdepth, shr_gdepth_want, shr_pdepth, shr_pdepth_want;   /* SWIM DEPTH phase 3 (0.3.9.4): the school's depth against the back grass
+                                   (FISH_DEPTH_*) and the pieces, with each goal; taken up only with the whole school clear (not saved) */
     float    shrimp_avoid_x;       /* where the crab shooed them: no pellet within CR_SHOO_ZONE_PX of it is theirs, no goal of theirs in it ... */
     float    shrimp_avoid_s;       /* ... for this many seconds more (not saved) */
     int8_t   shrimp_avoid_side;    /* ... and the side of it the shoo sent them to (+1 right, -1 left): their goals stay there */
@@ -877,13 +899,21 @@ void  tank_light_auto(tank_t *t);
 bool  tank_screen_turned(const tank_t *t);
 void  tank_screen_set(tank_t *t, bool turned);
 /* The way up on a desk tank or the pendant (0.3.2, @brandonn5371's ask): the
- * picture follows the IMU's 180-degree flip unless settings' ROTATION is
- * locked. The platform hands tank_orient its live reading every frame and
- * shows what comes back: the reading itself, or - locked - the way up the
- * picture had at the lock (saved, so a locked tank boots the same way up).
- * tank_orient_lock is the settings page's toggle. */
-bool  tank_orient(tank_t *t, bool live_inverted);
+ * picture follows the IMU unless settings' ROTATION is locked. The platform
+ * hands tank_orient its live reading every frame - quarter turns clockwise,
+ * 0..3 - and shows what comes back: the reading itself, or - locked - the way
+ * up the picture had at the lock (saved, so a locked tank boots the same way
+ * up). tank_orient_lock is the settings page's toggle. A quarter on a side (1,
+ * 3) needs a square picture (0.3.9.3: the square and the pendant stood on a
+ * side); elsewhere it is read as its turned-over half (TANK_QUARTER). */
+#define TANK_QUARTER(q) ((TANK_W == TANK_H) ? ((q) & 3) : ((q) & 2))
+int   tank_orient(tank_t *t, int live_q);
 void  tank_orient_lock(tank_t *t, bool lock);
+/* a point between the picture and the glass held upright (q = the picture's
+ * quarter turns): the touch port's calibration lives upright, the taps on the
+ * picture as shown */
+void  tank_quarter_from_upright(int q, float *x, float *y);
+void  tank_quarter_to_upright(int q, float *x, float *y);
 
 /* Touch input (platform feeds these; sim = mouse, device = FT3168):
  *  tank_touch_hold: call EVERY FRAME while a finger rests on the glass at x,y.
@@ -982,6 +1012,8 @@ void  tank_grow_algae(tank_t *t, int steps);
 float tank_dist(float ax, float ay, float bx, float by);
 int   tank_nearest_food(const tank_t *t, const fish_t *f, float *dist_out);
 int   tank_nearest_friend(const tank_t *t, int fish_idx, float *dist_out);
+/* fish i has come to a resting finger (the hold is drawing fish, and it is at the finger's edge) */
+bool  tank_at_finger(const tank_t *t, int fish_idx);
 float tank_randf(tank_t *t, float lo, float hi);
 /* roster preset count (6) and a preset's display name, for UI */
 int   tank_roster_count(void);
@@ -1163,9 +1195,10 @@ extern const uint32_t CORAL_PAL[CORAL_N];
 uint32_t tank_coral_rgb(const tank_t *t);          /* the colour, the default when unset */
 void     tank_coral_set_rgb(tank_t *t, uint32_t rgb);
 bool  tank_decor_placeable(int item);      /* SD item index: has an x and a layer */
-int   tank_decor_z_count(int item);        /* depths the item offers: 3 (BACK/MIDDLE/FRONT) or 2 (BACK/FRONT) */
+int   tank_decor_z_count(int item);        /* depths the item offers: 2 (BACK/FRONT) for every piece since 0.3.9.3 */
 int   tank_decor_z_at(int item, int i);    /* the i-th offered depth (the placement bar's segment i) */
 int   tank_decor_z_index(int item, int z); /* the inverse: which segment shows depth z */
+int   tank_bed_z(const tank_t *t, int b);   /* a bed's depth: the seagrass always BACK, the sword plant (b 3) BACK or FRONT */
 void  tank_decor_set(tank_t *t, int item, float x, int z);
 float tank_decor_x(const tank_t *t, int item);   /* the centre, default when unplaced */
 int   tank_decor_z(const tank_t *t, int item);
@@ -1319,6 +1352,7 @@ enum { CR_FID_NONE = 0, CR_FID_GROOM, CR_FID_SHUFFLE, CR_FID_SETTLE, CR_FID_STRE
 void  tank_crab_place(tank_t *t);
 bool  tank_floor_clear(const tank_t *t, float x, float half);   /* no piece IN FRONT over [x - half, x + half] on the floor: a lane may change here */
 bool  tank_crab_hit(const tank_t *t, float x, float y);
+bool  tank_crab_find_hit(const tank_t *t, float x, float y);   /* a sand dollar held up: its tap first (0.3.9.4) */
 bool  tank_crab_climb(tank_t *t);                                  /* the director, the sim: the rare climb now - to the volcano's near foot, then up (false = no crab / no volcano / climbing already) */
 bool  tank_crab_pellet_race(tank_t *t, float gap, int n);   /* the director's / the sim's stage (0.3.9.1): n pellets (1..4, a cluster) gap px off
                                                               the crab, the school huddled on the first, the crab going for it - near enough it shoos them */

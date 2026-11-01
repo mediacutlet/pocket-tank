@@ -148,6 +148,14 @@ void display_port_wake(void) {
 }
 
 void display_port_set_inverted(bool inverted) { s_inverted = inverted; }
+/* the quarter turns (upstream 0.3.9.3, for the square and the pendant): a
+ * 320 x 240 picture is not square, so it has no side to stand on - only the
+ * flip (q 2) is shown, and a side is ignored, as upstream's 1.8 does */
+void display_port_set_quarter(int q) { s_inverted = (q & 2) != 0; }
+bool display_port_quarters(void) { return false; }
+void display_port_side_tune(int madctl, int gx, int gy) { (void)madctl; (void)gx; (void)gy; }   /* (director `turn`: no side to tune) */
+void display_port_side_info(int *madctl, int *gx, int *gy, bool *on) { *madctl = 0; *gx = *gy = 0; *on = false; }
+void display_port_probe(bool on) { (void)on; }   /* (director `turn probe`: the SH8601's edge bands; none here) */
 
 void display_port_set_brightness(uint8_t level) {
     s_brightness = level;
@@ -208,6 +216,14 @@ bool board_is_square(void) { return false; }     /* (v0.3.4) not the 2.16 square
 void display_port_set_madctl(uint8_t v) { (void)v; }   /* the square's orientation register; the director asks board_is_square first */
 uint8_t display_port_madctl(void) { return 0; }
 bool board_has_expander(void) { return false; }
+/* the board by the chips that answered (upstream 0.3.9.3, for the "another
+ * board's version" notice): this port cannot tell the CYD from the
+ * Touch-LCD-2 - nothing it probes differs - so it says it cannot (NULL), and
+ * no notice is shown. The probe question is answered at once: there is none
+ * to wait for. */
+const char *board_port_hw(void) { return NULL; }
+bool board_port_probed(void) { return true; }
+void board_sd_select(bool on) { (void)on; }   /* the 1.8's TF card select (EXIO7): none here (the Touch-LCD-2's is held high, board_pins.h) */
 int  board_pwr_sense_pin(void) { return -1; }
 void display_port_deep_sleep_pins(bool tp_awake_high) { (void)tp_awake_high; }
 void display_port_deep_sleep_bus(void) { }

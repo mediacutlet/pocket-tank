@@ -9,6 +9,7 @@
 #include "brightness.h"
 #include "battery.h"
 #include "director.h"
+#include "imu_port.h"
 #include "esp_attr.h"
 #include "esp_log.h"
 #include "esp_system.h"
@@ -34,7 +35,9 @@ bool update_mode_pending(void) {
     return yes;
 }
 
-void update_mode_run(uint16_t *fb) {
+static int s_way = -1;                     /* director `ota flip`: held, -1 = the IMU's */
+void update_mode_hold_way(int q) { s_way = q; }
+void update_mode_run(uint16_t *fb, int way_up) {
     const esp_partition_t *run = esp_ota_get_running_partition();
     ESP_LOGI(TAG, "update mode: running from %s | internal heap %u KB, psram %u KB free (the measurement docs/OTA.md waits for)",
              run ? run->label : "?", (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL) / 1024, (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM) / 1024);
@@ -49,6 +52,9 @@ void update_mode_run(uint16_t *fb) {
     while (!update_outcome()) {
         int64_t now = esp_timer_get_time();
         float dt = (now - last) / 1e6f; last = now; if (dt > 0.25f) dt = 0.25f;
+        imu_port_poll(now);                /* the pages turn with the tank, as the tank does (unless it was held) */
+        { int q = s_way >= 0 ? s_way : (way_up & UPD_WAY_FIXED) ? (way_up & 3) : imu_port_quarter();
+          display_port_set_quarter(q); touch_port_set_quarter(q); }
         float x = 0, y = 0; bool down = touch_port_read_raw(&x, &y);
         { static bool was;
           if (down && !was) {

@@ -7,6 +7,7 @@ static bool s_ms;
 bool touch_port_milestones(void) { return s_ms; }
 void touch_port_show_milestones(bool on) { s_ms = on; }
 void touch_port_set_inverted(bool inverted) { (void)inverted; }
+void touch_port_set_quarter(int q) { (void)q; }
 /* no glass to tap: the prompt can only be answered by the director */
 static bool s_cf; static int s_cf_ans;
 void touch_port_confirm_open(void) { s_cf = true; s_cf_ans = 0; }
@@ -33,6 +34,10 @@ void touch_port_dismiss(void) { s_ms = false; s_bat = false; }
 static bool s_upd;
 bool touch_port_updates(void) { return s_upd; }
 void touch_port_show_updates(bool on) { s_upd = on; }
+static bool s_shelf;
+bool touch_port_shelf(void) { return s_shelf; }
+void touch_port_show_shelf(bool on) { s_shelf = on; }
+bool touch_port_take_shelf_tap(float *x, float *y) { (void)x; (void)y; return false; }
 int  touch_port_take_update(void) { return 0; }
 bool touch_port_read_raw(float *x, float *y) { (void)x; (void)y; return false; }
 void touch_port_set_bias(int px) { (void)px; }
@@ -48,3 +53,5 @@ void touch_port_raw_seen(int *x0, int *x1, int *y0, int *y1) { *x0 = *y0 = 0; *x
 bool touch_port_finger_now(void) { return false; }
 void touch_port_swallow(void) { }
 int  touch_port_wake_gpio(void) { return -1; }
+
+bool touch_port_take_lock_open(void) { return false; }   /* (this fork) no glass: nothing held on it */

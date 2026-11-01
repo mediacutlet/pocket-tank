@@ -50,6 +50,9 @@ float *q4_model_forward(q4_model_t *m, int token, int pos);
  * layer (fills the KV cache for positions 0..n-1); returns logits of the last
  * token, or NULL if n is out of range / no memory */
 float *q4_model_prefill(q4_model_t *m, const int *toks, int n);
+/* the same from position pos0 (THE TWO-PASS DECISION): the cache below pos0 must hold the
+ * tokens before it; fills positions pos0..pos0+n-1, returns the last token's logits */
+float *q4_model_prefill_at(q4_model_t *m, const int *toks, int n, int pos0);
 /* greedy decode: prefill the prompt (batched), then generate until BOS/max;
  * returns count of generated ids written to out */
 int q4_model_generate(q4_model_t *m, const int *prompt, int n_prompt, int *out, int max_out);
@@ -65,4 +68,10 @@ int q4_model_generate_seq(q4_model_t *m, const int *prompt, int n_prompt, int *o
 int q4_model_decide(q4_model_t *m, const int *prompt, int n_prompt,
                     const int *cand, int n_cand, float temp, uint32_t *rng,
                     float *probs_out, int *out, int max_out);
+/* decide, then the pick and n_follow tokens known to follow it as ONE batched pass (the
+ * two-pass decision); out gets the pick, the followers, the token after them, as max_out allows */
+int q4_model_decide_follow(q4_model_t *m, const int *prompt, int n_prompt,
+                    const int *cand, int n_cand, float temp, uint32_t *rng,
+                    float *probs_out, int *out, int max_out,
+                    const int *follow, int n_follow);
 #endif

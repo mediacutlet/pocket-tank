@@ -67,9 +67,17 @@ DIALOG_EDITS = [
     ('this._state=i&&this._installErase?"PROVISION":"DASHBOARD"', 1,
      'this._state=i&&(this._installErase||this._showsProvisionForm)?"PROVISION":"DASHBOARD"'),
     # a tank already on this version says so (the menu's update item is hidden for it by the
-    # dialog itself: the tank reports the manifest's own version string - director.c)
+    # dialog itself: the tank reports the manifest's own version string - director.c). Since
+    # 0.3.9.3 the tank's name carries its boards ("Pocket Tank|<the board it is>|<the board its
+    # version is for>"): only the part before the "|" is shown, and the page's overrides.wrongBoard
+    # (site/src/install) may say instead that this tank is another board than the one picked
     ('<div slot="headline">Connected to ${this._info.name}</div>', 1,
-     '<div slot="headline">${this._isSameVersion?"Your tank is up to date":"Connected to "+this._info.name}</div>'),
+     '<div slot="headline">${(this._ptWrong=this.overrides&&this.overrides.wrongBoard?this.overrides.wrongBoard(this._manifest,this._info):null)'
+     '?this._ptWrong[0]:this._isSameVersion?"Your tank is up to date":"Connected to "+String(this._info.name).split("|")[0]}</div>'),
+    # ... and then the install item gives way to what to do (0.3.9.3): nothing is installed on a
+    # board the tank says it is not
+    ('${this._isSameVersion?"":s`', 1,
+     '${this._ptWrong?s`<ew-list-item><div slot="supporting-text">${this._ptWrong[1]}</div></ew-list-item>`:this._isSameVersion?"":s`'),
     # the link the tank hands the page is the update log, not a device
     ('<div slot="headline">Visit Device</div>', 2, '<div slot="headline">See what\'s new</div>'),
     # a tank on this version got an "Erase User Data" item in the menu (an ERASING reinstall): this

@@ -56,5 +56,23 @@ extern const icon_t icon_tool_lock_closed;
 extern const icon_t icon_tool_lock_open;
 extern const icon_t icon_tool_scissors;
 extern const icon_t icon_tool_sponge;
+extern const icon_t icon_ms_crab_find_24;
+extern const icon_t icon_ms_first_bubbles_24;
+extern const icon_t icon_ms_first_dart_24;
+extern const icon_t icon_ms_first_feeding_24;
+extern const icon_t icon_ms_first_follow_24;
+extern const icon_t icon_ms_first_glass_cleaning_24;
+extern const icon_t icon_ms_first_hold_approach_24;
+extern const icon_t icon_ms_first_meal_24;
+extern const icon_t icon_ms_first_play_session_24;
+extern const icon_t icon_ms_first_quiet_night_24;
+extern const icon_t icon_ms_first_reef_24;
+extern const icon_t icon_ms_first_sale_24;
+extern const icon_t icon_ms_first_seagrass_24;
+extern const icon_t icon_ms_first_trimming_24;
+extern const icon_t icon_ms_full_school_24;
+extern const icon_t icon_ms_sand_dollar_24;
+extern const icon_t icon_ms_seahorse_fed_24;
+extern const icon_t icon_ms_tank_changed_someone_24;
 
 #endif

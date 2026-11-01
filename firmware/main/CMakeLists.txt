@@ -1,9 +1,11 @@
-set(SRCS main.c director.c brightness.c batlog.c codec_port.c advisor_llm_esp.c battery_port_axp2101.c imu_port_qmi8658.c
+set(SRCS main.c director.c brightness.c orientation.c sleep_setting.c batlog.c codec_port.c advisor_llm_esp.c battery_port_axp2101.c imu_port.c
          update_mode.c net_port_esp.c model_trailer.c)
 # sd_spike.c (the tank switcher's step 2 test, `sd test`) is left out of 0.3.9.3 (docs/release-0.3.9.3.md D2): it comes
 # back with the packages (step 4) - list it here and restore its three hooks in main.c / director.c
 if(CONFIG_POCKET_TANK_DISPLAY_SH8601)
     list(APPEND SRCS display_port_sh8601.c)
+elseif(CONFIG_POCKET_TANK_DISPLAY_ILI9341 OR CONFIG_POCKET_TANK_DISPLAY_ST7789)
+    list(APPEND SRCS display_port_spi.c)
 else()
     list(APPEND SRCS display_port_stub.c)
 endif()
@@ -11,6 +13,12 @@ if(CONFIG_POCKET_TANK_TOUCH_FT3168)
     list(APPEND SRCS touch_port_ft3168.c)
 else()
     list(APPEND SRCS touch_port_stub.c)
+endif()
+if(CONFIG_POCKET_TANK_IMU_QMI8658)
+    list(APPEND SRCS imu_qmi8658.c)
+endif()
+if(CONFIG_POCKET_TANK_IMU_MPU6050)
+    list(APPEND SRCS imu_mpu6050.c)
 endif()
 if(CONFIG_POCKET_TANK_AUDIO_ES8311)
     list(APPEND SRCS audio_port_es8311.c)

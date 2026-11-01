@@ -472,6 +472,18 @@ void tank_init(tank_t *t, uint32_t seed) {
 #define HOLD_APPROACH_FROM 140.0f /* a hold-approach must START at least this far out - past the ring:
                                  * a fish already at the finger earns nothing (0.3.9.3: was 60 / 30, under the fingertip) */
 #define HOLD_APPROACH_AT   HOLD_GATHERED_PX   /* ... and come in this close: onto the ring */
+#ifdef CONFIG_POCKET_TANK_320X240
+/* (this fork) the 320 x 240 tank: a finger held mid-tank has no fish 140 px
+ * off it but in the corners (the farthest a fish swims from the middle is
+ * ~150 px), so the FIRST HOLD APPROACH badge and the fry's HOLD step would
+ * wait on a fish that happened to be in one - in the sim's --selftest-hold
+ * none of four, spread over the glass, ever counted (0.3.9.5's sync). The
+ * ring keeps its pixels (the fish do), so the start stays past the ring's
+ * reach, HOLD_GATHERED_PX, by half the 1.8's margin: 120 px, the 1.8's 140
+ * at about the same share of the shorter glass */
+#undef  HOLD_APPROACH_FROM
+#define HOLD_APPROACH_FROM 120.0f
+#endif
 #define TRUST_PER_S        0.012f /* trust a fish earns a second under a resting finger (0.3.6: was 0.02;
                                    * Strato: "a bit slower" so the seahorse's double is worth having) */
 #define SEAHORSE_TRUST_X   2.0f   /* ... times this while the seahorse hangs on the finger */
@@ -541,6 +553,18 @@ bool tank_at_finger(const tank_t *t, int i) {   /* (hold_time, not hold_active: 
                                        * glass to the cap, so every morning looked the
                                        * same; now a night lands near ALGAE_DIRTY) */
 #define ALGAE_COVER_CAP     0.30f     /* growth stops claiming new cells here */
+#ifdef CONFIG_POCKET_TANK_320X240
+/* (this fork) the steps above were tuned on the 1.8's 28 x 23 = 644 cells; the
+ * CYD's glass is 20 x 15 = 300. A step claims or thickens one cell, so at the
+ * same pace per step its film covered the glass at twice the share an hour, and
+ * a 7 h night filmed it to the cap - every morning the same, the defect the
+ * 2026-09-23 retune fixed on the 1.8. The same pace PER CELL instead: one step
+ * per 644 / 300 of the time, so a night lands near ALGAE_DIRTY here too. */
+#undef  ALGAE_STEP_AWAKE_S
+#define ALGAE_STEP_AWAKE_S  (240.0f * 644 / ALGAE_CELLS)
+#undef  ALGAE_STEP_SLEEP_S
+#define ALGAE_STEP_SLEEP_S  (180.0f * 644 / ALGAE_CELLS)
+#endif
 #define WIPE_RADIUS      20.0f  /* squeegee half-width around the drag path */
 #define WIPE_ENGAGE_PX   18.0f  /* stroke travel before a drag starts wiping
                                  * (a rolly fingertip tap stays under this) */

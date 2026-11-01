@@ -1,0 +1,33 @@
+# The Waveshare ESP32-S3-Touch-LCD-2: layered over sdkconfig.defaults, as the
+# CYD's file is. ESP32-S3R8 - 16 MB flash and 8 MB octal PSRAM, as the AMOLED
+# board - with a 2" ST7789T3 IPS (240 x 320, scanned landscape 320 x 240), a
+# CST816D touch panel and a QMI8658 IMU. No codec, no PMIC, no RTC chip: the
+# audio port is the stub, the battery meter stays hidden (no AXP2101 answers)
+# and the clock is the system time, which runs on through sleep.
+#
+#   idf.py -B build_wst -D SDKCONFIG=build_wst/sdkconfig \
+#          -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.defaults.wst" build
+CONFIG_POCKET_TANK_WST_320X240=y
+CONFIG_POCKET_TANK_DISPLAY_SH8601=n
+CONFIG_POCKET_TANK_DISPLAY_ST7789=y
+CONFIG_POCKET_TANK_TOUCH_FT3168=y
+CONFIG_POCKET_TANK_AUDIO_ES8311=n
+# The onboard QMI8658 senses handling (the tank light) but does not turn the
+# picture: with the AMOLED's axes it flipped back and forth in the hand. The
+# settings page's SCREEN row sets which way up the picture is. To have the
+# IMU turn it, measure the axes (hold it right side up, run the director's
+# `imu`), set CONFIG_POCKET_TANK_IMU_QMI8658_UP_AXIS / _UP_NEGATIVE, and turn
+# CONFIG_POCKET_TANK_IMU_AUTO_FLIP back on.
+CONFIG_POCKET_TANK_IMU_QMI8658=y
+CONFIG_POCKET_TANK_IMU_MPU6050=n
+CONFIG_POCKET_TANK_IMU_AUTO_FLIP=n
+# Face down does not sleep it (CONFIG_POCKET_TANK_IMU_FACE_DOWN_SLEEP stays
+# off, its default here): the gesture needs the axis out of the glass, and
+# this QMI8658's axes are not measured. BOOT and the director's sleeps still
+# sleep it; the SLEEP row says what that does.
+# Sleep goes dark and light-sleeps, and never deep, as the CYD's does
+# (2026-10-08): a touch on the glass or a pick-up lights it again where it
+# was, and BOOT is no longer the only way back. Only the factory default:
+# the settings page's SLEEP row (NEVER / SCREEN / LIGHT) changes it at run
+# time, kept in NVS (tank/sleep).
+CONFIG_POCKET_TANK_SLEEP_LIGHT=y

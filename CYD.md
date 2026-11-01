@@ -744,23 +744,29 @@ takes the moment the clock has reached; the night, and a loop being baked
 again, draw the grass live. On a 320 x 240 board:
 
 - **Its size.** 88 moments (`GRASS_LOOP_MOMENTS`: `main.c` names the square
-  and the watch, and every other board takes the 1.8's), in at most 2816 KB
-  of PSRAM (`GRASS_LOOP_BUDGET`). A band is the rows from the tallest back
-  frond's tip down to the sand - 240 at most, the whole tank, 150 KB.
-- **Its memory**, planned in the simulator with the firmware's own rule
-  (`gl_alloc` takes a block only while PSRAM keeps that block plus 1.2 MB
-  free): 2.82 MB on a new tank, 2.94 MB with the beds at 0.4, 2.96 MB from
-  0.7 up to full grass, in 38 blocks, nothing refused. Of the ~4.9 MB the
-  CYD had free at 0.3.9.5 that leaves ~1.9 MB; the boot show's 187 KB (a
-  frame and a landing map) comes out of it and goes back when the show
-  ends. Below ~4.2 MB free the plan shrinks (fewer bands, a smaller arena)
-  and is still whole at 3.4 MB. Upstream's "a very tall grass kept live"
-  is that plan giving up for want of memory: the CYD's band is never more
-  than 240 rows and does not reach it. Internal RAM: nothing at run time -
-  the loop's blocks are all PSRAM, and the bake task's 16 KB stack was
-  already started in 0.3.9.5 - but 1.3 KB more static RAM in the image
-  (`.dram0.bss` 57,456 to 58,760 bytes), most of it the director's new
-  `glcheck` (`colh[TANK_W]`).
+  and the watch, and every other board takes the 1.8's). A band is the rows
+  from the tallest back frond's tip down to the sand - 240 at most, the
+  whole tank, 150 KB.
+- **Its memory.** `GRASS_LOOP_BUDGET`, 2816 KB, is not all of it. The budget
+  is what the bands and their masks, one bake buffer and its mask share with
+  the arena of differences, and the arena takes whatever the bands leave, so
+  in each plan below that part is the whole 2816 KB. The odd fronds' masks
+  (one a band), a second bake mask and the loop's tables (`GL_META_BYTES`,
+  32 KB) come on top of it (`gl_geometry` in `common/render.c`): 66 KB more
+  with a new tank's 50-row band, 144 KB with a 240-row one. Planned in the
+  simulator with the firmware's own rule (`gl_alloc` takes a block only
+  while PSRAM keeps that block plus 1224 KB free): 2882 KB on a new tank,
+  2941 KB with the beds at 0.4, 2960 KB from 0.7 up to full grass, in 38
+  blocks, nothing refused. Of the ~4900 KB the CYD had free at 0.3.9.5 that
+  leaves ~1940 KB; the boot show's 187 KB (a frame and a landing map) comes
+  out of it and goes back when the show ends. Below ~4200 KB free the plan
+  shrinks (fewer bands, a smaller arena) and is still whole at 3400 KB.
+  Upstream's "a very tall grass kept live" is that plan giving up for want
+  of memory: the CYD's band is never more than 240 rows and does not reach
+  it. Internal RAM: nothing at run time - the loop's blocks are all PSRAM,
+  and the bake task's 16 KB stack was already started in 0.3.9.5 - but 1.3
+  KB more static RAM in the image (`.dram0.bss` 57,456 to 58,760 bytes),
+  most of it the director's new `glcheck` (`colh[TANK_W]`).
 - **Its core.** The bake runs on core 1 (the `bake` task), a slice at a
   time and only inside the window of a frame's flush (`s_bake_deadline`,
   the flush's running average); the CYD's 30 ms SPI send is a wide window.

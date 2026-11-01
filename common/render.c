@@ -6504,7 +6504,23 @@ static void seahorse_card_draw(ctx_t *c, const tank_t *t) {
             src_t s = src_color(SH_RGB[b & 15], 1.0f);
             for (int yy = 0; yy < S; yy++) span(c, ox + lx * S, ox + lx * S + S - 1, oy + ly * S + yy, &s, SH_ALPHA[b & 15]);
         }
+#ifdef CONFIG_POCKET_TANK_320X240
+    /* (this fork) the critter arrows (0.3.9.3) keep their 34 px box on the scaled card, so it reaches X + 42 while the
+     * column after the 1x seahorse starts at X + 40: the box covered the title's S and the days line under it. The
+     * column starts past the box instead; its longest line, "+NN.N TRUST PASSED ON" at scale 1, still ends inside
+     * the card, and the two lines beside the right box (the title, the days) end before it */
+#define SH_CARD_TX (RENDER_CRIT_NAV_IN + RENDER_CRIT_NAV_W + UI(12))      /* the column's x, from the card's left */
+#define SH_CARD_RIGHT_BOX (SEAHORSE_CARD_W - RENDER_CRIT_NAV_IN - RENDER_CRIT_NAV_W)
+    const int TX = X + SH_CARD_TX;
+    _Static_assert(SH_CARD_TX > RENDER_CRIT_NAV_IN + RENDER_CRIT_NAV_W && SH_CARD_TX + 21 * 6 * UI_TEXT(2) <= SEAHORSE_CARD_W - 2,
+                   "the seahorse card's column starts past the left arrow, and its longest line still fits");
+    _Static_assert(SH_CARD_TX + 8 * 6 * UI_TEXT(3) < SH_CARD_RIGHT_BOX && SH_CARD_TX + 20 * 6 * UI_TEXT(2) < SH_CARD_RIGHT_BOX,
+                   "the seahorse card's title and days line end before the right arrow");
+#undef SH_CARD_TX
+#undef SH_CARD_RIGHT_BOX
+#else
     const int TX = X + UI(14) + SH_W * S + UI(12);   /* "+N.N TRUST PASSED ON" is 21 chars at scale 2: 252 px, inside the card from here */
+#endif
     draw_text(c, TX, Y + UI(18), UI_TEXT(3), 0xffffff, "SEAHORSE");
     char line[32];
     float days = tank_seahorse_days(t);
@@ -8872,6 +8888,18 @@ static void sh_lock_btn(ctx_t *c, int x, int y, bool locked) {
 static void sh_lock_xy(int *x, int *y) {                   /* by the title: at the shelves' right edge, or beside the title on the round glass and the watch */
 #if PAGE_BOWL || defined(TANK_WATCH)
     *x = (TANK_W - text_w("MY TANKS", 3) - 14 - SH_LOCK_W) / 2 + text_w("MY TANKS", 3) + 14;   /* (the title and the button centered as one group) */
+#elif defined(CONFIG_POCKET_TANK_320X240)
+    /* (this fork) 4 px in from the glass's right edge, not at the shelves': the rows start 34 px down, so at the shelves'
+     * edge the button's foot stood over the NOW tag of a tank in the top row's fourth place. In line with CLOSE's
+     * right edge (8 px in) it would still touch the tag's corner; 4 px in leaves a 4 px gap. The glass is square-
+     * cornered, so its edge needs no more margin than that */
+#define SH_LOCK_X (TANK_W - 4 - SH_LOCK_W)
+#define SH_NOW_W  (3 * 6 * UI_TEXT(2) - UI_TEXT(2) + UI(12))          /* the NOW tag's width, as render_shelf draws it (text_w: 6 px a letter less one) */
+    _Static_assert(SH_LOCK_X >= SH_X0 + 3 * (SH_TW + SH_GAP) + (SH_TW - SH_NOW_W) / 2 + SH_NOW_W + 3,
+                   "the padlock stands clear of the NOW tag over the top row's fourth tank, with a gap the eye can see");
+    *x = SH_LOCK_X;
+#undef SH_LOCK_X
+#undef SH_NOW_W
 #else
     *x = SH_X0 + SH_ROW_W - SH_LOCK_W;
 #endif

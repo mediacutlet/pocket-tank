@@ -53,7 +53,8 @@ Against upstream's main (`git log upstream/main..main`):
   board that button stands between the version and CLOSE, a single BOOT
   press waits 0.4 s for a second before it sleeps, and a finger held still
   for 5 s on a touch-locked glass opens MY TANKS, whose padlock undoes the
-  lock (*MY TANKS*).
+  lock - or, over a page MY TANKS cannot open over, undoes it itself
+  (*MY TANKS*).
 - **A second 320 x 240 board.** `CONFIG_POCKET_TANK_WST_320X240` builds the
   same tank for the Waveshare ESP32-S3-Touch-LCD-2, contributed by adampog
   (*The Waveshare ESP32-S3-Touch-LCD-2*). Both boards select
@@ -233,6 +234,15 @@ undoes the lock there. The lock is the board's (NVS `tank/tlock`): it stays
 through a restart, a swap and a reset of the tank. A locked board still
 wakes from the dark on a touch.
 
+Two pages can come up on a locked glass by themselves: a fry's welcome,
+when one is born, and the first-run setup, after SWAP IN on a NEW TANK.
+Each waits for a finger, MY TANKS will not open over either (nor does
+BOOT twice), and the lock keeps every touch from the page. Over those
+pages, and over the reset prompt, the 5 s hold therefore undoes the lock
+itself, and the page then answers; the finger that held is spent, so its
+lift taps nothing. The TOUCH IS LOCKED note is drawn over the page, not
+under it. Lock the glass again from MY TANKS afterwards.
+
 Where the tanks live: the tank on the glass where it always has (NVS
 `tank/save`), its name and place in NVS `frame`; each shelved tank in a
 24 KB slot of the `storage` partition, past its first 64 KB (*Building and
@@ -328,7 +338,7 @@ On the glass, with no tool in hand:
 | a finger held still for about three seconds | the fish that trust you come over |
 | a finger held still on a decoration you own, 0.7 s | its placement page, with SELL |
 | a swipe along the milestones page's TANK row | the next page of the tank's badges, when it has more than one |
-| a finger held still 5 s on a touch-locked glass | MY TANKS, whose padlock undoes the lock (*MY TANKS*) |
+| a finger held still 5 s on a touch-locked glass | MY TANKS, whose padlock undoes the lock; over a fry's welcome, the first-run setup or the reset prompt, the lock undone at once (*MY TANKS*) |
 
 The movement gestures need an IMU. The CYD has none on the board: a
 QMI8658 or an MPU-6050 breakout on its I2C socket (VCC 3V3, GND, SDA IO16,
@@ -617,7 +627,17 @@ glass's edges. Every other measurement in those pages is `UI(n)` or
 `UI_TEXT(s)`, identities on upstream's boards, whose pages stay byte for
 byte upstream's. The settings page's MY TANKS stands where the milestones
 page has SETTINGS, 96 px wide, and the version line moved into two lines on
-its left.
+its left. The padlock stands 4 px in from the glass's right edge, not at the
+shelves' edge: there its foot covered the NOW tag of a tank in the top
+row's fourth place, and a static assert in `sh_lock_xy` keeps the gap.
+
+**The seahorse's card starts its text past the arrow.** The critter cards'
+arrows (0.3.9.3) keep their 34 px box, 8 px in from the corner, on a card
+the fork scales; the seahorse's column, after its 1x picture, started at
+X + 40 and the box covered the title's S and the days line. On 320 x 240
+the column starts past the box (`seahorse_card_draw`), and static asserts
+there hold the longest line inside the card and the two beside the right
+arrow clear of it. The other critters' titles are centred and clear.
 
 **A hold-approach starts 120 px from the finger, not 140** (`common/tank.c`,
 `HOLD_APPROACH_FROM`). Upstream's 0.3.9.3 moved the start out to 140 px,
@@ -969,9 +989,11 @@ there needs the IMU's INT line wired (below).
   240 px tank. Worth a look on the glass.
 - **MY TANKS has not been on the glass** (0.3.9.5's sync): the shelves, the
   cards, the keyboard and the touch lock's 5 s hold are laid out and checked
-  in the simulator only. A SWAP IN restarts the board in software, which
-  keeps the chip's timer as deep sleep does, so the tank that comes back
-  should have lived its time on the shelf; nobody has seen it do so here.
+  in the simulator only, and the hold over a fry's welcome (it undoes the
+  lock there) only by reading the code: `main.c` is not in the simulator.
+  A SWAP IN restarts the board in software, which keeps the chip's timer
+  as deep sleep does, so the tank that comes back should have lived its
+  time on the shelf; nobody has seen it do so here.
 - **The grass loop is off in 0.3.9.5** on every board (`GRASS_LOOP_ON 0`,
   `main.c`: upstream's "until the loop is fixed and proven"), and with it
   the loading screen and the boot show, which wait on the loop's first
@@ -1226,7 +1248,18 @@ upstream's text but for one block.
      without a PMIC upstream's code sleeps at the first press. The 320 x
      240's single press waits out the window (`s_btn_sleep_due`);
    - a way back only BOOT gives (v0.3.9.3's touch lock): the CYD in its case
-     needs one on the glass (the 5 s hold, `touch_port_take_lock_open`);
+     needs one on the glass (the 5 s hold, `touch_port_take_lock_open`),
+     and it has to work over every page upstream's way refuses to open
+     over. MY TANKS will not open over a setup page, and a fry's welcome
+     comes up by itself on a locked glass; there the hold undoes the lock
+     (`main.c`). Look for the pages that can appear with nobody touching;
+   - a widget upstream adds at a fixed size onto a page the fork scales:
+     v0.3.9.3's critter arrows (a 34 px box) covered the start of the
+     seahorse card's scaled text column. `--critter-cards <prefix>` draws
+     every critter's card - the snapshot set has only the snail's and the
+     crab's - and `--shelf-shot` in the 320 x 240 world adds two pages for
+     this world alone, `_shelf_locked_now3` (the NOW tag beside the
+     padlock) and `_lock_hint_birth` (the note over a fry's welcome);
    - a rule that reads a save by where its pieces stand: v0.3.9.3's
      relayout takes a save from before 0.3.9.3 with a spot past the floor
      for the 1.8's world. The 1.8's fixtures do that on the 320 px floor

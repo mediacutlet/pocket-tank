@@ -1441,8 +1441,19 @@ static void tank_task(void *arg) {
         if (ans > 0) reset_tank();
         else if (ans < 0) ESP_LOGI(TAG, "reset prompt: tank kept");
 #if CONFIG_POCKET_TANK_320X240
-        if (touch_port_take_lock_open() && !touch_port_shelf()) shelf_toggle();   /* (this fork) a finger held still on the locked glass: MY TANKS,
-                                                                                     where its padlock undoes the lock - BOOT twice without BOOT */
+        if (touch_port_take_lock_open() && !touch_port_shelf()) {   /* (this fork) a finger held still on the locked glass: MY TANKS,
+                                                                       where its padlock undoes the lock - BOOT twice without BOOT */
+            if (setup_active() || touch_port_confirm_up()) {
+                /* MY TANKS will not open over a naming page or the reset prompt (shelf_toggle), and the lock keeps
+                 * every touch from the page itself: a fry born while locked, or a NEW TANK swapped in, left the CYD in
+                 * its case with no way on but the director. Here the hold undoes the lock itself, as the padlock would,
+                 * and the page answers. The finger still down is swallowed, or its lift would tap whatever it rests on */
+                touch_port_set_touch_lock(false); nvs_u8_put("tlock", 0); s_shelf_baked = false;
+                touch_port_swallow();
+                tank_emit(TEV_CONFIRM, -1);
+                ESP_LOGI(TAG, "touch lock: a finger held still over a setup page or the reset prompt - unlocked here, as MY TANKS cannot open over it");
+            } else shelf_toggle();
+        }
 #endif
         { int v = 0, w = touch_port_take_setting(&v);                 /* the settings page */
           if (w == SET_TAP_TANKS) shelf_toggle();                    /* MY TANKS from the settings page (0.3.9.3): as BOOT twice */
@@ -1638,10 +1649,16 @@ static void tank_task(void *arg) {
                 const notice_t *nt = notice_current();
                 if (nt) render_notice(&tank, fb[cur], TANK_W, nt->kind, nt->fish, nt->bit, 1.0f - nt->age / NOTICE_UP_S);
             }
+#if !CONFIG_POCKET_TANK_320X240
             if (touch_port_lock_hint() && !touch_port_shelf())   /* a touch on the locked glass: the way back */
                 render_touch_lock_hint(fb[cur], TANK_W);
+#endif
             if (setup_active())                  /* first-run setup: over the tank, under the prompt */
                 render_setup(&tank, fb[cur], TANK_W, tank.clock);
+#if CONFIG_POCKET_TANK_320X240
+            if (touch_port_lock_hint() && !touch_port_shelf())   /* (this fork) the way back, over a setup page too: there the */
+                render_touch_lock_hint(fb[cur], TANK_W);         /* 5 s hold is the only way on, and the page would hide the note */
+#endif
             if (touch_port_confirm_up())         /* reset prompt: over everything, fish still swim */
                 render_confirm_reset(fb[cur], TANK_W, touch_port_confirm_frac());
             if (loading) {                       /* (over everything: the whole frame) */

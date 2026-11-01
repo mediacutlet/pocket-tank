@@ -4504,6 +4504,23 @@ static int shelf_shot(const char *prefix, const char *jelly_ppm) {
     for (int f = 0; f < 3; f++) render_tank(&tank, fb, TANK_W);
     render_touch_lock_hint(fb, TANK_W);
     snprintf(path, sizeof path, "%s_lock_hint.ppm", prefix); write_ppm(path, fb);
+#ifdef CONFIG_POCKET_TANK_320X240
+    {   /* (this fork) two pages the set above never shows: the locked shelves with the tank on the glass in the top row's
+           fourth place, where its NOW tag stands nearest the padlock (_shelf_locked_now3); and the note over a fry's
+           welcome, drawn after the setup page as the firmware's frame does on a 320 x 240 board, since there the 5 s hold
+           is the only way on (_lock_hint_birth) */
+        shelf_slot_t s3[8]; memcpy(s3, s, sizeof s3);
+        s3[0].state = SHELF_DORMANT; s3[3].state = SHELF_NOW;
+        render_shelf_set_touch_lock(true); render_shelf(fb, TANK_W, s3, 1, 1); render_shelf_set_touch_lock(false);
+        snprintf(path, sizeof path, "%s_shelf_locked_now3.ppm", prefix); write_ppm(path, fb);
+        shelf_stage(2024, 5, 20); render_set_scene_cache(scene);
+        setup_begin_birth(&tank, tank.n_fish - 1);
+        for (int f = 0; f < 3; f++) render_tank(&tank, fb, TANK_W);
+        render_setup(&tank, fb, TANK_W, 1.0f); render_touch_lock_hint(fb, TANK_W);
+        snprintf(path, sizeof path, "%s_lock_hint_birth.ppm", prefix); write_ppm(path, fb);
+        setup_cancel(&tank);
+    }
+#endif
     shelf_stage(2024, 5, 20); render_set_scene_cache(scene); for (int f = 0; f < 3; f++) render_tank(&tank, fb, TANK_W);
     render_settings(&tank, fb, TANK_W, 60, 2);                                        /* the settings page (its TANKS button, 0.3.9.3) */
     snprintf(path, sizeof path, "%s_settings.ppm", prefix); write_ppm(path, fb);

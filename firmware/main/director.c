@@ -487,6 +487,36 @@ static void run(tank_t *t, char *line) {
             if ((y & 7) == 7) vTaskDelay(1);
         }
         printf("shot end\n");
+    } else if (!strcmp(c, "glcheck")) {               /* glcheck: every baked moment of the grass loop against its neighbours - a pixel that differs from BOTH
+                                                         while they agree with each other is a flicker (the 0.3.9.6 soak: "dark vertical lines up the fronds") */
+        const int nf = render_grass_loop_n();
+        int pn, pb, prow; int64_t pus; render_grass_loop_prof(&pn, &pb, &pus, &prow);
+        if (nf < 3 || prow <= 0) { ESP_LOGW(TAG, "glcheck: no loop (%d moments, %d rows)", nf, prow); return; }
+        const size_t pxb = (size_t)TANK_W * prow * 2, mkb = (size_t)prow * 32 * 4;
+        uint16_t *b[3] = {0}; uint32_t *mk = heap_caps_malloc(mkb, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        for (int i = 0; i < 3; i++) b[i] = heap_caps_malloc(pxb, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        static int colh[TANK_W]; int modh[32] = {0}; int y0 = 0, rows = 0, bad = 0; long tfl = 0, tsw = 0;
+        memset(colh, 0, sizeof colh);
+        if (!mk || !b[0] || !b[1] || !b[2]) { ESP_LOGW(TAG, "glcheck: no memory for 3 x %u KB (psram %u KB free)", (unsigned)(pxb / 1024), (unsigned)(heap_caps_get_free_size(MALLOC_CAP_SPIRAM) / 1024)); goto gl_done; }
+        if (!render_grass_loop_dump(nf - 1, b[0], mk, &y0, &rows) || !render_grass_loop_dump(0, b[1], mk, &y0, &rows) || rows != prow) { ESP_LOGW(TAG, "glcheck: a moment not baked (rows %d of %d)", rows, prow); goto gl_done; }
+        for (int j = 0; j < nf; j++) {                /* b[j % 3] = moment j-1, b[(j+1) % 3] = j, b[(j+2) % 3] <- j+1 */
+            const uint16_t *pv = b[j % 3], *cu = b[(j + 1) % 3]; uint16_t *nx = b[(j + 2) % 3];
+            if (!render_grass_loop_dump((j + 1) % nf, nx, mk, &y0, &rows)) { ESP_LOGW(TAG, "glcheck: moment %d not baked", (j + 1) % nf); goto gl_done; }
+            long fl = 0, sw = 0; int fx = -1, fy = -1, lx = -1, ly = -1;
+            for (int r = 0; r < rows; r++) for (int x = 0; x < TANK_W; x++) {
+                const size_t i = (size_t)r * TANK_W + x;
+                if (cu[i] != nx[i]) sw++;
+                if (cu[i] != pv[i] && cu[i] != nx[i] && pv[i] == nx[i]) { if (!fl) { fx = x; fy = y0 + r; } lx = x; ly = y0 + r; fl++; colh[x]++; modh[x & 31]++; }
+            }
+            tfl += fl; tsw += sw;
+            if (fl) { bad++; if (bad <= 16) ESP_LOGI(TAG, "glcheck: moment %2d: %ld flicker px (%d,%d .. %d,%d), %ld px of sway to the next", j, fl, fx, fy, lx, ly, sw); }
+            vTaskDelay(1);
+        }
+        ESP_LOGI(TAG, "glcheck: %d moments, band %d rows from %d: %ld flicker px in %d moments, sway %ld px a step on average", nf, rows, y0, tfl, bad, tsw / nf);
+        { char line[200]; int o = 0; for (int m = 0; m < 32 && o < 180; m++) if (modh[m]) o += snprintf(line + o, sizeof line - o, " %d:%d", m, modh[m]); ESP_LOGI(TAG, "glcheck: flicker x mod 32 ->%s", o ? line : " none"); }
+        for (int t = 0; t < 8; t++) { int bx = -1; for (int x = 0; x < TANK_W; x++) if (colh[x] > (bx < 0 ? 0 : colh[bx])) bx = x; if (bx < 0) break; ESP_LOGI(TAG, "glcheck: column %d: %d flicker px", bx, colh[bx]); colh[bx] = 0; }
+    gl_done:
+        free(mk); for (int i = 0; i < 3; i++) free(b[i]);
     } else if (!strcmp(c, "rim")) {                   /* rim on|off: a piece's contact shadow falling on the fronds painted over its rim (0.3.9.4) - the look's A/B (not saved) */
         static bool rim_off;
         if (argc > 1) { rim_off = !strcmp(argv[1], "off"); render_debug_rim_off(rim_off); }

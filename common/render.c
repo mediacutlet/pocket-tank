@@ -229,6 +229,8 @@ static uint16_t g_gl_ver[GL_MAX];               /* a band's bake count: a frame 
 static uint16_t *g_gl_diff; static size_t g_gl_dwords, g_gl_dused;   /* the fine moments' differences, one after another as they are baked */
 static uint32_t g_gl_doff[GL_MAX * GL_FMAX];    /* (where each starts) */
 static int     g_gl_nomem;                      /* rows the platform could not spare a loop for (not tried again for them) */
+static int     g_gl_top_bed = -1, g_gl_top_segs, g_gl_top_n;   /* (what the band's top came from, for the log: the tallest frond's bed and segments, the beds counted) */
+static int     g_gl_why;                        /* ... and where the plan gave up (1 the tables, 2 the bake's buffers, 3 fewer than four bands or no arena; render_grass_loop_nomem) */
 static uint8_t g_gl_fok[GL_MAX * GL_FMAX];      /* a fine moment: 0 stale, 1 baked, 2 its difference too big (its band's moment instead) */
 static uint16_t *g_gl_bake; static uint32_t *g_gl_bmask;   /* a fine moment's bake, and a frame's mask of its grass ... */
 static uint32_t *g_gl_pmask;                    /* ... the bake's own mask of it (0.3.9.4: a bake in slices spans frames that use g_gl_bmask) */
@@ -238,6 +240,7 @@ static int     g_gl_still;                      /* frames the look has held: a b
 static int     g_gl_bakes; static int64_t g_gl_bake_us;   /* (the display line) */
 static bool    g_gl_warm;                       /* the loop has been whole since it was turned on (LOADING: render_grass_loop_warming) */
 static int     g_gl_lock, g_gl_cur = -1;        /* moments the loop steps through a frame at a time (0: by the clock), the last frame's */
+static float   g_gl_step_t = -1, g_gl_step_acc;   /* THE PACE (gl_next): the clock of the last stepped frame; the fraction of a moment carried */
 void render_set_grass_loop(void *(*alloc)(size_t), void (*release)(void *), size_t budget) { g_gl_alloc = alloc; g_gl_free = release; g_gl_budget = budget; }
 static void gl_patch_reset(void);                /* THE PATCH and the ring (0.3.9.4, with the loop's pieces below) */
 static void gl_ring_reset(void);
@@ -252,8 +255,10 @@ static void gl_release(void) {
     g_gl_n = 0; g_gl_cap = 0;
 }
 void render_grass_loop_on(bool on) { g_gl_on = on && g_gl_alloc && g_gl_free; g_gl_nomem = 0; g_gl_warm = false; if (!g_gl_on) gl_release(); }
-void render_grass_loop_lock(int moments) { if (moments != g_gl_lock) { g_gl_lock = moments; g_gl_nomem = 0; g_gl_cur = -1; g_gl_fcap = GL_FMAX; gl_release(); } }   /* (planned again for them) */
+void render_grass_loop_lock(int moments) { if (moments != g_gl_lock) { g_gl_lock = moments; g_gl_nomem = 0; g_gl_cur = -1; g_gl_step_t = -1; g_gl_step_acc = 0; g_gl_fcap = GL_FMAX; gl_release(); } }   /* (planned again for them) */
 int  render_grass_loop_moment(void) { return g_gl_cur; }
+int  render_grass_loop_nomem(int *why) { *why = g_gl_why; return g_gl_nomem; }   /* rows the plan gave up on (0: it did not), and where */
+void render_grass_loop_top(int *bed, int *segs, int *beds) { *bed = g_gl_top_bed; *segs = g_gl_top_segs; *beds = g_gl_top_n; }   /* (the log) the tallest back frond the band is sized for */
 void render_grass_loop_arena(int *used_kb, int *cap_kb) { *used_kb = (int)(g_gl_dused * 2 / 1024); *cap_kb = (int)(g_gl_dwords * 2 / 1024); }
 bool render_grass_loop_is_on(void) { return g_gl_on; }
 void render_grass_loop_bypass(bool on) { g_gl_bypass = on; }
@@ -275,7 +280,32 @@ static inline int gl_base(int j) { return (j + g_gl_f / 2) / g_gl_f % g_gl_n; } 
 /* the next frame's fine moment: by the clock - or, stepping (render_grass_loop_lock), the one after the last frame's,
    so the grass moves exactly once a frame, with the fish (Strato: moments on the clock's grid "vary from the frame
    rate of the rest of the tank" - a frame that repeats one or skips one is a step the eye catches) */
-static inline int gl_next(float clock) { int nf = g_gl_n * g_gl_f; return g_gl_lock && g_gl_cur >= 0 && g_gl_cur < nf ? (g_gl_cur + 1) % nf : gl_fine(clock); }
+/* THE PACE (0.3.9.4, Strato on the square at 13-14 fps: the fronds "glitchy and not smooth"; another keeper's light tank swaying
+   twice as fast as the full one): stepping ran ONE moment a frame, so the sway's period was the frame rate's (GRASS_LOOP_MOMENTS
+   planned for ~17.5 fps on the square) and every uneven frame was a jerk of the grass. Now a stepped frame advances by the clock -
+   the moments the sway has walked since the last frame, carried fractionally - one at the least (never a repeat), GL_STEP_MAX at
+   most (never a jump): the period is the sway's at any frame rate, a long frame is a slightly longer step, not a stall */
+#define GL_STEP_MAX 3
+static inline int gl_steps(float clock, float *acc) {   /* the moments a stepped frame at `clock` advances, and the fraction it would carry (nothing changed) */
+    const int nf = g_gl_n * g_gl_f;
+    const float dt = g_gl_step_t >= 0 && clock > g_gl_step_t ? clock - g_gl_step_t : 0;
+    float want = g_gl_step_acc + dt * nf / GL_SPAN;
+    int steps = (int)want;
+    if (steps < 1) { steps = 1; want = 1; }
+    if (steps > GL_STEP_MAX) { steps = GL_STEP_MAX; want = GL_STEP_MAX; }
+    if (acc) *acc = want - steps;
+    return steps;
+}
+static inline int gl_next(float clock) {               /* PURE: the prefetch asks for the next frame's moment before the frame does (a first cut carried the fraction here
+                                                          and both asks advanced it: the sway lurched 1-3 moments at random - Strato: the fronds "glitchy", a fish through them flickering) */
+    const int nf = g_gl_n * g_gl_f;
+    if (!(g_gl_lock && g_gl_cur >= 0 && g_gl_cur < nf)) return gl_fine(clock);
+    return (g_gl_cur + gl_steps(clock, NULL)) % nf;
+}
+static inline void gl_stepped(int j, float clock) {    /* the frame took moment j: the carry and the clock move on here alone */
+    if (g_gl_cur >= 0) { float acc; gl_steps(clock, &acc); g_gl_step_acc = acc; }
+    g_gl_cur = j; g_gl_step_t = clock;
+}
 static uint32_t *g_om;                           /* SWIM DEPTH: while set, the odd fronds' pixels recorded here too (g_veg_odd) */
 static bool      g_veg_odd;                      /* (draw_veg: the frond being painted is an odd one) */
 /* SWIM DEPTH (0.3.9.4, docs/swim-depth.md): a fish BEHIND or THROUGH the back grass. Before it is drawn the pixels
@@ -303,6 +333,8 @@ static bool g_dep_off;                           /* (the sim's grass tests: ever
                                                     band's odd fronds, a pixel off at a frond's edge, which a pixel-for-pixel test of
                                                     the grass would read as the grass's own difference) */
 void render_depth_off(bool off) { g_dep_off = off; }
+static bool g_dep_keep_old;                         /* (--selftest-front-keep's control: the restore behind a piece ignores the fish IN FRONT, as before 0.3.9.6) */
+void render_debug_front_keep_old(bool on) { g_dep_keep_old = on; }
 static int64_t g_dep_us; static int g_dep_n;      /* the keep and the put-back's own time, and how many fish did it (render_depth_prof) */
 void render_depth_prof(int64_t *us, int *n) { *us = g_dep_us; *n = g_dep_n; g_dep_us = 0; g_dep_n = 0; }
 size_t render_depth_buf_bytes(void) {
@@ -1150,6 +1182,22 @@ static const int VEG_SEED[VEG_BEDS_MAX] = { 0, 7, 3, 5 };   /* each bed's sway p
                                                               * bed; veg_span reads it: most rows meet nothing and take the fast path - 2026-10-23) */
 static int g_veg_force_layer = -1;                 /* (EXPLORATION 10-31, the sim's --depth-shot: only the even or the odd fronds) */
 void render_proto_veg_layer(int layer) { g_veg_force_layer = layer; }
+/* THE HELD HEIGHTS (0.3.9.4, the flicker on Strato's square and 1.8): while the grass loop is up, EVERY drawing of the back grass -
+   its bands and moments, a frame drawn live while the loop is stale or parked, a box repainted, the seahorse's blade - takes the
+   frond heights the loop was last baked toward (g_gl_seg, the stale event's), not the tank's of this frame. Before, a live frame
+   between band frames drew the current heights, and a frond the urchin had nibbled since the bake jumped 3-4 px every band
+   frame for as long as a rebake took. A height change shows when the loop takes it (at once for a trim, GL_SEG_WAIT_S else). */
+static const uint8_t (*g_veg_seg_hold)[VEG_FRONDS_MAX];
+#define GL_SEG_JUMP   4                           /* (the loop's rule, below: a frond this many segments off is taken at once - the hold reaches no further,
+                                                     so another tank drawn under the same loop, the sim's tests' bare copies, keeps its own heights) */
+static inline int veg_segs_of(const tank_t *t, int b, int i, float *bx) {
+    int sg = tank_veg_frond(t, b, i, bx);
+    if (g_veg_seg_hold && b < VEG_BEDS_MAX && i < VEG_FRONDS_MAX && bed_z(t, b) == DECOR_Z_BACK) {
+        const int h = g_veg_seg_hold[b][i], d = h > sg ? h - sg : sg - h;
+        if (d < GL_SEG_JUMP) sg = h;
+    }
+    return sg;
+}
 static void draw_veg(ctx_t *c, const tank_t *t, int b, int seed, int layer, bool final) {
     if (!g_veg_step) return;
     if (g_veg_force_layer >= 0) layer = g_veg_force_layer;                         /* director `vegstep 0`: the A/B of the grass's whole cost */
@@ -1181,7 +1229,7 @@ static void draw_veg(ctx_t *c, const tank_t *t, int b, int seed, int layer, bool
         float bx;
         /* each frond's own height (tank_t.veg_h): what the keeper cut is
            exactly what shows - no render-side variation on top */
-        int segs = tank_veg_frond(t, b, i, &bx);
+        int segs = veg_segs_of(t, b, i, &bx);
         if (g_veg_arch_pass < 0 && (bx + 14 < g_veg_mask_cx - CASTLE_ARCH_R || bx - 14 > g_veg_mask_cx + CASTLE_ARCH_R)) continue;   /* the early arch pass: only the fronds that reach the arch */
         if (g_veg_cull && (bx + GL_BED_PAD < c->ox || bx - GL_BED_PAD > c->ox + c->w - 1)) continue;   /* THE PATCH: a frond clear of the box */
         if (segs < 1) segs = 1;                    /* nubs: always a bit of green */
@@ -3706,7 +3754,7 @@ static void sh_sprite_cached(decor_scratch_t *sc, float t, int pose, float u, fl
 /* a blade's ribbon at a tank row, exactly as draw_veg lays it (its sway and
  * taper): the centre x and the half-width; false off the blade */
 static bool veg_ribbon_at(const tank_t *t, int b, int i, int y, float clock, float *cx, float *half) {
-    float bx; int segs = tank_veg_frond(t, b, i, &bx);
+    float bx; int segs = veg_segs_of(t, b, i, &bx);   /* (the held heights: the blade as drawn) */
     if (segs < 1) segs = 1;
     if (segs > VEG_MAX_SEGS) segs = VEG_MAX_SEGS;
     bool sword = tank_veg_kind(t, b) == VEG_KIND_SWORD;
@@ -4465,11 +4513,11 @@ static void bake_scene(const tank_t *t, uint16_t *sc, float dim) {
    frond GL_SEG_JUMP segments off (a trim, a real bite), anything else, or a loop not yet whole rebakes at once. (A first
    cut waited 2 min from the BAKE: an old loop rebaked at the first segment, a growing tank every ~2 min, each some
    seconds at ~10 fps on the square - Strato's "once in a while the frame rate really slows down") */
-#define GL_SEG_JUMP   4
 #define GL_SEG_WAIT_S 900.0f
 static uint8_t g_gl_seg[VEG_BEDS_MAX][VEG_FRONDS_MAX];   /* the heights the loop was baked with */
 static uint32_t g_gl_seg_h, g_gl_hard_last;             /* ... their hash; the last frame's look but for the heights */
 static float   g_gl_seg_t = -1;                        /* the tank clock the heights first moved at (-1: they have not) */
+static bool    g_gl_seg_ok;                            /* g_gl_seg holds a look's heights (a stale event copied them): THE HELD HEIGHTS apply */
 static uint32_t gl_key(const tank_t *t, uint32_t *segs, uint8_t seg[VEG_BEDS_MAX][VEG_FRONDS_MAX]) {
     uint32_t h = 2166136261u, g = 2166136261u;
 #define GL_MIX(h, v) (h = (h ^ (uint32_t)(v)) * 16777619u)
@@ -4755,7 +4803,7 @@ static uint32_t gl_stale_check(const tank_t *t) {
     memset(seg, 0, sizeof seg);
     uint32_t sh, hard = gl_key(t, &sh, seg);
     g_gl_full_now = hard ^ (sh * 2654435761u);
-    if (g_gl_full_now != g_gl_key_last) g_gl_still = 0;
+    if (hard != g_gl_hard_last) g_gl_still = 0;        /* (the heights alone - a nibble, growth - do not hold a bake up: THE HELD HEIGHTS keep them out of the look) */
     bool stale = hard != g_gl_key;
     if (sh == g_gl_seg_h) g_gl_seg_t = -1;               /* (the heights as baked: nothing waits) */
     else if (!stale) {                                   /* the heights moved: at once, or later */
@@ -4770,10 +4818,13 @@ static uint32_t gl_stale_check(const tank_t *t) {
         bool partial = g_gl_n > 0 && g_gl_fgen && (g_gl_patch || gl_serving());
         if (partial && !g_gl_patch) gl_wrow_reset();                        /* (a rebake under way keeps its columns: they stay stale) */
         if (partial && g_gl_patch) for (int i = 0; i < g_gl_nwin && partial; i++) partial = gl_rect_add(w, &nw, g_gl_win[i].x0, g_gl_win[i].y0, g_gl_win[i].x1, g_gl_win[i].y1);   /* (a rebake under way: its boxes stay stale) */
+        if (partial && g_gl_dqn > 0 && g_gl_dwords - g_gl_dused < 3 * (g_gl_dused / (size_t)g_gl_dqn)) partial = false;   /* the ring with room for fewer than three differences: whole
+                                                                                    again, packed from 0 (a share of the arena was wrong: on Strato's square the headroom rule
+                                                                                    left the arena at 91% full from the first bake and every move baked whole at 9 fps) */
         if (partial) partial = gl_window(t, seg, w, &nw);
         g_gl_key = hard; g_gl_still = 0; g_gl_gen++;
-        memcpy(g_gl_seg, seg, sizeof g_gl_seg); g_gl_seg_h = sh; g_gl_seg_t = -1;
-        if (partial) { memcpy(g_gl_win, w, sizeof w); g_gl_nwin = nw; g_gl_patch = true; g_gl_pwin = 0; if (g_gl_page_closed) g_gl_patch_page = true; }
+        memcpy(g_gl_seg, seg, sizeof g_gl_seg); g_gl_seg_h = sh; g_gl_seg_t = -1; g_gl_seg_ok = true;
+        if (partial) { memcpy(g_gl_win, w, sizeof w); g_gl_nwin = nw; g_gl_patch = true; g_gl_pwin = 0; g_gl_pcap = -1; if (g_gl_page_closed) g_gl_patch_page = true; }   /* (a frame's captured boxes were the old window's) */
         else {
             for (int k = 0; k < GL_MAX; k++) g_gl_ok[k] = false;
             memset(g_gl_fok, 0, sizeof g_gl_fok); gl_ring_reset(); gl_patch_reset();
@@ -4796,6 +4847,7 @@ static int gl_pick_f(int bands) {
                                                       half hour on a growing tank - stays boxes for the loop, not a new band; the band never shrinks) */
 static int gl_top(const tank_t *t) {               /* the band's first row */
     int top = TANK_H;
+    g_gl_top_bed = -1; g_gl_top_segs = 0; g_gl_top_n = tank_veg_beds(t);
     for (int b = 0; b < tank_veg_beds(t); b++) {
         if (bed_z(t, b) != DECOR_Z_BACK) continue;
         int n; tank_veg_bed(t, b, NULL, NULL, NULL, &n);
@@ -4804,7 +4856,7 @@ static int gl_top(const tank_t *t) {               /* the band's first row */
             if (segs < 1) segs = 1;
             if (segs > VEG_MAX_SEGS) segs = VEG_MAX_SEGS;
             int y = (int)(TANK_BOT - 16 - (segs - 1) * VEG_SEG_DY - VEG_SEG_RY) - 3;
-            if (y < top) top = y;
+            if (y < top) { top = y; g_gl_top_bed = b; g_gl_top_segs = segs; }
         }
     }
     if (top >= TANK_H) top = TANK_H - 16;
@@ -4821,15 +4873,20 @@ static bool gl_geometry(const tank_t *t) {         /* the band the back grass ne
     int rows = TANK_H - top;
     if (rows > g_gl_cap) {                           /* (taller grass: the loop again, with room to grow) */
         gl_release();
-        if (rows <= g_gl_nomem) return false;
+        if (g_gl_nomem && rows >= g_gl_nomem) return false;   /* (a band this tall or taller found no memory: a smaller one is tried - 0.3.9.4: a first plan at a boot saw a band of
+                                                        428 rows on Strato's square and every right-sized one after it was refused) */
         int cap = rows + 24 > TANK_H ? TANK_H : rows + 24;
         size_t band = (((size_t)cap * TANK_W * 2) + 127) & ~(size_t)63, mask = (size_t)cap * DIRTY_WORDS_PER_ROW * 4;
-        size_t diff = band / 20;                     /* a fine moment's difference, about (they ran ~6 KB a 206 KB band on the square) ... */
-        if (g_gl_davg && g_gl_davg * 2 * 5 / 4 > diff) diff = g_gl_davg * 2 * 5 / 4;   /* ... or as the last whole loop measured them, a quarter over: a plan that fits the first time */
+        size_t diff = band / 20;                     /* a fine moment's difference, about (they ran ~6 KB a 206 KB band on the square): the plan's floor */
+        size_t dwant = diff;                         /* ... and what the last whole loop measured, a quarter over: the room asked for when there is room.
+                                                        (A first cut made the measure the FLOOR too: after a replan on Strato's square the arena at that floor
+                                                        failed the PSRAM headroom rule, the plan gave up with four bands fewer, and the loop was gone for the
+                                                        day - the grass live at 11 fps and no one the wiser until the log) */
+        if (g_gl_davg && g_gl_davg * 2 * 5 / 4 > dwant) dwant = g_gl_davg * 2 * 5 / 4;
         long n = ((long)g_gl_budget - (long)(band + mask)) / (long)(band + mask + (GL_FINE - 1) * diff);   /* (less a fine moment's bake) */
         if (g_gl_lock && n > (g_gl_lock + GL_FINE - 1) / GL_FINE) n = (g_gl_lock + GL_FINE - 1) / GL_FINE;   /* (stepping: the moments a sway wants, no more) */
         if (n > GL_MAX) n = GL_MAX;
-        if (!(g_gl_meta = g_gl_alloc(GL_META_BYTES))) { g_gl_nomem = rows; return false; }
+        if (!(g_gl_meta = g_gl_alloc(GL_META_BYTES))) { g_gl_nomem = rows; g_gl_why = 1; return false; }
         memset(g_gl_meta, 0, GL_META_BYTES);
         g_gl_fgen = (uint16_t *)g_gl_meta; g_gl_dlen = (uint32_t *)((uint8_t *)g_gl_meta + GL_MAX * GL_FMAX * 2); g_gl_dq = (uint8_t *)g_gl_meta + GL_MAX * GL_FMAX * 6;
         g_gl_pm_old = (uint32_t *)(((uintptr_t)((uint8_t *)g_gl_meta + GL_META_TAB) + 3) & ~(uintptr_t)3); g_gl_wrow = (uint16_t *)((uint8_t *)g_gl_pm_old + GL_PM_BYTES);
@@ -4846,13 +4903,14 @@ static bool gl_geometry(const tank_t *t) {         /* the band the back grass ne
         size_t dmin = (size_t)got * (g_gl_f - 1) * diff, dbytes = (size_t)g_gl_budget - (size_t)(got + 1) * (band + mask);   /* the differences: the rest of
                                                                                     the budget (a tall bed's run bigger), at least the estimate */
         if ((long)g_gl_budget < (long)((got + 1) * (band + mask)) || dbytes < dmin) dbytes = dmin;
+        if (dbytes < (size_t)got * (g_gl_f - 1) * dwant) dbytes = (size_t)got * (g_gl_f - 1) * dwant;   /* (the measure's room, when the headroom allows: the shrink below stops at the floor) */
         while (got >= 4) {                           /* (no room for them: a band fewer, and try again) */
             while (!(g_gl_diff = g_gl_alloc(dbytes)) && dbytes / 4 * 3 >= dmin) dbytes = dbytes / 4 * 3;
             if (g_gl_diff) break;
             got--; g_gl_free(g_gl_band[got]); g_gl_free(g_gl_mask[got]); g_gl_band[got] = NULL; g_gl_mask[got] = NULL;
             g_gl_f = gl_pick_f(got); dmin = (size_t)got * (g_gl_f - 1) * diff; dbytes = dmin + (band + mask);
         }
-        if (got < 4 || !g_gl_diff) { gl_release(); g_gl_nomem = rows; return false; }   /* too few to sway smoothly: the grass is drawn the old way */
+        if (got < 4 || !g_gl_diff) { g_gl_why = !g_gl_bake || !g_gl_bmask || !g_gl_pmask ? 2 : 3; gl_release(); g_gl_nomem = rows; return false; }   /* too few to sway smoothly: the grass is drawn the old way */
         for (int k = 0; k < got; k++)                 /* (the odd fronds' masks beside the bands, outside the budget: all or none) */
             if (!(g_gl_omask[k] = g_gl_alloc(mask))) { for (int j = 0; j <= k; j++) { if (g_gl_omask[j]) g_gl_free(g_gl_omask[j]); g_gl_omask[j] = NULL; } break; }
         g_gl_n = got; g_gl_cap = cap; g_gl_dwords = dbytes / 2; gl_ring_reset(); gl_patch_reset(); g_gl_bs.phase = 0;
@@ -4925,6 +4983,7 @@ static void gl_rec_begin(gl_rec_t *s, uint32_t *dm, uint32_t *om, int j) {
     g_bgmask = dm - g_gl_y0 * DIRTY_WORDS_PER_ROW; g_bg_rec = true; g_veg_arch_pass = 0;
     g_om = om ? om - g_gl_y0 * DIRTY_WORDS_PER_ROW : NULL;
     g_veg_clock_force = gl_ftime(j);
+    g_veg_seg_hold = g_gl_seg_ok ? g_gl_seg : NULL;
 }
 static void gl_rec_end(const gl_rec_t *s) { g_veg_clock_force = s->force; g_bg_rec = s->rec; g_bgmask = s->bgmask; g_touched = s->touched; g_dirty = s->dirty; g_om = s->om; g_under = s->under; g_fbg_on = s->fbg; }
 static void gl_bed_draw(ctx_t *c, const tank_t *t, int b, int pkz) {   /* one back bed into a band or a box, as the bake paints it */
@@ -4999,9 +5058,23 @@ static long gl_diff_splice_rows(uint16_t *dst, size_t cap, size_t w, int r0, int
         const int y = g_gl_y0 + r, n = *old++; const uint16_t *runs = old;
         size_t ow = 0; for (int i = 0; i < n; i++) ow += 2 + (size_t)runs[ow + 1];   /* the old row's words */
         old += ow;
-        int ia[2], ib[2], m = 0;                                                     /* the row's stale columns, by x */
-        { const uint16_t *iv = g_gl_wrow + r * 4; for (int q = 0; q < 4; q += 2) if (iv[q] <= iv[q + 1]) { ia[m] = iv[q]; ib[m] = iv[q + 1]; m++; } }
-        (void)y;
+        int ia[2 * GL_WIN_MAX], ib[2 * GL_WIN_MAX], m = 0;                           /* the row's stale columns INSIDE each box, by x: what a repaint painted (gl_patch_rect
+                                                                                        clips the row's intervals to its box). A row keeps two intervals and three boxes in a
+                                                                                        row merge the nearest two: encoded whole, the gap between those boxes - never painted
+                                                                                        in g_gl_bake - went into the moment as stale pixels. Strato's square, 10-31 night: dark
+                                                                                        vertical lines up the fronds that stood in such a gap, on their own after growth's
+                                                                                        strips or after a move; `--selftest-grasspatch`, three fronds nibbled across the beds */
+        { const uint16_t *iv = g_gl_wrow + r * 4;
+          for (int i = 0; i < g_gl_nwin; i++) {
+              const gl_rect_t *rc = &g_gl_win[i];
+              if (y < rc->y0 || y > rc->y1) continue;
+              for (int q = 0; q < 4; q += 2) {
+                  if (iv[q] > iv[q + 1]) continue;
+                  const int a = iv[q] > rc->x0 ? iv[q] : rc->x0, b = iv[q + 1] < rc->x1 ? iv[q + 1] : rc->x1;
+                  if (a <= b && m < 2 * GL_WIN_MAX) { ia[m] = a; ib[m] = b; m++; }
+              }
+          }
+          for (int i = 1; i < m; i++) { int ta = ia[i], tb = ib[i], j = i; while (j > 0 && ia[j - 1] > ta) { ia[j] = ia[j - 1]; ib[j] = ib[j - 1]; j--; } ia[j] = ta; ib[j] = tb; } }
         if (!m) { if (w + 1 + ow > cap) return -1; dst[w++] = (uint16_t)n; memcpy(dst + w, runs, ow * 2); w += ow; continue; }
         if (w >= cap) return -1;
         const size_t at = w++; int count = 0, c = 0;
@@ -5130,7 +5203,7 @@ static int gl_patch_step(const tank_t *t, float dim, int pkz) {
             if (g_gl_pwin > 0 || g_gl_bs.phase == 3) j = g_gl_bs.j;   /* (the one under way) */
             else for (int i = 0; i < nf && j < 0; i++) { int f = (due + i) % nf; if (g_gl_fok[f] == 1 && f % g_gl_f != 0 && g_gl_fgen[f] != g_gl_gen) j = f; }
         }
-        if (j < 0) { gl_patch_reset(); gl_davg_update(); return 0; }   /* every moment at this look */
+        if (j < 0) { gl_patch_reset(); gl_davg_update(); if (g_gl_dhead >= g_gl_dtail) gl_ring_pack(); return 0; }   /* every moment at this look (and the ring packed: the splices' holes closed) */
         if (j != g_gl_pcap && g_gl_bs.phase != 3 && g_gl_pwin < 2 * g_gl_nwin) { g_gl_bs.j = j; gl_patch_rect(t, g_gl_bake, g_gl_y0, g_gl_pmask, NULL, j, dim, pkz, g_gl_pwin / 2, g_gl_pwin & 1); g_gl_pwin++; }
         else {                                                   /* the splice, GL_ENC_ROWS rows a slice, at the ring's head */
             const int kb = gl_base(j);
@@ -5257,6 +5330,40 @@ const uint16_t *render_boot_grass(const tank_t *t, int *y0) {
     }
     return NULL;
 }
+/* ... and with no loop to read (0.3.9.6: 0.3.9.5 parked the loop, and the show's grass with it; or the loop could not
+   have its memory): the same thing drawn live into dst - the scene's rows from *y0 copied in, the back grass of the
+   clock's moment painted over them, as the bake paints a band - the way render_tank draws it live when the loop is
+   stale or off. dst is the show's own frame; nothing is recorded. false: no scene yet */
+bool render_boot_grass_live(const tank_t *t, uint16_t *dst, int *y0) {
+    if (!g_scene || !g_sig_ok || !g_scene_epoch) return false;
+    int top = TANK_H;
+    for (int b = 0; b < tank_veg_beds(t); b++) {
+        if (bed_z(t, b) != DECOR_Z_BACK) continue;
+        int n; tank_veg_bed(t, b, NULL, NULL, NULL, &n);
+        for (int i = 0; i < n; i++) {
+            float bx; int segs = tank_veg_frond(t, b, i, &bx);
+            if (segs < 1) segs = 1;
+            if (segs > VEG_MAX_SEGS) segs = VEG_MAX_SEGS;
+            int y = (int)(TANK_BOT - 16 - (segs - 1) * VEG_SEG_DY - VEG_SEG_RY) - 3;
+            if (y < top) top = y;
+        }
+    }
+    if (top >= TANK_H) top = TANK_H - 16;
+    top -= GL_TOP_ROOM;
+    if (top < 0) top = 0;
+    memcpy(dst + (size_t)top * TANK_W, g_scene + (size_t)top * TANK_W, (size_t)(TANK_H - top) * TANK_W * sizeof(uint16_t));
+    uint32_t *keep_t = g_touched, *keep_d = g_dirty, *keep_om = g_om; const uint32_t *keep_u = g_under;
+    const bool keep_rec = g_bg_rec, keep_fbg = g_fbg_on; const int keep_top = g_sg_top; const float keep_force = g_veg_clock_force;
+    g_touched = NULL; g_dirty = NULL; g_under = NULL; g_fbg_on = false; g_bg_rec = false; g_om = NULL; g_veg_arch_pass = 0; g_veg_clock_force = -1;
+    g_bg_clip = true; g_bg_clip_r.x0 = 0; g_bg_clip_r.x1 = TANK_W - 1; g_bg_clip_r.y0 = (short)top; g_bg_clip_r.y1 = (short)(TANK_H - 1); g_veg_cull = true;
+    ctx_t cb = { dst + (size_t)top * TANK_W, TANK_W, g_scene_dim < 0 ? 1.0f : g_scene_dim, 0, top, TANK_W, TANK_H - top };
+    const int pkz = g_pk_k >= 0 ? g_pc[g_pk_k].z : DECOR_Z_BACK;
+    for (int b = 0; b < tank_veg_beds(t); b++) if (bed_z(t, b) == DECOR_Z_BACK) gl_bed_draw(&cb, t, b, pkz);
+    g_bg_clip = false; g_veg_cull = false;
+    g_touched = keep_t; g_dirty = keep_d; g_om = keep_om; g_under = keep_u; g_bg_rec = keep_rec; g_fbg_on = keep_fbg; g_sg_top = keep_top; g_veg_clock_force = keep_force;
+    *y0 = top;
+    return true;
+}
 /* SWIM DEPTH (0.3.9.4, docs/swim-depth.md): one animal drawn at its own depth - against the back grass (dep: IN FRONT,
    BEHIND, THROUGH) and the pieces (pdep: IN FRONT, BEHIND) and a bed IN FRONT. Before it is drawn, what is under its box
    (last frame's drawn box bb with room for a frame's travel, or r round cx, cy) is kept; after, the grass's pixels it is
@@ -5266,6 +5373,8 @@ const uint16_t *render_boot_grass(const tank_t *t, int *y0) {
    The frame's masks: g_dm_* (set in render_tank). true: it drew - its box in bb */
 static const uint32_t *g_dm_all, *g_dm_odd; static int g_dm_y0;
 static bool g_dbg_grass_on; static const uint32_t *g_dbg_dm; static int g_dbg_dm_y0;   /* (tests: the frame's grass mask kept for render_debug_grass_at) */
+static bool g_dbg_root_cut;                                                              /* (tests: the grass's put-back over an animal cut at the roots again, as 0.3.9.4 had it) */
+void render_debug_root_cut(bool on) { g_dbg_root_cut = on; }
 void render_debug_grass_mask(bool on) { g_dbg_grass_on = on; }
 bool render_debug_grass_at(int x, int y) { return g_dbg_dm && (unsigned)x < (unsigned)TANK_W && y >= g_dbg_dm_y0 && y < TANK_H && ((g_dbg_dm[(y - g_dbg_dm_y0) * DIRTY_WORDS_PER_ROW + (x >> 5)] >> (x & 31)) & 1); }
 static int g_fbed_n, g_fbed_x0[VEG_BEDS_MAX], g_fbed_x1[VEG_BEDS_MAX];
@@ -5374,10 +5483,14 @@ static bool dep_draw(ctx_t *c, uint16_t *fb, const tank_t *t, int i, dep_draw_t 
     *bb_ok = drew;
     if (bx1 < 0) return drew;
     const bool through = dep == FISH_DEPTH_THROUGH && dm_odd;
-    const int y_cut = pdep == DEP_NOBED ? TANK_H : DEP_ROOT_Y;   /* in a shelter BEHIND the whole animal is behind the grass, roots too (0.3.9.4: the crab's claws
-                                                                     in the cave sat over the fronds' feet - Strato on the 1.8) */
-    if (grass) for (int y = by0 < dm_y0 ? dm_y0 : by0; y <= by1 && y < y_cut; y++) {   /* the grass's own pixels back over it (down to the roots: an
-                                                                                         animal standing on the sand keeps its feet and its shadow over them) */
+    /* the grass's own pixels back over it, EVERY ROW - a frond before an animal is before all of it, its foot on the sand
+       included. 0.3.9.4 cut the put-back at DEP_ROOT_Y so a critter on the sand kept its feet and shadow over the roots;
+       for the urchin (and the snail, the crab, a fish ducked into the grass) that cut every frond mid-body: over its spines
+       and the top of the dome, the lower dome over the frond's foot - "a grass frond that should be drawn behind the urchin
+       overlaps a bit of the top of the urchin" (Strato on the square, 10-31 night; 0.3.9.6). The crab in a shelter BEHIND
+       already came back whole (0.3.9.4 item 21) */
+    const int y_cut = g_dbg_root_cut && pdep != DEP_NOBED ? DEP_ROOT_Y : TANK_H;   /* (the A/B: PT_ROOT_CUT=1 in the sim's tests - the 0.3.9.4 cut back; they fail) */
+    if (grass) for (int y = by0 < dm_y0 ? dm_y0 : by0; y <= by1 && y < y_cut; y++) {
         const uint32_t *ma = dm_all + (size_t)(y - dm_y0) * DIRTY_WORDS_PER_ROW, *mo = through ? dm_odd + (size_t)(y - dm_y0) * DIRTY_WORDS_PER_ROW : NULL;
         const uint16_t *sv = g_dep_save + (size_t)(y - by0) * bw; uint16_t *row = fb + (size_t)y * TANK_W;
         const uint32_t *sd = g_dep_dirty + (size_t)(y - by0) * DIRTY_WORDS_PER_ROW; uint32_t *dr = g_dirty ? g_dirty + (size_t)y * DIRTY_WORDS_PER_ROW : NULL;
@@ -5409,10 +5522,13 @@ static bool dep_draw(ctx_t *c, uint16_t *fb, const tank_t *t, int i, dep_draw_t 
             for (int x = xa; x <= xb; x++) {
                 int w = x >> 5; uint32_t bit = 1u << (x & 31);
                 if ((dr && !(dr[w] & bit)) || !pc_body_covers(k, x, y)) continue;
-                uint16_t v = from_scene ? g_scene[y * TANK_W + x] : sv[x - bx0];
+                const bool scene_px = from_scene && (g_dep_keep_old || !keep_at(x, y));   /* a fish drawn before it IN FRONT of the pieces: what was there (that
+                                                                       fish), not the scene - 0.3.9.6, Bananna's pendant: a resting fish IN FRONT of the pumpkin had its
+                                                                       tail cut by the carved face where a fish behind the pumpkin passed */
+                uint16_t v = scene_px ? g_scene[y * TANK_W + x] : sv[x - bx0];
                 if (row[x] == v) continue;
                 row[x] = v;
-                if (dr && (from_scene || !(sd[w - w0] & bit))) dr[w] &= ~bit;   /* (the scene's pixel is final) */
+                if (dr && (scene_px || !(sd[w - w0] & bit))) dr[w] &= ~bit;   /* (the scene's pixel is final) */
             }
         }
     }
@@ -5485,6 +5601,7 @@ void render_tank(const tank_t *t, uint16_t *fb, int stride) {
                                                       they are neither used (the back grass drawn live meanwhile) nor rebaked; the scene's new look is
                                                       taken up when the page closes - one rebake, not two, and none if the piece comes back as it was */
     g_gl_parked = pc_live;
+    g_veg_seg_hold = cached && g_gl_on && g_gl_n > 0 && g_gl_seg_ok && !t->night ? g_gl_seg : NULL;   /* THE HELD HEIGHTS, this frame (the night draws live: nothing to disagree with) */
     int pkx = g_pk_k >= 0 ? g_pc[g_pk_k].cx : -1, pkz = g_pk_k >= 0 ? g_pc[g_pk_k].z : DECOR_Z_BACK;
     bool pk_in_scene = g_pk_k >= 0 && !g_pc[g_pk_k].placing;
     g_pk_lx = t->night && pk_in_scene ? pkx : -1; g_pk_ly = PK_LIGHT_Y;     /* the lantern's light, this frame */
@@ -5519,7 +5636,7 @@ void render_tank(const tank_t *t, uint16_t *fb, int stride) {
         g_gl_dark = t->night;
         if (loop_ok && g_gl_on && !g_gl_bypass && g_gl_n && !sgv && g_gl_dark) {   /* the light off: live grass, at the stepped moment */
             int j = gl_next(t->clock);
-            if (g_gl_lock) g_gl_cur = j;
+            if (g_gl_lock) gl_stepped(j, t->clock);
             if (g_veg_clock_force < 0) { g_veg_clock_force = gl_ftime(j); gl_forced = true; }   /* (the loop's moments, so the day picks up where the night left it) */
         } else if (loop_ok && g_gl_on && !g_gl_bypass && g_gl_n && !sgv) {    /* THE GRASS LOOP: the frame's band and fine moment, baked */
             gl_key_now = gl_stale_check(t);
@@ -5539,7 +5656,7 @@ void render_tank(const tank_t *t, uint16_t *fb, int stride) {
                 if (gl_k >= 0 && g_gl_lock && g_gl_fok[j] == 0) gl_k = -1;   /* (... stepping, drawn live at its own: a repeated moment is a step) */
             }
             if (g_gl_lock) {
-                g_gl_cur = j;
+                gl_stepped(j, t->clock);
                 if (gl_k < 0 && g_veg_clock_force < 0) { g_veg_clock_force = gl_ftime(j); gl_forced = true; }   /* (stale: the grass drawn live at the
                                                                                     frame's moment all the same - no jump as the loop comes back) */
             }
@@ -6061,11 +6178,12 @@ void render_tank(const tank_t *t, uint16_t *fb, int stride) {
     if (loop_ok && g_gl_on && !g_gl_bypass && !t->night) {   /* (not with a live piece: the loop waits for the page to close) */
         if (!gl_key_now) gl_key_now = gl_stale_check(t);
         const uint32_t hard = gl_key_now, full = g_gl_full_now;
-        if (full == g_gl_key_last && ++g_gl_still >= GL_SETTLE && gl_geometry(t) && !g_gl_task) gl_bake_frame(t, dim, pkz);   /* (in slices, under a budget; THE PATCH's boxes first; or the platform's task) */
+        if (hard == g_gl_hard_last && ++g_gl_still >= GL_SETTLE && gl_geometry(t) && !g_gl_task) gl_bake_frame(t, dim, pkz);   /* (in slices, under a budget; THE PATCH's boxes first; or the platform's task) */
         g_gl_dim_last = dim; g_gl_pkz_last = pkz;
         g_gl_key_last = full; g_gl_hard_last = hard;
         if (g_gl_replan) { g_gl_replan = false; gl_release(); g_gl_nomem = 0; }   /* (the next frame plans the loop afresh) */
     }
+    g_veg_seg_hold = NULL;
     g_pk_lx = -1; g_pk_under_castle = false; g_pk_shadows = false;   /* the light is this frame's: no page is ever lit by it */
     PROF_ADD(6, p0);
 #undef DYN_RECT

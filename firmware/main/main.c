@@ -146,18 +146,24 @@ static bool s_prefetch_pending; static uint16_t *s_prefetch_fb; static unsigned 
  * is primed for its next frame. A whole page says render_touch_all. */
 #define GRASS_CACHE_ON 0                                /* the back grass from a cached scene, refreshed every GRASS_CACHE_MS (2026-10-24; director `grasscache`) */
 #define GRASS_CACHE_MS 160
-#define GRASS_LOOP_ON 0                                 /* THE GRASS LOOP (0.3.9.3, render.c): the back grass baked into a loop of moments of its sway; director `grassloop` */
+#define GRASS_LOOP_ON 1                                 /* THE GRASS LOOP (0.3.9.3, render.c): the back grass baked into a loop of moments of its sway; director `grassloop` */
 #define GRASS_LOOP_BUDGET (2816u * 1024)                /* PSRAM for its moments, at most - and never past the plan's headroom (gl_alloc) */
-#if defined(TANK_SQUARE)                                /* its moments, stepped one a frame (render_grass_loop_lock): the board's frame rate x half the */
-#define GRASS_LOOP_MOMENTS 64                           /* sway's 7 s, so the sway keeps about its period - the square ~17.5 fps, */
+#if defined(TANK_SQUARE)                                /* its moments, stepped by the clock since THE PACE (render_grass_loop_lock; one a frame before, planned at the board's
+                                                           frame rate x half the sway's 7 s) - the count sets the step's size and the arena's share, not the sway's speed: */
+#define GRASS_LOOP_MOMENTS 48                           /* the square: 64 filled its arena to the last byte on Strato's grown tank (the PSRAM headroom rule leaves it ~705 KB)
+                                                           and every move baked whole at 8 fps; 48 leaves two fifths free for the box patch (0.3.9.4, the soak) */
 #elif defined(TANK_WATCH)
 #define GRASS_LOOP_MOMENTS 80                           /* the watch ~22.6, */
 #else
 #define GRASS_LOOP_MOMENTS 88                           /* the 1.8 and the pendant at the 25 fps ceiling */
 #endif
+static int s_gl_refused;
 static void *gl_alloc(size_t n) {                       /* the loop's memory (64-byte aligned for the prefetch's DMA), only while PSRAM keeps its headroom */
-    if (heap_caps_get_free_size(MALLOC_CAP_SPIRAM) < n + PLAN_PSRAM_MIN_FREE_AFTER + 200 * 1024) return NULL;
-    return heap_caps_aligned_alloc(64, n, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    size_t free = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
+    if (free < n + PLAN_PSRAM_MIN_FREE_AFTER + 200 * 1024) { if (s_gl_refused++ < 6) ESP_LOGW("display", "grass loop: %u KB refused, psram %u KB free (headroom %u KB)", (unsigned)(n / 1024), (unsigned)(free / 1024), (unsigned)((PLAN_PSRAM_MIN_FREE_AFTER + 200 * 1024) / 1024)); return NULL; }
+    void *p = heap_caps_aligned_alloc(64, n, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!p && s_gl_refused++ < 6) ESP_LOGW("display", "grass loop: %u KB not found in psram (%u KB free, largest %u KB)", (unsigned)(n / 1024), (unsigned)(free / 1024), (unsigned)(heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM) / 1024));
+    return p;
 }
 static void gl_free(void *p) { heap_caps_free(p); }
 #define USE_RESTORE 0                                   /* 0: the DMA prefetch (measured better on a grown tank); 1: the dirty restore */
@@ -1331,17 +1337,18 @@ static void tank_task(void *arg);
 static SemaphoreHandle_t s_render_lock; static volatile bool s_render_wants; static bool s_render_held;
 static void render_unlock(void) { if (s_render_held) { s_render_held = false; xSemaphoreGive(s_render_lock); } }
 static int64_t s_bake_us, s_bake_wait_us; static int s_bake_slices, s_bake_takes, s_bake_timeouts;
+static volatile int64_t s_bake_deadline; static int64_t s_flush_avg_us = 18000;   /* the bake's window: the flush (its running average), never into the next frame's start */
 static void bake_task(void *arg) {
     (void)arg;
     for (;;) {
         int r = 0;
         const int64_t tw = esp_timer_get_time();
-        if (!s_render_wants && xSemaphoreTake(s_render_lock, pdMS_TO_TICKS(40))) {
+        if (!s_render_wants && esp_timer_get_time() + 5000 < s_bake_deadline && xSemaphoreTake(s_render_lock, pdMS_TO_TICKS(40))) {
             const int64_t t0 = esp_timer_get_time(); s_bake_wait_us += t0 - tw; s_bake_takes++;
-            do {                                            /* a few slices at a stretch, until the tank task wants the lock back (~12 ms at most) */
+            do {                                            /* slices while the flush's window lasts (a slice is under ~5 ms): never a frame kept waiting */
                 r = render_grass_loop_bake_slice(&tank);
                 if (r) s_bake_slices++;
-            } while (r && !s_render_wants && esp_timer_get_time() - t0 < 12000);
+            } while (r && !s_render_wants && esp_timer_get_time() + 5000 < s_bake_deadline);
             s_bake_us += esp_timer_get_time() - t0;
             xSemaphoreGive(s_render_lock);
         } else if (!s_render_wants) s_bake_timeouts++;
@@ -1441,19 +1448,12 @@ static void tank_task(void *arg) {
         if (ans > 0) reset_tank();
         else if (ans < 0) ESP_LOGI(TAG, "reset prompt: tank kept");
 #if CONFIG_POCKET_TANK_320X240
-        if (touch_port_take_lock_open() && !touch_port_shelf()) {   /* (this fork) a finger held still on the locked glass: MY TANKS,
-                                                                       where its padlock undoes the lock - BOOT twice without BOOT */
-            if (setup_active() || touch_port_confirm_up()) {
-                /* MY TANKS will not open over a naming page or the reset prompt (shelf_toggle), and the lock keeps
-                 * every touch from the page itself: a fry born while locked, or a NEW TANK swapped in, left the CYD in
-                 * its case with no way on but the director. Here the hold undoes the lock itself, as the padlock would,
-                 * and the page answers. The finger still down is swallowed, or its lift would tap whatever it rests on */
-                touch_port_set_touch_lock(false); nvs_u8_put("tlock", 0); s_shelf_baked = false;
-                touch_port_swallow();
-                tank_emit(TEV_CONFIRM, -1);
-                ESP_LOGI(TAG, "touch lock: a finger held still over a setup page or the reset prompt - unlocked here, as MY TANKS cannot open over it");
-            } else shelf_toggle();
-        }
+        if (touch_port_take_lock_open() && !touch_port_shelf())   /* (this fork) a finger held still on the locked glass: MY TANKS,
+                                                                     where its padlock undoes the lock - BOOT twice without BOOT. The
+                                                                     hold comes only from the plain locked tank: over a setup page the
+                                                                     lock passes the page its taps (0.3.9.6), and the reset prompt
+                                                                     answers NO by itself (touch_port_ft3168.c) */
+            shelf_toggle();
 #endif
         { int v = 0, w = touch_port_take_setting(&v);                 /* the settings page */
           if (w == SET_TAP_TANKS) shelf_toggle();                    /* MY TANKS from the settings page (0.3.9.3): as BOOT twice */
@@ -1567,8 +1567,12 @@ static void tank_task(void *arg) {
             if (!s_loaded && setup_active()) { s_loaded = true; ESP_LOGI(TAG, "loading: a new tank's setup - no boot show after it"); }   /* (Strato 10-31:
                                                    a fresh tank named and set up, then the show, felt like a second start) */
             if (!page && !s_loaded && !setup_active() && !touch_port_confirm_up()) {
-                if (render_grass_loop_warming() || boot_show_on()) {   /* (THE BOOT SHOW plays on a moment past the loop: the fish come last) */
-                    if (!s_load_t0) { s_load_t0 = now; ESP_LOGI(TAG, "loading: %s (the grass loop's first bake)", s_load_swap ? "FILLING THE TANK" : "WAKING THE TANK"); }
+                /* THE BOOT SHOW plays on a moment past the loop: the fish come last. It begins on EVERY start by day, loop or no
+                   loop (0.3.9.6: 0.3.9.5 parked the loop and, unmeant, the show with it - this path began only while the loop warmed,
+                   so no start and no SWAP IN played it); its grass is drawn live then (boot_show.c) */
+                if (render_grass_loop_warming() || boot_show_on() || (!s_show_tried && !tank.night)) {
+                    if (!s_load_t0) { s_load_t0 = now; ESP_LOGI(TAG, "loading: %s (%s)", s_load_swap ? "FILLING THE TANK" : "WAKING THE TANK",
+                                                                render_grass_loop_is_on() ? "the grass loop's first bake" : "the boot show, the loop off"); }
                     loading = now - s_load_t0 < 15000000LL;
                     if (!loading) { s_loaded = true; ESP_LOGW(TAG, "loading: 15 s and the loop is not whole - the tank as it is"); }
                 } else if (s_load_t0) { s_loaded = true; ESP_LOGI(TAG, "loading: the tank is ready after %lld ms", (now - s_load_t0) / 1000); }
@@ -1578,7 +1582,7 @@ static void tank_task(void *arg) {
             else if (loading) {
                 int baked = render_grass_loop_bake_more(&tank, 2);
                 if (baked == 0 && (!boot_show_on() || render_grass_loop_warming())) render_tank(&tank, fb[cur], TANK_W);   /* (a tank frame until the loop can bake: its look settles) */
-                if (!s_show_tried && render_grass_loop_n() > 0) {     /* the loop has its memory: the show's comes from what is left */
+                if (!s_show_tried && boot_show_ready()) {     /* the loop has its memory (the show's comes from what is left), or there is none to wait for */
                     s_show_tried = true;
                     size_t before = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
                     if (boot_show_begin(&tank, s_load_swap, show_alloc, gl_free)) {
@@ -1649,16 +1653,10 @@ static void tank_task(void *arg) {
                 const notice_t *nt = notice_current();
                 if (nt) render_notice(&tank, fb[cur], TANK_W, nt->kind, nt->fish, nt->bit, 1.0f - nt->age / NOTICE_UP_S);
             }
-#if !CONFIG_POCKET_TANK_320X240
             if (touch_port_lock_hint() && !touch_port_shelf())   /* a touch on the locked glass: the way back */
                 render_touch_lock_hint(fb[cur], TANK_W);
-#endif
             if (setup_active())                  /* first-run setup: over the tank, under the prompt */
                 render_setup(&tank, fb[cur], TANK_W, tank.clock);
-#if CONFIG_POCKET_TANK_320X240
-            if (touch_port_lock_hint() && !touch_port_shelf())   /* (this fork) the way back, over a setup page too: there the */
-                render_touch_lock_hint(fb[cur], TANK_W);         /* 5 s hold is the only way on, and the page would hide the note */
-#endif
             if (touch_port_confirm_up())         /* reset prompt: over everything, fish still swim */
                 render_confirm_reset(fb[cur], TANK_W, touch_port_confirm_frac());
             if (loading) {                       /* (over everything: the whole frame) */
@@ -1668,16 +1666,20 @@ static void tank_task(void *arg) {
                     if (!s_show_whole_us && !render_grass_loop_warming()) s_show_whole_us = now - s_show_t0;
                     if (!boot_show_frame(&tank, fb[cur], (now - s_show_t0) / 1e6f, !render_grass_loop_warming(), ln ? (float)render_grass_loop_ready() / ln : 0)) {
                         boot_show_end(); s_loaded = true;   /* (its last frame is the tank's) */
-                        ESP_LOGI(TAG, "loading: the boot show is over, the tank is the tank after %lld ms (%d frames, %.1f fps; the loop whole %lld ms in)", (now - s_load_t0) / 1000,
-                                 s_show_frames, s_show_frames * 1e6f / (float)(now - s_show_t0 + 1), s_show_whole_us / 1000);
+                        if (render_grass_loop_is_on())
+                            ESP_LOGI(TAG, "loading: the boot show is over, the tank is the tank after %lld ms (%d frames, %.1f fps; the loop whole %lld ms in)", (now - s_load_t0) / 1000,
+                                     s_show_frames, s_show_frames * 1e6f / (float)(now - s_show_t0 + 1), s_show_whole_us / 1000);
+                        else ESP_LOGI(TAG, "loading: the boot show is over, the tank is the tank after %lld ms (%d frames, %.1f fps; the grass drawn live, no loop)", (now - s_load_t0) / 1000,
+                                      s_show_frames, s_show_frames * 1e6f / (float)(now - s_show_t0 + 1));
                     }
-                } else if (s_show_tried) render_loading(fb[cur], TANK_W, shelf_now()->name, tank.clock, s_load_swap ? NULL : "WAKING THE TANK");
-                else memset(fb[cur], 0, (size_t)TANK_W * TANK_H * sizeof(uint16_t));   /* (dark until the show starts) */
+                } else if (s_show_tried && render_grass_loop_warming()) render_loading(fb[cur], TANK_W, shelf_now()->name, tank.clock, s_load_swap ? NULL : "WAKING THE TANK");
+                else if (!s_show_tried) memset(fb[cur], 0, (size_t)TANK_W * TANK_H * sizeof(uint16_t));   /* (dark until the show starts; no show and no loop: the tank frame drawn above) */
                 if (USE_RESTORE) render_touch_all();
             }
             int64_t t1 = esp_timer_get_time();
             if (sel >= 0) { card_us += t1 - tc; card_frames++; }
-            render_unlock();                            /* THE SECOND CORE: the bake task has the flush and the sleep */
+            s_bake_deadline = esp_timer_get_time() + s_flush_avg_us - 500;   /* THE SECOND CORE: the bake task has the flush's window */
+            render_unlock();
             /* the next frame's scene prefetch starts BEFORE this frame's flush (2026-10-03): the copy
                into the idle framebuffer takes ~14 ms, and started after the flush it had only the
                tick and a 1 ms sleep to hide behind - the next frame waited ~9 ms for it. The flush
@@ -1707,6 +1709,8 @@ static void tank_task(void *arg) {
             else { display_port_flush(fb[cur]); flush_done(fb[cur], NULL); s_restore_pending[cur] = true; }
             touch_port_poll(&tank);
             pf_tail = esp_timer_get_time();
+            s_flush_avg_us += ((pf_tail - t1) - s_flush_avg_us) / 8;
+            s_bake_deadline = 0;
             render_us += t1 - t0; flush_us += pf_tail - t1; frames++; s_frame_last = fb[cur];
         }
         cur ^= 1;
@@ -1732,6 +1736,8 @@ static void tank_task(void *arg) {
                 { int ln, lb, lr; int64_t lus; render_grass_loop_prof(&ln, &lb, &lus, &lr);
                   int au, ac; render_grass_loop_arena(&au, &ac);
                   if (render_grass_loop_is_on()) ESP_LOGI("display", "grass loop: %d moments, band %d rows, diffs %d of %d KB, %d bakes%s", ln, lr, au, ac, lb, lb ? "" : " (all current)");
+                  { int why, nm = render_grass_loop_nomem(&why), tb, ts, tn; render_grass_loop_top(&tb, &ts, &tn);
+                    if (render_grass_loop_is_on() && !ln && nm) ESP_LOGW("display", "grass loop: no loop - the plan gave up for %d rows at %s (the top: bed %d, %d segments, %d beds; veg %.2f %.2f %.2f / %.2f)", nm, why == 1 ? "the tables" : why == 2 ? "the bake's buffers" : "the bands or the arena", tb, ts, tn, tank.veg_growth[0], tank.veg_growth[1], tank.veg_growth[2], tank.veg_growth[3]); }
                   if (lb) ESP_LOGI("display", "grass loop: a bake %.1f ms%s", lus / 1e3f / lb, s_bake_slices ? " (on core 1)" : "");
                   if (s_bake_slices) { ESP_LOGI("display", "grass loop: core 1 baked %d slices in %d takes (%.1f ms a take, waited %.1f ms a take, %d timeouts)", s_bake_slices, s_bake_takes,
                                                  s_bake_takes ? s_bake_us / 1e3f / s_bake_takes : 0, s_bake_takes ? s_bake_wait_us / 1e3f / s_bake_takes : 0, s_bake_timeouts);
@@ -1891,7 +1897,14 @@ void app_main(void) {
         gpio_config(&sense);
     }
     touch_port_init();
-    touch_port_set_touch_lock(nvs_u8("tlock", 0));       /* THE TOUCH LOCK: as the keeper left it */
+    {   /* THE TOUCH LOCK: as the keeper left it across the tank's own restarts (SWAP IN, an update, a wake from deep sleep) - and
+           OFF after any other start: a hard boot (PWR held 10 s, the battery run flat, the cable's reset, a crash). 0.3.9.6, Strato
+           11-01 after Migima's stuck welcome: "make sure a hard boot restores touch, i don't want this to lock up future devices" */
+        const esp_reset_reason_t why = esp_reset_reason();
+        int lk = nvs_u8("tlock", 0);
+        if (lk && why != ESP_RST_SW && why != ESP_RST_DEEPSLEEP) { nvs_u8_put("tlock", 0); lk = 0; ESP_LOGI(TAG, "touch lock: OFF - a hard boot (reset reason %d) unlocks the glass", (int)why); }
+        touch_port_set_touch_lock(lk);
+    }
     s_pmic = battery_port_init(board_i2c_bus());
     adv_load();                       /* the keeper's battery size and touch map (the hidden ADVANCED page, 0.3.9.2) */
     if (!board_has_expander()) {      /* not positively the 1.8: on the round board A3V3 feeds the ES7210 whole,

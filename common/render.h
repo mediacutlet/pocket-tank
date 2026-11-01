@@ -402,7 +402,9 @@ int      render_grass_loop_n(void);
 int      render_grass_loop_ready(void);       /* moments baked and current */
 void     render_grass_loop_lock(int moments);
 int      render_grass_loop_moment(void);      /* the last frame's moment (stepping), -1 before one */
-void     render_grass_loop_arena(int *used_kb, int *cap_kb);   /* the fine moments' differences: KB used of KB held */
+void     render_grass_loop_arena(int *used_kb, int *cap_kb);
+int      render_grass_loop_nomem(int *why);
+void     render_grass_loop_top(int *bed, int *segs, int *beds);   /* (the log) the tallest back frond the band is sized for: its bed, its segments, the beds counted */   /* rows the plan gave up on (0: it did not) and where (1 the tables, 2 the bake's buffers, 3 fewer than four bands or no arena) */   /* the fine moments' differences: KB used of KB held */
 bool     render_grass_loop_patching(void);   /* THE PATCH (0.3.9.4): the loop stale inside boxes only - served with them repainted, rebaked inside them */
 int      render_grass_loop_boxes(int box[][4]);   /* ... the boxes (x0, y0, x1, y1 each; up to 6) */
 bool     render_grass_loop_dump(int j, uint16_t *px, uint32_t *mask, int *y0, int *rows);   /* (the tests) moment j as the loop holds it: its rows and its grass mask */
@@ -812,6 +814,7 @@ void render_loading(uint16_t *fb, int stride, const char *name, float clock, con
 size_t render_depth_buf_bytes(void);
 void render_set_depth_buf(void *buf);
 void render_depth_off(bool off);
+void render_debug_front_keep_old(bool on);   /* (tests: --selftest-front-keep's control, the 0.3.9.5 restore) */
 bool render_piece_covers(int item, int x, int y);
 #define PC_SHADOW_NEAR 3                 /* a piece's CONTACT SHADOW: its body shifted this far down and right, hard ... */
 #define PC_SHADOW_FAR  6                 /* ... and this far, soft (render.c pc_contact_shadow; the fronds over the rim take it too, 0.3.9.4) */
@@ -821,7 +824,8 @@ void render_debug_rim_off(bool off);
 void render_debug_page_animals(bool show);   /* (tests: the creatures drawn under a placement page, which hides them since 0.3.9.4 - the layering checks) */
 void render_debug_grass_mask(bool on);  /* (tests: keep the frame's grass mask - the loop's, at its moment - for render_debug_grass_at) */
 bool render_debug_grass_at(int x, int y);
-#define DEP_ROOT_Y ((int)FISH_FLOOR_Y - 8)            /* (the grass comes back over an animal above this row only: below it the pebbles' edge and the roots) */   /* swim depth: the grass comes back over an animal down to this row; its feet and shadow stay over the roots */    /* (the A/B: a piece's contact shadow NOT falling on the fronds painted over its rim, as before 0.3.9.4) */   /* (tests: a piece drawn live on its page records its mask too, so render_piece_covers reads it) */
+void render_debug_root_cut(bool on);   /* (tests: the put-back over an animal cut at DEP_ROOT_Y as in 0.3.9.4 - the control that fails --selftest-depth) */
+#define DEP_ROOT_Y ((int)FISH_FLOOR_Y - 8)            /* the roots' first row (the pebbles' edge below it). 0.3.9.4 cut the grass's put-back over an animal here; since 0.3.9.6 the grass comes back on every row (a frond before a critter is before its feet too) - the tests still read it to count the roots apart */    /* (the A/B: a piece's contact shadow NOT falling on the fronds painted over its rim, as before 0.3.9.4) */   /* (tests: a piece drawn live on its page records its mask too, so render_piece_covers reads it) */
 int  render_debug_piece_grass(int item, int *bands, int *fines, void *(*alloc)(size_t), void (*release)(void *));   /* (director pkcheck) */   /* (tests: a piece's own body, as the last frame recorded it) */
 void render_depth_prof(int64_t *us, int *fish);   /* the depth's own work since the last call, and how many fish did it */   /* (the sim's grass tests: every fish IN FRONT) */
 void render_proto_veg_layer(int layer);   /* (exploration: the sim's --depth-shot) */
@@ -829,6 +833,7 @@ int  render_boot_pieces(const tank_t *t, int items[DECOR_SLOTS]);
 void render_boot_scene(const tank_t *t, uint16_t *dst, uint32_t hide);
 void render_boot_scene_done(const tank_t *t);   /* after the last render_boot_scene: the tank's own scene and masks back */
 const uint16_t *render_boot_grass(const tank_t *t, int *y0);
+bool render_boot_grass_live(const tank_t *t, uint16_t *dst, int *y0);   /* no loop: the same drawn live into dst from *y0 (0.3.9.6) */
 bool render_grass_loop_warming(void);
 int  render_grass_loop_bake_more(const tank_t *t, int n);
 void render_shelf_set_move(bool on, int i, const char *name);   /* MOVE (0.3.9.3): a tank in hand - the page's slot i lifted (-1: it is on another page) */

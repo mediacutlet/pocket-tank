@@ -6,7 +6,9 @@
  * shows a hole where another will stand - each dissolving in on an 8x8 Bayer grid in 2x2 cells with a bright edge as
  * it lands; the back grass grows up from the sand as fast as the loop really bakes; last the fish, the critters and
  * the bubbles. It is the tank's own pixels throughout: the scene (render_scene_buf), the empty tank baked once with the
- * pieces left out, and the loop's bands as they bake.
+ * pieces left out, and the loop's bands as they bake - or, with no loop (0.3.9.5 parked it, and the hotfix left nothing to
+ * begin the show from: no start and no SWAP IN played it; 0.3.9.6), the back grass drawn live into the show's own frame
+ * each frame (render_boot_grass_live), growing on the show's clock.
  *
  * Its memory: the empty tank (a frame) and a landing map, half a byte a pixel - which piece makes that pixel what the
  * scene has (0: the empty tank's own). Once the fish come the empty tank's frame holds the tank drawn without them. */
@@ -19,6 +21,7 @@
 #define BS_GAP_S     0.35f      /* ... the next this much later */
 #define BS_PIECE_S   0.80f      /* ... each takes this long */
 #define BS_GRASS_S   1.00f      /* the grass grows in this long at least (longer if the loop bakes slower) */
+#define BS_GRASS_LIVE_S 2.40f   /* ... and with no loop (drawn live, on the show's clock): about the loop's pace on the boards */
 #define BS_LIFE_S    0.70f      /* the fish, the critters, the bubbles */
 #define BS_GLOW      7          /* of 64: how near its landing a pixel still glows */
 #define BS_PIECES    14         /* (a nibble a pixel: 0 = the empty tank) */
@@ -57,6 +60,7 @@ static inline int prog64(float ts, float t0, float dur) {   /* 0..64+ */
 }
 
 bool boot_show_on(void) { return s.on; }
+bool boot_show_ready(void) { return render_scene_buf(NULL) && (render_grass_loop_n() > 0 || !render_grass_loop_warming()); }
 
 void boot_show_end(void) {
     if (s.release) { if (s.empty) s.release(s.empty); if (s.land) s.release(s.land); }
@@ -124,10 +128,14 @@ bool boot_show_frame(const tank_t *t, uint16_t *fb, float ts, bool loop_whole, f
     int pk[BS_PIECES + 1];
     for (int k = 1; k <= s.npieces; k++) pk[k] = prog64(ts, BS_PIECE0_S + (k - 1) * BS_GAP_S, BS_PIECE_S);
     const float tg0 = s.npieces ? BS_PIECE0_S + (s.npieces - 1) * BS_GAP_S + 0.2f : BS_WATER_S;
-    float gp = (ts - tg0) / BS_GRASS_S; if (gp > bake_frac) gp = bake_frac;
+    float grass_s = BS_GRASS_S;
+    if (!render_grass_loop_warming() && !render_grass_loop_n()) { bake_frac = 1.0f; grass_s = BS_GRASS_LIVE_S; }   /* (no loop baking: the show's clock alone) */
+    float gp = (ts - tg0) / grass_s; if (gp > bake_frac) gp = bake_frac;
     if (gp > s.grass_p) s.grass_p = gp;         /* (it only grows) */
     if (s.grass_p > 1.0f) s.grass_p = 1.0f;
     int y0 = TANK_H; const uint16_t *band = render_boot_grass(t, &y0);
+    if (!band && !render_grass_loop_warming() && render_boot_grass_live(t, fb, &y0)) band = fb + (size_t)y0 * TANK_W;   /* no loop to wait for: the grass
+                                                                                        drawn live into this frame, grown on the show's clock (read in place below) */
     const int gq = (int)(s.grass_p * 1024), span = (int)(TANK_H * 0.72f);
     const int line = s.fill ? TANK_H - TANK_H * (pw < 0 ? 0 : pw) / 64 : 0, light = pw < 0 ? 0 : pw * 4;
 
@@ -137,12 +145,14 @@ bool boot_show_frame(const tank_t *t, uint16_t *fb, float ts, bool loop_whole, f
         const int gneed = (TANK_H - 8 - y) * 1024 / span;      /* the grass: grows up from the sand */
         uint16_t *frow = fb + (size_t)y * TANK_W; const uint16_t *srow = sc + (size_t)y * TANK_W;
         if (pw >= 64 && (landed || !s.rowp[y])) {             /* a row that is the scene now, but for its grass */
-            memcpy(frow, srow, TANK_W * sizeof(uint16_t));
-            if (!brow || gq - gneed + 32 < 0) continue;          /* (no grass reaches it yet) */
-            for (int x = 0; x < TANK_W; x++) {
-                if (brow[x] == srow[x] || land_at(y * TANK_W + x)) continue;
-                int d = gq - gneed - (bayer(x, y) >> 1);
-                if (d >= 0) frow[x] = d < 24 ? glow(brow[x]) : brow[x];
+            if (!brow || gq - gneed + 32 < 0) { memcpy(frow, srow, TANK_W * sizeof(uint16_t)); continue; }   /* (no grass reaches it yet) */
+            for (int x = 0; x < TANK_W; x++) {                   /* (brow may be frow itself - the live grass: each pixel read before it is written) */
+                const uint16_t g = brow[x]; uint16_t v = srow[x];
+                if (g != v && !land_at(y * TANK_W + x)) {
+                    int d = gq - gneed - (bayer(x, y) >> 1);
+                    if (d >= 0) v = d < 24 ? glow(g) : g;
+                }
+                frow[x] = v;
             }
             continue;
         }

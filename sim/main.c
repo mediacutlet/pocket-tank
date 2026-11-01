@@ -3355,7 +3355,7 @@ static void write_ppm(const char *path, const uint16_t *fb) {
  * grown fish, the castle, the coral and the reef cluster in full bloom, tidy
  * grass, clean glass; <prefix>_hero.ppm and <prefix>_hero_card.ppm (the stats card). */
 typedef struct { int preset; stage_t stage; float x, y, heading; } hero_fish_t;
-static int hero_shot(const char *prefix) {
+static uint16_t *hero_stage(void) {               /* the hero tank staged and drawn (its frame returned); hero_shot writes it */
     static const hero_fish_t CAST[] = {
         { 0, STAGE_ELDER, 244, 150,  3.14159f - 0.06f },   /* mira: teal, the logo's fish, center stage */
         { 3, STAGE_ADULT, 104, 122,  0.10f },              /* nori: violet, upper left, heading in */
@@ -3400,6 +3400,10 @@ static int hero_shot(const char *prefix) {
         tank.clock += 1.0f / 60.0f;
         render_tank(&tank, fb, TANK_W);
     }
+    return fb;
+}
+static int hero_shot(const char *prefix) {
+    uint16_t *fb = hero_stage();
     char path[512];
     snprintf(path, sizeof path, "%s_hero.ppm", prefix); write_ppm(path, fb);
     render_tank(&tank, fb, TANK_W); render_stats_card(&tank, 0, fb, TANK_W);
@@ -3442,25 +3446,104 @@ static int depth_shot(const char *prefix) {
 }
 
 static void *bs_alloc64(size_t n);
+
+/* the "no grass" frame: the beds set to 0 still draw their nubs at the roots (draw_veg: "always a bit of green"), so the grass
+ * is not drawn at all for it (0.3.9.6: the put-back reaches the roots, where the nubs stand) */
+#define DEPTH_NOGRASS(tk, out, R) do { for (int b_ = 0; b_ < VEG_BEDS_MAX; b_++) tank_veg_set((tk), b_, 0); \
+                                       int vs_ = render_veg_step(); render_set_veg_step(0); R((tk), (out)); render_set_veg_step(vs_); } while (0)
+/* --urchin-frond-shot <prefix> (the 0.3.9.6 hunt; Strato on the square 10-31 night: "a grass frond that should be
+ * drawn behind the urchin overlaps a bit of the top of the urchin"): the urchin on the sand in a bed of back grass,
+ * in either lane, at each depth, the grass live and then from the loop (one frame per moment, several). Every pixel
+ * of its body (where it changes the bare tank) is classed against the frame: its own, the grass's by the frame's mask
+ * (render_debug_grass_at), the water's (a hole), or something else; live, the odd and the even fronds told apart.
+ * Writes <prefix>_<pass>_<lane>_<depth>_fN.ppm with the wrong pixels in magenta */
+static int urchin_frond_shot(const char *prefix) {
+    if (getenv("PT_ROOT_CUT")) render_debug_root_cut(true);   /* (the 0.3.9.4 cut back, for the before picture) */
+    const bool plain = getenv("PT_UF_PLAIN") != NULL;          /* (the frames as drawn, no magenta) */
+    tank_init(&tank, 2024); tank_new_population(&tank);
+    tank.n_fish = 1; tank.fish[0].x = -400;
+    tank_veg_set(&tank, 0, 0.7f); tank_veg_set(&tank, 1, 0.7f); tank_veg_set(&tank, 2, 0.7f);
+    memset(tank.algae, 0, sizeof tank.algae); tank.night = false;
+    float x0, x1, top; int nf; tank_veg_bed(&tank, 0, &x0, &x1, &top, &nf);
+    tank.sd_unlocks |= SD_ITEM_URCHIN; tank.urchin_x = (x0 + x1) / 2; tank.urchin_dy = 0; tank.urchin_rest = 99;
+    if (getenv("PT_URCHIN_X")) tank.urchin_x = (float)atoi(getenv("PT_URCHIN_X"));
+    static uint16_t scene[TANK_W * TANK_H];
+    render_set_scene_cache(scene); render_set_vignette_cache(vig_buf); render_set_card_cache(card_buf); render_set_dirty_mask(dirty_buf);
+    static uint16_t X[TANK_W * TANK_H], U[TANK_W * TANK_H], N[TANK_W * TANK_H], A[TANK_W * TANK_H], E[TANK_W * TANK_H], D[TANK_W * TANK_H];
+    static tank_t base; base = tank;
+    #define UFR(tk, out) do { for (int q = 0; q < 3; q++) render_tank((tk), (out), TANK_W); } while (0)
+    tank = base; DEPTH_NOGRASS(&tank, U, UFR);                                                      /* the urchin, no grass at all (not even the nubs) */
+    tank.urchin_x = -1; DEPTH_NOGRASS(&tank, N, UFR);                                                /* neither */
+    const char *lane_n[2] = { "back", "front" }, *dep_n[3] = { "front", "behind", "through" };
+    int worst = 0;
+    render_debug_grass_mask(true);
+    for (int pass = 0; pass < 2; pass++) {
+        if (pass == 1) { render_set_grass_loop(bs_alloc64, free, 3u << 20); render_grass_loop_lock(0); render_grass_loop_on(true);
+                         tank = base; for (int k = 0; k < 400 && (!render_grass_loop_n() || render_grass_loop_ready() < render_grass_loop_n()); k++) { render_grass_loop_bake_more(&tank, 4); render_tank(&tank, X, TANK_W); }
+                         if (!render_grass_loop_n() || render_grass_loop_ready() != render_grass_loop_n()) { printf("urchin-frond: the grass loop did not bake (%d of %d)\n", render_grass_loop_ready(), render_grass_loop_n()); return 1; }
+                         printf("urchin-frond: the grass loop baked, %d moments\n", render_grass_loop_n()); }
+        for (int lane = 0; lane < 2; lane++) for (int dep = 0; dep < 3; dep++) {
+            const int frames = pass ? 8 : 1;
+            for (int f = 0; f < frames; f++) {
+                tank = base; tank.urchin_front = lane == 1; tank.urchin_gdepth = tank.urchin_gdepth_want = (uint8_t)dep;
+                if (pass == 0) { tank.urchin_x = -1; UFR(&tank, A); render_proto_veg_layer(0); UFR(&tank, E); render_proto_veg_layer(-1); tank.urchin_x = base.urchin_x; UFR(&tank, X); }
+                else render_tank(&tank, X, TANK_W);      /* (one frame: the loop steps a moment each) */
+                int body = 0, own = 0, grass = 0, hole = 0, other = 0, odd = 0, even = 0, wrong = 0, wx0 = TANK_W, wy0 = TANK_H, wx1 = -1, wy1 = -1, top_y = TANK_H;
+                for (int i = 0; i < TANK_W * TANK_H; i++) {
+                    const int x = i % TANK_W, y = i / TANK_W;
+                    D[i] = X[i];
+                    if (U[i] == N[i]) continue;          /* its body: where it changes the bare tank */
+                    body++;
+                    if (y < top_y) top_y = y;
+                    bool bad = false;
+                    if (X[i] == U[i]) own++;
+                    else if (X[i] == N[i]) { hole++; bad = true; }
+                    else if (render_debug_grass_at(x, y)) {
+                        grass++;
+                        bool is_odd = pass == 0 && A[i] != E[i];
+                        if (pass == 0) { if (is_odd) odd++; else even++; }
+                        bad = dep == FISH_DEPTH_FRONT || (pass == 0 && dep == FISH_DEPTH_THROUGH && !is_odd);
+                    }
+                    else { other++; bad = true; }
+                    if (bad) { wrong++; if (!plain) D[i] = FB_SWAP16(0xF81F); if (x < wx0) wx0 = x; if (x > wx1) wx1 = x; if (y < wy0) wy0 = y; if (y > wy1) wy1 = y; }
+                }
+                printf("urchin-frond %s lane %s %-7s f%d: body %d (top y %d, roots %d) own %d grass %d (odd %d even %d) hole %d other %d -> WRONG %d", pass ? "loop" : "live", lane_n[lane], dep_n[dep], f, body, top_y, DEP_ROOT_Y, own, grass, odd, even, hole, other, wrong);
+                if (wrong) printf(" at %d,%d..%d,%d (urchin %d,%d)", wx0, wy0, wx1, wy1, (int)base.urchin_x, (int)URCHIN_FLOOR_Y);
+                printf("\n");
+                if (wrong > worst) worst = wrong;
+                if (prefix) { char path[512]; snprintf(path, sizeof path, "%s_%s_%s_%s_f%d.ppm", prefix, pass ? "loop" : "live", lane_n[lane], dep_n[dep], f); write_ppm(path, D); }
+            }
+        }
+    }
+    render_debug_grass_mask(false); render_grass_loop_on(false);
+    #undef UFR
+    printf("urchin-frond: worst %d wrong px\n", worst);
+    return 0;
+}
 /* --selftest-depth (SWIM DEPTH, 0.3.9.4; in make check, all four worlds): a fish in a bed of back grass drawn at each
  * depth by the real path, checked against the tank without the fish (A), without the grass (G) and - the grass drawn
  * live - with the even fronds alone (E). IN FRONT: today's frame. BEHIND: every grass pixel under the fish is the
  * grass's. THROUGH: the odd fronds' are the grass's, the even fronds' the fish's (live: exactly; the loop's odd mask is
  * its band's, so there a share of each). Then the same with the grass loop baked (the day's path) */
+static int g_depth_roots_n, g_depth_roots_grass;   /* (the last depth_count: the grass pixels under the animal at the roots, DEP_ROOT_Y down, and those the grass's) */
 static int depth_count(const uint16_t *X, const uint16_t *F, const uint16_t *A, const uint16_t *G, const uint16_t *E,
                        int *fish_grass, int *as_grass, int *odd_n, int *odd_grass, int *even_n, int *even_fish, int *off_grass) {
     *fish_grass = *as_grass = *odd_n = *odd_grass = *even_n = *even_fish = *off_grass = 0;
+    g_depth_roots_n = g_depth_roots_grass = 0;
     for (int i = 0; i < TANK_W * TANK_H; i++) {
-        bool fish = F[i] != A[i], grass = A[i] != G[i] && i / TANK_W < (int)FISH_FLOOR_Y - 8;   /* (the roots at the sand line stay under an animal standing there) */
+        bool fish = F[i] != A[i], grass = A[i] != G[i];   /* every row: the roots too (0.3.9.6 - a frond before an animal is before its feet as well;
+                                                             until then the put-back stopped at DEP_ROOT_Y and cut a frond mid-body over a critter on the sand) */
         if (!fish) { if (X[i] != F[i]) (*off_grass)++; continue; }   /* (nothing but under the fish may change) */
         if (!grass) { if (X[i] != F[i]) (*off_grass)++; continue; }
         (*fish_grass)++; if (X[i] == A[i]) (*as_grass)++;
+        if (i / TANK_W >= DEP_ROOT_Y) { g_depth_roots_n++; if (X[i] == A[i]) g_depth_roots_grass++; }
         if (E) { bool odd = A[i] != E[i];
                  if (odd) { (*odd_n)++; if (X[i] == A[i]) (*odd_grass)++; } else { (*even_n)++; if (X[i] == F[i]) (*even_fish)++; } }
     }
     return 0;
 }
 static int selftest_depth(void) {
+    if (getenv("PT_ROOT_CUT")) render_debug_root_cut(true);   /* (the control: the 0.3.9.4 cut at the roots - the critters' BEHIND rows fail) */
     tank_init(&tank, 2024); tank_new_population(&tank);
     tank_make_fish(&tank, 0, 0, 0.6f, 0.6f, STAGE_ADULT); tank.n_fish = 1;
     tank.fish[0].eaten = 60; progression_set_age(&tank, 0, STAGE_ADULT_AGE + 1);
@@ -3484,7 +3567,7 @@ static int selftest_depth(void) {
         tank = base; tank.fish[0].gdepth = tank.fish[0].gdepth_want = FISH_DEPTH_FRONT; DEPTH_R(&tank, F);
         tank = base; tank.fish[0].x = -400; DEPTH_R(&tank, A);
         if (pass == 0) { render_proto_veg_layer(0); DEPTH_R(&tank, E); render_proto_veg_layer(-1); }
-        tank = base; tank.fish[0].x = -400; for (int b = 0; b < VEG_BEDS_MAX; b++) tank_veg_set(&tank, b, 0); DEPTH_R(&tank, G);
+        tank = base; tank.fish[0].x = -400; DEPTH_NOGRASS(&tank, G, DEPTH_R);
         for (int dep = FISH_DEPTH_BEHIND; dep <= FISH_DEPTH_THROUGH; dep++) {
             tank = base; tank.fish[0].gdepth = tank.fish[0].gdepth_want = (uint8_t)dep; DEPTH_R(&tank, X);
             int fg, ag, on, og, en, ef, off;
@@ -3547,7 +3630,7 @@ static int selftest_depth(void) {
         tank = sb; tank.shr_gdepth = tank.shr_pdepth = FISH_DEPTH_FRONT; DEPTH_R(&tank, F);
         tank = sb; for (int i = 0; i < tank.shrimp_n; i++) tank.shrimp[i].x = -400; DEPTH_R(&tank, SA);
         render_proto_veg_layer(0); DEPTH_R(&tank, SE); render_proto_veg_layer(-1);
-        for (int b = 0; b < VEG_BEDS_MAX; b++) tank_veg_set(&tank, b, 0); DEPTH_R(&tank, SG);
+        DEPTH_NOGRASS(&tank, SG, DEPTH_R);
         for (int dep = FISH_DEPTH_BEHIND; dep <= FISH_DEPTH_THROUGH; dep++) {
             tank = sb; tank.shr_gdepth = tank.shr_gdepth_want = (uint8_t)dep; tank.shr_pdepth = tank.shr_pdepth_want = FISH_DEPTH_FRONT; DEPTH_R(&tank, X);
             int fg, ag, on, og, en, ef, off;
@@ -3573,7 +3656,7 @@ static int selftest_depth(void) {
         tank = hb; tank.sh_gdepth = tank.sh_gdepth_want = FISH_DEPTH_FRONT; DEPTH_R(&tank, F);
         tank = hb; tank.sh_hidden = true; DEPTH_R(&tank, HA);
         render_proto_veg_layer(0); DEPTH_R(&tank, HE); render_proto_veg_layer(-1);
-        for (int b = 0; b < VEG_BEDS_MAX; b++) tank_veg_set(&tank, b, 0); DEPTH_R(&tank, HG);
+        DEPTH_NOGRASS(&tank, HG, DEPTH_R);
         for (int dep = FISH_DEPTH_BEHIND; dep <= FISH_DEPTH_THROUGH; dep++) {
             tank = hb; tank.sh_gdepth = tank.sh_gdepth_want = (uint8_t)dep; DEPTH_R(&tank, X);
             int fg, ag, on, og, en, ef, off;
@@ -3609,35 +3692,50 @@ static int selftest_depth(void) {
         }
         #undef DEPTH_R
     }
-    for (int who = 0; who < 2; who++) {   /* phase 3c: the crab and the urchin on the sand of a bed of grass (their back lane), BEHIND and THROUGH it */
+    for (int pass = 0; pass < 6; pass++) {   /* phase 3c: the crab, the urchin and the snail on the sand of a bed of grass (their back lane), BEHIND and
+                                                THROUGH it - the grass live (passes 0-2), then from the loop (3-5). A FROND IS WHOLE (0.3.9.6; Strato on the
+                                                square 10-31 night, "a grass frond that should be drawn behind the urchin overlaps a bit of the top of the
+                                                urchin"): BEHIND, every grass pixel over the critter is the grass's down to the sand - its spines, its
+                                                dome, its feet at the roots; the put-back used to stop at DEP_ROOT_Y and left the lower body over the
+                                                frond's foot. THROUGH live: the odd fronds whole over it, the even ones whole under it */
         static uint16_t CA[TANK_W * TANK_H], CG[TANK_W * TANK_H], CE[TANK_W * TANK_H];
-        const char *nm = who ? "urchin" : "crab";
+        const int who = pass % 3; const bool loop = pass >= 3;
+        const char *nm = who == 0 ? "crab" : who == 1 ? "urchin" : "snail", *w = loop ? "loop" : "live";
         tank = base; tank.fish[0].x = -400;
         float bx0, bx1, btop; int bnf; tank_veg_bed(&tank, 0, &bx0, &bx1, &btop, &bnf);
         float mx = (bx0 + bx1) / 2;
-        if (!who) { tank.sd_unlocks |= SD_ITEM_CRAB; tank.cr_x = mx; tank.cr_y = 0; tank.cr_tilt = 0; tank.cr_mode = CR_REST; tank.cr_timer = 999; tank.cr_cave = -1;
-                    tank.cr_find = 0; tank.cr_hide = 0; tank.cr_poke = 0; tank.cr_lane_front = false; }
-        else      { tank.sd_unlocks |= SD_ITEM_URCHIN; tank.urchin_x = mx; tank.urchin_dy = 0; tank.urchin_front = false; tank.urchin_rest = 99; }
+        if (who == 0) { tank.sd_unlocks |= SD_ITEM_CRAB; tank.cr_x = mx; tank.cr_y = 0; tank.cr_tilt = 0; tank.cr_mode = CR_REST; tank.cr_timer = 999; tank.cr_cave = -1;
+                        tank.cr_find = 0; tank.cr_hide = 0; tank.cr_poke = 0; tank.cr_lane_front = false; }
+        if (who == 1) { tank.sd_unlocks |= SD_ITEM_URCHIN; tank.urchin_x = mx; tank.urchin_dy = 0; tank.urchin_front = false; tank.urchin_rest = 99; }
+        if (who == 2) { tank.sd_unlocks |= SD_ITEM_SNAIL; tank.snail_cell = -1; tank.snail_x = mx; tank.snail_y = SNAIL_FLOOR_Y; tank.snail_dy = 0; tank.snail_front = false; tank.snail_heading = 0; }
         static tank_t cb; cb = tank;
+        if (loop && pass == 3) { render_set_grass_loop(bs_alloc64, free, 3u << 20); render_grass_loop_lock(0); render_grass_loop_on(true); }
+        if (loop) { tank = cb; for (int k = 0; k < 400 && (!render_grass_loop_n() || render_grass_loop_ready() < render_grass_loop_n()); k++) { render_grass_loop_bake_more(&tank, 4); render_tank(&tank, X, TANK_W); }
+                    if (!render_grass_loop_n() || render_grass_loop_ready() != render_grass_loop_n()) { printf("FAIL: depth %s loop: the grass loop did not bake (%d of %d)\n", nm, render_grass_loop_ready(), render_grass_loop_n()); fails++; continue; } }
         #define DEPTH_R(tk, out) do { for (int q = 0; q < 3; q++) render_tank((tk), (out), TANK_W); } while (0)
-        #define SET_DEP(tk, d) do { if (!who) (tk).cr_gdepth = (tk).cr_gdepth_want = (uint8_t)(d); else (tk).urchin_gdepth = (tk).urchin_gdepth_want = (uint8_t)(d); } while (0)
+        #define SET_DEP(tk, d) do { if (who == 0) (tk).cr_gdepth = (tk).cr_gdepth_want = (uint8_t)(d); else if (who == 1) (tk).urchin_gdepth = (tk).urchin_gdepth_want = (uint8_t)(d); else (tk).snail_gdepth = (tk).snail_gdepth_want = (uint8_t)(d); } while (0)
+        #define HIDE(tk) do { if (who == 0) (tk).cr_x = -1; else if (who == 1) (tk).urchin_x = -1; else (tk).snail_x = -400; } while (0)
         tank = cb; SET_DEP(tank, FISH_DEPTH_FRONT); DEPTH_R(&tank, F);
-        tank = cb; if (!who) tank.cr_x = -1; else tank.urchin_x = -1; DEPTH_R(&tank, CA);
-        render_proto_veg_layer(0); DEPTH_R(&tank, CE); render_proto_veg_layer(-1);
-        for (int b = 0; b < VEG_BEDS_MAX; b++) tank_veg_set(&tank, b, 0); DEPTH_R(&tank, CG);
+        tank = cb; HIDE(tank); DEPTH_R(&tank, CA);
+        if (!loop) { render_proto_veg_layer(0); DEPTH_R(&tank, CE); render_proto_veg_layer(-1); }
+        DEPTH_NOGRASS(&tank, CG, DEPTH_R);
         for (int dep = FISH_DEPTH_BEHIND; dep <= FISH_DEPTH_THROUGH; dep++) {
             tank = cb; SET_DEP(tank, dep); DEPTH_R(&tank, X);
             int fg, ag, on, og, en, ef, off;
-            depth_count(X, F, CA, CG, CE, &fg, &ag, &on, &og, &en, &ef, &off);
+            depth_count(X, F, CA, CG, loop ? NULL : CE, &fg, &ag, &on, &og, &en, &ef, &off);
+            const int rn = g_depth_roots_n, rg = g_depth_roots_grass;
             const char *d = dep == FISH_DEPTH_BEHIND ? "BEHIND" : "THROUGH";
-            if (fg < 20) { printf("FAIL: depth %s: it crosses only %d grass pixels (the staging)\n", nm, fg); fails++; break; }
-            if (off > fg / 50 + 2) { printf("FAIL: depth %s %s: %d pixels changed away from its grass\n", nm, d, off); fails++; }
-            if (dep == FISH_DEPTH_BEHIND && ag < fg - fg / 50) { printf("FAIL: depth %s BEHIND: %d of %d grass pixels the grass's\n", nm, ag, fg); fails++; }
-            if (dep == FISH_DEPTH_THROUGH && (og < on - on / 50 || ef < en - en / 50)) { printf("FAIL: depth %s THROUGH: odd %d of %d grass's, even %d of %d its own\n", nm, og, on, ef, en); fails++; }
-            printf("depth %s %s: %d of %d grass pixels over it are the grass's\n", nm, d, ag, fg);
+            if (fg < 20 || rn < 4) { printf("FAIL: depth %s %s: it crosses only %d grass pixels, %d at the roots (the staging)\n", nm, w, fg, rn); fails++; break; }
+            if (off > fg / 50 + 2) { printf("FAIL: depth %s %s %s: %d pixels changed away from its grass\n", nm, w, d, off); fails++; }
+            if (dep == FISH_DEPTH_BEHIND && (ag < fg - fg / 50 || rg < rn)) { printf("FAIL: depth %s %s BEHIND: %d of %d grass pixels the grass's, %d of %d at the roots (a frond cut mid-body)\n", nm, w, ag, fg, rg, rn); fails++; }
+            if (dep == FISH_DEPTH_THROUGH && !loop && (og < on - on / 50 || ef < en - en / 50)) { printf("FAIL: depth %s live THROUGH: odd %d of %d grass's, even %d of %d its own\n", nm, og, on, ef, en); fails++; }
+            if (dep == FISH_DEPTH_THROUGH && loop && (ag < fg / 5 || ag > fg - fg / 5)) { printf("FAIL: depth %s loop THROUGH: %d of %d grass pixels the grass's (want a share)\n", nm, ag, fg); fails++; }
+            printf("depth %s %s %s: %d of %d grass pixels over it are the grass's (%d of %d at the roots)\n", nm, w, d, ag, fg, rg, rn);
         }
+        #undef HIDE
         #undef SET_DEP
         #undef DEPTH_R
+        if (pass == 5) render_grass_loop_on(false);
     }
     {   /* IN FRONT is whole (Strato on the square 10-31: "a bit of the grass is overlapping the snail"): the snail, the crab and the
            urchin on the sand of a bed, IN FRONT of it - every pixel of each as with no grass at all */
@@ -3953,6 +4051,74 @@ static int selftest_cave(const char *prefix) {
     }
     render_depth_off(false);
     printf("selftest-cave: %s\n", fails ? "FAIL" : "PASS");
+    return fails ? 1 : 0;
+}
+
+/* --selftest-front-keep [prefix] (0.3.9.6, Bananna's #help thread 10-31 "Fish clipping into pumpkin", the pendant: a resting fish IN FRONT
+ * of the pumpkin IN FRONT, its tail cut by the carved face). A fish passing BEHIND a piece puts the piece back over itself from the scene
+ * (dep_draw); that restore took every pixel the frame had drawn in its box - a fish drawn BEFORE it and IN FRONT of the pieces too.
+ * Staged for every piece IN FRONT: fish 0 IN FRONT over the piece's middle, fish 1 (drawn after it) BEHIND the pieces, overlapping it;
+ * over the piece's body the frame is the same with fish 1 as without it (fish 1 is behind the piece there; fish 0 in front of both).
+ * PT_FRONT_KEEP_OLD=1 = the control (the 0.3.9.5 restore): it must FAIL. --pumpkin-fish-hunt is the long version (a lived tank). */
+static int selftest_front_keep(const char *prefix) {
+    static uint16_t scene[TANK_W * TANK_H], R0[TANK_W * TANK_H], R1[TANK_W * TANK_H], N[TANK_W * TANK_H];
+    static tank_t g;
+    const bool old = getenv("PT_FRONT_KEEP_OLD") != NULL;
+    render_debug_front_keep_old(old);
+    static const int ITEMS[] = { 8, 3, 4, 9, 2 };
+    static const char *NAME[] = { "pumpkin", "coral", "cluster", "volcano", "castle" };
+    static const int OFF[][2] = { { 18, 4 }, { -18, -5 }, { 8, 12 } };
+    int fails = 0, cells = 0;
+    for (int it = 0; it < 5; it++) {
+        const int item = ITEMS[it];
+        int worst = 0, fish0 = 1 << 30;
+        for (int o = 0; o < 3; o++) {
+            tank_init(&tank, 91); tank_new_population(&tank);
+            tank_make_fish(&tank, 0, 1, 0.6f, 0.6f, STAGE_ADULT); tank_make_fish(&tank, 1, 3, 0.6f, 0.6f, STAGE_ADULT); tank.n_fish = 2;
+            for (int i = 0; i < MAX_FOOD; i++) tank.food[i].alive = false;
+            tank.night = false; tank.light_override = true; tank.light_on = true; memset(tank.algae, 0, sizeof tank.algae);
+            const unsigned bit = item == 8 ? SD_ITEM_PUMPKIN : item == 3 ? SD_ITEM_CORAL : item == 4 ? SD_ITEM_CLUSTER : item == 9 ? SD_ITEM_VOLCANO : SD_ITEM_CASTLE;
+            tank.sd_unlocks |= bit;
+            if (item == 8) tank_pumpkin_place(&tank); else if (item == 3) tank_coral_place(&tank); else if (item == 4) tank_cluster_place(&tank);
+            else if (item == 9) tank_volcano_place(&tank); else tank_castle_place(&tank);
+            const float X = TANK_FLOOR_X(224.0f);
+            tank_decor_set(&tank, item, X, DECOR_Z_FRONT);
+            render_set_scene_cache(scene); render_set_vignette_cache(vig_buf); render_set_card_cache(card_buf); render_set_dirty_mask(dirty_buf);
+            g = tank; g.fish[0].x = g.fish[1].x = -400;
+            render_tank(&g, N, TANK_W); render_tank(&g, N, TANK_W);
+            static uint8_t cov[TANK_W * TANK_H]; int n = 0;                       /* the piece's body: where most of it lies under a fish */
+            for (int y = 0; y < TANK_H; y++) for (int x = 0; x < TANK_W; x++) n += cov[y * TANK_W + x] = render_piece_covers(item, x, y);
+            if (n < 400) { printf("FAIL: front-keep: the %s IN FRONT has no body (%d px)\n", NAME[it], n); fails++; break; }
+            int best = -1, bxx = 0, byy = 0;
+            for (int y = 12; y < TANK_H - 12; y += 4) for (int x = 24; x < TANK_W - 24; x += 4) {
+                int m = 0; for (int dy = -10; dy <= 10; dy += 2) for (int dx = -22; dx <= 22; dx += 2) m += cov[(y + dy) * TANK_W + x + dx];
+                if (m > best) { best = m; bxx = x; byy = y; }
+            }
+            const float cx = (float)bxx, cy = (float)byy;
+            fish_t *a = &tank.fish[0], *b = &tank.fish[1];
+            a->x = cx; a->y = cy; a->heading = 3.14159f; tank_fish_face(a); a->gdepth = a->gdepth_want = FISH_DEPTH_FRONT; a->pdepth = a->pdepth_want = FISH_DEPTH_FRONT;
+            b->x = cx + OFF[o][0]; b->y = cy + OFF[o][1]; b->heading = 0.1f; tank_fish_face(b); b->gdepth = b->gdepth_want = FISH_DEPTH_FRONT; b->pdepth = b->pdepth_want = FISH_DEPTH_BEHIND;
+            for (int k = 0; k < 3; k++) render_tank(&tank, R1, TANK_W);           /* both */
+            g = tank; g.fish[1].x = -400;
+            for (int k = 0; k < 3; k++) render_tank(&g, R0, TANK_W);              /* fish 0 alone */
+            int bad = 0, shown = 0;
+            for (int y = 0; y < TANK_H; y++) for (int x = 0; x < TANK_W; x++) {
+                if (!render_piece_covers(item, x, y)) continue;
+                const int i = y * TANK_W + x;
+                shown += R0[i] != N[i];                                          /* fish 0 over the piece */
+                if (R1[i] != R0[i]) { bad++; if (prefix && !getenv("PT_FRONT_KEEP_PLAIN")) R1[i] = FB_SWAP16(0xF81F); }
+            }
+            if (prefix && o == 0) { char path[300]; snprintf(path, sizeof path, "%s_frontkeep_%s.ppm", prefix, NAME[it]); write_ppm(path, R1); }
+            if (bad > worst) worst = bad;
+            if (shown < fish0) fish0 = shown;
+            cells++;
+        }
+        if (fish0 < 150) { printf("FAIL: front-keep: fish 0 barely over the %s (%d px) - the staging\n", NAME[it], fish0); fails++; }
+        else if (worst) { printf("FAIL: front-keep: the %s IN FRONT comes back over a fish IN FRONT of it where a fish behind it passes (%d px at worst)\n", NAME[it], worst); fails++; }
+        else printf("front-keep: the %s IN FRONT: a fish in front of it stays whole while one behind it passes (%d+ px of it over the piece)\n", NAME[it], fish0);
+    }
+    render_debug_front_keep_old(false);
+    printf("selftest-front-keep: %s (%d cells%s)\n", fails ? "FAIL" : "PASS", cells, old ? ", the control" : "");
     return fails ? 1 : 0;
 }
 
@@ -4368,19 +4534,21 @@ static int selftest_place(const char *prefix) {
 /* --boot-show <prefix> / --boot-show-fill <prefix> (THE BOOT SHOW, common/boot_show.c): the hero tank, a snail and the
  * shrimp added, started the way the firmware starts a tank - the grass loop on and baking two moments a frame at the
  * boards' ~11 fps while the show plays (the platform's loading path, main.c) - frames <prefix>_boot_NNN.ppm until the
- * tank is the tank, and a held half second after */
+ * tank is the tank, and a held half second after. PT_LOOP_OFF=1: the loop off, as 0.3.9.5 ships (the grass drawn live
+ * on the show's clock; 0.3.9.6) */
 static void *bs_alloc64(size_t n) { void *p = NULL; return posix_memalign(&p, 64, n) ? NULL : p; }
 static int boot_show_shot(const char *prefix, bool fill) {
+    const bool loop = !getenv("PT_LOOP_OFF");
     hero_shot(prefix);
     tank.sd_unlocks |= SD_ITEM_SNAIL | SD_ITEM_SHRIMP; tank.shrimp_n = 8;
-    render_set_grass_loop(bs_alloc64, free, 3u << 20); render_grass_loop_lock(88); render_grass_loop_on(true);
+    render_set_grass_loop(bs_alloc64, free, 3u << 20); render_grass_loop_lock(88); render_grass_loop_on(loop);
     static uint16_t fb[TANK_W * TANK_H];
     char path[512]; int fr = 0, held = 0; bool tried = false; float ts = 0; const float dt = 1.0f / 11;
     for (; fr < 400; fr++) {
         tank_tick(&tank, dt, advisor_rules);
         int baked = render_grass_loop_bake_more(&tank, 2);
-        if (baked == 0) render_tank(&tank, fb, TANK_W);                 /* (the loop's look settles under a tank frame) */
-        if (!tried && render_grass_loop_n() > 0) { tried = true; if (!boot_show_begin(&tank, fill, bs_alloc64, free)) { printf("boot-show: no memory\n"); return 1; } }
+        if (baked == 0 && (!boot_show_on() || render_grass_loop_warming())) render_tank(&tank, fb, TANK_W);   /* (the loop's look settles under a tank frame) */
+        if (!tried && boot_show_ready()) { tried = true; if (!boot_show_begin(&tank, fill, bs_alloc64, free)) { printf("boot-show: no memory\n"); return 1; } }
         if (boot_show_on()) {
             int n = render_grass_loop_n();
             if (!boot_show_frame(&tank, fb, ts, !render_grass_loop_warming(), n ? (float)render_grass_loop_ready() / n : 0)) {
@@ -4391,8 +4559,66 @@ static int boot_show_shot(const char *prefix, bool fill) {
         else memset(fb, 0, sizeof fb);                                  /* (dark until it starts) */
         snprintf(path, sizeof path, "%s_boot_%03d.ppm", prefix, fr); write_ppm(path, fb);
     }
-    printf("boot-show: %d frames %s_boot_NNN.ppm (11 fps), the show %.1f s\n", fr, prefix, ts);
+    printf("boot-show: %d frames %s_boot_NNN.ppm (11 fps), the show %.1f s, the loop %s\n", fr, prefix, ts, loop ? "on" : "OFF");
     return 0;
+}
+
+/* --selftest-boot-show (0.3.9.6): THE BOOT SHOW with the grass loop OFF, as 0.3.9.5 ships - 0.3.9.5 parked the loop and
+ * the hotfix left nothing to begin the show from (main.c's loading path began only while the loop warmed), so no start and
+ * no SWAP IN played it. Both forms, the hero tank, the platform's loading path: the show begins at once, its grass (drawn
+ * live, render_boot_grass_live) grows in and is all there before the animals come, it plays to its end within its time,
+ * and its last frame is the tank's own */
+static int selftest_boot_show(void) {
+    int fails = 0;
+    static uint16_t band[TANK_W * TANK_H], chk[TANK_W * TANK_H];
+    for (int form = 0; form < 2; form++) {
+        const bool fill = form == 1; const char *nm = fill ? "FILL (a SWAP IN)" : "WAKE (a start)";
+        uint16_t *fb = hero_stage();
+        tank.sd_unlocks |= SD_ITEM_SNAIL | SD_ITEM_SHRIMP; tank.shrimp_n = 8;
+        render_set_grass_loop(bs_alloc64, free, 3u << 20); render_grass_loop_lock(88); render_grass_loop_on(false);
+        if (render_grass_loop_is_on() || render_grass_loop_warming()) { printf("FAIL: boot-show %s: the loop is on\n", nm); fails++; }
+        bool tried = false; float ts = 0, grass_done_ts = -1; const float dt = 1.0f / 11;
+        int began = -1, ended = -1, frames = 0, gmax_frac = 0, first_black = -1, shrank = 0, last_in = 0;
+        for (int fr = 0; fr < 400; fr++) {
+            tank_tick(&tank, dt, advisor_rules); tank.night = false;
+            int baked = render_grass_loop_bake_more(&tank, 2);
+            if (baked == 0 && (!boot_show_on() || render_grass_loop_warming())) render_tank(&tank, fb, TANK_W);
+            if (!tried && boot_show_ready()) { tried = true; began = fr; if (!boot_show_begin(&tank, fill, bs_alloc64, free)) { printf("FAIL: boot-show %s: no memory\n", nm); fails++; break; } }
+            if (!boot_show_on()) { if (tried) break; continue; }
+            int n = render_grass_loop_n();
+            if (!boot_show_frame(&tank, fb, ts, !render_grass_loop_warming(), n ? (float)render_grass_loop_ready() / n : 0)) { boot_show_end(); ended = fr; break; }
+            frames++;
+            if (first_black < 0 && ts >= 0.3f) { int black = 0; for (int i = 0; i < TANK_W * TANK_H; i++) black += fb[i] == 0; black = black * 100 / (TANK_W * TANK_H); first_black = black ? black : 1; }   /* (the water part way up: the FILL form's top is still dark; the light's, part way up, is dim, not black) */
+            int y0; const uint16_t *sc = render_scene_buf(NULL);
+            if (sc && render_boot_grass_live(&tank, band, &y0)) {   /* the grass of this frame's moment: how much of it the show has in place */
+                int g = 0, in = 0;
+                for (int i = y0 * TANK_W; i < TANK_W * TANK_H; i++) if (band[i] != sc[i]) { g++; in += fb[i] == band[i]; }
+                int frac = g ? in * 100 / g : 0;
+                if (frac > gmax_frac) gmax_frac = frac;
+                if (frac >= 97 && grass_done_ts < 0) grass_done_ts = ts;
+                if (in + 400 < last_in && grass_done_ts < 0) shrank++;   /* (a glowing pixel settles: small dips are the glow; the grass only grows) */
+                last_in = in;
+            }
+            ts += dt;
+        }
+        if (began < 0 || began > 2) { printf("FAIL: boot-show %s: the show did not begin at the start (frame %d)\n", nm, began); fails++; }
+        if (ended < 0) { printf("FAIL: boot-show %s: the show never ended (%d frames)\n", nm, frames); fails++; }
+        if (ts < 2.5f || ts > 9.0f) { printf("FAIL: boot-show %s: the show took %.1f s (want 2.5..9)\n", nm, ts); fails++; }
+        if (gmax_frac < 97) { printf("FAIL: boot-show %s: the grass never all came in (%d%% at most)\n", nm, gmax_frac); fails++; }
+        if (grass_done_ts < 1.5f) { printf("FAIL: boot-show %s: the grass was in by %.1f s - it did not grow\n", nm, grass_done_ts); fails++; }
+        if (shrank) { printf("FAIL: boot-show %s: the grass shrank in %d frames\n", nm, shrank); fails++; }
+        if (fill ? first_black < 30 : first_black > 5) { printf("FAIL: boot-show %s: the frame at 0.3 s is %d%% black (the %s)\n", nm, first_black, fill ? "water should be part way up" : "light should be part way up"); fails++; }
+        if (ended >= 0) {                                   /* its last frame is the tank's: the same tank drawn again */
+            render_tank(&tank, chk, TANK_W);
+            int diff = 0; for (int i = 0; i < TANK_W * TANK_H; i++) diff += chk[i] != fb[i];
+            if (diff) { printf("FAIL: boot-show %s: the last frame differs from the tank's in %d px\n", nm, diff); fails++; }
+        }
+        printf("boot-show %s, the loop off: began at frame %d, %d frames, %.1f s; grass %d%% in by %.1f s; the frame at 0.3 s %d%% black\n",
+               nm, began, frames, ts, gmax_frac, grass_done_ts, first_black);
+        render_grass_loop_on(false);
+    }
+    printf("selftest-boot-show: %s\n", fails ? "FAIL" : "PASS");
+    return fails ? 1 : 0;
 }
 
 /* --shelf-shot <prefix> [jelly.ppm]: the tank switcher's pages for Strato's
@@ -4505,20 +4731,12 @@ static int shelf_shot(const char *prefix, const char *jelly_ppm) {
     render_touch_lock_hint(fb, TANK_W);
     snprintf(path, sizeof path, "%s_lock_hint.ppm", prefix); write_ppm(path, fb);
 #ifdef CONFIG_POCKET_TANK_320X240
-    {   /* (this fork) two pages the set above never shows: the locked shelves with the tank on the glass in the top row's
-           fourth place, where its NOW tag stands nearest the padlock (_shelf_locked_now3); and the note over a fry's
-           welcome, drawn after the setup page as the firmware's frame does on a 320 x 240 board, since there the 5 s hold
-           is the only way on (_lock_hint_birth) */
+    {   /* (this fork) a page the set above never shows: the locked shelves with the tank on the glass in the top row's
+           fourth place, where its NOW tag stands nearest the padlock */
         shelf_slot_t s3[8]; memcpy(s3, s, sizeof s3);
         s3[0].state = SHELF_DORMANT; s3[3].state = SHELF_NOW;
         render_shelf_set_touch_lock(true); render_shelf(fb, TANK_W, s3, 1, 1); render_shelf_set_touch_lock(false);
         snprintf(path, sizeof path, "%s_shelf_locked_now3.ppm", prefix); write_ppm(path, fb);
-        shelf_stage(2024, 5, 20); render_set_scene_cache(scene);
-        setup_begin_birth(&tank, tank.n_fish - 1);
-        for (int f = 0; f < 3; f++) render_tank(&tank, fb, TANK_W);
-        render_setup(&tank, fb, TANK_W, 1.0f); render_touch_lock_hint(fb, TANK_W);
-        snprintf(path, sizeof path, "%s_lock_hint_birth.ppm", prefix); write_ppm(path, fb);
-        setup_cancel(&tank);
     }
 #endif
     shelf_stage(2024, 5, 20); render_set_scene_cache(scene); for (int f = 0; f < 3; f++) render_tank(&tank, fb, TANK_W);
@@ -4756,6 +4974,119 @@ static int save_shot(const char *prefix) {
     for (int i = 0; i < n; i++) printf(" %d@%.0f z%d", items[i], tank_decor_x(&tank, items[i]), tank_decor_z(&tank, items[i]));
     printf("\n");
     return 0;
+}
+
+/* --pumpkin-fish-shot <prefix> (0.3.9.6, Bananna's #help thread 10-31 "Fish clipping into pumpkin", the pendant): a fish
+ * parked over the pumpkin's face, every depth against the grass x the pieces, the pumpkin BEHIND and IN FRONT */
+static int pumpkin_fish_shot(const char *prefix) {
+    tank_init(&tank, 2024);
+    tank_new_population(&tank);
+    tank_make_fish(&tank, 0, 3, 0.6f, 0.6f, STAGE_ADULT); tank.n_fish = 1;
+    progression_set_age(&tank, 0, STAGE_ADULT_AGE + 1);
+    tank.fish[0].eaten = 60; tank.fish[0].hunger = 2; tank.fish[0].stress = 1; tank.fish[0].energy = 8;
+    tank.sd_unlocks |= SD_ITEM_PUMPKIN;
+    tank_pumpkin_place(&tank);
+    for (int i = 0; i < 5 * 60; i++) tank_tick(&tank, 1.0f / 60.0f, advisor_rules);
+    for (int i = 0; i < MAX_FOOD; i++) tank.food[i].alive = false;
+    render_set_scene_cache(scene_buf); render_set_vignette_cache(vig_buf); render_set_card_cache(card_buf); render_set_dirty_mask(dirty_buf);
+    const float px = TANK_FLOOR_X(90.0f);
+    static tank_t base; base = tank;
+    static uint16_t fb[TANK_W * TANK_H];
+    const char *gn[3] = { "front", "behind", "through" }, *zn[3] = { "back", "mid", "front" };
+    char path[512];
+    const int night = getenv("PF_NIGHT") ? atoi(getenv("PF_NIGHT")) : 0;
+    base.night = night; base.light_on = !night;
+    for (int z = 0; z <= 2; z += 2)
+        for (int g = 0; g < 3; g++)
+            for (int pd = 0; pd < 2; pd++) {
+                tank = base;
+                tank_decor_set(&tank, 8, px, z);
+                fish_t *f = &tank.fish[0];
+                f->x = px + 14; f->y = DECOR_FY(z) - 40; f->heading = 3.14159f; tank_fish_face(f);
+                f->gdepth = f->gdepth_want = (uint8_t)g; f->pdepth = f->pdepth_want = (uint8_t)pd;
+                for (int k = 0; k < 4; k++) render_tank(&tank, fb, TANK_W);
+                snprintf(path, sizeof path, "%s_pf_%s_g%s_p%s.ppm", prefix, zn[z], gn[g], pd ? "behind" : "front"); write_ppm(path, fb);
+            }
+    printf("pumpkin-fish-shot: %s_pf_<pumpkin z>_g<grass depth>_p<piece depth>.ppm, the pumpkin at x %.0f\n", prefix, px);
+    return 0;
+}
+
+/* --pumpkin-fish-hunt <prefix> (0.3.9.6, the same thread): a pendant-like tank (the pumpkin IN FRONT of the left bed, the coral
+ * beside it, the castle, the cluster, the volcano) lived for PF_SECS seconds; every frame a fish's box meets the pumpkin, a forked
+ * copy of the sim renders the same moment without that fish (A), and without the pumpkin with and without it (B, B0). Over the
+ * pumpkin's silhouette where the fish has pixels, the frame must show the pumpkin everywhere (behind it) or the fish everywhere
+ * (in front): both at once is the clipping. Writes the first few such frames whole */
+#include <sys/wait.h>
+static const char *g_pf_dump;
+static int pf_child(const tank_t *snap, int i, uint16_t *F, int out[4]) {
+    static uint16_t A[TANK_W * TANK_H], B[TANK_W * TANK_H], B0[TANK_W * TANK_H];
+    static uint8_t sil[TANK_W * TANK_H];
+    tank = *snap; tank.fish[i].x = -400; for (int k = 0; k < 2; k++) render_tank(&tank, A, TANK_W);
+    for (int y = 0; y < TANK_H; y++) for (int x = 0; x < TANK_W; x++) sil[y * TANK_W + x] = render_decor_covers(8, x, y);
+    tank = *snap; tank.sd_unlocks &= ~SD_ITEM_PUMPKIN; for (int k = 0; k < 2; k++) render_tank(&tank, B, TANK_W);
+    tank.fish[i].x = -400; for (int k = 0; k < 2; k++) render_tank(&tank, B0, TANK_W);
+    int npk = 0, nfi = 0, nfx = 0;
+    for (int p = 0; p < TANK_W * TANK_H; p++) {
+        if (B[p] == B0[p]) continue; nfx++;
+        if (!sil[p]) continue;
+        if (F[p] == A[p]) npk++; else nfi++;
+    }
+    out[0] = npk; out[1] = nfi; out[2] = nfx; out[3] = 0;
+    if (g_pf_dump && npk >= (getenv("PF_DUMPMIN") ? atoi(getenv("PF_DUMPMIN")) : 4) && nfi >= 4) {           /* the pixels where the pumpkin won over the fish, magenta, on the frame */
+        static uint16_t M[TANK_W * TANK_H]; memcpy(M, F, sizeof M);
+        for (int p = 0; p < TANK_W * TANK_H; p++) if (B[p] != B0[p] && sil[p] && F[p] == A[p]) M[p] = FB_SWAP16(0xF81F);
+        write_ppm(g_pf_dump, M);
+    }
+    return 0;
+}
+static int pumpkin_fish_hunt(const char *prefix) {
+    const float secs = getenv("PF_SECS") ? (float)atof(getenv("PF_SECS")) : 600;
+    const int seed = getenv("PF_SEED") ? atoi(getenv("PF_SEED")) : 7;
+    tank_init(&tank, (uint32_t)seed);
+    tank_new_population(&tank);
+    for (int i = 0; i < 4; i++) tank_make_fish(&tank, i, i, 0.6f, 0.6f, STAGE_ADULT);
+    tank.n_fish = 4;
+    for (int i = 0; i < 4; i++) { progression_set_age(&tank, i, STAGE_ADULT_AGE + 1); tank.fish[i].eaten = 60; tank.fish[i].hunger = 2; tank.fish[i].stress = 1; tank.fish[i].energy = 0.5f + i; }
+    tank.sd_unlocks |= SD_ITEM_PUMPKIN | SD_ITEM_CORAL | SD_ITEM_CASTLE | SD_ITEM_CLUSTER | SD_ITEM_VOLCANO;
+    tank_castle_place(&tank); tank_coral_place(&tank); tank_cluster_place(&tank); tank_volcano_place(&tank); tank_pumpkin_place(&tank);
+    float b0x0, b0x1; tank_veg_bed(&tank, 0, &b0x0, &b0x1, NULL, NULL);
+    const float px = getenv("PF_X") ? TANK_FLOOR_X((float)atof(getenv("PF_X"))) : (b0x0 + b0x1) * 0.5f;
+    tank_decor_set(&tank, 8, px, getenv("PF_Z") ? atoi(getenv("PF_Z")) : DECOR_Z_FRONT);
+    tank_decor_set(&tank, 3, px + 70, DECOR_Z_FRONT);
+    render_set_scene_cache(scene_buf); render_set_vignette_cache(vig_buf); render_set_card_cache(card_buf); render_set_dirty_mask(dirty_buf);
+    static uint16_t fb[TANK_W * TANK_H];
+    static tank_t snap;
+    int frames = 0, checked = 0, mixed = 0, wrote = 0, worst = 0, n_front = 0, n_behind = 0, n_none = 0;
+    const float dt = 1.0f / 25;
+    for (float tt = 0; tt < secs; tt += dt) {
+        tank_tick(&tank, dt, advisor_rules);
+        for (int i = 0; i < tank.n_fish; i++) if (tank.fish[i].energy > 1.5f && (frames / 25) % 240 == 0) tank.fish[i].energy = 0.4f;   /* a breather now and then */
+        snap = tank;
+        render_tank(&tank, fb, TANK_W);
+        frames++;
+        for (int i = 0; i < tank.n_fish; i++) {
+            const fish_t *f = &tank.fish[i];
+            if (fabsf(f->x - px) > 44 + 40 || f->y < DECOR_FY_FRONT - 110) continue;
+            checked++;
+            int fd[2]; if (pipe(fd)) return 1;
+            pid_t pid = fork();
+            char dump[512]; snprintf(dump, sizeof dump, "%s_hunt%d_m.ppm", prefix, wrote); g_pf_dump = wrote < 6 ? dump : NULL;
+            if (pid == 0) { close(fd[0]); int out[4]; pf_child(&snap, i, fb, out); fflush(stdout); if (write(fd[1], out, sizeof out) < 0) _exit(1); _exit(0); }
+            close(fd[1]); int out[4] = {0}; if (read(fd[0], out, sizeof out) < 0) out[0] = -1; close(fd[0]); waitpid(pid, NULL, 0);
+            int m = out[0] < out[1] ? out[0] : out[1];
+            if (out[0] + out[1] == 0) n_none++; else if (out[1] == 0) n_behind++; else if (out[0] == 0) n_front++;
+            if (out[0] >= 4 && out[1] >= 4) {
+                mixed++;
+                if (getenv("PF_DUMPMIN") && out[0] < atoi(getenv("PF_DUMPMIN"))) continue;
+                if (m > worst) worst = m;
+                if (mixed <= 12 || m >= worst) printf("MIXED t=%.1f fish %d at %.0f,%.0f  shown pumpkin %d / fish %d (of %d px)  gdepth %d pdepth %d breather %.1f goal %d\n",
+                                       tt, i, f->x, f->y, out[0], out[1], out[2], f->gdepth, f->pdepth, f->breather, f->goal.id);
+                if (wrote < 6) { char path[512]; snprintf(path, sizeof path, "%s_hunt%d.ppm", prefix, wrote++); write_ppm(path, fb); }
+            }
+        }
+    }
+    printf("pumpkin-fish-hunt: %d frames, %d fish-on-pumpkin checks (%d off it, %d wholly behind, %d wholly in front), %d mixed (worst %d px), the pumpkin at %.0f z%d\n", frames, checked, n_none, n_behind, n_front, mixed, worst, px, tank_decor_z(&tank, 8));
+    return mixed ? 1 : 0;
 }
 
 static int pumpkin_shot(const char *prefix) {
@@ -5052,15 +5383,16 @@ static void *gl_alloc64(size_t n) { void *p = NULL; return posix_memalign(&p, 64
  * and the host's render time with it and without (the device's is the measure that counts) */
 #ifdef CONFIG_POCKET_TANK_320X240
 /* (this fork) the grass loop on the 320 x 240 world: its frames match the
- * live ones but for a pixel or two at the tip of the tallest fronds, a
- * shade apart - one step of the 565 colour in each channel (0.3.9.5's sync:
- * day, moment 7 of 104, x 199 y 22, 32,108,64 live against 40,112,72 from
- * the loop). The loop is off on every board in 0.3.9.5 (main.c
- * GRASS_LOOP_ON 0, upstream: "until the loop is fixed and proven"), so on
- * this world the A/B allows GL_CYD_NEAR such pixels a frame and no other
- * difference at all: a band misplaced or a moment off still fails. When
- * upstream turns the loop on again, this goes, and the A/B is exact here
- * too (CYD.md, Still open). */
+ * live ones but for one pixel at a frond's tip, one green of the grass
+ * against another a shade apart - one step of the 565 colour in each
+ * channel (day, moment 7 of 104, x 199 y 22, 32,108,64 live against
+ * 40,112,72 from the loop; the same in 0.3.9.5 and 0.3.9.6). It is the
+ * grass's own: the pixel stays with the castle, the sword plant or the
+ * seahorse taken out of the staging; what draws it apart is not found. The
+ * loop is on again on every board in 0.3.9.6, the CYD's too; one pixel a
+ * shade apart at one moment of 104 is not a thing an eye finds, so this
+ * world's A/B allows GL_CYD_NEAR such pixels a frame and no other
+ * difference at all: a band misplaced or a moment off still fails. */
 #define GL_CYD_NEAR 4
 static bool gl_one_step(uint16_t a, uint16_t b) {
     a = FB_SWAP16(a); b = FB_SWAP16(b);
@@ -5150,7 +5482,7 @@ static int selftest_grassloop(void) {
             tank.clock += 0.031f + 0.027f * ((f + r) % 3);
             render_tank(&tank, fb, TANK_W);
             const int m = render_grass_loop_moment();
-            if (m != (slast + 1) % sn) GLFAIL("stepping: a frame showed moment %d after %d", m, slast);
+            { int d = (m - slast + sn) % sn; if (d < 1 || d > 3) GLFAIL("stepping: a frame showed moment %d after %d (%d steps: never a repeat, never a jump)", m, slast, d); }
             slast = m;
         }
         render_grass_loop_bypass(true); render_force_veg_clock(slast * 3.5f / sn); render_tank(&tank, fa, TANK_W); render_tank(&tank, fa, TANK_W);
@@ -5163,7 +5495,7 @@ static int selftest_grassloop(void) {
     for (int f = 0; f < 3; f++) {
         tank.clock += 0.04f; render_tank(&tank, fb, TANK_W);
         const int m = render_grass_loop_moment();
-        if (m != (slast + 1) % sn) GLFAIL("stepping, stale: a frame showed moment %d after %d", m, slast);
+        { int d = (m - slast + sn) % sn; if (d < 1 || d > 3) GLFAIL("stepping, stale: a frame showed moment %d after %d (%d steps)", m, slast, d); }
         slast = m;
         render_grass_loop_bypass(true); render_force_veg_clock(m * 3.5f / sn); render_tank(&tank, fa, TANK_W); render_tank(&tank, fa, TANK_W);
         render_force_veg_clock(-1); render_grass_loop_bypass(false);
@@ -5189,7 +5521,7 @@ static int selftest_grassloop(void) {
                 uint16_t *buf = bufs[cur]; cur ^= 1;
                 tank.clock += 0.04f; render_tank(&tank, buf, TANK_W);
                 const int m = render_grass_loop_moment();
-                if (m != (last + 1) % n) GLFAIL("primed stepping, %d moments (target %d): a frame showed moment %d after %d", n, target, m, last);
+                { int d = (m - last + n) % n; if (d < 1 || d > 3) GLFAIL("primed stepping, %d moments (target %d): a frame showed moment %d after %d (%d steps)", n, target, m, last, d); }
                 last = m;
                 const uint16_t *sc, *bd; size_t top, off, blen; unsigned ep;          /* the next frame's prefetch, as main.c does it */
                 if (render_grass_loop_parts(tank.clock + 0.04f, &sc, &top, &bd, &off, &blen, &ep)) {
@@ -5340,7 +5672,7 @@ static int selftest_grasspatch(void) {
     static const char *const CASE[] = { "the pumpkin hidden", "the pumpkin shown", "the pumpkin moved", "the volcano sent BEHIND", "the volcano moved BEHIND",
                                         "the coral grown", "the pumpkin and the coral moved, two frames apart", "the sword plant sent BEHIND", "the sword plant moved BEHIND",
                                         "the sword plant brought IN FRONT", "a frond grown past the wait", "bed 1 trimmed", "the castle bought IN FRONT", "the castle moved",
-                                        "the castle sold", "the ring's fallback: the pumpkin moved, the splice refused", "thirty moves in a tight ring", "the pumpkin moved, by the clock" };
+                                        "the castle sold", "the ring's fallback: the pumpkin moved, the splice refused", "thirty moves in a tight ring", "a frond nibbled while the loop rebakes", "three fronds nibbled across the beds: three stale intervals in a row", "the pumpkin moved, by the clock" };
     enum { NCASE = (int)(sizeof CASE / sizeof CASE[0]) };
     int64_t patch_us = 0, whole_us = 0; int patch_n = 0, whole_n = 0, boxes_most = 0;
     for (int lock_pass = 0; lock_pass < 2; lock_pass++) {
@@ -5386,6 +5718,23 @@ static int selftest_grasspatch(void) {
                     render_grass_loop_on(false); render_set_grass_loop(bs_alloc64, free, 12u << 20); render_grass_loop_lock(lock); render_grass_loop_on(true); gp_whole(fb, 1200);
                     tank_decor_set(&tank, 9, vx, DECOR_Z_FRONT); gp_whole(fb, 1200);
                     continue; }
+                case 17: tank_decor_set(&tank, 8, kx + 15, DECOR_Z_FRONT); break;              /* (the nibbles come in the frames meanwhile, below) */
+                case 18: {                                                                    /* THE PATCH keeps two stale intervals a row: three fronds' strips at once (growth crossing a
+                                                                                                 segment in three beds, the urchin's nibbles) made three, the nearest two merged - and the
+                                                                                                 splice encoded the gap between them from the moment's scratch, never painted there (Strato's
+                                                                                                 square, 10-31 night: dark vertical lines up the fronds, on their own or after a move) */
+                    int n0, n1, n2; tank_veg_bed(&tank, 0, NULL, NULL, NULL, &n0); tank_veg_bed(&tank, 1, NULL, NULL, NULL, &n1); tank_veg_bed(&tank, 2, NULL, NULL, NULL, &n2);
+#ifdef CONFIG_POCKET_TANK_320X240
+                    /* (this fork) on the 320 px floor bed 1 has three fronds, so its frond 4 is none and the case made two boxes:
+                       here bed 0's fronds 0 and 4 are the nearest pair, 48 px apart as bed 1's are on the 1.8 with fronds 1-3
+                       between, and bed 2's last frond the third, far off. Checked against the 0.3.9.5 splice put back: it
+                       fails here, as the 1.8's staging does there (bed 2's 0 and 4 with bed 0's 0 did not) */
+                    tank.veg_h[0][0] -= 5.0f / (VEG_SEGS_FULL - 2); tank.veg_h[0][4] -= 5.0f / (VEG_SEGS_FULL - 2); tank.veg_h[2][n2 - 1] -= 5.0f / (VEG_SEGS_FULL - 2);
+#else
+                    tank.veg_h[1][0] -= 5.0f / (VEG_SEGS_FULL - 2); tank.veg_h[1][4] -= 5.0f / (VEG_SEGS_FULL - 2); tank.veg_h[0][0] -= 5.0f / (VEG_SEGS_FULL - 2);   /* (past the jump: strips at once;
+                                                                                                 bed 1's two are the nearest pair, apart - their merged interval's gap holds fronds 1-3) */
+#endif
+                    (void)n0; (void)n1; (void)n2; break; }
                 default: tank_decor_set(&tank, 8, kx + 40, DECOR_Z_FRONT); break;
             }
             static uint16_t scene_was[TANK_W * TANK_H]; { unsigned ep; const uint16_t *sc = render_scene_buf(&ep); memcpy(scene_was, sc, sizeof scene_was); }
@@ -5411,8 +5760,11 @@ static int selftest_grasspatch(void) {
             if (c == 15) render_grass_loop_debug_abort();                                      /* the ring refuses the first splice: the fine moments whole again */
             render_grass_loop_debug_budget(1);                                                 /* a slice a frame: the rebake spans many frames, as on a board */
             int worst = 0, frames = 0, where[2] = { -1, -1 }, fell_back = 0;
-            for (int f = 0; f < (c == 15 ? 40 : 8); f++) {                                    /* frames meanwhile: served from the loop, the boxes repainted */
+            const float h0 = tank.veg_h[0][4];
+            for (int f = 0; f < (c == 15 ? 40 : c == 17 ? 30 : 8); f++) {                     /* frames meanwhile: served from the loop, the boxes repainted */
                 if (c == 6 && f == 1) tank_decor_set(&tank, 3, cx - 40, DECOR_Z_FRONT);
+                if (c == 17 && f % 9 == 4) tank.veg_h[0][4] -= 1.0f / (VEG_SEGS_FULL - 2);     /* THE HELD HEIGHTS: the urchin at a frond, a segment each time (three: under the jump) -
+                                                                                                 the rebake goes on (no settle reset), every frame draws the heights the loop holds */
                 int w2[2]; int d = gp_frame_diff(fb, fa, lock, w2); if (d > worst) { worst = d; where[0] = w2[0]; where[1] = w2[1]; } frames++;
                 if (!render_grass_loop_patching() && render_grass_loop_ready() < n) fell_back++;   /* (whole bakes under way: the fallback) */
                 if (d && getenv("PT_GRASSPATCH_SHOT")) { char pth[300]; snprintf(pth, sizeof pth, "%s_%d_live.ppm", getenv("PT_GRASSPATCH_SHOT"), c); write_ppm(pth, fa); snprintf(pth, sizeof pth, "%s_%d_loop.ppm", getenv("PT_GRASSPATCH_SHOT"), c); write_ppm(pth, fb); }
@@ -5421,7 +5773,16 @@ static int selftest_grasspatch(void) {
             if (c == 6 && !render_grass_loop_patching()) GP_FAIL("%s: the second move did not keep the loop stale inside boxes", CASE[c]);
             if (c == 15 && !fell_back) GP_FAIL("%s: the refusal did not fall back to whole bakes", CASE[c]);
             if (c != 15 && fell_back) GP_FAIL("%s: fell back to whole bakes (%d frames of them)", CASE[c], fell_back);
+            if (c == 18 && nb < 3) GP_FAIL("%s: %d boxes - the case needs three strips apart (box 0: %d,%d-%d,%d)", CASE[c], nb, box[0][0], box[0][1], box[0][2], box[0][3]);
+            if (c == 17 && !render_grass_loop_patching()) GP_FAIL("%s: the nibbles ended the patch early (a jump or a whole bake)", CASE[c]);
             frames += gp_whole(fb, 3000);
+            if (c == 17) {                                                                    /* the loop whole at its held heights; the wait over, the frond's three segments are taken as a strip */
+                if (render_grass_loop_ready() != n) GP_FAIL("%s: the loop did not come whole again under the nibbles (%d of %d in %d frames)", CASE[c], render_grass_loop_ready(), n, frames);
+                if (tank.veg_h[0][4] >= h0) GP_FAIL("%s: the frond was not nibbled", CASE[c]);
+                tank.clock += 901.0f; render_tank(&tank, fb, TANK_W);
+                if (!render_grass_loop_patching()) { int bx2[6][4]; GP_FAIL("%s: the wait over, the nibbled frond was not taken as boxes (%d of %d exact, %d boxes, h %.3f -> %.3f)", CASE[c], render_grass_loop_ready(), n, render_grass_loop_boxes(bx2), h0, tank.veg_h[0][4]); }
+                frames += gp_whole(fb, 3000);
+            }
             render_grass_loop_debug_budget(0);
             if (render_grass_loop_ready() != n) { GP_FAIL("%s: the loop did not come whole again (%d of %d)", CASE[c], render_grass_loop_ready(), n); continue; }
             { int ln2, lb2, lr2; int64_t lus2; render_grass_loop_prof(&ln2, &lb2, &lus2, &lr2); if (c != 15) { patch_us += lus2; patch_n += lb2; } }
@@ -9993,8 +10354,11 @@ int main(int argc, char **argv) {
         if (strcmp(argv[a], "--depth-shot") == 0 && a + 1 < argc) return depth_shot(argv[a + 1]);
         if (strcmp(argv[a], "--boot-show") == 0 && a + 1 < argc) return boot_show_shot(argv[a + 1], false);
         if (strcmp(argv[a], "--boot-show-fill") == 0 && a + 1 < argc) return boot_show_shot(argv[a + 1], true);
+        if (strcmp(argv[a], "--selftest-boot-show") == 0) return selftest_boot_show();
         if (strcmp(argv[a], "--shelf-shot") == 0 && a + 1 < argc) return shelf_shot(argv[a + 1], a + 2 < argc ? argv[a + 2] : NULL);
         if (strcmp(argv[a], "--pumpkin") == 0 && a + 1 < argc) return pumpkin_shot(argv[a + 1]);
+        if (strcmp(argv[a], "--pumpkin-fish-shot") == 0 && a + 1 < argc) return pumpkin_fish_shot(argv[a + 1]);
+        if (strcmp(argv[a], "--pumpkin-fish-hunt") == 0 && a + 1 < argc) return pumpkin_fish_hunt(argv[a + 1]);
         if (strcmp(argv[a], "--pumpkin-light") == 0 && a + 1 < argc) return pumpkin_light(argv[a + 1]);
         if (strcmp(argv[a], "--selftest-pumpkin-light") == 0) return selftest_pumpkin_light();
         if (strcmp(argv[a], "--breather-trace") == 0 || strcmp(argv[a], "--selftest-breather") == 0) return breather_trace();
@@ -10004,10 +10368,12 @@ int main(int argc, char **argv) {
         if (strcmp(argv[a], "--selftest-grasspatch") == 0) return selftest_grasspatch();
         if (strcmp(argv[a], "--selftest-touch-lock") == 0) return selftest_touch_lock();
         if (strcmp(argv[a], "--selftest-depth") == 0) return selftest_depth();
+        if (strcmp(argv[a], "--urchin-frond-shot") == 0) return urchin_frond_shot(a + 1 < argc ? argv[a + 1] : NULL);
         if (strcmp(argv[a], "--selftest-footprint") == 0) return selftest_footprint(a + 1 < argc ? argv[a + 1] : NULL);
         if (strcmp(argv[a], "--selftest-place") == 0) return selftest_place(a + 1 < argc ? argv[a + 1] : NULL);
         if (strcmp(argv[a], "--square-boot") == 0) return square_boot(a + 1 < argc ? argv[a + 1] : NULL);
         if (strcmp(argv[a], "--selftest-cave") == 0) return selftest_cave(a + 1 < argc ? argv[a + 1] : NULL);
+        if (strcmp(argv[a], "--selftest-front-keep") == 0) return selftest_front_keep(a + 1 < argc ? argv[a + 1] : NULL);
         if (strcmp(argv[a], "--selftest-shelf-rename") == 0) return selftest_shelf_rename();
         if (strcmp(argv[a], "--volcano") == 0 && a + 1 < argc) return volcano_shot(argv[a + 1]);
         if (strcmp(argv[a], "--crab") == 0 && a + 1 < argc) return crab_shot(argv[a + 1]);

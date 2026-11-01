@@ -575,7 +575,9 @@ bool touch_port_lock_hint(void) { return s_tlock && s_tlock_us && esp_timer_get_
 /* (this fork) the touch lock undone without BOOT on a 320x240 board: in the CYD's case BOOT cannot be reached, and
  * upstream's only way back on the glass is BOOT twice. A finger held still on the locked glass for 5 s (the BOOT
  * chord's hold, ADV_BOOT_HOLD_S) opens MY TANKS instead - nothing else - and its padlock undoes the lock there. 5 s
- * still is a deliberate act: a tap, a swipe or a palm moving over the glass does nothing, as before. */
+ * still is a deliberate act: a tap, a swipe or a palm moving over the glass does nothing, as before. It is needed
+ * over the plain locked tank alone: since 0.3.9.6 upstream lets a setup page (a new tank's welcome, a fry's naming)
+ * take its taps through the lock, and the reset prompt answers NO by itself after CONFIRM_TIMEOUT_US. */
 #define TOUCH_LOCK_HOLD_US 5000000
 #define TOUCH_LOCK_HOLD_SLOP 24                           /* px the finger may roll and still be "still" (a tap's own slop) */
 static bool s_tlock_held, s_tlock_open;                   /* this press already asked; the ask, for main.c */
@@ -611,7 +613,11 @@ void touch_port_poll(tank_t *t) {
            a darting fish has moved and the finger hid it the whole time */
         for (int i = 0; i < t->n_fish && i < N_FISH_MAX; i++) { s_fx[i] = t->fish[i].x; s_fy[i] = t->fish[i].y; }
     }
-    if (s_tlock && !s_shelf) {                               /* THE TOUCH LOCK: the finger goes nowhere - the note says how to get back */
+    /* THE TOUCH LOCK: the finger goes nowhere - the note says how to get back. Not over MY TANKS (its padlock is the way back), and
+       not over a page the tank opened itself and only a tap closes - a new tank's welcome after SWAP IN, a fry's naming (0.3.9.6,
+       Migima's #help thread 11-01 "Stuck in the Welcome Screen": the lock is the board's and stays across the swap's restart, the
+       welcome covered the note, and BOOT twice will not open MY TANKS over a naming page - nothing could reach the padlock) */
+    if (s_tlock && !s_shelf && !setup_active()) {
         if (touched) s_tlock_us = now;                       /* (held: the note stays up, then 2 s past the lift) */
         if (touched != s_down && s_log) ESP_LOGI(TAG, "touch locked: the %s ignored", touched ? "press" : "lift");
 #if CONFIG_POCKET_TANK_320X240

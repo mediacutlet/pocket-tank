@@ -3,9 +3,11 @@ LM's fork of Pocket Tank, by StratoBuilds (https://github.com/mediacutlet/pocket
 
 THREE LAYERS
 
-This tree holds code under two licences, in three layers. Upstream's
-LICENSE, NOTICE and CONTRIBUTING.md are kept exactly as upstream ships them;
-this file adds the fork's part and changes nothing in theirs.
+Pocket Tank's code in this tree, upstream's and the CYD port's, is under
+two licences, in three layers. The third-party code the tree also carries
+keeps licences of its own (THIRD-PARTY CODE, below). Upstream's LICENSE,
+NOTICE and CONTRIBUTING.md are kept exactly as upstream ships them; this
+file adds the fork's part and changes nothing in theirs.
 
 1. Upstream, up to and including v0.3.9.2: the MIT License.
    Copyright (c) 2026 MediaCutlet
@@ -36,19 +38,24 @@ A summary; the licence texts are what count.
   changed and shared only for noncommercial purposes, under PolyForm
   Noncommercial 1.0.0. Commercial use - selling it, or anything built on
   it - needs Strato Doumanis's written permission: strato@pocketank.com
-- Whoever passes on any part of it must pass on PolyForm's terms (LICENSE,
-  or https://polyformproject.org/licenses/noncommercial/1.0.0) and the three
-  Required Notice lines above. A copy that keeps LICENSE as it is carries
-  both.
+- Whoever passes on upstream's code from v0.3.9.3 on - the tree or the
+  firmware as a whole, or any part of that code - must pass on PolyForm's
+  terms (LICENSE, or https://polyformproject.org/licenses/noncommercial/1.0.0)
+  and the three Required Notice lines above. A copy that keeps LICENSE as
+  it is carries both. A file of the CYD port's own, passed on by itself,
+  holds none of that code: its MIT notice is enough (the last point).
 - PolyForm allows no sublicensing, so the fork cannot offer upstream's code
   from v0.3.9.3 on under MIT, and does not. An upstream file the fork has
   changed stays under upstream's terms; the fork never labels one MIT.
 - The CYD port's own files, listed in LICENSE-MIT-CYD, may be reused under
   the MIT License alone, apart from the rest of the tree - in another
   project, commercial or not - keeping the copyright and permission notice
-  in LICENSE-MIT-CYD. Three of them carry a few lines from upstream's MIT
-  releases (layer 1, copyright MediaCutlet); their headers say so, and
-  NOTICE holds that MIT text.
+  in LICENSE-MIT-CYD. Three of them also hold a few lines from upstream's
+  MIT releases (layer 1): imu_mpu6050.c, orientation.c and sleep_setting.c.
+  Whoever reuses one of those keeps MediaCutlet's copyright notice too -
+  "Copyright (c) 2026 MediaCutlet", which the file's header names beside
+  LM's. The permission notice is the same MIT text for both; NOTICE holds
+  it for MediaCutlet's.
 
 WHERE THE TEXTS ARE
 
@@ -62,13 +69,26 @@ WHERE THE TEXTS ARE
   NOTICE-CYD        the fork's: this file
   CYD.md            the fork's guide; its "Licence" section says how the
                     list in LICENSE-MIT-CYD is kept current
+  installer/vendor/esp-web-tools/LICENSE
+                    ESP Web Tools': the Apache License 2.0
 
 THIRD-PARTY CODE
 
-model/llama2.c/ and sim/lvgl/ are not part of this repository: they are
-cloned separately and carry their own MIT licenses. ESP-IDF, and the
-components idf.py fetches into firmware/managed_components/, come with
-their own licences too.
+In the tree, under licences of their own:
+
+- installer/vendor/esp-web-tools/ is ESP Web Tools 10.4.0, by the ESPHome
+  maintainers (https://github.com/esphome/esp-web-tools), vendored for the
+  browser installer: the Apache License 2.0, in its LICENSE in that folder.
+  The libraries its scripts bundle, lit among them, come under their own.
+- common/llm/q4_model.c and model/runq4.c say at their heads that they are
+  derived from runq.c of llama2.c (https://github.com/karpathy/llama2.c),
+  which is under the MIT License, "Copyright (c) 2023 Andrej", with the
+  same permission notice as NOTICE's. The rest of each file is upstream's,
+  under upstream's terms.
+
+Not in the tree: model/llama2.c/ and sim/lvgl/ are cloned separately and
+carry their own MIT licenses. ESP-IDF, and the components idf.py fetches
+into firmware/managed_components/, come with their own licences too.
 
 OTHER CONTRIBUTORS
 
@@ -79,9 +99,17 @@ not in LICENSE-MIT-CYD's list.
 
 CONTRIBUTING UPSTREAM
 
-A pull request sent to upstream falls under upstream's CONTRIBUTING.md: it
-licenses the contribution to Strato Doumanis under PolyForm Noncommercial
-1.0.0 and grants him the right to use, change, license and distribute it
-for any purpose, commercial ones included. The fork sends none today. A
-CYD file sent there would stay MIT here, and upstream would hold those
-rights in it as well.
+Upstream's CONTRIBUTING.md, from v0.3.9.3 on, sets the terms of a pull
+request to upstream: by opening one, a contributor licenses the
+contribution to Strato Doumanis under PolyForm Noncommercial 1.0.0 and
+grants him the right to use, change, license and distribute it for any
+purpose, commercial ones included.
+
+One pull request from this fork is open there: #15, opened on 2026-10-01
+from the fork's main branch, and still open on 2026-10-31. A pull request
+follows the branch it comes from, so whatever is pushed to the fork's main
+is offered to upstream through it, the files in LICENSE-MIT-CYD's list
+included. Its last update brought it to the fork's main as of upstream's
+v0.3.9.2 (4d913b5), before upstream had a CONTRIBUTING.md and while all of
+Pocket Tank was under the MIT License. A CYD file offered there stays MIT
+here; upstream would hold the rights CONTRIBUTING.md names in it as well.

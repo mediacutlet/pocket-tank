@@ -70,8 +70,12 @@ those boards.
 
 ## Licence
 
-The tree holds code under two licences, in three layers (`NOTICE-CYD` says
-what they mean together - a summary; the licence texts are what count):
+Pocket Tank's code in this tree, upstream's and the port's, is under two
+licences, in three layers (`NOTICE-CYD` says what they mean together - a
+summary; the licence texts are what count). The third-party code the tree
+also carries keeps its own: ESP Web Tools in `installer/vendor/`
+(Apache-2.0), and llama2.c's `runq.c` inside `common/llm/q4_model.c` and
+`model/runq4.c` (MIT); `NOTICE-CYD` names them.
 
 | Layer | Licence | Copyright | Its text |
 |---|---|---|---|
@@ -83,21 +87,38 @@ what they mean together - a summary; the licence texts are what count):
   tree - contains upstream's code from v0.3.9.3 on, so it may be used,
   changed and shared for noncommercial purposes only. Commercial use needs
   Strato's written permission (strato@pocketank.com).
-- Whoever gets any part of it must get PolyForm's terms, or their URL, and
-  the three `Required Notice:` lines. A copy that keeps `LICENSE` as it is
-  carries both, and `NOTICE-CYD` repeats the lines word for word.
+- Whoever gets upstream's code from v0.3.9.3 on - the tree or the firmware
+  as a whole, or any part of that code - must get PolyForm's terms, or
+  their URL, and the three `Required Notice:` lines. A copy that keeps
+  `LICENSE` as it is carries both, and `NOTICE-CYD` repeats the lines word
+  for word. A file of the port's own, passed on by itself, holds none of
+  that code: its MIT notice is enough (the next point).
 - The CYD port's own files may be reused under MIT alone, apart from the
-  rest of the tree.
+  rest of the tree, keeping `LICENSE-MIT-CYD`'s copyright and permission
+  notice - and for `imu_mpu6050.c`, `orientation.c` and `sleep_setting.c`,
+  which hold a few lines of upstream's MIT releases, MediaCutlet's
+  copyright notice from their headers as well.
 - `LICENSE`, `NOTICE` and `CONTRIBUTING.md` are upstream's and are never
-  edited here: PolyForm's Notices clause wants them passed on as they are,
-  and an edit would conflict at every sync. The fork's part is in
-  `LICENSE-MIT-CYD` and `NOTICE-CYD`, files upstream does not have.
+  edited here, so every sync merges them clean. Two of them also have to
+  be passed on: `LICENSE` holds what PolyForm's Notices clause asks for -
+  its terms and the three `Required Notice:` lines - and `NOTICE` holds the
+  copyright and permission notice the MIT License asks for, for the code up
+  to v0.3.9.2. Neither licence asks for `CONTRIBUTING.md`; it stays because
+  it is upstream's. The fork's part is in `LICENSE-MIT-CYD` and
+  `NOTICE-CYD`, files upstream does not have.
 - adampog's Touch-LCD-2 (pull request #2, merged 2026-10-08) came to the
   fork while it was all MIT code. It is adampog's, so the files it touched
   are not in `LICENSE-MIT-CYD`'s list.
-- `CONTRIBUTING.md` is about pull requests to upstream: one would give
+- `CONTRIBUTING.md` is about pull requests to upstream: opening one gives
   Strato a right to the contribution for any purpose, commercial ones
-  included. The fork sends none (*Syncing with upstream*).
+  included. The fork means to send none, but one is open: pull request #15,
+  opened 2026-10-01 from the fork's `main`. A pull request follows its
+  branch, so every push of `main` to `origin` offers upstream whatever
+  `main` then holds, `LICENSE-MIT-CYD`'s files included. Its last update
+  (`4d913b5`, the v0.3.9.2 sync) came before upstream had a
+  `CONTRIBUTING.md`. Whether to close it or keep it is LM's to settle
+  before the next push of `main`; step 9 of *Syncing with upstream* checks
+  it, and `NOTICE-CYD`'s *CONTRIBUTING UPSTREAM* says which.
 
 **Never label an upstream file MIT.** A path upstream ever had, in any
 commit or tag, is upstream's, however much of it the fork has rewritten - and
@@ -1176,8 +1197,10 @@ CYD's old `CONFIG_POCKET_TANK_BOARD_CYD_320X240` the same way).
 
 ## Syncing with upstream
 
-The fork takes upstream's releases by merging them; it never sends anything
-back. The `upstream` remote is `https://github.com/mediacutlet/pocket-tank.git`
+The fork takes upstream's releases by merging them and means to send
+nothing back - but upstream's pull request #15 comes from the fork's
+`main`, so a push of `main` to `origin` updates it (*Licence*, and step 9
+below). The `upstream` remote is `https://github.com/mediacutlet/pocket-tank.git`
 with its push URL set to `no_push`, so a push there fails. Every line the
 fork changes in an upstream file is a conflict waiting at the next sync,
 which is why the CYD's code sits in blocks of its own and README.md is
@@ -1427,4 +1450,22 @@ upstream's text but for one block.
    git merge --ff-only sync-<release>
    ```
 
-   Nothing is ever pushed to `upstream`; `origin` is the fork.
+   Nothing is ever pushed to `upstream`; `origin` is the fork. But a push
+   of `main` to `origin` also updates every open pull request to upstream
+   whose head is the fork's `main`, and since v0.3.9.3 upstream's
+   `CONTRIBUTING.md` puts its terms on what a pull request carries
+   (*Licence*). Before that push, see which are open:
+
+   ```sh
+   curl -s 'https://api.github.com/repos/mediacutlet/pocket-tank/pulls?state=open&per_page=100' |
+     python3 -c 'import json, sys
+   for p in json.load(sys.stdin):
+       if p["head"]["label"].startswith("lmoiseichuk:"):
+           print(p["number"], p["head"]["label"], p["head"]["sha"][:12], p["title"])'
+   ```
+
+   On 2026-10-31 it printed #15, `lmoiseichuk:main` at `4d913b5`. One
+   whose head is `lmoiseichuk:main` takes this sync - upstream's code,
+   the fork's changes and `LICENSE-MIT-CYD`'s files - when `main` is
+   pushed. Close it, or keep it, before the push, and make `NOTICE-CYD`'s
+   *CONTRIBUTING UPSTREAM* and *Licence* above say which.

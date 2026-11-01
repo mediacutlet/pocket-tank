@@ -39,6 +39,10 @@ both:
   firmware/main/sleep_setting.c   brightness.c, and three includes from
                                   persist_port_esp.c
 
+Whoever reuses one of these three keeps MediaCutlet's copyright notice,
+"Copyright (c) 2026 MediaCutlet", beside LM's below. The permission notice
+is the same MIT text for both.
+
 Every file above but CYD.md carries an SPDX-License-Identifier header;
 CYD.md is documentation and is listed here only.
 

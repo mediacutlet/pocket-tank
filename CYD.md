@@ -48,6 +48,12 @@ Against upstream's main (`git log upstream/main..main`):
 - **The simulator's fifth world.** `make -C sim 320X240=1` builds
   `fishsim-320x240`, and `make -C sim check-all` runs the selftests in
   all five worlds.
+- **MY TANKS without BOOT.** Upstream's shelves of tanks (0.3.9.3) open
+  with BOOT pressed twice or the settings page's MY TANKS. On a 320 x 240
+  board that button stands between the version and CLOSE, a single BOOT
+  press waits 0.4 s for a second before it sleeps, and a finger held still
+  for 5 s on a touch-locked glass opens MY TANKS, whose padlock undoes the
+  lock (*MY TANKS*).
 - **A second 320 x 240 board.** `CONFIG_POCKET_TANK_WST_320X240` builds the
   same tank for the Waveshare ESP32-S3-Touch-LCD-2, contributed by adampog
   (*The Waveshare ESP32-S3-Touch-LCD-2*). Both boards select
@@ -60,6 +66,35 @@ Kconfig (deepsleep, their default, which is upstream's behaviour), and the
 touch hooks. Their simulator pages are byte for byte upstream's; their
 firmware builds, and has been read against upstream's, not run on one of
 those boards.
+
+## The licence (from upstream's 0.3.9.3)
+
+With 0.3.9.3 upstream changed its licence: from that release on, Pocket
+Tank is under the PolyForm Noncommercial License 1.0.0 (`LICENSE`), and
+v0.3.9.2 and earlier stay under MIT (`NOTICE`, which keeps the MIT text).
+The fork keeps both files as upstream has them. What that means here, as
+the two files read - a summary, not advice, and the choice is LM's:
+
+- Until this merge the fork was MIT code: upstream's up to v0.3.9.2 and the
+  fork's own work. From it on, the fork carries upstream code under PolyForm
+  Noncommercial: using, changing and sharing it for any noncommercial
+  purpose is allowed; selling it, or anything built on it, needs Strato's
+  written permission (strato@pocketank.com).
+- Whoever gets any part of it from the fork must get the licence's terms,
+  or their URL, and upstream's three `Required Notice:` lines at the head
+  of `LICENSE`. A copy of the fork that keeps `LICENSE` as it is carries
+  both.
+- The fork's own additions (the CYD port, this page) are LM's work, and
+  how they are licensed on their own is LM's to say; a firmware image built
+  from this tree contains upstream's 0.3.9.3 code and passes on under
+  upstream's terms.
+- Code that came under MIT stays under it: upstream says so of its own MIT
+  contributions (`NOTICE`), and adampog's Touch-LCD-2 came to the fork
+  (2026-10-08) before the change.
+- `CONTRIBUTING.md` is about pull requests to upstream. The fork sends none
+  (*Syncing with upstream*), so it asks nothing of the fork today.
+- Staying on v0.3.9.2 keeps the fork all MIT, without MY TANKS and what
+  follows it.
 
 ## Using it
 
@@ -83,6 +118,9 @@ follows is how to reach each thing on this board, and where it differs.
   settings page (the two swapped places in 0.3.9).
 - **CLOSE** on the settings page or the shop goes back to the milestones
   page; CLOSE on the milestones page goes back to the tank.
+- **MY TANKS**, at the foot of the settings page between the version and
+  CLOSE, opens the shelves of tanks (*MY TANKS*); its CLOSE goes back to
+  the tank.
 
 So settings are three taps away: a fish, its card, SETTINGS.
 
@@ -157,6 +195,51 @@ To move it later, hold a still finger on the piece in the tank for a moment
 has MOVE and SHELVE for a piece in the tank, PLACE and SELL for one on the
 shelf. A locked piece opens only from the shop.
 
+### MY TANKS
+
+New in 0.3.9.3: the board keeps more than one tank. Besides the tank on
+the glass, up to 119 more wait on two wooden shelves, four to a shelf and
+eight to a page. On the CYD: **SETTINGS, then MY TANKS** at the foot, between
+the version and CLOSE - a fish, its card, SETTINGS, MY TANKS. BOOT pressed
+twice opens it too, on the Touch-LCD-2 or a CYD out of its case. CLOSE goes
+back to the tank.
+
+- **A tank on the shelf** wears its rest: zZ, DORMANT, lives on as if
+  asleep and catches up when it comes back, as a night does; two bars,
+  PAUSED, waits exactly as it was left. The tank on the glass wears NOW.
+- **Tap a tank** for its card: its picture, name, type, how long it has
+  rested and its age; TIME (DORMANT or PAUSED); **SWAP IN**, RENAME and
+  MORE. SWAP IN saves the tank on the glass onto the shelf and restarts the
+  board into the other one; the wallet and the board's settings (LIGHTS OUT,
+  the ROTATION lock) go with it. The tank on the glass has a card too, with
+  RENAME alone.
+- **RENAME** is a keyboard: two lines of seven for the name plate, fourteen
+  big keys a page (MORE turns to the next page: A-N, O-Z ' ., digits and
+  - ! ? /), DEL, SPACE, LINE (the other line), CLEAR, BACK and DONE. A key
+  acts as the finger lifts on it.
+- **MORE** on a card is REMOVE: the tank and its fish go for good, and its
+  pieces sell back. HOLD TO SELL fills as the finger stays on it, 2 s.
+- **An empty place**, or LIBRARY at the bottom left, opens THE LIBRARY:
+  NEW TANK starts another fish tank, free for the first, 300 sand dollars
+  after that.
+- **To move a tank**, hold it until it lifts, then tap its new place (a
+  tank there trades places with it); CANCEL puts it back.
+
+**The touch lock** is the padlock by the title: shut, nothing a finger
+does reaches the tank or opens a page, and a touch only shows TOUCH IS
+LOCKED. Upstream's way back is BOOT twice; on a 320 x 240 board **a finger
+held still on the glass for 5 s** opens MY TANKS as well, and the padlock
+undoes the lock there. The lock is the board's (NVS `tank/tlock`): it stays
+through a restart, a swap and a reset of the tank. A locked board still
+wakes from the dark on a touch.
+
+Where the tanks live: the tank on the glass where it always has (NVS
+`tank/save`), its name and place in NVS `frame`; each shelved tank in a
+24 KB slot of the `storage` partition, past its first 64 KB (*Building and
+flashing*). In 0.3.9.5 a swap restarts straight into the other tank:
+upstream's loading screen and the show of the tank building itself up are
+switched off with the grass loop (*Still open*).
+
 ### Settings
 
 | row | choices | what it does |
@@ -169,8 +252,9 @@ shelf. A locked piece opens only from the shop.
 | ROTATION | one padlock button, with LOCKED or UNLOCKED beside it | in SCREEN's place once an IMU answers. Tap the padlock to lock the picture the way up it is now; tap it again to let it follow the board turned over |
 | SLEEP | NEVER / SCREEN / LIGHT | what every way into sleep does, on every 320 x 240 board: NEVER ignores it, SCREEN darkens the glass with the chip awake, LIGHT darkens it and light-sleeps. LIGHT is the factory default; a choice is kept in NVS and applies from the next sleep (*Sleeping and waking*) |
 
-At the foot: the release and the build id, small and dim ("V0.3.4 ALPHA
-BUILD ...", cut short of CLOSE), and CLOSE. There is no UPDATES button.
+At the foot: the release over the build id, small and dim, on two lines
+cut short of the next button ("V0.3.9.5 ALPHA", "BUILD 4D913B5C3D"), then
+MY TANKS (*MY TANKS*), then CLOSE. There is no UPDATES button.
 
 ### The ADVANCED page
 
@@ -201,8 +285,9 @@ taps answer (`ADV_BATTERY_ROW` in `common/advanced.h`).
 
 What puts the tank to sleep:
 
-- a press of **BOOT** (at its release), unless the press opened the reset
-  prompt or the ADVANCED page;
+- a press of **BOOT**, 0.4 s after its release, unless a second press
+  follows within those 0.4 s (two presses open MY TANKS) or the press
+  opened the reset prompt or the ADVANCED page;
 - **laying it face down**, level and still, for 2 s - with an IMU fitted;
 - the director's `deepsleep [N]` and `poweroff`, over the serial port
   (*The serial console (the director)*).
@@ -243,6 +328,7 @@ On the glass, with no tool in hand:
 | a finger held still for about three seconds | the fish that trust you come over |
 | a finger held still on a decoration you own, 0.7 s | its placement page, with SELL |
 | a swipe along the milestones page's TANK row | the next page of the tank's badges, when it has more than one |
+| a finger held still 5 s on a touch-locked glass | MY TANKS, whose padlock undoes the lock (*MY TANKS*) |
 
 The movement gestures need an IMU. The CYD has none on the board: a
 QMI8658 or an MPU-6050 breakout on its I2C socket (VCC 3V3, GND, SDA IO16,
@@ -258,7 +344,8 @@ are the AMOLED board's too; face down is the CYD's. Moving it, and BOOT:
 | lay it screen down, level and still, 2 s | it saves, darkens and sleeps, as a short press of BOOT |
 | turn it screen up, or pick it up | it wakes where it was, fish and all |
 | touch the glass while it sleeps | it wakes where it was; that touch does nothing in the tank (not while it lies face down) |
-| short press of BOOT | sleeps the tank; another press wakes it in place (face down or not) |
+| short press of BOOT | sleeps the tank 0.4 s after the release; another press wakes it in place (face down or not) |
+| two short presses of BOOT, the second within 0.4 s | MY TANKS, or closes it |
 | hold BOOT 5 s, then tap the glass with BOOT still down | the *Reset tank?* prompt; on the settings page, the ADVANCED page. A tap sooner is an ordinary tap, and letting go of BOOT then sleeps the tank |
 
 The SLEEP row decides what every way into sleep does, face down included.
@@ -277,11 +364,12 @@ pellets, on a fish it opens its card - and letting go of BOOT then puts the
 tank to sleep, as a short press does. A finger already on the glass when
 the five seconds are up does not count: lift it and tap again.
 
-YES erases the tank's whole NVS namespace. BRIGHTNESS, SCREEN and SLEEP are
-saved again at once, so they stay as they were. LIGHTS OUT, AUTO FEED and
-the ROTATION lock live in the save and go back to their defaults. VOLUME
-keeps sounding as it was until the next restart, and is NORMAL after it.
-A touch kept on the ADVANCED page is not in that namespace and stays.
+YES erases the tank on the glass alone (since 0.3.9.3: its save and the
+director's parked copy, `tank/save` and `tank/bk`; until then the whole
+`tank` namespace). BRIGHTNESS, VOLUME, SCREEN, SLEEP, the touch lock and a
+touch kept on the ADVANCED page stay, and so do the tanks on the shelf.
+LIGHTS OUT, AUTO FEED and the ROTATION lock live in the save and go back to
+their defaults. The chord does nothing while the touch is locked.
 
 BOOT cannot be reached in the board's case: take it out, or erase the save
 over the cable, which keeps the app and the model (*Recovering a board*).
@@ -361,7 +449,19 @@ not matter to it.
 **Updating keeps the tank**, as on the AMOLED board: the script writes the
 bootloader, the partition table, the app and a fresh otadata (`0xA90000`,
 which app slot boots), and the save in NVS (`0x9000`, 24 KB) is left
-alone. The model partition is written only with `--model`.
+alone, as are the tanks on the shelf in `storage` (*MY TANKS*). The model
+partition is written only with `--model`.
+
+The partition table is upstream's and has not changed since the CYD's
+first flash: NVS `0x9000` (24 KB), `phy_init` `0xF000`, `ota_0`
+`0x10000` (2.5 MB), the model `0x290000` (8 MB), `otadata` `0xA90000`,
+`ota_1` `0xAA0000` (2.5 MB), and `storage` `0xD20000`, 2.875 MB, to the
+end of the 16 MB. MY TANKS (0.3.9.3) keeps its shelf in `storage` past its
+first 64 KB (the NVS rescue copy, `nvs_start` in `main.c`): 120 slots of
+24 KB, one kept free for a swap, so 119 tanks. Nothing writes `storage`
+but the firmware; whatever an earlier image left there (the vendor's demo)
+fails the slots' checks and reads as empty places, and a slot is erased
+before it is written.
 
 ### The serial console (the director)
 
@@ -401,10 +501,23 @@ Each of these needs ESP-IDF's environment (the `export.sh` line above).
   esptool.py --chip esp32s3 -p <port> write_flash 0x9000 nvs.bin
   ```
 
+- **Back up the shelf** (MY TANKS) the same way: it is `storage` past its
+  first 64 KB, and an update never writes it:
+
+  ```sh
+  esptool.py --chip esp32s3 -p <port> -b 921600 read_flash 0xD30000 0x2D0000 shelf.bin
+  ```
+
 - **Start a fresh tank without BOOT** by erasing the save alone; the app and
   the model stay, and the next boot opens the first-run setup. Brightness,
-  the SCREEN row, the SLEEP row and a touch kept on the ADVANCED page go
-  with it:
+  the SCREEN row, the SLEEP row, the touch lock and a touch kept on the
+  ADVANCED page go with it, and so does NVS `frame`. The shelved tanks stay
+  in `storage` and come back on the shelf - **all but the board's first
+  tank**: the fresh tank on the glass is tank 1 again, and the boot takes a
+  shelved tank 1 for a leftover copy of it and erases its slot (`shelf_boot`
+  in `common/shelf.c`, upstream's). So with tank 1 on the shelf this loses
+  it as well as the tank on the glass; the reset prompt's YES does not
+  (it keeps `frame`). With the shelf backed up (above):
 
   ```sh
   esptool.py --chip esp32s3 -p <port> erase_region 0x9000 0x6000
@@ -492,6 +605,32 @@ instead (the CYD's blocks in `common/render.h` and `common/render.c`):
 
 Every page of the AMOLED build renders pixel-for-pixel as it did before the
 port: the sim's `--snapshot` set (69 pages) was compared before and after.
+
+**MY TANKS has a layout of its own here** (0.3.9.5's sync). Upstream draws
+the shelves, a tank's card, the RENAME keyboard, REMOVE, THE LIBRARY, the
+loading screen and the touch lock's note in the frame's own coordinates,
+with a set of numbers per board (`SH_*` and `NK_*` in `common/render.c`).
+The 320 x 240 boards have a set beside them: two rows of four little tanks,
+64 px wide, their pictures 60 x 44 (the glass's own shape); the keyboard's
+seven 40 px keys across the glass under the name plate; the footer from the
+glass's edges. Every other measurement in those pages is `UI(n)` or
+`UI_TEXT(s)`, identities on upstream's boards, whose pages stay byte for
+byte upstream's. The settings page's MY TANKS stands where the milestones
+page has SETTINGS, 96 px wide, and the version line moved into two lines on
+its left.
+
+**A hold-approach starts 120 px from the finger, not 140** (`common/tank.c`,
+`HOLD_APPROACH_FROM`). Upstream's 0.3.9.3 moved the start out to 140 px,
+past the ring its fish now swim round a held finger. On the 320 x 240 tank a
+finger held mid-tank has no fish that far out but in the corners, and the
+FIRST HOLD APPROACH badge and the fry's HOLD step would wait on one being
+there; the ring itself keeps its pixels, as the fish do.
+
+**BOOT's single press waits 0.4 s** on a 320 x 240 board. Upstream's two
+presses for MY TANKS (0.3.9.3) cost nothing on its boards, where BOOT alone
+does nothing; here BOOT alone is the sleep key, so a single press sleeps only
+once the window for a second has passed (`s_btn_sleep_due`, `main.c`), and
+one held longer than the window sleeps at its release, as before.
 
 **The stats card cannot write past the frame.** It is copied into the frame
 row by row with no clipping; at 258 px tall on a 240 px frame it wrote past
@@ -828,6 +967,32 @@ there needs the IMU's INT line wired (below).
   40 MHz to about 33 fps.
 - **The decorations** keep their pixel sizes: the castle is 146 px tall in a
   240 px tank. Worth a look on the glass.
+- **MY TANKS has not been on the glass** (0.3.9.5's sync): the shelves, the
+  cards, the keyboard and the touch lock's 5 s hold are laid out and checked
+  in the simulator only. A SWAP IN restarts the board in software, which
+  keeps the chip's timer as deep sleep does, so the tank that comes back
+  should have lived its time on the shelf; nobody has seen it do so here.
+- **The grass loop is off in 0.3.9.5** on every board (`GRASS_LOOP_ON 0`,
+  `main.c`: upstream's "until the loop is fixed and proven"), and with it
+  the loading screen and the boot show, which wait on the loop's first
+  bake and use its memory. The bake task still starts: a 16 KB stack in
+  internal RAM on core 1, taking the render lock every 4 ms to find
+  nothing to do. The boot log's "starting the tank task: internal heap"
+  line is the number to read. On the 320 x 240 world the loop's frames
+  differ from the live ones by one step of the 565 colour at the tip of a
+  tallest frond, and `--selftest-grassloop` allows four such pixels a frame
+  there (`GL_CYD_NEAR`): when upstream turns the loop back on, the A/B
+  wants to be exact here too before the CYD runs it.
+- **The frame rate after 0.3.9.4's swim depth and shadows** is unmeasured.
+  On the host the 320 x 240 world's frame with a full canopy went from ~155
+  to ~200 us (the 1.8's world: 208 to 248). The CYD drew a frame in 5 to
+  14 ms and sent it in 30: drawing ~28% dearer is at worst ~4 ms a frame,
+  about 21 fps down to 19.
+- **`HOLD_APPROACH_FROM` 120** comes from the simulator, where one fish in
+  four came in to a finger held mid-tank. Whether the FIRST HOLD APPROACH
+  badge and the fry's HOLD step come in fair time is a check on the glass.
+- **The crab card's COLLECT** (0.3.9.4) touches the big numbers above it on
+  a 240 px card, both scaled from upstream's design.
 
 ## The Waveshare ESP32-S3-Touch-LCD-2
 
@@ -1016,9 +1181,10 @@ upstream's text but for one block.
      around `set_lock_icon` in `common/render.c` merged unterminated, and
      the simulator would not build;
    - a settings tap upstream adds takes the next free number, which is the
-     fork's: v0.3.9's `SET_TAP_BRIGHT_LIVE` came in as 10, `SET_TAP_FLIP`'s.
-     The fork's taps move up past it and the new one joins the static
-     assert in `common/render.h` that keeps them apart;
+     fork's: v0.3.9's `SET_TAP_BRIGHT_LIVE` came in as 10, `SET_TAP_FLIP`'s,
+     and v0.3.9.3's `SET_TAP_TANKS` as 11, `SET_TAP_FLIP`'s again (FLIP and
+     SLEEP are 12 and 13 now). The fork's taps move up past it and the new
+     one joins the static assert in `common/render.h` that keeps them apart;
    - the frame's byte order: since v0.3.9 tankcore builds every board with
      `PT_FB_SWAP=1` (`common/render.h`), so the frame is already in the
      panel's order and `display_port_spi.c` copies it out of PSRAM without
@@ -1049,7 +1215,47 @@ upstream's text but for one block.
    - an upstream selftest whose probe lands on something only the 320 x 240
      layout overlaps: v0.3.9.1's probe above the milestones foot fell on
      the sand dollar, and the battery pill stands over the NEXT arrow. A
-     branch in `sim/main.c` says which, and why.
+     branch in `sim/main.c` says which, and why;
+   - a family of pages upstream draws in the frame's coordinates, a set of
+     numbers per board in an `#if PAGE_BOWL / TANK_WATCH / TANK_SQUARE /
+     else` chain: v0.3.9.3's MY TANKS (`SH_*`) and its keyboard (`NK_*`).
+     The 1.8's numbers run off a 320 px glass; the 320 x 240 needs a branch
+     in each chain, and the drawing code's own numbers `UI()`/`UI_TEXT()`;
+   - a second press upstream gives BOOT (v0.3.9.3: twice opens MY TANKS)
+     where its boards give the single press nothing to do: on a board
+     without a PMIC upstream's code sleeps at the first press. The 320 x
+     240's single press waits out the window (`s_btn_sleep_due`);
+   - a way back only BOOT gives (v0.3.9.3's touch lock): the CYD in its case
+     needs one on the glass (the 5 s hold, `touch_port_take_lock_open`);
+   - a rule that reads a save by where its pieces stand: v0.3.9.3's
+     relayout takes a save from before 0.3.9.3 with a spot past the floor
+     for the 1.8's world. The 1.8's fixtures do that on the 320 px floor
+     (their bubble column at 358), so `--selftest-saves` moves its expected
+     images the same way in that world (`cyd_expect_relayout`); a CYD's own
+     save never has a spot past 320;
+   - a distance in pixels chosen on the 1.8's tank: v0.3.9.3's
+     `HOLD_APPROACH_FROM` 140 (120 here);
+   - upstream selftests with a number or a shape of their own glass: the
+     seahorse's snack sum (a fish, hungry after ten minutes of sleep, ate
+     one of the pellets on the small tank), the sword plant's leaves on the
+     pumpkin (54-63 px here, 100 asked), the padlock inside a 40 px rounded
+     corner (the CYD's glass is square), the grass loop's A/B (a shade at a
+     frond's tip). Each has a 320 x 240 branch in `sim/main.c` with its
+     reason;
+   - the IMU's interface grows: v0.3.9.3's quarter turns (`imu_port_sides`,
+     `imu_port_quarter`, the way up seeded from NVS `inv` and `side`) went
+     into `imu_port.c` by hand, the side's sign from each chip's own axes,
+     and upstream moved `imu_port_init` ahead of update mode, the fork's
+     `s_imu` with it;
+   - `display_port.h`'s questions in v0.3.9.3: `display_port_set_quarter`,
+     `display_port_quarters`, `display_port_side_tune`,
+     `display_port_side_info`, `display_port_probe`, `board_port_hw`,
+     `board_port_probed` and `board_sd_select`, answered in
+     `display_port_spi.c` (no sides; `board_port_hw` NULL, since nothing it
+     probes tells the CYD from the Touch-LCD-2, so no WRONG VERSION card);
+   - **the simulator never compiles `firmware/main`**: a conflict resolved
+     in `main.c` is checked only by a firmware build (0.3.9.5's sync left a
+     stray brace there). Run `tools/build_cyd.sh` before the long sim runs.
 
 3. **The simulator, in all five worlds:**
 
@@ -1072,7 +1278,9 @@ upstream's text but for one block.
 4. **Upstream's four worlds against upstream's own tree.** Build upstream's
    simulator in a worktree of `upstream/main` (it needs its own `sim/lvgl`),
    write each world's pages with `--snapshot <prefix>` from `fishsim`,
-   `fishsim-round`, `fishsim-watch` and `fishsim-square` in both trees, and compare them with
+   `fishsim-round`, `fishsim-watch` and `fishsim-square` in both trees -
+   and since 0.3.9.5's sync `--shelf-shot`, `--place-shot` and
+   `--crab-card-shot` too, whose pages the fork scaled - and compare them with
    `cmp`. The only difference expected is the build line, which prints the
    tree's own `git describe`; any other page that differs is the fork
    reaching an upstream board.

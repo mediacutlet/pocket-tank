@@ -1,6 +1,6 @@
 /* setup.h — first-run setup (2026-09-13): the welcome, a name and colours for
  * each of the two fry, then the care tips - for a fresh install and after a
- * reset. Platform-agnostic: the state machine, the gestures, the hit
+ * reset. (0.4: each fry's name, then its FORM and COLORS - THE EDITOR below.) Platform-agnostic: the state machine, the gestures, the hit
  * geometry and the drawing all live here (the reset prompt kept its state in
  * each platform's touch code; a five-page flow would have been written
  * twice), built on render.h's UI primitives over the LIVE tank - the fish
@@ -106,12 +106,16 @@ int  setup_hit(float x, float y);
 void setup_activate(tank_t *t, int id);
 const char *setup_hit_name(int id);      /* "NEXT", "slot 2", "up", "body 3"... */
 int  setup_slot(void);                   /* the active letter slot on a name page */
-void render_setup(const tank_t *t, uint16_t *fb, int stride, float clock);
+void render_setup(const tank_t *t, uint16_t *fb, int stride, double clock);
 
 /* pages, in order */
-enum { SETUP_PG_WELCOME, SETUP_PG_BUBBLES, SETUP_PG_NAME_A, SETUP_PG_LOOK_A, SETUP_PG_NAME_B, SETUP_PG_LOOK_B, SETUP_PG_CARE, SETUP_PG_N };
+/* (0.4, Strato: design a fish before naming it - its colors, then its form,
+ * then its name once its chosen form is in view - both fish, then the tank:
+ * the bubble column, then the care tips) */
+enum { SETUP_PG_WELCOME, SETUP_PG_COLORS_A, SETUP_PG_FORM_A, SETUP_PG_NAME_A,
+       SETUP_PG_COLORS_B, SETUP_PG_FORM_B, SETUP_PG_NAME_B, SETUP_PG_BUBBLES, SETUP_PG_CARE, SETUP_PG_N };
 /* the birth flow's pages, in order (numbered past the first run's) */
-enum { SETUP_PG_BORN = SETUP_PG_N, SETUP_PG_NAME_NEW, SETUP_PG_FAMILY, SETUP_PG_BIRTH_END };
+enum { SETUP_PG_BORN = SETUP_PG_N, SETUP_PG_NAME_NEW, SETUP_PG_FAMILY, SETUP_PG_NATURE, SETUP_PG_BIRTH_END };
 #define SETUP_BIRTH_PAGES (SETUP_PG_BIRTH_END - SETUP_PG_BORN)
 /* the placement page (its own one-page flow, numbered past the birth flow's) */
 enum { SETUP_PG_PLACE = SETUP_PG_BIRTH_END };
@@ -129,11 +133,18 @@ enum { SETUP_PG_RENAME = SETUP_PG_PLACE + 1 };
 #define SETUP_HIT_DOWN  4                /* ... previous */
 #define SETUP_HIT_SLOT0 10               /* + 0..FISH_NAME_MAX-1: pick that slot */
 #define SETUP_HIT_BODY0 40               /* + swatch 0..LOOK_N-1 */
+#define SETUP_HIT_ROLL  6                /* the editor's ROLL: the page's genes at random */
+#define SETUP_HIT_SWAP  7                /* COLORS: trade the body and markings colors */
+#define SETUP_HIT_ACC0  160              /* the editor: + LOOK_ACCENT swatch 0..LOOK_N-1 (MARKINGS) */
+#define SETUP_HIT_SHAPE0 170             /* + SHAPE_* */
+#define SETUP_HIT_FINS0 175              /* + FINS_* */
+#define SETUP_HIT_PAT0  180              /* + PATTERN_* */
 #define SETUP_HIT_KEY0  100              /* legacy keyboards only: + 0..25 = A..Z, + SETUP_KEY_DEL, + SETUP_KEY_PAGE */
 #define SETUP_KEY_DEL   26
 #define SETUP_KEY_PAGE  27
 #define SETUP_KEY_N     28
 #define SETUP_HIT_Z0    60               /* + DECOR_Z_BACK..FRONT: the placement page's layer row */
+#define SETUP_HIT_ORD0  64               /* + 0 BEHIND / 1 IN FRONT: the sword plant's ORDER SQUARES (0.4) - behind or in front of the piece they show */
 #define SETUP_HIT_COLOR0 80              /* + 0..CORAL_N-1: the coral's colour swatches (its placement page) */
 
 /* geometry (tank coordinates), shared by the drawing, the hit test and the
@@ -181,29 +192,76 @@ enum { SETUP_PG_RENAME = SETUP_PG_PLACE + 1 };
 #define SETUP_SLOT_W   (5 * SETUP_SLOT_SCALE)
 #define SETUP_SLOT_H   (7 * SETUP_SLOT_SCALE)
 #define SETUP_SLOT_X   ((PAGE_W - ((FISH_NAME_MAX - 1) * SETUP_SLOT_PX + SETUP_SLOT_W)) / 2)
-#define SETUP_SLOT_Y   150
+#define SETUP_SLOT_Y   170              /* (150 until 0.4: the band above now shows a young fish's GROWN UP beside it) */
 #define SETUP_ARROW_GAP 40
 #define SETUP_SPIN_PX   30                                 /* drag travel per letter */
-/* the colour page (third design too): no panel, the live FRY wears the pick
- * with a ring round it; one row of 8 body swatches, 42 x 60 px at a 46 px
- * pitch, a tall band around it so a low-landing finger still hits; the
- * accent is a "?" - a fry's markings come in as it grows */
-#define SETUP_SW_N  LOOK_N
-#define SETUP_SW_PX 46
-#define SETUP_SW_W  42
-#define SETUP_SW_H  60
+/* THE EDITOR (0.4, docs/genetics-0.4.md; Spore's creature editor in a
+ * pocket): per fish, NAME, then FORM (body SHAPE, FINS), then COLORS (BODY,
+ * PATTERN, MARKINGS) - over the live tank, BACK / ROLL / NEXT on top. The
+ * band under them shows the fry as it is NOW, on stage at the left (the live
+ * fish, wearing its body and shape), and the GROWN fish it becomes at the
+ * right (fins come in when it is grown, markings as it grows). Under the
+ * band the rows: three picture tiles for a form (each a small fish of that
+ * option in the fish's own colors), eight swatches for a color. Each row's
+ * band runs from its label to halfway into the gap below, the nearest
+ * choice along x - no dead space. ROLL picks the page's genes at random. */
+#define SETUP_SW_N  LOOK_N              /* nine since 0.4 (charcoal): a wider row, 44 px apart, 40 wide - more
+                                       swatch in all than eight at 46 / 42; the bowl's circle is narrower
+                                       at the markings row, so there 40 / 36 */
+#define SETUP_SW_PX (PAGE_BOWL ? 40 : 44)
+#define SETUP_SW_W  (PAGE_BOWL ? 36 : 40)
 #define SETUP_SW_X  ((PAGE_W - (SETUP_SW_N - 1) * SETUP_SW_PX - SETUP_SW_W) / 2)
-#define SETUP_SW_Y  176
-#define SETUP_ACC_Y 276
-/* the family page (birth flow): the portrait ringed under the name, then
- * four rows - BODY / MARKINGS (a swatch, whose it is), BOLD / SOCIAL (a bar
- * of the fry's own, the parents' ticks in their body colours) - and a
- * PARENTS legend naming both in their tick colours; BACK + DONE at the foot */
-#define SETUP_FAM_PORTRAIT_Y (SETUP_Y + 78)
-#define SETUP_FAM_ROW_Y      (SETUP_Y + 128)
-#define SETUP_FAM_ROW_DY     26
+#define SETUP_ROLL_X ((PAGE_W - SETUP_TOP_BTN_W) / 2)
+/* COLORS: SWAP (body <-> markings, Strato 10-04) is a tall button at the
+   pattern row's right end, between the two palettes, an arrow pointing up at
+   the body row and one down at the markings row; the pattern tiles narrow
+   to make its room */
+#define SETUP_PAT_TILE_W  100
+#define SETUP_PAT_TILE_PX 108
+#define SETUP_SWAP_W      40
+#define SETUP_SWAP_GAP    10
+#define SETUP_PAT_TILE_X  ((PAGE_W - (2 * SETUP_PAT_TILE_PX + SETUP_PAT_TILE_W + SETUP_SWAP_GAP + SETUP_SWAP_W)) / 2)
+#define SETUP_SWAP_X      (SETUP_PAT_TILE_X + 2 * SETUP_PAT_TILE_PX + SETUP_PAT_TILE_W + SETUP_SWAP_GAP)
+#define SETUP_SWAP_Y      (SETUP_COLOR_BODY_Y + SETUP_COLOR_SW_H + 8)
+#define SETUP_SWAP_H      (SETUP_COLOR_ACC_Y - SETUP_LABEL_DY - 4 - SETUP_SWAP_Y)
+#define SETUP_ED_NOW_X      130          /* the fry's stage (page x) ... */
+#define SETUP_ED_GROWN_X    306          /* ... and the grown portrait */
+#define SETUP_ED_PREVIEW_Y  110
+#define SETUP_ED_CAPTION_Y  140          /* NOW / GROWN UP */
+#define SETUP_ED_GROWN_SIZE 1.5f
+#define SETUP_TILE_N   3
+#define SETUP_TILE_W   110
+#define SETUP_TILE_PX  118
+#define SETUP_TILE_X   ((PAGE_W - (SETUP_TILE_N - 1) * SETUP_TILE_PX - SETUP_TILE_W) / 2)
+#define SETUP_LABEL_DY 16                /* a row's label sits this far above it */
+#define SETUP_FORM_TILE_H 56             /* FORM: two rows of named tiles */
+#define SETUP_FORM_SHAPE_Y 174
+#define SETUP_FORM_FINS_Y  256
+#define SETUP_COLOR_SW_H   32            /* COLORS: swatches, tiles, swatches */
+#define SETUP_COLOR_PAT_H  44
+#define SETUP_COLOR_BODY_Y 174
+#define SETUP_COLOR_PAT_Y  230
+#define SETUP_COLOR_ACC_Y  298
+/* the family page (birth flow; 0.4 heredity): the fry's name; NOW (the fry,
+ * ringed) and the GROWN fish it becomes side by side, as in the editor; then
+ * a row per gene - SHAPE, FINS, PATTERN (the option's name), BODY, MARKINGS
+ * (a swatch) - and, under FROM, where it came from: a parent's name in its
+ * body color, a * when it was that parent's hidden copy (a footnote says
+ * so), or NEW! for a mutation. The nature page after it (DONE): BOLD /
+ * SOCIAL - the fry's bar, the parents' ticks in their body colors - and the
+ * PARENTS legend. BACK + NEXT / DONE at the foot of both. */
+#define SETUP_FAM_PORTRAIT_Y (SETUP_Y + 82)
+#define SETUP_FAM_NOW_X      (SETUP_X + SETUP_W / 2 - 90)
+#define SETUP_FAM_GROWN_X    (SETUP_X + SETUP_W / 2 + 80)
+#define SETUP_FAM_GROWN_SIZE 1.3f
+#define SETUP_FAM_ROW_Y      (SETUP_Y + 134)
+#define SETUP_FAM_ROW_DY     24
 #define SETUP_FAM_LABEL_X    (SETUP_X + 28)
-#define SETUP_FAM_VALUE_X    (SETUP_X + 150)
+#define SETUP_FAM_VALUE_X    (SETUP_X + 136)
+#define SETUP_FAM_FROM_X     (SETUP_X + 248)
+#define SETUP_FAM_NOTE_Y     (SETUP_FAM_ROW_Y + 5 * SETUP_FAM_ROW_DY + 2)
+#define SETUP_NAT_ROW_Y      (SETUP_Y + 100)   /* the nature page's rows */
+#define SETUP_NAT_ROW_DY     34
 #define SETUP_FAM_BAR_W      200
 #define SETUP_FAM_BAR_H      8
 /* the placement page's DEPTH control (second design, 2026-09-16 - Strato:
@@ -226,14 +284,16 @@ enum { SETUP_PG_RENAME = SETUP_PG_PLACE + 1 };
 #define SETUP_DEPTH_H      70
 #define SETUP_DEPTH_TILE_H 40
 #define SETUP_DEPTH_HINT_Y (SETUP_DEPTH_Y + SETUP_DEPTH_H + 8)
+#define SETUP_ORDSQ_X      ((PAGE_W - 2 * SETUP_DEPTH_SEG_W) / 2)   /* the sword plant's ORDER SQUARES (0.4): two segments in the DEPTH bar's place -
+                                                                 BEHIND | IN FRONT of the piece beside it in the stack, a universal block for it */
 #define SETUP_PLACE_Y      (SETUP_DEPTH_HINT_Y + 20)
 /* the coral's placement page (2026-09-23) trades the hint line for a COLOR
  * row: CORAL_N swatches at the colour page's pitch, shorter (42 x 26), the
  * chosen one ringed; the coral on the floor below wears the pick at once.
  * The drag zone starts under the row. */
 #define SETUP_COL_N   CORAL_N
-#define SETUP_COL_PX  SETUP_SW_PX
-#define SETUP_COL_W   SETUP_SW_W
+#define SETUP_COL_PX  46               /* (the editor's swatches' old pitch - the editor's moved to nine in 0.4) */
+#define SETUP_COL_W   42
 #define SETUP_COL_H   26
 #define SETUP_COL_X   ((PAGE_W - (SETUP_COL_N - 1) * SETUP_COL_PX - SETUP_COL_W) / 2)
 #define SETUP_COL_Y   (SETUP_DEPTH_Y + SETUP_DEPTH_H + 22)
@@ -251,6 +311,14 @@ enum { SETUP_PG_RENAME = SETUP_PG_PLACE + 1 };
 /* the stage: the clear spot each page leaves for the fish being edited
  * (tank_t.stage_*), top centre between the buttons */
 #define SETUP_STAGE_X   (TANK_W / 2)                    /* the stage is in the TANK: the frame's coordinates, under the page's title */
-#define SETUP_STAGE_NAME_Y (PAGE_Y + 94)
-#define SETUP_STAGE_LOOK_Y (PAGE_Y + 112)
+#define SETUP_STAGE_NAME_Y (PAGE_Y + 104)
+/* a name page for a fish not yet grown (0.4): it is staged at NOW, the left,
+   and its GROWN UP form sits on a plate at the right, as in the editor - the
+   keeper names the fish they designed, fins and markings in view */
+#define SETUP_NAME_PREVIEW_Y   106
+#define SETUP_NAME_GROWN_SIZE  1.3f
+#define SETUP_STAGE_EDIT_X (PAGE_X + SETUP_ED_NOW_X)   /* the editor's NOW */
+#define SETUP_STAGE_EDIT_Y (PAGE_Y + SETUP_ED_PREVIEW_Y)
+void setup_fish_removed(tank_t *t, int idx);   /* a fish left, the slots shifted: the page follows its fish (or closes) */
+
 #endif

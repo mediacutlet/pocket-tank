@@ -25,11 +25,15 @@ int  touch_port_take_adv(void) { return 0; }
 static bool s_shop;
 bool touch_port_shop(void) { return s_shop; }
 void touch_port_show_shop(bool on) { s_shop = on; }
+static bool s_coll;
+bool touch_port_collection(void) { return s_coll; }
+void touch_port_show_collection(bool on) { s_coll = on; }
 int  touch_port_take_shop(void) { return 0; }
 static bool s_bat;
 void touch_port_set_pill(bool up) { (void)up; }
 bool touch_port_battery(void) { return s_bat; }
 void touch_port_show_battery(bool on) { s_bat = on; }
+void touch_port_set_quiet(bool on) { (void)on; }
 void touch_port_dismiss(void) { s_ms = false; s_bat = false; }
 static bool s_upd;
 bool touch_port_updates(void) { return s_upd; }

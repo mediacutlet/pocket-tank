@@ -24,6 +24,7 @@
 #ifndef PROGRESSION_H
 #define PROGRESSION_H
 #include "tank.h"
+#include "passport.h"
 #include <stdint.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -35,11 +36,18 @@
  * --selftest-saves pins the spelling. */
 #define SAVE_NVS_NS  "tank"
 #define SAVE_NVS_KEY "save"
-bool    persist_port_load(void *buf, size_t max, size_t *got); /* the saved blob, whatever length an older
-                                                            * build wrote (*got = it); a NEWER build's longer one
-                                                            * loads its first max bytes (*got = max); false = nothing */
+bool    persist_port_load(void *buf, size_t max, size_t *got); /* the saved blob, whatever length a build
+                                                            * wrote: *got = its stored length; a NEWER build's longer
+                                                            * one fills buf with its first max bytes (*got stays the
+                                                            * whole: progression keeps the rest); false = nothing */
 bool    persist_port_save(const void *buf, size_t len);
 bool    persist_port_erase(void);                          /* the tank on the glass (and a parked copy); the shelf and the board keys stay (D13) */
+/* a blob of its own beside the tank save (the visitor collection, 0.4): the
+ * device keeps it under `key` in SAVE_NVS_NS (so a reset erases it too), the
+ * sim in a file beside the save. got = its stored length */
+bool    persist_port_blob_load(const char *key, void *buf, size_t max, size_t *got);
+bool    persist_port_blob_save(const char *key, const void *buf, size_t len);
+bool    persist_port_blob_forget(const char *key);         /* gone (true if it was never there): MY TANKS swaps a tank in without one */
 int64_t clock_port_now_unix(void);                         /* 0 if unknown */
 /* the release (version.h PT_RELEASE_NUM) of the build that wrote the save
  * the last load read - 0 for a save from before release numbers, or none */
@@ -61,6 +69,9 @@ const char *board_port_hw(void);
  * morning deserves its night too). Returns the hours lived through, -1 for
  * none. */
 float progression_boot(tank_t *t);
+/* the tank has changed since its last save: one is due at the next window
+   (30 s), not the 10-min heartbeat (the selftests read it) */
+bool  progression_dirty(void);
 /* the device waking from DEEP sleep (2026-09-14): restore the save, then live
  * through the dark stretch since it was written - tank_tick_sleep for
  * (now_unix - saved_unix), capped at PROGRESSION_SLEEP_CAP_S. Hunger, energy,
@@ -113,6 +124,26 @@ bool progression_save(tank_t *t);
 extern float progression_time_scale;
 /* debug: stage and show an arrival now (sim key R); no-op at the cap */
 void progression_force_arrival(tank_t *t);
+/* cross-tank fry (phase 5, docs/tank-link-0.4.md; tank_link.c calls these) */
+int  progression_fry_room(const tank_t *t);                             /* room here for a new fry (or a gift) */
+int  progression_fish_held(const tank_t *t);   /* the fish here + the places held for gifts and fry we said yes to: what counts against POP_CAP */
+/* THE CAP's guard: progression_fish_held above POP_CAP is a bug on some path (Strato 2026-11-03: at most POP_CAP fish,
+ * never more, on every path). Checked at every path that adds a fish and once a tick (progression_tick, tank_link_tick);
+ * a breach calls the platform's hook with the file, line and path: the sim fails the running selftest, the device logs
+ * once. A compare, no frame cost. NULL = not checked */
+extern void (*progression_cap_hook)(const tank_t *t, int held, const char *file, int line, const char *path);
+void progression_cap_check_at(const tank_t *t, const char *file, int line, const char *path);
+#define progression_cap_check(t, path) progression_cap_check_at((t), __FILE__, __LINE__, (path))
+/* GIVE (tank link phase 6, gift.h): whether a fish may be given (a sale's rules, and home, not at a door);
+   one of ours gone next door for good (no sand dollars); a gift from next door, ours now (its slot) */
+bool progression_keeps_two(const tank_t *t, int fish);   /* it may go and two stay: the fish of ours on their way out (gifts) counted gone */
+bool progression_fish_givable(const tank_t *t, int fish);
+bool progression_give_out(tank_t *t, int fish);
+int  progression_gift_adopt(tank_t *t, const passport_t *pp);
+int  progression_fry_adopt(tank_t *t, const passport_t *pp, int edge);  /* home: one of ours born next door; its slot or -1 */
+void progression_fry_kept(tank_t *t, int vis_k);                        /* host: its home said no - ours after all */
+void progression_fry_home(tank_t *t, int slot);                         /* home: it swam in - its birth flow */
+float progression_bond(const tank_t *t, uint32_t vis, uint32_t *mate);  /* a visitor's time together here, 0..1 of its goal, and with whom */
 /* debug: stage an arrival as if its last gate had just closed - the
  * spawning follows (or progression_force_arrival, at once) */
 void progression_stage_arrival(tank_t *t);
@@ -134,6 +165,9 @@ float progression_age_s(const tank_t *t, int idx);        /* grown seconds */
 /* director/debug: put a fish's tended clock at `seconds` and apply the stage
  * and size that go with it now (the silent surprise, on cue) */
 void progression_set_age(tank_t *t, int idx, float seconds);
+/* the same for an age a passport brought (home from a visit, a gift): the
+ * stage the fish has is kept, as at a load - only the director demotes */
+void progression_age_from_passport(tank_t *t, int idx, float seconds);
 /* director/debug: the new-tank path on a tank_init'd tank - two fry, first
  * milestones, nothing tended yet. Saves over the current save on the next
  * heartbeat: stash it first (firmware director: `stash`). */
@@ -259,7 +293,7 @@ bool progression_buy(tank_t *t, int item);
  * release after October 31 sets it to 0 (Strato: no date check, a board
  * keeps selling it until it is updated). One bought stays in its tank, so
  * the shop keeps its row for the keeper who has one. */
-#define SD_PUMPKIN_IN_SHOP 1
+#define SD_PUMPKIN_IN_SHOP 0                   /* 0.4.0 (11-03): out of the shop, as promised for the first update in November */
 bool progression_pumpkin_offered(const tank_t *t);
 /* the sale back (2026-09-24, Strato): a placeable piece sells for SD_SELL_PCT
  * of its price (the snail is a permanent resident), goes back to the shop at
@@ -323,9 +357,9 @@ bool progression_lock(tank_t *t, int item, bool on);
 #define SD_PRICE_FRY   200
 #define FRY_OFFER_N    3
 #define FRY_OFFER_S    (24 * 3600.0f)
-typedef struct { uint32_t body, accent; bool sold; } fry_offer_t;
+typedef struct { uint32_t body, accent; bool sold; uint8_t shape, fins, pattern; } fry_offer_t;   /* (0.4, 11-01: its form - genetics in the shop) */
 bool  progression_fry_for_sale(const tank_t *t);   /* the first sale's badge is earned */
-bool  progression_fry_room(const tank_t *t);       /* a slot free and no welcome owed */
+bool  progression_fry_room_to_buy(const tank_t *t);  /* ... and no welcome owed: the shop may sell */
 void  progression_fry_offer(int k, fry_offer_t *o);
 int   progression_fry_left(void);                  /* fry not yet bought in this offer */
 float progression_fry_new_in_s(void);              /* tank seconds until a fresh three */
@@ -333,7 +367,7 @@ bool  progression_buy_fry(tank_t *t, int k);
 void  progression_fry_roll(tank_t *t);             /* director / tests: a fresh three now */
 void  progression_fry_open(tank_t *t);             /* director / tests: the shop's fry, as if a fish was sold */
 int  progression_fish_value(const tank_t *t, int fish);      /* what it would fetch now */
-bool progression_fish_sellable(const tank_t *t, int fish);   /* false: the last pair, or a welcome is owed */
+bool progression_fish_sellable(const tank_t *t, int fish);   /* false: the last pair, a welcome is owed, or it is next door */
 bool progression_sell_fish(tank_t *t, int fish);
 /* dollars awarded since the last call (the toast over the live tank) */
 int  progression_sd_take_award(void);
@@ -343,12 +377,7 @@ void progression_sd_grant(tank_t *t, int n);
 #define SD_EARN_LINES 8
 const char *const *progression_sd_earn_lines(void);
 
-/* population ceiling. Compile-time so the device can ship lower until its
- * advisor latency is measured (docs/progression-next.md): firmware passes
- * -DPOP_CAP=5, the sim shows all 6. Never above N_FISH_MAX. */
-#ifndef POP_CAP
-#define POP_CAP N_FISH_MAX
-#endif
+/* the population ceiling, POP_CAP (5), is tank.h's: one cap for the sim and every board */
 
 /* stage thresholds, in seconds of grown life: awake time in full (the light
  * makes no difference), sleep at SLEEP_GROWTH_FRAC. A desk companion is

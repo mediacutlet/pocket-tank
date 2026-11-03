@@ -14,6 +14,15 @@ endif()
 # execute_process runs at configure time only: without this, a build after a
 # new commit keeps the previous id (2026-09-30: the tank reported bb7751a from
 # a 092a913 tree). A change of HEAD or of the branch's ref reconfigures.
-set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
-             ${CMAKE_CURRENT_LIST_DIR}/../.git/HEAD ${CMAKE_CURRENT_LIST_DIR}/../.git/index)
+# In a worktree (~/.cache/pocket-tank/wt-*) .git is a FILE pointing into the
+# main repo's .git/worktrees/<name>, so ../.git/HEAD does not exist and the id
+# never refreshed (2026-10-04: a d326460 build reported 8c15fa2): ask git where
+# this checkout's own HEAD and index live.
+execute_process(COMMAND git rev-parse --absolute-git-dir
+                WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}
+                OUTPUT_VARIABLE PT_GIT_DIR OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+if(NOT PT_GIT_DIR)
+    set(PT_GIT_DIR ${CMAKE_CURRENT_LIST_DIR}/../.git)
+endif()
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${PT_GIT_DIR}/HEAD ${PT_GIT_DIR}/index)
 project(pocket_tank)

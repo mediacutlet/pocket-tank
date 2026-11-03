@@ -2,6 +2,8 @@
  * Wall clock: esp time (set from the PCF85063 RTC at boot in Track 4; until
  * then it is 0 on a cold boot, which simply disables the ravenous rule). */
 #include "progression.h"
+#include "collection.h"
+#include "gift.h"
 #include "nvs_flash.h"
 #include "nvs.h"
 #include "esp_log.h"
@@ -13,8 +15,9 @@ static const char *TAG = "persist";
 
 /* A save LONGER than this build's save_t is a newer build's (a rollback, or
  * the installer's older release): its head is our whole layout (tails only
- * ever append), so the head is loaded and the newer tail - things this build
- * never knew about - reads as its defaults when the newer build comes back.
+ * ever append), so the head is loaded and *got reports the whole length -
+ * progression reads it again whole to keep the newer tail and write it back
+ * (newer_keep), so the newer build finds it when it comes back.
  * A blob that exists but won't read blocks every save until a reset, so a
  * tank we could not load is never overwritten by a fresh one. */
 static bool s_save_blocked;
@@ -29,7 +32,6 @@ bool persist_port_load(void *buf, size_t max, size_t *got) {
         else if ((e = nvs_get_blob(h, SAVE_NVS_KEY, all, &len)) == ESP_OK) {
             memcpy(buf, all, max);
             ESP_LOGW(TAG, "a newer build's save (%u bytes): loading the first %u", (unsigned)len, (unsigned)max);
-            len = max;
         }
         free(all);
     }
@@ -56,10 +58,38 @@ bool persist_port_erase(void) {
     nvs_handle_t h; if (nvs_open(SAVE_NVS_NS, NVS_READWRITE, &h) != ESP_OK) return false;
     esp_err_t e = nvs_erase_key(h, SAVE_NVS_KEY); if (e == ESP_ERR_NVS_NOT_FOUND) e = ESP_OK;
     esp_err_t e2 = nvs_erase_key(h, "bk"); if (e == ESP_OK && e2 != ESP_OK && e2 != ESP_ERR_NVS_NOT_FOUND) e = e2;
+    static const char *const OWN[7] = { COLL_NVS_KEY, KIN_NVS_KEY, GIFT_NVS_KEY,   /* the tank's own blobs beside its save (0.4): the visitor
+                                                                                   collection, the KIN book, the gift notes */
+                                        "bkvis", "bkkin", "bkgft", "bkbooks" };    /* ... and the director's parked ones (director.c books_park), as "bk" */
+    for (int k = 0; k < 7; k++) { e2 = nvs_erase_key(h, OWN[k]); if (e == ESP_OK && e2 != ESP_OK && e2 != ESP_ERR_NVS_NOT_FOUND) e = e2; }
     if (e == ESP_OK) e = nvs_commit(h);
     nvs_close(h);
     if (e != ESP_OK) ESP_LOGW(TAG, "erase failed: %s", esp_err_to_name(e));
     else { ESP_LOGI(TAG, "the tank on the glass erased (the shelf and the board's settings kept)"); s_save_blocked = false; }
+    return e == ESP_OK;
+}
+bool persist_port_blob_load(const char *key, void *buf, size_t max, size_t *got) {
+    nvs_handle_t h; if (nvs_open(SAVE_NVS_NS, NVS_READONLY, &h) != ESP_OK) return false;
+    size_t len = 0; esp_err_t e = nvs_get_blob(h, key, NULL, &len);
+    if (e == ESP_OK && (len == 0 || len > max)) e = ESP_ERR_INVALID_SIZE;
+    if (e == ESP_OK) e = nvs_get_blob(h, key, buf, &len);
+    nvs_close(h);
+    if (e == ESP_OK) *got = len;
+    return e == ESP_OK;
+}
+bool persist_port_blob_save(const char *key, const void *buf, size_t len) {
+    if (s_save_blocked) return false;
+    nvs_handle_t h; if (nvs_open(SAVE_NVS_NS, NVS_READWRITE, &h) != ESP_OK) return false;
+    esp_err_t e = nvs_set_blob(h, key, buf, len); if (e == ESP_OK) e = nvs_commit(h);
+    nvs_close(h); if (e != ESP_OK) ESP_LOGW(TAG, "%s save failed: %s", key, esp_err_to_name(e));
+    return e == ESP_OK;
+}
+bool persist_port_blob_forget(const char *key) {
+    if (s_save_blocked) return false;
+    nvs_handle_t h; if (nvs_open(SAVE_NVS_NS, NVS_READWRITE, &h) != ESP_OK) return false;
+    esp_err_t e = nvs_erase_key(h, key); if (e == ESP_ERR_NVS_NOT_FOUND) e = ESP_OK;
+    if (e == ESP_OK) e = nvs_commit(h);
+    nvs_close(h); if (e != ESP_OK) ESP_LOGW(TAG, "%s forget failed: %s", key, esp_err_to_name(e));
     return e == ESP_OK;
 }
 int64_t clock_port_now_unix(void) {
@@ -73,6 +103,7 @@ int64_t clock_port_now_unix(void) {
  * tank on the glass only (D13). ---- */
 #include "shelf.h"
 #include "esp_partition.h"
+#include "esp_memory_utils.h"
 #define SHELF_BASE 0x10000
 static const esp_partition_t *shelf_part(void) {
     static const esp_partition_t *p; static bool looked;
@@ -80,7 +111,23 @@ static const esp_partition_t *shelf_part(void) {
     return p;
 }
 size_t shelf_port_size(void) { const esp_partition_t *p = shelf_part(); return p && p->size > SHELF_BASE ? p->size - SHELF_BASE : 0; }
-bool shelf_port_read(uint32_t off, void *buf, size_t n) { const esp_partition_t *p = shelf_part(); return p && esp_partition_read(p, SHELF_BASE + off, buf, n) == ESP_OK; }
+/* a read into PSRAM (the page's snapshots, the shelf's scratch) comes through 1 KB on the stack. Flash reads
+   straight into PSRAM take a bounce buffer from INTERNAL RAM for the read (esp_flash_read: up to 16 KB, or the
+   whole largest internal block when that is smaller) - MY TANKS's open took the square's internal low mark
+   19 -> 7 KB, one snapshot at a time (0.4); on the watch / pendant (~20 KB free) the largest block went whole */
+#define SHELF_READ_BOUNCE 1024
+bool shelf_port_read(uint32_t off, void *buf, size_t n) {
+    const esp_partition_t *p = shelf_part();
+    if (!p) return false;
+    if (esp_ptr_in_dram(buf)) return esp_partition_read(p, SHELF_BASE + off, buf, n) == ESP_OK;
+    uint8_t b[SHELF_READ_BOUNCE];
+    for (size_t o = 0; o < n; o += sizeof b) {
+        size_t k = n - o < sizeof b ? n - o : sizeof b;
+        if (esp_partition_read(p, SHELF_BASE + off + o, b, k) != ESP_OK) return false;
+        memcpy((uint8_t *)buf + o, b, k);
+    }
+    return true;
+}
 bool shelf_port_write(uint32_t off, const void *buf, size_t n) { const esp_partition_t *p = shelf_part(); return p && esp_partition_write(p, SHELF_BASE + off, buf, n) == ESP_OK; }
 bool shelf_port_erase(uint32_t off, size_t n) { const esp_partition_t *p = shelf_part(); return p && esp_partition_erase_range(p, SHELF_BASE + off, n) == ESP_OK; }
 bool shelf_port_frame_get(const char *key, void *buf, size_t max, size_t *got) {
@@ -103,6 +150,7 @@ bool shelf_port_frame_del(const char *key) {
     return e == ESP_OK || e == ESP_ERR_NVS_NOT_FOUND;
 }
 bool persist_port_forget(void) {                  /* the save on the glass only: a fresh tank comes in */
+    if (s_save_blocked) return false;             /* (a save we could not load is never thrown away for a fresh one) */
     nvs_handle_t h; if (nvs_open(SAVE_NVS_NS, NVS_READWRITE, &h) != ESP_OK) return false;
     esp_err_t e = nvs_erase_key(h, SAVE_NVS_KEY); if (e == ESP_OK) e = nvs_commit(h);
     nvs_close(h);

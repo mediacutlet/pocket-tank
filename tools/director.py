@@ -40,7 +40,7 @@ try:
         if not line:
             continue
         text = line.decode("utf-8", "replace").rstrip()
-        if a.watch or "director" in text or not a.cmd:
+        if a.watch or "director" in text or ") link: " in text or not a.cmd:   # the tank link answers under its own tag
             print(text)
 except KeyboardInterrupt:
     pass

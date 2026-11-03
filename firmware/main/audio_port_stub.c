@@ -4,12 +4,13 @@
 #include "audio.h"
 #include "esp_log.h"
 
-static int s_volume = 2;
+static int s_volume = 100;
 bool audio_port_init(i2c_master_bus_handle_t bus) { (void)bus; ESP_LOGI("audio", "stub port: %d cues known, nothing plays", SND_COUNT); return false; }
 void audio_port_play(int cue, int pitch_q8) { (void)cue; (void)pitch_q8; }
 void audio_port_stop(int cue) { (void)cue; }
 void audio_port_prewarm(void) {}
-void audio_port_set_volume(int level) { s_volume = level < 0 ? 0 : level > 2 ? 2 : level; }
+void audio_port_preview_volume(int pct) { s_volume = pct < 0 ? 0 : pct > 100 ? 100 : pct; }
+void audio_port_set_volume(int pct) { s_volume = pct < 0 ? 0 : pct > 100 ? 100 : pct; }
 int  audio_port_volume(void) { return s_volume; }
 void audio_port_sleep(void) {}
 void audio_port_deep_sleep_pins(void) {}

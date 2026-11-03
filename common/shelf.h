@@ -15,8 +15,38 @@
  *   3. the incoming save -> NVS (or no save: a fresh tank, born at the boot)
  *   4. frame `now` = the incoming tank
  *   5. its old slot erased, the journal deleted
+ * A write the board refuses (NVS full or worn, saving off) never loses a tank:
+ * before step 3 the swap stops there; at step 3 or 4 it is undone (the tank
+ * that left goes back onto the glass from its slot). If even the undo is
+ * refused, both tanks stay whole in their slots, the journal stands, and
+ * nothing on the shelf is written until the boot that finishes it. A save
+ * longer than SHELF_SAVE_MAX (a newer build's, after a rollback) never swaps.
  * What is shared across a swap (the wallet, the board's settings) goes with
- * it as the frame's `carry`, given to the incoming tank after it loads. */
+ * it as the frame's `carry`, given to the incoming tank after it loads.
+ *
+ * THE TANK'S OWN BLOBS (0.4): the visitor collection, the KIN book and the
+ * GIVE notes live beside the save (persist_port_blob_*: the glass's). On the
+ * shelf they ride in the slot's last SHELF_EXTRA_MAX bytes, gathered into the
+ * outgoing slot at step 1 and put back in NVS with the incoming save at step 3
+ * (a slot without them - a fresh tank, a 0.3.9 shelf - brings none).
+ *
+ * THE VISITOR BOOK (0.4, Strato 11-03: the collection pages): the collection's first page (12) is the "visitors" blob
+ * above, as it always was; pages 2..10 (108 more) are a BOOK, a slot of its own on the shelf's grid. A book belongs to a
+ * tank by its shelf ID and the PRINT of its first page (a hash of those 12 fish IDs: once the page is full it never
+ * changes, so a book finds its tank again after a rollback that wiped the save's IDs, and never a reset tank's). It
+ * never moves in a swap - the tank on the glass and on the shelf read the same book. The slot is 6 sectors: three
+ * GROUPS of 3 pages (36 records), each in two copies (A sector 2g, B 2g+1) with a sequence number and a checksum, the
+ * newer good one read; a write erases ONE sector (the older copy). A slot is a book when group 0 (sector 0 or 1)
+ * reads; its other groups need the same print. Older builds read a book's slot as a free one (a swap there writes a
+ * tank over it: pages 2..10 lost, the first page kept). A book counts as a used slot, and one is made only with two
+ * free (one stays free for swaps). A tank removed, a reset, or a book whose tank is gone (the boot) erases it.
+ * Parked (the director's stash): its owner's top bit set, so neither the staged tank nor the sweep touches it. */
+#define SHELF_BOOK_MAGIC   0x31565450u           /* "PTV1" */
+#define SHELF_BOOK_GROUPS  3
+#define SHELF_BOOK_RECS    36                    /* records a group: 3 pages of 12 */
+#define SHELF_BOOK_HDR     32                    /* a sector's head: magic owner print seq | group count rec | 8 zero | crc */
+#define SHELF_BOOK_PAYLOAD (4096 - SHELF_BOOK_HDR)
+#define SHELF_BOOK_PARKED  0x80000000u           /* (a shelf ID never reaches it) */
 #ifndef SHELF_H
 #define SHELF_H
 #include <stdbool.h>
@@ -27,7 +57,9 @@
 #define SHELF_SAVE_OFF    256                     /* the save, in the header's sector */
 #define SHELF_SAVE_MAX    (4096 - SHELF_SAVE_OFF)
 #define SHELF_THUMB_OFF   4096
-#define SHELF_THUMB_MAX   (SHELF_SLOT_SIZE - SHELF_THUMB_OFF)
+#define SHELF_EXTRA_MAX   2560                    /* the tank's own blobs, full: the collection 918 + KIN 262 + the gift notes 1296 (v2: 145-byte notes) + 42 = 2518 (shelf.c asserts it) */
+#define SHELF_EXTRA_OFF   (SHELF_SLOT_SIZE - SHELF_EXTRA_MAX)
+#define SHELF_THUMB_MAX   (SHELF_EXTRA_OFF - SHELF_THUMB_OFF)   /* 17920: the square's 92 x 96 is the biggest (17664) */
 #define SHELF_SLOTS_MAX   120
 #define SHELF_POS_MAX     120                     /* places on the shelves: 15 pages of 8 */
 #define SHELF_NAME_MAX    15                     /* two plate lines of 7 and the break between them (0.3.9.3) */
@@ -94,6 +126,23 @@ bool shelf_set_time(int i, int mode, int64_t now_unix);
 bool shelf_swap(int i, const uint16_t *thumb, int w, int h, const void *carry, size_t carry_len, int64_t now_unix);
 /* the carry, once, after the incoming tank has loaded (false = none) */
 bool shelf_take_carry(void *buf, size_t len);
+/* the tank on the glass's name as it travels on its fish's passports (passport_t.home_name, 16 bytes): one line, or ""
+   for a name the keeper never gave it - MY TANK, TANK <n> - so its HOME WATERS stand alone next door */
+void shelf_keeper_name(char *out);
 /* how long the tank on the glass lived on the shelf before this boot, for the log (-1 = not swapped in) */
 float shelf_lived_h(void);
+
+/* THE VISITOR BOOK (above). owner = a shelf ID (shelf_now()->id for the tank on the glass), print = its first page's.
+ * read: group g's records (count returned, 0 = none or no book; *recs into the shelf's scratch, valid until the next
+ * book call; *rec = the record size it was written with). write: fill shelf_book_buf() with count records of rec
+ * bytes, then write group g (the book made if there is none: false = no room, or the flash refused). room: a book of
+ * this tank's, or one can be made. forget: every book of an owner (its slot erased). rekey: books of `from` become
+ * `to`'s (the director parks one with SHELF_BOOK_PARKED); the count rekeyed. */
+int      shelf_book_read(uint32_t owner, uint32_t print, int group, const uint8_t **recs, int *rec);
+uint8_t *shelf_book_buf(void);
+bool     shelf_book_write(uint32_t owner, uint32_t print, int group, int count, int rec);
+bool     shelf_book_room(uint32_t owner, uint32_t print);
+void     shelf_book_forget(uint32_t owner);
+int      shelf_book_rekey(uint32_t from, uint32_t to);
+int      shelf_book_count(void);                  /* books on the board (the log, the director) */
 #endif

@@ -18,9 +18,11 @@ static const char *path(void) {
 }
 bool persist_port_load(void *buf, size_t max, size_t *got) {
     FILE *f = fopen(path(), "rb"); if (!f) return false;
-    size_t n = fread(buf, 1, max, f); fclose(f);
+    size_t n = fread(buf, 1, max, f);
+    long all = fseek(f, 0, SEEK_END) == 0 ? ftell(f) : -1; fclose(f);
     if (n == 0) return false;
-    *got = n; return true;                       /* a newer build's longer save: its head (see the device port) */
+    *got = all > (long)n ? (size_t)all : n;      /* a newer build's longer save: its head, and the whole length (see the device port) */
+    return true;
 }
 
 static bool ensure_parent_dir(const char *file) {
@@ -40,14 +42,34 @@ static bool ensure_parent_dir(const char *file) {
 }
 
 static bool alive(void);
+static bool s_blocked;                             /* the device port's s_save_blocked (or NVS full): the tank's own keys refuse writes */
+void persist_port_sim_block(bool on) { s_blocked = on; }
 bool persist_port_save(const void *buf, size_t len) {
-    if (!alive()) return false;
+    if (s_blocked || !alive()) return false;
     const char *save = path();
     if (!ensure_parent_dir(save)) return false;
     FILE *f = fopen(save, "wb"); if (!f) return false;
     size_t n = fwrite(buf, 1, len, f); fclose(f); return n == len;
 }
-bool persist_port_erase(void) { return remove(path()) == 0 || errno == ENOENT; }
+static const char *blob_path(const char *key) { static char p[600]; snprintf(p, sizeof p, "%s.%s", path(), key); return p; }
+bool persist_port_erase(void) { remove(blob_path("visitors")); remove(blob_path("kin")); remove(blob_path("gifts")); return remove(path()) == 0 || errno == ENOENT; }
+bool persist_port_blob_load(const char *key, void *buf, size_t max, size_t *got) {
+    FILE *f = fopen(blob_path(key), "rb"); if (!f) return false;
+    size_t n = fread(buf, 1, max, f);
+    bool more = fgetc(f) != EOF; fclose(f);
+    if (!n || more) return false;                  /* (longer than max: refused whole, as NVS does - never a head) */
+    *got = n; return true;
+}
+int g_sim_blob_saves;                             /* blob writes, counted (--selftest-under-card: the KIN book's rate) */
+bool persist_port_blob_save(const char *key, const void *buf, size_t len) {
+    if (s_blocked || !alive()) return false;
+    const char *p = blob_path(key);
+    g_sim_blob_saves++;
+    if (!ensure_parent_dir(p)) return false;
+    FILE *f = fopen(p, "wb"); if (!f) return false;
+    size_t n = fwrite(buf, 1, len, f); fclose(f); return n == len;
+}
+bool persist_port_blob_forget(const char *key) { if (s_blocked || !alive()) return false; return remove(blob_path(key)) == 0 || errno == ENOENT; }
 #ifndef PT_VERSION
 #define PT_VERSION "sim"
 #endif
@@ -66,8 +88,13 @@ int64_t clock_port_now_unix(void) { return (int64_t)time(NULL) + s_clock_shift; 
 #include "shelf.h"
 #define SIM_SHELF_SIZE (0x2E0000 - 0x10000)       /* the boards' storage, less its first 64 KB */
 static int s_cut = -1;                             /* writes left before the cut; -1 = never */
-void shelf_port_sim_cut(int writes) { s_cut = writes; }
-static bool alive(void) { if (s_cut < 0) return true; if (s_cut == 0) return false; s_cut--; return true; }
+static int s_fail = -1;                            /* writes left before ONE that fails (a refused write: the board runs on) */
+int shelf_port_sim_cut(int writes) { int was = s_cut; s_cut = writes; return was; }    /* (was: writes still left, 0 = it cut) */
+int shelf_port_sim_fail(int writes) { int was = s_fail; s_fail = writes; return was; }  /* (was -1: it failed, or was off) */
+static bool alive(void) {
+    if (s_fail >= 0 && s_fail-- == 0) return false;
+    if (s_cut < 0) return true; if (s_cut == 0) return false; s_cut--; return true;
+}
 static const char *store_path(void) {
     static char p[512];
     if (getenv("POCKET_TANK_STORAGE")) return getenv("POCKET_TANK_STORAGE");
@@ -127,4 +154,4 @@ bool shelf_port_frame_set(const char *key, const void *buf, size_t n) {
     return ok && rename(tmp, p) == 0;
 }
 bool shelf_port_frame_del(const char *key) { if (!alive()) return false; return remove(frame_path(key)) == 0 || errno == ENOENT; }
-bool persist_port_forget(void) { if (!alive()) return false; return remove(path()) == 0 || errno == ENOENT; }
+bool persist_port_forget(void) { if (s_blocked || !alive()) return false; return remove(path()) == 0 || errno == ENOENT; }

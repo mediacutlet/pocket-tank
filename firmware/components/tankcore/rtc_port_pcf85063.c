@@ -15,6 +15,7 @@
 #include "rtc_port.h"
 #include "driver/i2c_master.h"
 #include "esp_log.h"
+#include "esp_rom_sys.h"
 #include <string.h>
 #include <sys/time.h>
 #include <time.h>
@@ -24,19 +25,21 @@
 static const char *TAG = "rtc";
 static i2c_master_dev_handle_t s_dev;
 static bool s_stopped;                                /* the chip answered but had lost its time at this boot (stays set: the boot log tells it) */
+static bool s_unread;                                 /* the chip did not answer the read at this boot: its time unknown, never written over */
 
 static int bcd2bin(uint8_t b) { return (b >> 4) * 10 + (b & 0x0f); }
 static uint8_t bin2bcd(int v) { return (uint8_t)(((v / 10) << 4) | (v % 10)); }
 
-static bool rtc_read(struct tm *out) {
+enum { RTC_NO_ANSWER = -1, RTC_STOPPED = 0, RTC_OK = 1 };
+static int rtc_read(struct tm *out) {
     uint8_t reg = REG_SECONDS, b[7];
-    if (i2c_master_transmit_receive(s_dev, &reg, 1, b, 7, 100) != ESP_OK) return false;
+    if (i2c_master_transmit_receive(s_dev, &reg, 1, b, 7, 100) != ESP_OK) return RTC_NO_ANSWER;
     memset(out, 0, sizeof *out);
     out->tm_sec = bcd2bin(b[0] & 0x7f); out->tm_min = bcd2bin(b[1] & 0x7f);
     out->tm_hour = bcd2bin(b[2] & 0x3f); out->tm_mday = bcd2bin(b[3] & 0x3f);
     out->tm_wday = b[4] & 0x07; out->tm_mon = bcd2bin(b[5] & 0x1f) - 1;
     out->tm_year = bcd2bin(b[6]) + 100;                 /* 20xx */
-    return !(b[0] & 0x80);                              /* OS flag set = clock invalid */
+    return (b[0] & 0x80) ? RTC_STOPPED : RTC_OK;         /* OS flag set = clock invalid */
 }
 static bool rtc_write(const struct tm *t) {
     uint8_t w[8] = { REG_SECONDS, bin2bcd(t->tm_sec), bin2bcd(t->tm_min), bin2bcd(t->tm_hour),
@@ -72,7 +75,14 @@ bool rtc_port_init(i2c_master_bus_handle_t bus) {
     }
     if (!bus || i2c_master_bus_add_device(bus, &cfg, &s_dev) != ESP_OK) { ESP_LOGW(TAG, "no RTC"); return false; }
     struct tm t;
-    if (rtc_read(&t) && t.tm_year + 1900 >= 2024) {
+    int r = rtc_read(&t);
+    for (int k = 0; k < 2 && r == RTC_NO_ANSWER; k++) { esp_rom_delay_us(5000); r = rtc_read(&t); }   /* a bus hiccup: try again */
+    if (r == RTC_NO_ANSWER) {
+        /* no answer three times: UNKNOWN, not stopped (0.4 rc round two) - the clock stays unset as for a stopped
+           chip, but main.c never seeds the save's older stamp into it (rtc_port_unread): it may hold good time */
+        s_unread = true;
+        ESP_LOGW(TAG, "RTC chip did not answer the read: the clock is unset at this boot, the chip is left as it is");
+    } else if (r == RTC_OK && t.tm_year + 1900 >= 2024) {
         struct timeval tv = { .tv_sec = mktime(&t) };
         settimeofday(&tv, NULL);
         ESP_LOGI(TAG, "system clock set from RTC: %04d-%02d-%02d %02d:%02d", t.tm_year + 1900, t.tm_mon + 1, t.tm_mday, t.tm_hour, t.tm_min);
@@ -86,6 +96,7 @@ bool rtc_port_init(i2c_master_bus_handle_t bus) {
     return true;
 }
 bool rtc_port_stopped(void) { return s_stopped; }
+bool rtc_port_unread(void) { return s_unread; }
 void rtc_port_store(void) {
     if (!s_dev) return;
     time_t now = time(NULL);

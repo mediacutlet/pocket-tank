@@ -5,15 +5,14 @@
 set(COMMON ${CMAKE_CURRENT_LIST_DIR}/../../../common)
 idf_component_register(
     SRCS "${COMMON}/tank.c" "${COMMON}/advisor.c" "${COMMON}/render.c" "${COMMON}/icons.c" "${COMMON}/progression.c" "${COMMON}/setup.c"
-         "${COMMON}/audio.c" "${COMMON}/notice.c" "${COMMON}/sounds.c" "${COMMON}/battery.c" "${COMMON}/update.c" "${COMMON}/advanced.c" "${COMMON}/shelf.c" "${COMMON}/boot_show.c"
+         "${COMMON}/audio.c" "${COMMON}/notice.c" "${COMMON}/sounds.c" "${COMMON}/battery.c" "${COMMON}/update.c" "${COMMON}/advanced.c" "${COMMON}/shelf.c" "${COMMON}/boot_show.c" "${COMMON}/passport.c" "${COMMON}/link.c" "${COMMON}/tank_link.c" "${COMMON}/collection.c" "${COMMON}/gift.c"
          "persist_port_esp.c" "rtc_port_pcf85063.c"
     INCLUDE_DIRS "${COMMON}" "."
     PRIV_REQUIRES nvs_flash esp_driver_i2c esp_partition
 )
-# POP_CAP: the device ships a 5-fish ceiling until advisor latency is measured on
-# hardware (docs/progression-next.md); the sim shows all 6. N_FISH_MAX stays 6.
-target_compile_options(${COMPONENT_LIB} PRIVATE -O2 -ffast-math -DPOP_CAP=5)
-target_compile_definitions(${COMPONENT_LIB} PUBLIC POP_CAP=5)
+# POP_CAP (the keeper's 5-fish cap) is common/tank.h's, the same for the sim and every board: never defined here
+# (tank.h stops a build that does). N_FISH_MAX stays 6, the array bound.
+target_compile_options(${COMPONENT_LIB} PRIVATE -O2 -ffast-math)
 # the world's shape is compiled in (common/tank.h): the bowl for the round board.
 # PUBLIC: every component that sees tank.h must see the same world.
 if(CONFIG_POCKET_TANK_ROUND)

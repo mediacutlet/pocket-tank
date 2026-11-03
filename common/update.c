@@ -297,7 +297,7 @@ static void draw_keyboard(uint16_t *fb, int stride) {
         }
     }
 }
-static void draw_field(uint16_t *fb, int stride, float clock) {    /* the typed passphrase, its tail if long, a cursor */
+static void draw_field(uint16_t *fb, int stride, double clock) {    /* the typed passphrase, its tail if long, a cursor */
     render_rect(fb, stride, UX, FIELD_Y, UW, FIELD_H, C_PANEL); render_rect_edge(fb, stride, UX, FIELD_Y, UW, FIELD_H, C_INNER);
     const char *p = s.pass; size_t n = strlen(p);
     char shown[FIELD_VISIBLE + 2];
@@ -590,7 +590,7 @@ static void signal_bars(uint16_t *fb, int stride, int x, int y, int rssi) {   /*
         render_rect(fb, stride, x + i * 7, y + 16 - h, 5, h, i < lit ? C_EDGE : C_DIM);
     }
 }
-static void spinner(uint16_t *fb, int stride, int cx, int cy, float clock) {
+static void spinner(uint16_t *fb, int stride, int cx, int cy, double clock) {
     int lit = (int)(clock * 8) & 7;
     static const int DX[8] = { 0, 13, 18, 13, 0, -13, -18, -13 }, DY[8] = { -18, -13, 0, 13, 18, 13, 0, -13 };
     for (int i = 0; i < 8; i++) render_rect(fb, stride, cx + DX[i] - 3, cy + DY[i] - 3, 6, 6, i == lit ? C_EDGE : (i + 7) % 8 == lit ? 0x5a8a94 : C_DIM);
@@ -606,10 +606,10 @@ static void wrap2(const char *src, char *l1, char *l2, size_t cap) {   /* two li
     snprintf(l2, cap, "%s", rest);
     if (strlen(rest) > lim) { l2[lim - 3] = '.'; l2[lim - 2] = '.'; l2[lim - 1] = '.'; l2[lim] = 0; }
 }
-void render_clock_sync(uint16_t *fb, int stride, float clock) {   /* the loading screen's look (10-31): the tank's WAKING THE TANK follows on the same water */
+void render_clock_sync(uint16_t *fb, int stride, double clock) {   /* the loading screen's look (10-31): the tank's WAKING THE TANK follows on the same water */
     render_loading(fb, stride, "WAKING UP", clock, "CHECKING THE TIME");
 }
-void render_update(uint16_t *fb, int stride, float clock) {
+void render_update(uint16_t *fb, int stride, double clock) {
     page_bg(fb, stride);
     char line[80];
     switch (s.page) {

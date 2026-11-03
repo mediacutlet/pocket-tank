@@ -155,6 +155,16 @@ void battery_port_key_init(void) {
    read the same twice - a garbled I2C byte does not. */
 #define KEY_EDGE_US 4000000
 static int64_t s_key_down_us = -KEY_EDGE_US;
+/* the presses nobody polled for (0.4 rc): the boot's TIME CHECK runs before the frame loop, up to 30 s, and a press on
+   that page was latched in REG 49 - the tank's first poll then read it as a fresh press and slept or powered off.
+   Cleared, with the key-down edge forgotten, once the tank is about to come up */
+void battery_port_key_clear(void) {
+    if (!s_dev) return;
+    uint8_t st = 0; rd(0x49, &st);
+    wr(0x49, 0x0F);                                                     /* short, long, key down, key up: cleared (write 1 to clear) */
+    s_key_down_us = -KEY_EDGE_US;
+    if (st & 0x0F) ESP_LOGI("battery", "PWR key: a press made before the tank was up (REG 49 %02x) - cleared, not acted on", st);
+}
 int battery_port_key_poll(void) {
     if (!s_dev) return 0;
     uint8_t st, again = 0;

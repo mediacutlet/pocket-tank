@@ -25,6 +25,7 @@ bool imu_port_moving(void);
  * show on two consecutive polls (500 ms) - a pick-up does, a knock on the
  * desk or a mug set down beside it is one spike. */
 bool imu_port_handled(void);
+bool imu_port_carried(void);    /* the tank link's drift: sustained motion well past a knock (CARRY_*), held a second */
 int  imu_port_motion(void);                       /* last poll's movement, counts (director / tuning) */
 void imu_port_last(int16_t out[3], int *motion);  /* the last poll's raw sample + its movement (director `imu`) */
 /* drowse bracket: quiesce the accel before the panel/touch rails cut (a

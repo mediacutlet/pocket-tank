@@ -1,0 +1,99 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="1000" font-family="monospace"><rect width="100%" height="100%" fill="#020b10"/>
+<text x="500" y="30" fill="#e8f1f2" font-size="18" text-anchor="middle">POCKET TANK 0.4 - GENETICS SKETCH, ROUND 4 (adult, side-on)</text>
+<text x="500" y="65" fill="#7fa8b0" font-size="14" text-anchor="middle">BODY  (fins CLASSIC, pattern BARS)</text>
+<polygon points="177.0,170.0 132.0,140.0 132.0,200.0" fill="#1d9f98" fill-opacity="1.00"/>
+<polygon points="228.0,146.0 204.0,131.0 183.0,146.0" fill="#1d9f98" fill-opacity="1.00"/>
+<polygon points="258.0,170.0 240.0,149.0 216.0,140.0 186.0,143.0 165.0,152.0 156.0,170.0 165.0,188.0 186.0,197.0 216.0,200.0 240.0,191.0" fill="#38dcc7" fill-opacity="1.00"/>
+<clipPath id="body1"><polygon points="258.0,170.0 240.0,149.0 216.0,140.0 186.0,143.0 165.0,152.0 156.0,170.0 165.0,188.0 186.0,197.0 216.0,200.0 240.0,191.0" fill="#000" fill-opacity="1.00"/></clipPath>
+<g clip-path="url(#body1)"><ellipse cx="183.0" cy="170.0" rx="6.0" ry="15.0" fill="#ffbd59" fill-opacity="0.6"/><ellipse cx="201.0" cy="170.0" rx="6.0" ry="15.0" fill="#ffbd59" fill-opacity="0.6"/><ellipse cx="219.0" cy="170.0" rx="6.0" ry="15.0" fill="#ffbd59" fill-opacity="0.6"/></g>
+<circle cx="237.0" cy="161.0" r="6.6" fill="#fff"/><circle cx="239.1" cy="161.0" r="3.3" fill="#031015"/>
+<text x="180" y="265" fill="#9fd8e2" font-size="15" text-anchor="middle">CLASSIC (today)</text>
+<polygon points="485.0,170.0 440.0,140.0 440.0,200.0" fill="#1d9f98" fill-opacity="1.00"/>
+<polygon points="548.0,154.4 524.0,144.7 503.0,154.4" fill="#1d9f98" fill-opacity="1.00"/>
+<polygon points="593.0,170.0 572.0,156.5 542.0,150.5 506.0,152.0 479.0,158.0 467.0,170.0 479.0,182.0 506.0,188.0 542.0,189.5 572.0,183.5" fill="#38dcc7" fill-opacity="1.00"/>
+<clipPath id="body2"><polygon points="593.0,170.0 572.0,156.5 542.0,150.5 506.0,152.0 479.0,158.0 467.0,170.0 479.0,182.0 506.0,188.0 542.0,189.5 572.0,183.5" fill="#000" fill-opacity="1.00"/></clipPath>
+<g clip-path="url(#body2)"><ellipse cx="503.0" cy="170.0" rx="6.0" ry="9.8" fill="#ffbd59" fill-opacity="0.6"/><ellipse cx="521.0" cy="170.0" rx="6.0" ry="9.8" fill="#ffbd59" fill-opacity="0.6"/><ellipse cx="539.0" cy="170.0" rx="6.0" ry="9.8" fill="#ffbd59" fill-opacity="0.6"/></g>
+<circle cx="569.0" cy="164.0" r="6.6" fill="#fff"/><circle cx="571.1" cy="164.0" r="3.3" fill="#031015"/>
+<text x="500" y="265" fill="#9fd8e2" font-size="15" text-anchor="middle">SLENDER</text>
+<polygon points="823.0,170.0 778.0,140.0 778.0,200.0" fill="#1d9f98" fill-opacity="1.00"/>
+<polygon points="868.0,134.0 844.0,111.5 823.0,134.0" fill="#1d9f98" fill-opacity="1.00"/>
+<polygon points="889.0,170.0 877.0,137.0 853.0,125.0 832.0,128.0 817.0,143.0 811.0,170.0 817.0,197.0 832.0,212.0 853.0,215.0 877.0,203.0" fill="#38dcc7" fill-opacity="1.00"/>
+<clipPath id="body3"><polygon points="889.0,170.0 877.0,137.0 853.0,125.0 832.0,128.0 817.0,143.0 811.0,170.0 817.0,197.0 832.0,212.0 853.0,215.0 877.0,203.0" fill="#000" fill-opacity="1.00"/></clipPath>
+<g clip-path="url(#body3)"><ellipse cx="823.0" cy="170.0" rx="6.0" ry="22.5" fill="#ffbd59" fill-opacity="0.6"/><ellipse cx="841.0" cy="170.0" rx="6.0" ry="22.5" fill="#ffbd59" fill-opacity="0.6"/><ellipse cx="859.0" cy="170.0" rx="6.0" ry="22.5" fill="#ffbd59" fill-opacity="0.6"/></g>
+<circle cx="871.0" cy="158.0" r="6.6" fill="#fff"/><circle cx="873.1" cy="158.0" r="3.3" fill="#031015"/>
+<text x="820" y="265" fill="#9fd8e2" font-size="15" text-anchor="middle">BULBOUS</text>
+<text x="500" y="297" fill="#7fa8b0" font-size="14" text-anchor="middle">FINS  (body CLASSIC, pattern BARS)</text>
+<polygon points="177.0,402.0 132.0,372.0 132.0,432.0" fill="#1d9f98" fill-opacity="1.00"/>
+<polygon points="228.0,378.0 204.0,363.0 183.0,378.0" fill="#1d9f98" fill-opacity="1.00"/>
+<polygon points="258.0,402.0 240.0,381.0 216.0,372.0 186.0,375.0 165.0,384.0 156.0,402.0 165.0,420.0 186.0,429.0 216.0,432.0 240.0,423.0" fill="#38dcc7" fill-opacity="1.00"/>
+<clipPath id="body4"><polygon points="258.0,402.0 240.0,381.0 216.0,372.0 186.0,375.0 165.0,384.0 156.0,402.0 165.0,420.0 186.0,429.0 216.0,432.0 240.0,423.0" fill="#000" fill-opacity="1.00"/></clipPath>
+<g clip-path="url(#body4)"><ellipse cx="183.0" cy="402.0" rx="6.0" ry="15.0" fill="#ffbd59" fill-opacity="0.6"/><ellipse cx="201.0" cy="402.0" rx="6.0" ry="15.0" fill="#ffbd59" fill-opacity="0.6"/><ellipse cx="219.0" cy="402.0" rx="6.0" ry="15.0" fill="#ffbd59" fill-opacity="0.6"/></g>
+<circle cx="237.0" cy="393.0" r="6.6" fill="#fff"/><circle cx="239.1" cy="393.0" r="3.3" fill="#031015"/>
+<text x="180" y="497" fill="#9fd8e2" font-size="15" text-anchor="middle">CLASSIC (today)</text>
+<polygon points="497.0,402.0 467.0,381.0 407.0,363.0 419.0,399.0" fill="#1d9f98" fill-opacity="1.00"/>
+<polygon points="497.0,402.0 419.0,405.0 401.0,450.0 461.0,426.0" fill="#1d9f98" fill-opacity="1.00"/>
+<polygon points="536.0,429.0 512.0,429.0 488.0,459.0 518.0,447.0" fill="#1d9f98" fill-opacity="1.00"/>
+<polygon points="542.0,375.0 506.0,364.5 494.0,378.0" fill="#1d9f98" fill-opacity="1.00"/>
+<polygon points="578.0,402.0 560.0,381.0 536.0,372.0 506.0,375.0 485.0,384.0 476.0,402.0 485.0,420.0 506.0,429.0 536.0,432.0 560.0,423.0" fill="#38dcc7" fill-opacity="1.00"/>
+<clipPath id="body5"><polygon points="578.0,402.0 560.0,381.0 536.0,372.0 506.0,375.0 485.0,384.0 476.0,402.0 485.0,420.0 506.0,429.0 536.0,432.0 560.0,423.0" fill="#000" fill-opacity="1.00"/></clipPath>
+<g clip-path="url(#body5)"><ellipse cx="503.0" cy="402.0" rx="6.0" ry="15.0" fill="#ffbd59" fill-opacity="0.6"/><ellipse cx="521.0" cy="402.0" rx="6.0" ry="15.0" fill="#ffbd59" fill-opacity="0.6"/><ellipse cx="539.0" cy="402.0" rx="6.0" ry="15.0" fill="#ffbd59" fill-opacity="0.6"/></g>
+<circle cx="557.0" cy="393.0" r="6.6" fill="#fff"/><circle cx="559.1" cy="393.0" r="3.3" fill="#031015"/>
+<text x="500" y="497" fill="#9fd8e2" font-size="15" text-anchor="middle">VEIL</text>
+<polygon points="817.0,402.0 784.0,375.0 796.0,402.0" fill="#1d9f98" fill-opacity="1.00"/>
+<polygon points="817.0,402.0 784.0,429.0 796.0,402.0" fill="#1d9f98" fill-opacity="1.00"/>
+<polygon points="874.0,376.5 850.0,333.0 814.0,345.0 814.0,381.0" fill="#1d9f98" fill-opacity="1.00"/>
+<polygon points="862.0,427.5 838.0,462.0 814.0,453.0 814.0,423.0" fill="#1d9f98" fill-opacity="1.00"/>
+<polygon points="898.0,402.0 880.0,381.0 856.0,372.0 826.0,375.0 805.0,384.0 796.0,402.0 805.0,420.0 826.0,429.0 856.0,432.0 880.0,423.0" fill="#38dcc7" fill-opacity="1.00"/>
+<clipPath id="body6"><polygon points="898.0,402.0 880.0,381.0 856.0,372.0 826.0,375.0 805.0,384.0 796.0,402.0 805.0,420.0 826.0,429.0 856.0,432.0 880.0,423.0" fill="#000" fill-opacity="1.00"/></clipPath>
+<g clip-path="url(#body6)"><ellipse cx="823.0" cy="402.0" rx="6.0" ry="15.0" fill="#ffbd59" fill-opacity="0.6"/><ellipse cx="841.0" cy="402.0" rx="6.0" ry="15.0" fill="#ffbd59" fill-opacity="0.6"/><ellipse cx="859.0" cy="402.0" rx="6.0" ry="15.0" fill="#ffbd59" fill-opacity="0.6"/></g>
+<circle cx="877.0" cy="393.0" r="6.6" fill="#fff"/><circle cx="879.1" cy="393.0" r="3.3" fill="#031015"/>
+<text x="820" y="497" fill="#9fd8e2" font-size="15" text-anchor="middle">SAIL</text>
+<text x="500" y="529" fill="#7fa8b0" font-size="14" text-anchor="middle">PATTERN  (body CLASSIC, fins CLASSIC)</text>
+<polygon points="177.0,634.0 132.0,604.0 132.0,664.0" fill="#1d9f98" fill-opacity="1.00"/>
+<polygon points="228.0,610.0 204.0,595.0 183.0,610.0" fill="#1d9f98" fill-opacity="1.00"/>
+<polygon points="258.0,634.0 240.0,613.0 216.0,604.0 186.0,607.0 165.0,616.0 156.0,634.0 165.0,652.0 186.0,661.0 216.0,664.0 240.0,655.0" fill="#38dcc7" fill-opacity="1.00"/>
+<clipPath id="body7"><polygon points="258.0,634.0 240.0,613.0 216.0,604.0 186.0,607.0 165.0,616.0 156.0,634.0 165.0,652.0 186.0,661.0 216.0,664.0 240.0,655.0" fill="#000" fill-opacity="1.00"/></clipPath>
+<g clip-path="url(#body7)"><ellipse cx="183.0" cy="634.0" rx="6.0" ry="15.0" fill="#ffbd59" fill-opacity="0.6"/><ellipse cx="201.0" cy="634.0" rx="6.0" ry="15.0" fill="#ffbd59" fill-opacity="0.6"/><ellipse cx="219.0" cy="634.0" rx="6.0" ry="15.0" fill="#ffbd59" fill-opacity="0.6"/></g>
+<circle cx="237.0" cy="625.0" r="6.6" fill="#fff"/><circle cx="239.1" cy="625.0" r="3.3" fill="#031015"/>
+<text x="180" y="729" fill="#9fd8e2" font-size="15" text-anchor="middle">BARS (today)</text>
+<polygon points="497.0,634.0 452.0,604.0 452.0,664.0" fill="#1d9f98" fill-opacity="1.00"/>
+<polygon points="548.0,610.0 524.0,595.0 503.0,610.0" fill="#1d9f98" fill-opacity="1.00"/>
+<polygon points="578.0,634.0 560.0,613.0 536.0,604.0 506.0,607.0 485.0,616.0 476.0,634.0 485.0,652.0 506.0,661.0 536.0,664.0 560.0,655.0" fill="#38dcc7" fill-opacity="1.00"/>
+<clipPath id="body8"><polygon points="578.0,634.0 560.0,613.0 536.0,604.0 506.0,607.0 485.0,616.0 476.0,634.0 485.0,652.0 506.0,661.0 536.0,664.0 560.0,655.0" fill="#000" fill-opacity="1.00"/></clipPath>
+<g clip-path="url(#body8)"><circle cx="538.4" cy="623.5" r="4.8" fill="#ffbd59" fill-opacity="0.6"/><circle cx="523.1" cy="641.5" r="4.8" fill="#ffbd59" fill-opacity="0.6"/><circle cx="512.9" cy="619.0" r="4.8" fill="#ffbd59" fill-opacity="0.6"/><circle cx="505.8" cy="635.5" r="4.8" fill="#ffbd59" fill-opacity="0.6"/><circle cx="492.5" cy="628.0" r="4.8" fill="#ffbd59" fill-opacity="0.6"/><circle cx="528.2" cy="632.5" r="4.8" fill="#ffbd59" fill-opacity="0.6"/><circle cx="497.6" cy="647.5" r="4.8" fill="#ffbd59" fill-opacity="0.6"/></g>
+<circle cx="557.0" cy="625.0" r="6.6" fill="#fff"/><circle cx="559.1" cy="625.0" r="3.3" fill="#031015"/>
+<text x="500" y="729" fill="#9fd8e2" font-size="15" text-anchor="middle">SPOTS</text>
+<polygon points="817.0,634.0 772.0,604.0 772.0,664.0" fill="#1d9f98" fill-opacity="1.00"/>
+<polygon points="868.0,610.0 844.0,595.0 823.0,610.0" fill="#1d9f98" fill-opacity="1.00"/>
+<polygon points="898.0,634.0 880.0,613.0 856.0,604.0 826.0,607.0 805.0,616.0 796.0,634.0 805.0,652.0 826.0,661.0 856.0,664.0 880.0,655.0" fill="#38dcc7" fill-opacity="1.00"/>
+<clipPath id="body9"><polygon points="898.0,634.0 880.0,613.0 856.0,604.0 826.0,607.0 805.0,616.0 796.0,634.0 805.0,652.0 826.0,661.0 856.0,664.0 880.0,655.0" fill="#000" fill-opacity="1.00"/></clipPath>
+<g clip-path="url(#body9)"><polygon points="862.0,595.0 853.0,622.0 851.5,634.0 853.0,646.0 862.0,673.0 904.0,673.0 904.0,595.0" fill="#ffbd59" fill-opacity="0.90"/></g>
+<circle cx="877.0" cy="625.0" r="6.6" fill="#fff"/><circle cx="879.1" cy="625.0" r="3.3" fill="#031015"/>
+<text x="820" y="729" fill="#9fd8e2" font-size="15" text-anchor="middle">MASK</text>
+<text x="500" y="761" fill="#7fa8b0" font-size="13" text-anchor="middle">MASK WITH EACH BODY AND FIN SET - the fins keep the fin color, no rule needed</text>
+<polygon points="165.0,866.0 120.0,836.0 120.0,896.0" fill="#2d5e94" fill-opacity="1.00"/>
+<polygon points="228.0,850.4 204.0,840.6 183.0,850.4" fill="#2d5e94" fill-opacity="1.00"/>
+<polygon points="273.0,866.0 252.0,852.5 222.0,846.5 186.0,848.0 159.0,854.0 147.0,866.0 159.0,878.0 186.0,884.0 222.0,885.5 252.0,879.5" fill="#4da3ff" fill-opacity="1.00"/>
+<clipPath id="body10"><polygon points="273.0,866.0 252.0,852.5 222.0,846.5 186.0,848.0 159.0,854.0 147.0,866.0 159.0,878.0 186.0,884.0 222.0,885.5 252.0,879.5" fill="#000" fill-opacity="1.00"/></clipPath>
+<g clip-path="url(#body10)"><polygon points="234.0,840.6 225.0,858.2 223.5,866.0 225.0,873.8 234.0,891.4 279.0,891.4 279.0,840.6" fill="#1a2a30" fill-opacity="0.90"/></g>
+<circle cx="249.0" cy="860.0" r="6.6" fill="#fff"/><circle cx="251.1" cy="860.0" r="3.3" fill="#031015"/>
+<text x="180" y="961" fill="#9fd8e2" font-size="15" text-anchor="middle">SLENDER / CLASSIC</text>
+<polygon points="497.0,866.0 467.0,845.0 407.0,827.0 419.0,863.0" fill="#6b5ed6" fill-opacity="1.00"/>
+<polygon points="497.0,866.0 419.0,869.0 401.0,914.0 461.0,890.0" fill="#6b5ed6" fill-opacity="1.00"/>
+<polygon points="536.0,893.0 512.0,893.0 488.0,923.0 518.0,911.0" fill="#6b5ed6" fill-opacity="1.00"/>
+<polygon points="542.0,839.0 506.0,828.5 494.0,842.0" fill="#6b5ed6" fill-opacity="1.00"/>
+<polygon points="578.0,866.0 560.0,845.0 536.0,836.0 506.0,839.0 485.0,848.0 476.0,866.0 485.0,884.0 506.0,893.0 536.0,896.0 560.0,887.0" fill="#a799ff" fill-opacity="1.00"/>
+<clipPath id="body11"><polygon points="578.0,866.0 560.0,845.0 536.0,836.0 506.0,839.0 485.0,848.0 476.0,866.0 485.0,884.0 506.0,893.0 536.0,896.0 560.0,887.0" fill="#000" fill-opacity="1.00"/></clipPath>
+<g clip-path="url(#body11)"><polygon points="542.0,827.0 533.0,854.0 531.5,866.0 533.0,878.0 542.0,905.0 584.0,905.0 584.0,827.0" fill="#ffffff" fill-opacity="0.90"/></g>
+<circle cx="557.0" cy="857.0" r="6.6" fill="#fff"/><circle cx="559.1" cy="857.0" r="3.3" fill="#031015"/>
+<text x="500" y="961" fill="#9fd8e2" font-size="15" text-anchor="middle">CLASSIC / VEIL</text>
+<polygon points="823.0,866.0 790.0,839.0 802.0,866.0" fill="#c98a1e" fill-opacity="1.00"/>
+<polygon points="823.0,866.0 790.0,893.0 802.0,866.0" fill="#c98a1e" fill-opacity="1.00"/>
+<polygon points="874.0,827.8 850.0,762.5 814.0,780.5 814.0,834.5" fill="#c98a1e" fill-opacity="1.00"/>
+<polygon points="862.0,904.2 838.0,956.0 814.0,942.5 814.0,897.5" fill="#c98a1e" fill-opacity="1.00"/>
+<polygon points="889.0,866.0 877.0,833.0 853.0,821.0 832.0,824.0 817.0,839.0 811.0,866.0 817.0,893.0 832.0,908.0 853.0,911.0 877.0,899.0" fill="#ffd166" fill-opacity="1.00"/>
+<clipPath id="body12"><polygon points="889.0,866.0 877.0,833.0 853.0,821.0 832.0,824.0 817.0,839.0 811.0,866.0 817.0,893.0 832.0,908.0 853.0,911.0 877.0,899.0" fill="#000" fill-opacity="1.00"/></clipPath>
+<g clip-path="url(#body12)"><polygon points="856.0,807.5 847.0,848.0 845.5,866.0 847.0,884.0 856.0,924.5 895.0,924.5 895.0,807.5" fill="#f25b65" fill-opacity="0.90"/></g>
+<circle cx="871.0" cy="854.0" r="6.6" fill="#fff"/><circle cx="873.1" cy="854.0" r="3.3" fill="#031015"/>
+<text x="820" y="961" fill="#9fd8e2" font-size="15" text-anchor="middle">BULBOUS / SAIL</text>
+</svg>

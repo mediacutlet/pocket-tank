@@ -131,11 +131,11 @@ enum { UPD_PG_NONE = 0, UPD_PG_POWER, UPD_PG_BUSY, UPD_PG_SCAN, UPD_PG_PASSWORD,
 void update_begin(int battery_pct, bool on_power);
 void update_tick(float dt);
 void update_touch(float x, float y, bool down);
-void render_update(uint16_t *fb, int stride, float clock);
+void render_update(uint16_t *fb, int stride, double clock);
 /* the clockless board's wake (2026-10-03): the glass while the boot asks the
  * internet for the time - a few seconds that would otherwise be dark, and a
  * dark glass after a press gets pressed again. Nothing to tap. */
-void render_clock_sync(uint16_t *fb, int stride, float clock);
+void render_clock_sync(uint16_t *fb, int stride, double clock);
 int  update_outcome(void);
 bool update_active(void);
 int  update_page(void);                                     /* UPD_PG_* (tests) */

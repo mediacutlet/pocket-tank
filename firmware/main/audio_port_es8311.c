@@ -39,7 +39,7 @@ static TaskHandle_t       s_task;
 static bool s_ok, s_up;
 static volatile bool s_sleep_req, s_warm_req;
 static int64_t s_quiet_since;
-static int s_volume = 2;
+static int s_volume = 100;                   /* percent (0.4: the settings slider), 0 = off */
 static int16_t s_buf[BLOCK];
 /* cold-start settle, tunable live (director `snd settle <codec ms> <amp ms>`,
    `snd idle <s>`) until the bench says what the DAC and the NS4150B need */
@@ -128,7 +128,7 @@ static void player(void *arg) {
             ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
             if (s_sleep_req) { s_sleep_req = false; continue; }
             xSemaphoreTake(s_mx, portMAX_DELAY);
-            bool any = audio_active() || s_warm_req;
+            bool any = audio_active() || (s_warm_req && s_volume);   /* muted: a stale warm request does not bring it up */
             xSemaphoreGive(s_mx);
             s_warm_req = false;
             if (!any) continue;
@@ -152,10 +152,13 @@ static void player(void *arg) {
     }
 }
 
+/* "sndp" the percent (0.4); a board saved by 0.3.x has only "snd", its
+ * level (0 off, 1 quiet, 2 normal), read as the percent that sounds the same */
 static void load_volume(void) {
     nvs_handle_t h; uint8_t v;
     if (nvs_open("tank", NVS_READONLY, &h) != ESP_OK) return;
-    if (nvs_get_u8(h, "snd", &v) == ESP_OK && v <= 2) s_volume = v;
+    if (nvs_get_u8(h, "sndp", &v) == ESP_OK && v <= 100) s_volume = v;
+    else if (nvs_get_u8(h, "snd", &v) == ESP_OK && v <= 2) s_volume = audio_volume_from_level(v);
     nvs_close(h);
 }
 
@@ -180,7 +183,9 @@ bool audio_port_init(i2c_master_bus_handle_t bus) {
     audio_init((const int16_t *)_binary_sounds_bin_start, SND_BANK_SAMPLES);   /* flash-mapped: no RAM */
     load_volume(); audio_set_volume(s_volume);
     s_mx = xSemaphoreCreateMutex();
-    xTaskCreatePinnedToCore(player, "audio", 4096, NULL, 6, &s_task, 1);
+    if (!s_mx || xTaskCreatePinnedToCore(player, "audio", 4096, NULL, 6, &s_task, 1) != pdPASS) {   /* (no player, no sound: s_ok stays false -
+                                                                   a notify to a task that never started asserted on every boot) */
+        ESP_LOGE(TAG, "no internal RAM for the audio task: silent"); s_task = NULL; return false; }
     s_ok = true;
     int present = 0; for (int i = 0; i < SND_COUNT; i++) present += SND_CUES[i].n_var > 0;
     ESP_LOGI(TAG, "%d of %d cues, bank %u KB in flash, volume %d; warm while handled (touch / IMU), down %lld s after", present, SND_COUNT, (unsigned)(SND_BANK_BYTES / 1024), s_volume, s_idle_us / 1000000);
@@ -195,7 +200,8 @@ void audio_port_play(int cue, int pitch_q8) {
     if (started) xTaskNotifyGive(s_task);
 }
 void audio_port_prewarm(void) {
-    if (!s_ok) return;
+    if (!s_ok || s_volume == 0) return;         /* MUTED = OFF (0.4): a muted tank plays nothing, so no touch or motion brings the
+                                                   amp up - held to an ear it hissed, the NS4150B enabled on silence (a keeper, 11-02) */
     s_quiet_since = 0;                          /* activity: the idle clock restarts */
     if (s_up) return;
     s_warm_req = true; xTaskNotifyGive(s_task);
@@ -204,12 +210,31 @@ void audio_port_stop(int cue) {
     if (!s_ok) return;
     xSemaphoreTake(s_mx, portMAX_DELAY); audio_stop(cue); xSemaphoreGive(s_mx);
 }
-void audio_port_set_volume(int level) {
-    s_volume = level < 0 ? 0 : level > 2 ? 2 : level;
+/* The mute edges. Into mute: if the port is up, send it down now (the player stops the voices, amp low, codec down, rail off - the
+ * sleep path). Out of mute: the touch that began the slider's drag was skipped by prewarm (it was muted then), so warm it here; the
+ * first tick plays ~255 ms late, once, instead of the port staying cold. */
+static void mute_edge(int was) {
+    if (!s_ok) return;
+    if (s_volume == 0 && s_up) { s_sleep_req = true; xTaskNotifyGive(s_task); }
+    else if (s_volume > 0 && was == 0) audio_port_prewarm();
+}
+void audio_port_preview_volume(int pct) {    /* not saved, but what audio_port_volume says: the page's knob follows the finger */
+    int was = s_volume;
+    s_volume = pct < 0 ? 0 : pct > 100 ? 100 : pct;
     if (s_ok) { xSemaphoreTake(s_mx, portMAX_DELAY); audio_set_volume(s_volume); xSemaphoreGive(s_mx); }
-    nvs_handle_t h;
-    if (nvs_open("tank", NVS_READWRITE, &h) == ESP_OK) { nvs_set_u8(h, "snd", (uint8_t)s_volume); nvs_commit(h); nvs_close(h); }
-    ESP_LOGI(TAG, "volume %s", s_volume == 0 ? "off" : s_volume == 1 ? "quiet" : "normal");
+    mute_edge(was);
+}
+void audio_port_set_volume(int pct) {
+    int was = s_volume;
+    s_volume = pct < 0 ? 0 : pct > 100 ? 100 : pct;
+    if (s_ok) { xSemaphoreTake(s_mx, portMAX_DELAY); audio_set_volume(s_volume); xSemaphoreGive(s_mx); }
+    mute_edge(was);
+    nvs_handle_t h;                            /* "snd" too, the nearest old level: a board taken back to 0.3.x keeps a near volume */
+    if (nvs_open("tank", NVS_READWRITE, &h) == ESP_OK) {
+        nvs_set_u8(h, "sndp", (uint8_t)s_volume); nvs_set_u8(h, "snd", s_volume == 0 ? 0 : s_volume < 75 ? 1 : 2);
+        nvs_commit(h); nvs_close(h);
+    }
+    if (s_volume) ESP_LOGI(TAG, "volume %d%%", s_volume); else ESP_LOGI(TAG, "volume off");
 }
 int  audio_port_volume(void) { return s_volume; }
 void audio_port_sleep(void) {

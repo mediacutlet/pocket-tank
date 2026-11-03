@@ -19,13 +19,18 @@
 #define VERSION_H
 #include <string.h>
 
+/* main is the 0.4 line (2026-10-05, Strato: "bump main to 0.4.0 dev"): the
+ * number sits above every 0.3.x, so the Wi-Fi update never offers a 0.3.x
+ * release (a 0.3.3 included) to a board on a main build (update.c newer()).
+ * 0.3.x fixes live on branch release-0.3.2 and merge forward - keep THIS
+ * number in that merge. At the 0.4.0 release the stage goes back to "alpha". */
 #define PT_RELEASE_MAJOR 0
-#define PT_RELEASE_MINOR 3
-#define PT_RELEASE_PATCH 9
-#define PT_RELEASE_HOTFIX 6                    /* a fourth part (2026-10-21): a fix between patches - 0.3.8.1 - that
+#define PT_RELEASE_MINOR 4
+#define PT_RELEASE_PATCH 0
+#define PT_RELEASE_HOTFIX 0                    /* a fourth part (2026-10-21): a fix between patches - 0.3.8.1 - that
                                                   must not burn the next number. 0 = none, and the string has three parts */
-#define PT_RELEASE       "0.3.9.6"
-#define PT_RELEASE_STAGE "alpha"               /* pre-1.0: shown beside the number */
+#define PT_RELEASE       "0.4.0"
+#define PT_RELEASE_STAGE "alpha"               /* pre-1.0: shown beside the number ("alpha" in a release; "dev" on main between them) */
 /* the packed number the tank compares (update.c newer(), the save's stamp):
  * a byte each, major.minor.patch.hotfix. Until 0.3.8 it was three bytes
  * (major << 16 | minor << 8 | patch): every four-byte number is larger than

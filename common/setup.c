@@ -1,4 +1,5 @@
 /* setup.c — first-run setup flow (see setup.h). */
+#include "collection.h"
 #include "setup.h"
 #include "tank_events.h"
 #include "render.h"
@@ -18,6 +19,7 @@
 #define C_GO     0x155e58      /* BEGIN: the teal of a charging battery */
 #define C_GO_E   0x38dcc7
 #define C_FILL   0x5f8a92      /* the family page's trait bars: a muted teal the parents' ticks stand out on */
+#define C_NEW    0xffd166      /* a mutation (0.4): gold - NEW!, the announcement's line and ring */
 
 static bool s_active;
 static bool s_birth;           /* the birth flow (three pages about s_fish), not the first run */
@@ -29,6 +31,8 @@ static bool s_rename;          /* the rename page (one page about s_fish: the le
 static char s_old_name[FISH_NAME_MAX + 1];   /* ... the name it came in with (CANCEL puts it back) */
 static int  s_renamed;         /* a rename page just closed: the fish's slot + 1, until the platform takes it */
 static int  s_item;            /* placement: the SD item being placed */
+static int  s_ref = -1;        /* placement: the piece the ORDER SQUARES show (the sword plant's page, 0.4) - the one it last passed, -1 = the default */
+static int  order_ref(const tank_t *t);   /* (below, with the squares) */
 static int  s_fish;            /* birth flow: the newborn's slot */
 static int  s_birth_offered = -1;   /* setup_poll_birth: the arrival already opened for (-1 = none since boot) */
 static int  s_page;
@@ -40,22 +44,59 @@ static float s_ly;             /* last y, for the wheel */
 static float s_acc;            /* vertical travel toward the next step */
 static bool  s_spun;           /* this press has turned the wheel (or moved the column): no tap on release */
 static bool  s_sell_armed;     /* the placement page's SELL tapped once (2026-09-24) */
+static double s_sell_clock;    /* ... when: a second tap within SETUP_SELL_WAIT_S is the same press doubled, not the yes (0.4, the
+                                  11-02 sweep: a double-tap sold the piece - after the pumpkin leaves the shop, for good) */
+#define SETUP_SELL_WAIT_S 0.6f   /* as the fish card's SELL (render.c MSP_SELL_WAIT_S) */
+static int   s_same_note;      /* the editor (0.4): frames left of "SAME AS ITS BODY" after a tap on the struck-out swatch */
 /* the legacy keyboards (setup.h, SETUP_KBD_*) */
 static int  s_kbd;             /* the name page's design: the wheel unless the director says otherwise */
 static bool s_typed;           /* this name page: the keeper has typed (the default is gone) */
 static int  s_kb_page;         /* SETUP_KBD_PAGES: 0 = A-M, 1 = N-Z */
 
-static int page_fish(void) { return s_birth || s_rename ? s_fish : s_place ? 0 : (s_page == SETUP_PG_NAME_A || s_page == SETUP_PG_LOOK_A) ? 0 : 1; }
+static int page_fish(void) { return s_birth || s_rename ? s_fish : s_place ? 0 : s_page <= SETUP_PG_NAME_A ? 0 : 1; }
 static bool page_is_name(void) { return s_page == SETUP_PG_NAME_A || s_page == SETUP_PG_NAME_B || s_page == SETUP_PG_NAME_NEW || s_page == SETUP_PG_RENAME; }
-static bool page_is_look(void) { return s_page == SETUP_PG_LOOK_A || s_page == SETUP_PG_LOOK_B; }
-static bool page_is_last(void) { return s_page == SETUP_PG_CARE || s_page == SETUP_PG_FAMILY; }
+static bool page_is_form(void) { return s_page == SETUP_PG_FORM_A || s_page == SETUP_PG_FORM_B; }
+static bool page_is_colors(void) { return s_page == SETUP_PG_COLORS_A || s_page == SETUP_PG_COLORS_B; }
+static bool page_is_look(void) { return page_is_form() || page_is_colors(); }   /* the editor's two pages */
+static bool page_is_last(void) { return s_page == SETUP_PG_CARE || s_page == SETUP_PG_NATURE; }
 static bool page_one_button(void) { return s_page == SETUP_PG_WELCOME || s_page == SETUP_PG_BORN; }   /* a lone NEXT at the foot */
 static int  first_page(void) { return s_rename ? SETUP_PG_RENAME : s_place ? SETUP_PG_PLACE : s_birth ? SETUP_PG_BORN : SETUP_PG_WELCOME; }
 static bool nav_on_top(void) { return (page_is_name() && s_kbd != SETUP_KBD_GRID) || page_is_look() || s_page == SETUP_PG_BUBBLES || s_page == SETUP_PG_PLACE; }
 static int  place_y(void) { return s_item == 3 ? SETUP_PLACE_CORAL_Y : s_item == 4 ? SETUP_PLACE_CLUSTER_Y : SETUP_PLACE_Y; }   /* where the drag zone starts */
-static const char *fish_name(const tank_t *t, int i) { return i >= 0 && i < t->n_fish ? t->fish[i].name : "?"; }
+/* a fish's parent w (0 = parent_uid[0] / parent_a, 1 = the other), wherever it
+   lives (2026-10-06): one of ours by its ID - away or not - else a fish of
+   another tank by name (kin: a visitor, a cross-tank fry's other parent),
+   else "?". The slot index alone named a parent from next door "?" */
+typedef struct { const char *name; uint32_t color; float bold, sociable; bool known; } parent_t;
+static parent_t parent_of(const tank_t *t, const fish_t *f, int w) {
+    parent_t p = { "?", C_DIM, 0, 0, false };
+    uint32_t uid = f->parent_uid[w & 1];
+    int slot = w ? f->parent_b : f->parent_a;
+    const fish_t *q = slot >= 0 && slot < t->n_fish ? &t->fish[slot] : NULL;
+    if (!q && uid) for (int i = 0; i < t->n_fish && !q; i++) if (t->fish[i].uid == uid) q = &t->fish[i];
+    if (q) { p.name = q->name; p.color = q->color; p.bold = q->bold; p.sociable = q->sociable; p.known = true; return p; }
+    const kin_t *k = kin_find(uid);
+    if (k) { p.name = k->name; p.color = k->color; p.bold = k->bold; p.sociable = k->sociable; p.known = true; }
+    return p;
+}
+/* a mutation in words for the announcement (0.4): "SOMETHING NEW: SAIL FINS";
+   false = none */
+static bool mutation_words(const fish_t *f, char *out, size_t n) {
+    if (!f->mutated || f->mutated > GENE_N) return false;
+    static const char *const PAT[PATTERN_N] = { "BARS", "A MASK", "AN EYE BAND", "NO MARKINGS" };
+    switch (f->mutated - 1) {
+    case GENE_SHAPE:   snprintf(out, n, "SOMETHING NEW: A %s BODY", SHAPE_NAMES[f->shape]); break;
+    case GENE_FINS:    snprintf(out, n, "SOMETHING NEW: %s FINS", FINS_NAMES[f->fins]); break;
+    case GENE_PATTERN: snprintf(out, n, "SOMETHING NEW: %s", PAT[f->pattern < PATTERN_N ? f->pattern : 0]); break;
+    case GENE_BODY:    snprintf(out, n, "SOMETHING NEW: ITS BODY COLOR"); break;
+    default:           snprintf(out, n, "SOMETHING NEW: ITS MARKINGS"); break;
+    }
+    return true;
+}
 static void stage(tank_t *t);
 static void tidy_name(tank_t *t, int fish);
+/* a name page whose fish is not grown yet shows its GROWN UP form beside it */
+static bool name_beside(const tank_t *t) { int f = page_fish(); return f >= 0 && f < t->n_fish && t->fish[f].stage < STAGE_ADULT; }
 
 void setup_begin(tank_t *t) {
     if (t->n_fish < 2) { progression_setup_done(t); s_active = false; return; }   /* nothing to name */
@@ -78,7 +119,7 @@ int  setup_take_renamed(void) { int f = s_renamed - 1; s_renamed = 0; return f; 
 void setup_begin_place(tank_t *t, int item) {
     if (!tank_decor_placeable(item)) return;
     s_active = true; s_birth = false; s_place = true; s_rename = false; s_item = item; s_fish = -1; s_page = SETUP_PG_PLACE; s_slot = 0; s_down = false;
-    s_sell_armed = false; s_moved = false;
+    s_sell_armed = false; s_moved = false; s_ref = -1;
     stage(t);
 }
 int setup_poll_birth(tank_t *t) {
@@ -113,14 +154,23 @@ static void rename_end(tank_t *t, bool keep) {
 }
 static void stage(tank_t *t) {                          /* who is on stage, and where */
     if (s_active && (page_is_name() || page_is_look())) {
-        t->stage_fish = (int8_t)page_fish(); t->stage_x = SETUP_STAGE_X;
-        t->stage_y = page_is_name() ? SETUP_STAGE_NAME_Y : SETUP_STAGE_LOOK_Y;
+        t->stage_fish = (int8_t)page_fish();
+        bool beside = !page_is_name() || name_beside(t);    /* NOW at the left, GROWN UP at the right */
+        t->stage_x = beside ? SETUP_STAGE_EDIT_X : SETUP_STAGE_X;
+        t->stage_y = !page_is_name() ? SETUP_STAGE_EDIT_Y : beside ? PAGE_Y + SETUP_NAME_PREVIEW_Y : SETUP_STAGE_NAME_Y;
     } else t->stage_fish = -1;
 }
 void setup_cancel(tank_t *t) {
     if (s_active && s_rename) { rename_end(t, false); s_renamed = 0; return; }   /* the old name back, no card to return to */
     if (s_active && s_place) progression_save(t);       /* the piece stays where it was dragged */
     s_active = false; stage(t);
+}
+/* a fish left and the slots shifted (progression: a sale, a gift): the page about a fish follows it; a page about the one
+   that left closes - its rename's CANCEL never names another fish (the 11-02 sweep) */
+void setup_fish_removed(tank_t *t, int idx) {
+    if (!s_active || !(s_birth || s_rename) || s_fish < 0) return;
+    if (s_fish == idx) { s_active = false; s_birth = false; s_rename = false; s_renamed = 0; s_fish = -1; stage(t); return; }
+    if (s_fish > idx) { s_fish--; stage(t); }
 }
 int  setup_page(void)   { return s_page; }
 int  setup_slot(void)   { return s_slot; }
@@ -193,10 +243,18 @@ const char *setup_hit_name(int id) {
     if (id == SETUP_HIT_NEXT) return "NEXT";
     if (id == SETUP_HIT_BACK) return "BACK";
     if (id == SETUP_HIT_SELL) return "SELL";
+    if (id == SETUP_HIT_ROLL) return "ROLL";
+    if (id == SETUP_HIT_SWAP) return "SWAP";
+    if (id >= SETUP_HIT_ACC0 && id < SETUP_HIT_ACC0 + LOOK_N) { snprintf(buf, sizeof buf, "markings %d", id - SETUP_HIT_ACC0); return buf; }
+    if (id >= SETUP_HIT_SHAPE0 && id < SETUP_HIT_SHAPE0 + SHAPE_N) return SHAPE_NAMES[id - SETUP_HIT_SHAPE0];
+    if (id >= SETUP_HIT_FINS0 && id < SETUP_HIT_FINS0 + FINS_N) return FINS_NAMES[id - SETUP_HIT_FINS0];
+    if (id >= SETUP_HIT_PAT0 && id < SETUP_HIT_PAT0 + PATTERN_N) return PATTERN_NAMES[id - SETUP_HIT_PAT0];
     if (id == SETUP_HIT_SHELVE) return "SHELVE";
     if (id == SETUP_HIT_LOCK) return "LOCK";
     if (id == SETUP_HIT_BCK) return "SEND BACK";
     if (id == SETUP_HIT_FWD) return "BRING FORWARD";
+    if (id == SETUP_HIT_ORD0) return "BEHIND (the order squares)";
+    if (id == SETUP_HIT_ORD0 + 1) return "IN FRONT (the order squares)";
     if (id == SETUP_HIT_UP)   return "up";
     if (id == SETUP_HIT_DOWN) return "down";
     if (id >= SETUP_HIT_SLOT0 && id < SETUP_HIT_SLOT0 + FISH_NAME_MAX) { snprintf(buf, sizeof buf, "slot %d", id - SETUP_HIT_SLOT0); return buf; }
@@ -252,6 +310,59 @@ static void tidy_name(tank_t *t, int fish) {
     tank_set_name(t, fish, out);                        /* empty = the preset's */
 }
 
+/* a swatch that cannot be picked: a bold ink X corner to corner (the editor's
+   markings the body's own color) - a shape, so it reads without color */
+static void struck_out(uint16_t *fb, int stride, int x, int y, int w, int h, uint32_t under) {
+    const int n = w > h ? w : h;
+    uint32_t r = under >> 16 & 255, g = under >> 8 & 255, b = under & 255;
+    uint32_t ink = r * 299 + g * 587 + b * 114 < 100 * 1000 ? C_CAPT : C_PANEL;   /* light on a dark swatch (charcoal), ink on the rest */
+    for (int i = 2; i <= n - 3; i++) {
+        int px = x + 3 + (w - 6) * i / n, py = y + 3 + (h - 6) * i / n, qy = y + h - 3 - (h - 6) * i / n;
+        render_rect(fb, stride, px - 2, py - 2, 4, 4, ink);
+        render_rect(fb, stride, px - 2, qy - 2, 4, 4, ink);
+    }
+}
+/* SWAP (COLORS): a tall key between the palettes, a double-headed arrow -
+   up at the body row, down at the markings row: they trade places */
+static void swap_button(uint16_t *fb, int stride) {
+    const int x = SETUP_SWAP_X, y = SETUP_SWAP_Y, w = SETUP_SWAP_W, h = SETUP_SWAP_H, cx = x + w / 2;
+    render_rect(fb, stride, x, y, w, h, C_KEY);
+    render_rect_edge(fb, stride, x, y, w, h, C_EDGE);
+    const int head = 9;                                  /* each arrowhead: rows 2..18 px wide */
+    for (int i = 0; i < head; i++) {
+        int half = 1 + i;
+        render_rect(fb, stride, cx - half, y + 6 + i, 2 * half, 1, C_TEXT);          /* up, its tip at the top */
+        render_rect(fb, stride, cx - half, y + h - 7 - i, 2 * half, 1, C_TEXT);      /* down, its tip at the foot */
+    }
+    render_rect(fb, stride, cx - 2, y + 6 + head, 4, h - 12 - 2 * head, C_TEXT);    /* the shaft between them */
+}
+/* the editor's rows (setup.h, THE EDITOR): where each sits and what a pick is */
+typedef struct { int y, h, x, px, w, n, hit0, gene; const char *label; } edit_row_t;
+static const edit_row_t FORM_ROWS[] = {
+    { SETUP_FORM_SHAPE_Y, SETUP_FORM_TILE_H, SETUP_TILE_X, SETUP_TILE_PX, SETUP_TILE_W, SHAPE_N, SETUP_HIT_SHAPE0, GENE_SHAPE, "SHAPE" },
+    { SETUP_FORM_FINS_Y,  SETUP_FORM_TILE_H, SETUP_TILE_X, SETUP_TILE_PX, SETUP_TILE_W, FINS_N,  SETUP_HIT_FINS0,  GENE_FINS,  "FINS" },
+};
+static const edit_row_t COLOR_ROWS[] = {
+    { SETUP_COLOR_BODY_Y, SETUP_COLOR_SW_H,  SETUP_SW_X,   SETUP_SW_PX,   SETUP_SW_W,   LOOK_N,    SETUP_HIT_BODY0, GENE_BODY,    "BODY" },
+    { SETUP_COLOR_PAT_Y,  SETUP_COLOR_PAT_H, SETUP_PAT_TILE_X, SETUP_PAT_TILE_PX, SETUP_PAT_TILE_W, PATTERN_TILES, SETUP_HIT_PAT0, GENE_PATTERN, "PATTERN" },
+    { SETUP_COLOR_ACC_Y,  SETUP_COLOR_SW_H,  SETUP_SW_X,   SETUP_SW_PX,   SETUP_SW_W,   LOOK_N,    SETUP_HIT_ACC0,  GENE_ACCENT,  "MARKINGS" },
+};
+static int edit_rows(const edit_row_t **r) {
+    if (page_is_form()) { *r = FORM_ROWS; return (int)(sizeof FORM_ROWS / sizeof *FORM_ROWS); }
+    *r = COLOR_ROWS; return (int)(sizeof COLOR_ROWS / sizeof *COLOR_ROWS);
+}
+/* the page's genes at random (ROLL): never markings that match the body */
+static void edit_roll(tank_t *t, int fish) {
+    const edit_row_t *r; int n = edit_rows(&r);
+    for (int k = 0; k < n; k++) {
+        int nv = r[k].gene == GENE_PATTERN ? PATTERN_N : r[k].n;   /* ROLL can land on SOLID too */
+        int v = (int)tank_randf(t, 0, nv - 0.001f);
+        if (r[k].gene == GENE_ACCENT)
+            for (int guard = 0; guard < 16 && LOOK_ACCENT[v] == t->fish[fish].color; guard++) v = (int)tank_randf(t, 0, r[k].n - 0.001f);
+        tank_set_gene(t, fish, r[k].gene, v);
+    }
+}
+
 static bool in_box(float x, float y, int bx, int by, int bw, int bh, int m) {
     return x >= bx - m && x < bx + bw + m && y >= by - m && y < by + bh + m;
 }
@@ -274,8 +385,11 @@ int setup_hit(float x, float y) {
         }
         else if (in_box(x, y, SETUP_TOP_NEXT_X, SETUP_TOP_BTN_Y, SETUP_TOP_BTN_W, SETUP_BTN_H, m)) return SETUP_HIT_NEXT;
         if (s_place && in_box(x, y, SETUP_ORD_X0, SETUP_ORD_Y, SETUP_ORD_W, SETUP_BTN_H, 6)) return SETUP_HIT_BCK;   /* (every piece, the sword plant too) */
+        if (s_place && tank_decor_z_count(s_item) < 2 && in_box(x, y, SETUP_ORDSQ_X, SETUP_DEPTH_Y, 2 * SETUP_DEPTH_SEG_W, SETUP_DEPTH_H, 6))
+            return SETUP_HIT_ORD0 + (x >= SETUP_ORDSQ_X + SETUP_DEPTH_SEG_W);   /* the plant's ORDER SQUARES (no piece beside it: setup_activate does nothing) */
         if (s_place && in_box(x, y, SETUP_ORD_X1, SETUP_ORD_Y, SETUP_ORD_W, SETUP_BTN_H, 6)) return SETUP_HIT_FWD;
         if (!s_place && in_box(x, y, SETUP_TOP_BACK_X, SETUP_TOP_BTN_Y, SETUP_TOP_BTN_W, SETUP_BTN_H, m)) return SETUP_HIT_BACK;
+        if (page_is_look() && in_box(x, y, SETUP_ROLL_X, SETUP_TOP_BTN_Y, SETUP_TOP_BTN_W, SETUP_BTN_H, m)) return SETUP_HIT_ROLL;
     } else {
         if (in_box(x, y, SETUP_NEXT_X, SETUP_BTN_Y, SETUP_BTN_W, SETUP_BTN_H, m)) return SETUP_HIT_NEXT;
         if (in_box(x, y, SETUP_BACK_X, SETUP_BTN_Y, SETUP_BTN_W, SETUP_BTN_H, m)) return SETUP_HIT_BACK;
@@ -315,21 +429,29 @@ int setup_hit(float x, float y) {
         /* the DEPTH bar: a band 8 px around it, the segment under the finger
            (the item's own depths: the plant's three, the castle's two) */
         int n = tank_decor_z_count(s_item), bw = n * SETUP_DEPTH_SEG_W, bx = (PAGE_W - bw) / 2;
-        if (!in_box(x, y, bx, SETUP_DEPTH_Y, bw, SETUP_DEPTH_H, 8)) return 0;
+        if (n < 2 || !in_box(x, y, bx, SETUP_DEPTH_Y, bw, SETUP_DEPTH_H, 8)) return 0;   /* (the plant: one depth, no bar - 0.4) */
         int i = (int)((x - bx) / SETUP_DEPTH_SEG_W);
         if (i < 0) i = 0;
         if (i >= n) i = n - 1;
         return SETUP_HIT_Z0 + tank_decor_z_at(s_item, i);
     }
+    if (page_is_colors() && in_box(x, y, SETUP_SWAP_X, SETUP_SWAP_Y, SETUP_SWAP_W, SETUP_SWAP_H, 6)) return SETUP_HIT_SWAP;   /* before the rows' bands */
     if (page_is_look()) {
-        /* the swatch row, a tall band (40 px above, 40 below - fingers land
-           low); the nearest swatch along x, no dead space */
-        int rw = (SETUP_SW_N - 1) * SETUP_SW_PX + SETUP_SW_W;
-        if (!in_box(x, y, SETUP_SW_X, SETUP_SW_Y, rw, SETUP_SW_H, 40) || y >= SETUP_ACC_Y) return 0;
-        int i = (int)((x - SETUP_SW_X + (SETUP_SW_PX - SETUP_SW_W) * 0.5f) / SETUP_SW_PX);
-        if (i < 0) i = 0;
-        if (i >= SETUP_SW_N) i = SETUP_SW_N - 1;
-        return SETUP_HIT_BODY0 + i;
+        /* the rows: a band from a row's label to halfway into the gap under
+           it (the last one 24 px past its foot - fingers land low), the
+           nearest choice along x */
+        const edit_row_t *r; int n = edit_rows(&r);
+        for (int k = 0; k < n; k++) {
+            int top = r[k].y - SETUP_LABEL_DY - 4;
+            int bot = k + 1 < n ? (r[k].y + r[k].h + r[k + 1].y - SETUP_LABEL_DY - 4) / 2 : r[k].y + r[k].h + 24;
+            if (k + 1 < n && bot < r[k].y + r[k].h) bot = r[k].y + r[k].h;
+            int rw = (r[k].n - 1) * r[k].px + r[k].w;
+            if (y < top || y >= bot || x < r[k].x - 12 || x >= r[k].x + rw + 12) continue;
+            int i = (int)((x - r[k].x + (r[k].px - r[k].w) * 0.5f) / r[k].px);
+            if (i < 0) i = 0;
+            if (i >= r[k].n) i = r[k].n - 1;
+            return r[k].hit0 + i;
+        }
     }
     return 0;
 }
@@ -339,7 +461,8 @@ void setup_activate(tank_t *t, int id) {
     fish_t *f = &t->fish[page_fish()];
     if (s_place) {                                      /* DONE saves the spot; a layer button sets the depth; SELL twice sells */
         if (id == SETUP_HIT_SELL) {
-            if (!s_sell_armed) { s_sell_armed = true; return; }
+            if (!s_sell_armed) { s_sell_armed = true; s_sell_clock = t->clock; return; }
+            if (t->clock - s_sell_clock < SETUP_SELL_WAIT_S) { s_sell_clock = t->clock; return; }   /* a doubled tap (or a mash): still armed, the wait again from it */
             s_sell_armed = false;
             if (progression_sell(t, s_item)) { s_active = false; tank_emit(TEV_CONFIRM, -1); }
             return;
@@ -358,7 +481,16 @@ void setup_activate(tank_t *t, int id) {
         }
         s_sell_armed = false;                           /* any other tap stands SELL down */
         if (id == SETUP_HIT_NEXT) { s_active = false; tank_emit(TEV_CONFIRM, -1); progression_save(t); }
-        else if (id == SETUP_HIT_BCK || id == SETUP_HIT_FWD) { if (tank_decor_shift(t, s_item, id == SETUP_HIT_FWD ? 1 : -1)) s_moved = true; }   /* the stack: a step; DONE saves it */
+        else if (id == SETUP_HIT_BCK || id == SETUP_HIT_FWD) {                       /* the stack: a step; DONE saves it */
+            const int dir = id == SETUP_HIT_FWD ? 1 : -1, past = tank_decor_neighbor(t, s_item, dir);
+            if (tank_decor_shift(t, s_item, dir)) { s_moved = true; s_ref = past; }      /* (the squares follow the piece just passed) */
+        }
+        else if (id == SETUP_HIT_ORD0 || id == SETUP_HIT_ORD0 + 1) {               /* the ORDER SQUARES: behind / in front of their piece - the arrow's step */
+            const int ref = order_ref(t); const bool front = id == SETUP_HIT_ORD0 + 1;
+            for (int k = 0; ref >= 0 && k < DECOR_SLOTS && tank_decor_above(t, s_item, ref) != front; k++)
+                if (tank_decor_shift(t, s_item, front ? 1 : -1)) s_moved = true; else break;
+            if (ref >= 0) s_ref = ref;
+        }
         else if (id >= SETUP_HIT_Z0 && id < SETUP_HIT_Z0 + DECOR_Z_N) {
             if (tank_decor_z(t, s_item) != id - SETUP_HIT_Z0) s_moved = true;
             tank_decor_set(t, s_item, tank_decor_x(t, s_item), id - SETUP_HIT_Z0);
@@ -383,13 +515,13 @@ void setup_activate(tank_t *t, int id) {
             if (s_birth) progression_newborn_done(t); else progression_setup_done(t);
             return;
         }
-        s_page++; s_slot = 0; s_typed = false; s_kb_page = 0; stage(t);
+        s_page++; s_slot = 0; s_typed = false; s_kb_page = 0; s_same_note = 0; stage(t);
         return;
     }
     if (id == SETUP_HIT_BACK) {
         if (page_is_name()) tidy_name(t, page_fish());
         if (s_page > first_page()) s_page--;
-        s_slot = 0; s_typed = false; s_kb_page = 0; stage(t);
+        s_slot = 0; s_typed = false; s_kb_page = 0; s_same_note = 0; stage(t);
         return;
     }
     if (page_is_name() && s_kbd) {
@@ -402,8 +534,23 @@ void setup_activate(tank_t *t, int id) {
         else if (id == SETUP_HIT_DOWN) spin(f, -1);
         return;
     }
-    if (page_is_look() && id >= SETUP_HIT_BODY0 && id < SETUP_HIT_BODY0 + LOOK_N)
-        tank_set_look(t, page_fish(), LOOK_BODY[id - SETUP_HIT_BODY0], 0);   /* the accent stays its secret */
+    if (page_is_look()) {                               /* the fish wears a pick at once: the fry on stage, the grown portrait */
+        if (id == SETUP_HIT_ROLL) { edit_roll(t, page_fish()); tank_emit(TEV_WHEEL_TICK, -1); return; }
+        if (id == SETUP_HIT_SWAP && page_is_colors()) {       /* body <-> markings: one palette, so exact */
+            int b = tank_gene(f, GENE_BODY), a = tank_gene(f, GENE_ACCENT);
+            tank_set_look(t, page_fish(), LOOK_COLORS[a], LOOK_COLORS[b]);
+            tank_emit(TEV_WHEEL_TICK, -1); return;
+        }
+        const edit_row_t *r; int n = edit_rows(&r);
+        for (int k = 0; k < n; k++)
+            if (id >= r[k].hit0 && id < r[k].hit0 + r[k].n) {
+                int v = id - r[k].hit0;
+                if (r[k].gene == GENE_ACCENT && LOOK_ACCENT[v] == f->color) { s_same_note = 75; return; }   /* struck out: say why (~3 s) */
+                if (r[k].gene == GENE_PATTERN && v == f->pattern) v = PATTERN_SOLID;   /* the picked tile again: deselected - solid */
+                tank_set_gene(t, page_fish(), r[k].gene, v);
+                return;
+            }
+    }
 }
 
 void setup_touch(tank_t *t, float x, float y, bool down) {
@@ -576,7 +723,7 @@ static void volcano_glyph(uint16_t *fb, int stride, int cx, int y_bot) {
  * FRONT: the fish, then both leaves over it. The castle's (2026-09-16):
  * the castle and two leaves - BEHIND: the castle, the leaves over it; IN
  * FRONT: the leaves, the castle over them (its depths mean the plant layer) */
-static void depth_tile(const tank_t *t, uint16_t *fb, int stride, int x, int y, int w, int h, int z, int item, float clock) {
+static void depth_tile(const tank_t *t, uint16_t *fb, int stride, int x, int y, int w, int h, int z, int item, double clock) {
     const int cx = x + w / 2, cy = y + h / 2, lh = h - 6, yb = y + h - 3;
     const uint32_t la = 0x8dbb48, lb = 0x6c9d38;
     const fish_t *who = t->n_fish > 0 ? &t->fish[0] : NULL;
@@ -622,6 +769,59 @@ static void depth_tile(const tank_t *t, uint16_t *fb, int stride, int x, int y, 
     for (int k = -2; k <= 2; k++) frond_glyph(fb, stride, cx + k * 9 - 1, yb, lh - 4 - (k & 1) * 6, sg);
     if (z != DECOR_Z_BACK) { leaf_glyph(fb, stride, cx - 8, yb, lh, la); leaf_glyph(fb, stride, cx + 8, yb, lh, lb); }
 }
+/* THE ORDER SQUARES (0.4, Strato 11-02: "it looks odd with no examples when there is something like 'behind or in front of x' ...
+   a universal object in front / behind squares"): the page's piece against its neighbor in the stack, drawn as ONE universal
+   object for every piece - a plain block, gray with a lighter top and a dark rim, read by its shape and value, never its hue.
+   BEHIND: the piece's own glyph (the plant's two broad leaves, the pumpkin, ...) and the block over it; IN FRONT: the glyph over
+   the block. The real piece is named on the hint line under the squares */
+static void block_glyph(uint16_t *fb, int stride, int cx, int y_bot, int w, int h) {
+    const int x0 = cx - w / 2, y0 = y_bot - h + 1;
+    render_rect(fb, stride, x0 + 1, y0, w - 2, h, 0x1c2430);                      /* the rim, its corners cut */
+    render_rect(fb, stride, x0, y0 + 1, w, h - 2, 0x1c2430);
+    render_rect(fb, stride, x0 + 2, y0 + 1, w - 4, h - 2, 0x8a919c);              /* the face */
+    render_rect(fb, stride, x0 + 1, y0 + 2, w - 2, h - 4, 0x8a919c);
+    render_rect(fb, stride, x0 + 2, y0 + 2, w - 4, 3, 0xc9ced6);                  /* its lit top */
+    render_rect(fb, stride, x0 + 2, y_bot - 3, w - 4, 2, 0x5f6670);               /* its shaded foot */
+}
+static void order_piece_glyph(const tank_t *t, uint16_t *fb, int stride, int item, int cx, int yb, int lh) {
+    if (item == 8) pumpkin_glyph(fb, stride, cx, yb);
+    else if (item == 9) volcano_glyph(fb, stride, cx, yb);
+    else if (item == 2) castle_glyph(fb, stride, cx, yb, 0xa99b7b, 0xc4a95e);
+    else if (item == 4) cluster_glyph(fb, stride, cx, yb, &CLUSTER_SCHEMES[tank_cluster_scheme(t)]);
+    else if (item == 3) coral_glyph(fb, stride, cx, yb, tank_coral_rgb(t));
+    else { leaf_glyph(fb, stride, cx - 6, yb, lh, 0x8dbb48); leaf_glyph(fb, stride, cx + 6, yb, lh, 0x6c9d38); }   /* the sword plant */
+}
+/* one tile: the page's piece behind (front = false) or in front of the block */
+static void order_tile(const tank_t *t, uint16_t *fb, int stride, int x, int y, int w, int h, int item, bool front) {
+    const int cx = x + w / 2, yb = y + h - 3, lh = h - 6;
+    const int bw = item == 0 ? 36 : 30, bh = item == 0 ? 20 : 16;
+    const int bx = cx + (item == 0 ? 0 : 9), px = cx - (item == 0 ? 0 : 7);          /* (a piece glyph and the block side by side, overlapping) */
+    if (front) { block_glyph(fb, stride, bx, yb, bw, bh); order_piece_glyph(t, fb, stride, item, px, yb, lh); }
+    else { order_piece_glyph(t, fb, stride, item, px, yb, lh); block_glyph(fb, stride, bx, yb, bw, bh); }
+}
+/* the squares' piece (Strato 11-02, the plant's page): with several pieces they toggle the plant against ONE - the one it last
+   passed on this page (an arrow's step or a square's), at first the one just in front of it, else just behind; the arrows walk
+   the whole stack and the squares follow, so IN FRONT never lights another piece's BEHIND. -1 = no piece beside it */
+static int order_ref(const tank_t *t) {
+    const int below = tank_decor_neighbor(t, s_item, -1), above = tank_decor_neighbor(t, s_item, 1);
+    if (s_ref >= 0 && (s_ref == below || s_ref == above)) return s_ref;
+    return above >= 0 ? above : below;
+}
+/* the two squares: BEHIND | IN FRONT of `ref`, the lit one the page's piece's place; the hint line under them names ref ("BEHIND
+   THE PUMPKIN" - Strato 11-02: no caption over them too, it said the same) */
+static void order_bar(const tank_t *t, uint16_t *fb, int stride, int bx, int by, int segw, int bh, int tile_h, int item, int ref) {
+    const bool front = tank_decor_above(t, item, ref);
+    render_rect(fb, stride, bx, by, 2 * segw, bh, C_KEY);
+    static const char *const W[2] = { "BEHIND", "IN FRONT" };
+    for (int i = 0; i < 2; i++) {
+        const int sx = bx + i * segw; const bool on = (i == 1) == front;
+        if (on) { render_rect(fb, stride, sx, by, segw, bh, C_INNER); render_rect_edge(fb, stride, sx + 1, by + 1, segw - 2, bh - 2, C_EDGE); }
+        else if (i > 0) render_rect(fb, stride, sx, by + 6, 1, bh - 12, C_DIM);
+        order_tile(t, fb, stride, sx, by + 4, segw, tile_h, item, i == 1);
+        text_c(fb, stride, sx + segw / 2, by + tile_h + 10, 2, on ? C_TEXT : dim(C_CAPT, 45), W[i]);
+    }
+    render_rect_edge(fb, stride, bx, by, 2 * segw, bh, C_EDGE);
+}
 /* an order arrow (the placement page): a chevron in a small button, lit or dim */
 static void ord_arrow(uint16_t *fb, int stride, int x, int y, bool right, bool on) {
     uint32_t e = on ? C_EDGE : dim(C_CAPT, 45);
@@ -639,7 +839,8 @@ static void panel(uint16_t *fb, int stride) {
     render_rect_edge(fb, stride, SETUP_X + 1, SETUP_Y + 1, SETUP_W - 2, SETUP_H - 2, C_INNER);
 }
 
-void render_setup(const tank_t *t, uint16_t *fb, int stride, float clock) {
+void render_setup(const tank_t *t, uint16_t *fb, int stride, double clock) {
+    if (s_same_note > 0) s_same_note--;
     if (!s_active) return;
     const int CX = PAGE_W / 2;
     const int FLOOR = TANK_BOT - 16 - PAGE_Y;           /* the tank's sand line, in the page's coordinates */
@@ -707,12 +908,13 @@ void render_setup(const tank_t *t, uint16_t *fb, int stride, float clock) {
         /* the DEPTH bar: one outlined box, three joined segments, the chosen
            one lit; a picture tile on each and the word under it */
         static const char *const zl[DECOR_Z_N] = { "BEHIND", "AMONG", "IN FRONT" };
-        static const char *const hint[DECOR_Z_N] = { "BEHIND THE SEAGRASS", "", "IN FRONT OF THE SEAGRASS" };   /* (the sword plant:
-                                                                   against the seagrass, as the others against the plants - the fish choose their own) */
+        static const char *const hint[DECOR_Z_N] = { "IN FRONT OF THE SEAGRASS", "", "IN FRONT OF THE SEAGRASS" };   /* (the sword plant:
+                                                                   one depth since 0.4, over the seagrass - the fish choose their own) */
         static const char *const castle_hint[DECOR_Z_N] = { "THE PLANTS GROW IN FRONT OF IT", "", "IT STANDS IN FRONT OF THE PLANTS" };
         static const char *const coral_hint[DECOR_Z_N] = { "BEHIND THE GRASS AND THE FISH", "", "IN FRONT OF EVERYTHING" };
         int z = tank_decor_z(t, s_item), zi = tank_decor_z_index(s_item, z);
         int n = tank_decor_z_count(s_item), bw = n * SETUP_DEPTH_SEG_W, bx = (PAGE_W - bw) / 2;   /* the item's own depths */
+        if (n > 1) {                                                       /* (the plant has one depth: no bar, 0.4) */
         text_c(fb, stride, CX, SETUP_DEPTH_Y - 18, 2, C_CAPT, "DEPTH");
         render_rect(fb, stride, bx, SETUP_DEPTH_Y, bw, SETUP_DEPTH_H, C_KEY);
         for (int i = 0; i < n; i++) {
@@ -724,6 +926,18 @@ void render_setup(const tank_t *t, uint16_t *fb, int stride, float clock) {
             text_c(fb, stride, sx + SETUP_DEPTH_SEG_W / 2, SETUP_DEPTH_Y + SETUP_DEPTH_TILE_H + 10, 2, i == zi ? C_TEXT : dim(C_CAPT, 45), zl[zi_]);
         }
         render_rect_edge(fb, stride, bx, SETUP_DEPTH_Y, bw, SETUP_DEPTH_H, C_EDGE);
+        }
+        const int ref = n < 2 ? order_ref(t) : -1;          /* THE ORDER SQUARES (the plant, one depth): in the DEPTH bar's place, the arrows at its ends;
+                                                               the hint line names their piece */
+        if (ref >= 0) {
+            order_bar(t, fb, stride, SETUP_ORDSQ_X, SETUP_DEPTH_Y, SETUP_DEPTH_SEG_W, SETUP_DEPTH_H, SETUP_DEPTH_TILE_H, s_item, ref);
+            for (int pass = 0; pass < 2; pass++) {
+                const char *the = pass ? "" : "THE ";
+                if (tank_decor_above(t, ref, s_item)) snprintf(rel, sizeof rel, "BEHIND %s%s", the, SD_ITEMS[ref].name);
+                else snprintf(rel, sizeof rel, "IN FRONT OF %s%s", the, SD_ITEMS[ref].name);
+                if (render_text_w(rel, 2) <= rel_avail) break;
+            }
+        }
         if (s_item == 4) {
             /* the cluster: a LOOK row of three tiles - the coral, the tubes and
                the brain as three bands over the look's name - the pick ringed */
@@ -776,7 +990,7 @@ void render_setup(const tank_t *t, uint16_t *fb, int stride, float clock) {
         bool grid = s_kbd == SETUP_KBD_GRID;
         panel(fb, stride);
         text_c(fb, stride, CX, SETUP_Y + (grid ? 12 : 7), 2, C_CAPT, s_rename ? "RENAME YOUR FISH" : s_birth ? "NAME THE NEW FRY" : page_fish() == 0 ? "NAME THE FIRST FISH" : "NAME THE SECOND FISH");
-        if (grid) render_fish_preview(fb, stride, SETUP_X + 88, SETUP_Y + 72, 2.0f, f->color, f->fin, f->accent, clock);
+        if (grid) render_fish_preview(fb, stride, SETUP_X + 88, SETUP_Y + 72, 2.0f, f->color, f->fin, f->accent, f, FISH_ROOM_CARD, clock);
         const int SL = 22, NX = grid ? SETUP_X + 160 : CX - FISH_NAME_MAX * SL / 2 + 2, NY = grid ? SETUP_Y + 58 : SETUP_TOP_BTN_Y + (SETUP_BTN_H - 28) / 2;
         int n = name_len(f);
         for (int i = 0; i < FISH_NAME_MAX; i++) {
@@ -811,6 +1025,11 @@ void render_setup(const tank_t *t, uint16_t *fb, int stride, float clock) {
            blank are just faint underlines */
         const fish_t *f = &t->fish[page_fish()];
         fish_ring(fb, stride, f, 17 * f->size + 6, f->color);
+        if (name_beside(t)) {                                   /* the form they chose, in view while they name it (0.4) */
+            render_rect_blend(fb, stride, SETUP_ED_GROWN_X - 64, SETUP_NAME_PREVIEW_Y - 24, 128, 48, C_PANEL, 150);
+            render_fish_preview(fb, stride, SETUP_ED_GROWN_X, SETUP_NAME_PREVIEW_Y, SETUP_NAME_GROWN_SIZE, f->color, f->fin, f->accent, f, FISH_ROOM_FAM, clock);
+            text_c(fb, stride, (SETUP_ED_NOW_X + SETUP_ED_GROWN_X) / 2, SETUP_NAME_PREVIEW_Y - 10, 3, C_CAPT, ">");
+        }
         render_rect_blend(fb, stride, -PAGE_X, SETUP_SLOT_Y - SETUP_ARROW_GAP - 2, TANK_W, SETUP_SLOT_H + 2 * SETUP_ARROW_GAP + 36, C_PANEL, 150);
         text_c(fb, stride, CX, SETUP_Y + 7, 2, C_CAPT, s_rename ? "RENAME YOUR FISH" : s_birth ? "NAME THE NEW FRY" : page_fish() == 0 ? "NAME THE FIRST FISH" : "NAME THE SECOND FISH");
         nav(fb, stride, true, s_rename ? "DONE" : "NEXT", s_rename);
@@ -832,77 +1051,134 @@ void render_setup(const tank_t *t, uint16_t *fb, int stride, float clock) {
         text_c(fb, stride, CX, SETUP_SLOT_Y + SETUP_SLOT_H + 96, 2, C_CAPT, "SWIPE A LETTER UP OR DOWN");
         dots(fb, stride, PAGE_H - 14);
     } else if (page_is_look()) {
-        /* straight on the tank again: the ringed FRY is the preview (no
-           grown-up look - that is the surprise); a row of body swatches; the
-           accent a "?" that its first growth spurt answers */
+        /* THE EDITOR (setup.h): straight on the tank, the fry ringed on stage
+           (NOW), the grown fish on a dark plate (GROWN UP), the rows under a
+           panel band */
         const fish_t *f = &t->fish[page_fish()];
-        fish_ring(fb, stride, f, 17 * f->size + 6, f->color);
-        render_rect_blend(fb, stride, -PAGE_X, SETUP_SW_Y - 30, TANK_W, SETUP_ACC_Y + SETUP_SW_H + 16 - (SETUP_SW_Y - 30), C_PANEL, 110);
-        char cap[FISH_NAME_MAX + 16]; snprintf(cap, sizeof cap, "A COLOR FOR %s", f->name);
+        char cap[40]; snprintf(cap, sizeof cap, "%s FOR THE %s FISH", page_is_form() ? "A FORM" : "COLORS", page_fish() ? "SECOND" : "FIRST");   /* not named yet (0.4) */
         text_c(fb, stride, CX, SETUP_Y + 7, 2, C_CAPT, cap);
         nav(fb, stride, true, "NEXT", false);
-        render_text(fb, stride, SETUP_SW_X + 2, SETUP_SW_Y - 20, 2, C_CAPT, "BODY");
-        for (int i = 0; i < SETUP_SW_N; i++) {
-            int x = SETUP_SW_X + i * SETUP_SW_PX;
-            bool on = LOOK_BODY[i] == f->color;
-            render_rect(fb, stride, x, SETUP_SW_Y, SETUP_SW_W, SETUP_SW_H, LOOK_BODY[i]);
-            render_rect_edge(fb, stride, x, SETUP_SW_Y, SETUP_SW_W, SETUP_SW_H, on ? C_TEXT : C_DIM);
-            if (on) render_rect_edge(fb, stride, x + 1, SETUP_SW_Y + 1, SETUP_SW_W - 2, SETUP_SW_H - 2, C_TEXT);
+        render_button(fb, stride, SETUP_ROLL_X, SETUP_TOP_BTN_Y, SETUP_TOP_BTN_W, SETUP_BTN_H, C_KEY, C_DIM, "ROLL", 2);
+        const edit_row_t *r; int n = edit_rows(&r);
+        int band = SETUP_ED_CAPTION_Y - 6;                       /* from the captions down: fish swim behind them */
+        render_rect_blend(fb, stride, -PAGE_X, band, TANK_W, r[n - 1].y + r[n - 1].h + 10 - band, C_PANEL, 110);
+        fish_ring(fb, stride, f, 17 * f->size + 6, f->color);
+        render_rect_blend(fb, stride, SETUP_ED_GROWN_X - 72, SETUP_ED_PREVIEW_Y - 26, 144, 54, C_PANEL, 150);   /* clear of the buttons */
+        render_fish_preview(fb, stride, SETUP_ED_GROWN_X, SETUP_ED_PREVIEW_Y, SETUP_ED_GROWN_SIZE, f->color, f->fin, f->accent, f, FISH_ROOM_CARD, clock);
+        text_c(fb, stride, (SETUP_ED_NOW_X + SETUP_ED_GROWN_X) / 2, SETUP_ED_PREVIEW_Y - 10, 3, C_CAPT, ">");
+        text_c(fb, stride, SETUP_ED_NOW_X, SETUP_ED_CAPTION_Y, 2, C_CAPT, "NOW");
+        text_c(fb, stride, SETUP_ED_GROWN_X, SETUP_ED_CAPTION_Y, 2, C_CAPT, "GROWN UP");
+        for (int k = 0; k < n; k++) {
+            int cur = tank_gene(f, r[k].gene);
+            char lab[32];
+            if (r[k].gene == GENE_PATTERN) snprintf(lab, sizeof lab, "%s  %s", r[k].label, PATTERN_NAMES[cur]);   /* its tiles carry no names */
+            else if (r[k].gene == GENE_ACCENT && s_same_note > 0) snprintf(lab, sizeof lab, "%s  SAME AS ITS BODY", r[k].label);
+            else snprintf(lab, sizeof lab, "%s", r[k].label);
+            bool unused = r[k].gene == GENE_ACCENT && f->pattern == PATTERN_SOLID;   /* a solid fish wears no markings */
+            render_text(fb, stride, r[k].x + 2, r[k].y - SETUP_LABEL_DY, 2, unused ? dim(C_CAPT, 45) : C_CAPT, lab);
+            for (int i = 0; i < r[k].n; i++) {
+                int x = r[k].x + i * r[k].px, y = r[k].y, w = r[k].w, h = r[k].h;
+                bool on = i == cur;
+                if (r[k].gene == GENE_BODY || r[k].gene == GENE_ACCENT) {
+                    uint32_t rgb = r[k].gene == GENE_BODY ? LOOK_BODY[i] : LOOK_ACCENT[i];
+                    bool off = r[k].gene == GENE_ACCENT && rgb == f->color;   /* markings the body's own color would vanish */
+                    render_rect(fb, stride, x, y, w, h, rgb);                 /* in its own color, so it can be told (Strato
+                                                                                 10-04: dimmed, it was a mystery color) */
+                    render_rect_edge(fb, stride, x, y, w, h, on ? C_TEXT : C_DIM);
+                    if (on) render_rect_edge(fb, stride, x + 1, y + 1, w - 2, h - 2, C_TEXT);
+                    if (off) struck_out(fb, stride, x, y, w, h, rgb);              /* a shape says "not this one", never a hue */
+                    continue;
+                }
+                /* a tile: a small grown fish of that option, in this fish's colors */
+                fish_t form = *f;
+                if (r[k].gene == GENE_SHAPE) form.shape = (uint8_t)i;
+                else if (r[k].gene == GENE_FINS) form.fins = (uint8_t)i;
+                else form.pattern = (uint8_t)i;
+                render_rect(fb, stride, x, y, w, h, C_KEY);
+                render_rect_edge(fb, stride, x, y, w, h, on ? C_TEXT : C_DIM);
+                if (on) render_rect_edge(fb, stride, x + 1, y + 1, w - 2, h - 2, C_TEXT);
+                if (r[k].gene == GENE_PATTERN)
+                    render_fish_preview(fb, stride, x + w / 2.0f, y + h / 2.0f, 1.4f, f->color, f->fin, f->accent, &form, FISH_ROOM_ROW, clock);
+                else {
+                    render_fish_preview(fb, stride, x + w / 2.0f, y + 21, 1.0f, f->color, f->fin, f->accent, &form, FISH_ROOM_ROW, clock);
+                    text_c(fb, stride, x + w / 2, y + h - 17, 2, on ? C_TEXT : dim(C_CAPT, 60),
+                           r[k].gene == GENE_SHAPE ? SHAPE_NAMES[i] : FINS_NAMES[i]);
+                }
+            }
+            if (unused)                                     /* a solid fish: the markings row stands back (still a pick away -
+                                                               choosing a pattern brings them back) */
+                render_rect_blend(fb, stride, r[k].x - 2, r[k].y - 2, (r[k].n - 1) * r[k].px + r[k].w + 4, r[k].h + 4, C_PANEL, 150);
         }
-        render_text(fb, stride, SETUP_SW_X + 2, SETUP_ACC_Y - 20, 2, C_CAPT, "ACCENT");
-        render_rect(fb, stride, SETUP_SW_X, SETUP_ACC_Y, SETUP_SW_W, SETUP_SW_H, C_INNER);
-        render_rect_edge(fb, stride, SETUP_SW_X, SETUP_ACC_Y, SETUP_SW_W, SETUP_SW_H, C_DIM);
-        render_text(fb, stride, SETUP_SW_X + (SETUP_SW_W - 20) / 2, SETUP_ACC_Y + (SETUP_SW_H - 28) / 2, 4, C_CAPT, "?");
-        render_text(fb, stride, SETUP_SW_X + SETUP_SW_W + 16, SETUP_ACC_Y + 12, 2, C_CAPT, "ITS MARKINGS COME IN");
-        render_text(fb, stride, SETUP_SW_X + SETUP_SW_W + 16, SETUP_ACC_Y + 32, 2, C_CAPT, "AS IT GROWS UP");
+        if (page_is_colors()) swap_button(fb, stride);
         dots(fb, stride, PAGE_H - 14);
     } else if (s_page == SETUP_PG_BORN) {
         /* the announcement, over the live tank: the fry wears a double ring
            wherever it hatched (no stage - it stays in the grass it was born
            in), its parents are named, one button leads on */
         const fish_t *f = &t->fish[page_fish()];
-        float r = 17 * f->size + 6 + 3 * sinf(clock * 3);          /* a ring that breathes */
+        char news[40]; bool mut = mutation_words(f, news, sizeof news);
+        float r = 17 * f->size + 6 + 3 * sinf(tank_anim(clock) * 3);   /* a ring that breathes */
         fish_ring(fb, stride, f, r, f->color);
-        fish_ring(fb, stride, f, r + 8, C_EDGE);
-        render_rect_blend(fb, stride, -PAGE_X, 92, TANK_W, 116, C_PANEL, 150);
+        fish_ring(fb, stride, f, r + 8, mut ? C_NEW : C_EDGE);     /* a mutation: a gold outer ring */
+        render_rect_blend(fb, stride, -PAGE_X, 92, TANK_W, mut ? 138 : 116, C_PANEL, 150);
         text_c(fb, stride, CX, 104, 3, C_TEXT, "A NEW FRY!");
         char l1[FISH_NAME_MAX * 2 + 24];
         bool shop = f->parent_a < 0 && f->parent_b < 0;              /* bought (0.3.5): no parents, in at the surface */
         if (shop) snprintf(l1, sizeof l1, "FROM THE SHOP,");
-        else snprintf(l1, sizeof l1, "BORN TO %s AND %s", fish_name(t, f->parent_a), fish_name(t, f->parent_b));
+        else snprintf(l1, sizeof l1, "BORN TO %s AND %s", parent_of(t, f, 0).name, parent_of(t, f, 1).name);
         text_c(fb, stride, CX, 140, 2, C_CAPT, l1);
         text_c(fb, stride, CX, 162, 2, C_CAPT, shop ? "IN AT THE SURFACE." : "DOWN IN THE GRASS.");
         text_c(fb, stride, CX, 184, 2, C_CAPT, "GO AND SAY HELLO.");
+        if (mut) text_c(fb, stride, CX, 206, 2, C_NEW, news);      /* 0.4: neither parent shows it */
         render_button(fb, stride, SETUP_MID_X, SETUP_BTN_Y, SETUP_BTN_W, SETUP_BTN_H, C_GO, C_GO_E, "MEET IT", 2);
         dots(fb, stride, PAGE_H - 14);
     } else if (s_page == SETUP_PG_FAMILY) {
-        /* the family page: a panel (the fry on its own), its name, its
-           portrait as it is now - a fry, no markings yet - and what it
-           inherited: whose body, whose markings, and how bold and sociable
-           it is next to its parents' marks */
+        /* the family page (setup.h): NOW and GROWN UP, then each gene and
+           where it came from - a parent (* = that parent's hidden copy), or
+           NEW! (a mutation) */
         const fish_t *f = &t->fish[page_fish()];
-        const fish_t *pa = f->parent_a >= 0 && f->parent_a < t->n_fish ? &t->fish[f->parent_a] : NULL;
-        const fish_t *pb = f->parent_b >= 0 && f->parent_b < t->n_fish ? &t->fish[f->parent_b] : NULL;
+        panel(fb, stride);
+        text_c(fb, stride, CX, SETUP_Y + 20, 3, C_TEXT, f->name);
+        float ps = f->size * 2.0f;                                   /* the fry, twice life size ... */
+        if (ps > 1.2f) ps = 1.2f;                                    /* ... a juvenile's ring clear of the name */
+        render_ring(fb, stride, SETUP_FAM_NOW_X, SETUP_FAM_PORTRAIT_Y, 17 * ps + 6, f->color);
+        render_fish_portrait(fb, stride, SETUP_FAM_NOW_X, SETUP_FAM_PORTRAIT_Y, ps, f, FISH_ROOM_FAM, clock);
+        text_c(fb, stride, (SETUP_FAM_NOW_X + SETUP_FAM_GROWN_X) / 2 - 6, SETUP_FAM_PORTRAIT_Y - 10, 3, C_CAPT, ">");
+        render_fish_preview(fb, stride, SETUP_FAM_GROWN_X, SETUP_FAM_PORTRAIT_Y, SETUP_FAM_GROWN_SIZE, f->color, f->fin, f->accent, f, FISH_ROOM_FAM, clock);
+        render_text(fb, stride, SETUP_FAM_FROM_X, SETUP_FAM_ROW_Y - 20, 2, dim(C_CAPT, 60), "FROM");
+        bool hidden = false;
+        for (int g = 0; g < GENE_N; g++) {
+            int y = SETUP_FAM_ROW_Y + g * SETUP_FAM_ROW_DY, vx = SETUP_FAM_VALUE_X;
+            static const char *const LABEL[GENE_N] = { "SHAPE", "FINS", "PATTERN", "BODY", "MARKINGS" };
+            render_text(fb, stride, SETUP_FAM_LABEL_X, y, 2, C_CAPT, LABEL[g]);
+            if (g == GENE_BODY || g == GENE_ACCENT) {
+                uint32_t rgb = g == GENE_BODY ? f->color : f->accent;
+                render_rect(fb, stride, vx, y - 1, 16, 16, rgb); render_rect_edge(fb, stride, vx, y - 1, 16, 16, C_INNER);
+            } else render_text(fb, stride, vx, y, 2, C_TEXT, g == GENE_SHAPE ? SHAPE_NAMES[f->shape] : g == GENE_FINS ? FINS_NAMES[f->fins] : PATTERN_NAMES[f->pattern]);
+            if (f->mutated == g + 1) { render_text(fb, stride, SETUP_FAM_FROM_X, y, 2, C_NEW, "NEW!"); continue; }
+            parent_t p = parent_of(t, f, (f->from_b >> g & 1) ? 1 : 0);
+            bool sec = f->from_carried >> g & 1;
+            hidden |= sec;
+            text_named(fb, stride, SETUP_FAM_FROM_X, y, "", p.name, p.known ? p.color : C_DIM, sec ? " *" : NULL);
+        }
+        if (hidden) text_c(fb, stride, CX, SETUP_FAM_NOTE_Y, 2, dim(C_CAPT, 70), "* HIDDEN IN THAT PARENT");
+        nav(fb, stride, false, "NEXT", false);
+        dots(fb, stride, SETUP_Y + SETUP_H - 8);
+    } else if (s_page == SETUP_PG_NATURE) {
+        /* the nature page: how bold and sociable it is next to its parents'
+           marks, and who they are */
+        const fish_t *f = &t->fish[page_fish()];
+        parent_t PA = parent_of(t, f, 0), PB = parent_of(t, f, 1);
+        const parent_t *pa = PA.known ? &PA : NULL, *pb = PB.known ? &PB : NULL;
         bool shop = f->parent_a < 0 && f->parent_b < 0;              /* bought (0.3.5): its look is the shop's */
-        const char *na = shop ? "THE SHOP" : fish_name(t, f->parent_a), *nb = shop ? "THE SHOP" : fish_name(t, f->parent_b);
+        const char *na = shop ? "THE SHOP" : PA.name, *nb = shop ? "THE SHOP" : PB.name;
         uint32_t ca = pa ? name_rgb(pa->color) : shop ? C_CAPT : C_DIM, cb = pb ? name_rgb(pb->color) : shop ? C_CAPT : C_DIM;
         panel(fb, stride);
         text_c(fb, stride, CX, SETUP_Y + 20, 3, C_TEXT, f->name);
-        float ps = f->size * 2.0f;                                   /* a portrait, twice life size (a fry) ... */
-        if (ps > 1.2f) ps = 1.2f;                                    /* ... but a juvenile's ring must clear the name */
-        render_ring(fb, stride, CX, SETUP_FAM_PORTRAIT_Y, 17 * ps + 6, f->color);
-        render_fish_portrait(fb, stride, CX, SETUP_FAM_PORTRAIT_Y, ps, f, clock);
-        int y = SETUP_FAM_ROW_Y, vx = SETUP_FAM_VALUE_X;
-        render_text(fb, stride, SETUP_FAM_LABEL_X, y, 2, C_CAPT, "BODY");
-        render_rect(fb, stride, vx, y - 1, 16, 16, f->color); render_rect_edge(fb, stride, vx, y - 1, 16, 16, C_INNER);
-        text_named(fb, stride, vx + 24, y, "FROM ", na, ca, NULL);
-        y += SETUP_FAM_ROW_DY;
-        render_text(fb, stride, SETUP_FAM_LABEL_X, y, 2, C_CAPT, "MARKINGS");
-        render_rect(fb, stride, vx, y - 1, 16, 16, f->accent); render_rect_edge(fb, stride, vx, y - 1, 16, 16, C_INNER);
-        text_named(fb, stride, vx + 24, y, "FROM ", nb, cb, NULL);
+        text_c(fb, stride, CX, SETUP_Y + 56, 2, C_CAPT, "ITS NATURE");
+        int y = SETUP_NAT_ROW_Y, vx = SETUP_FAM_VALUE_X + 12;
         static const char *const TRAIT[2] = { "BOLD", "SOCIAL" };
-        for (int k = 0; k < 2; k++) {                                /* the fry's own bar, the parents' ticks */
-            y += SETUP_FAM_ROW_DY;
+        for (int k = 0; k < 2; k++, y += SETUP_NAT_ROW_DY) {          /* the fry's own bar, the parents' ticks */
             float v = k ? f->sociable : f->bold;
             float va = pa ? (k ? pa->sociable : pa->bold) : -1, vb = pb ? (k ? pb->sociable : pb->bold) : -1;
             int by = y + 3;
@@ -916,7 +1192,6 @@ void render_setup(const tank_t *t, uint16_t *fb, int stride, float clock) {
                 render_rect(fb, stride, tx - 1, by - 4, 3, SETUP_FAM_BAR_H + 8, p ? cb : ca);
             }
         }
-        y += SETUP_FAM_ROW_DY;
         render_text(fb, stride, SETUP_FAM_LABEL_X, y, 2, C_CAPT, "PARENTS");
         if (shop) render_text(fb, stride, vx, y, 2, C_CAPT, "NONE HERE");
         else {

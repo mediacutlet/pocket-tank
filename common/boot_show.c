@@ -31,11 +31,12 @@ static struct {
     void (*release)(void *);
     uint16_t *empty;            /* the empty tank; in the life phase the tank drawn without its animals */
     uint8_t *land;              /* a nibble a pixel */
+    tank_t *bare;               /* the tank without its animals, for the life phase - from alloc (PSRAM on the boards: a
+                                   whole tank_t, 6 KB since 0.4's visitor slots, was internal RAM all the time, 2026-11-01) */
     uint8_t rowp[TANK_H];       /* a row a piece lands in (the rest are water and sand: a copy once the water is in) */
     int npieces;
     float grass_p, life_t0;
 } s;
-static tank_t s_bare;           /* (the tank without its animals, for the life phase) */
 
 static const uint8_t B8[8][8] = {
     { 0, 32,  8, 40,  2, 34, 10, 42}, {48, 16, 56, 24, 50, 18, 58, 26}, {12, 44,  4, 36, 14, 46,  6, 38}, {60, 28, 52, 20, 62, 30, 54, 22},
@@ -63,7 +64,7 @@ bool boot_show_on(void) { return s.on; }
 bool boot_show_ready(void) { return render_scene_buf(NULL) && (render_grass_loop_n() > 0 || !render_grass_loop_warming()); }
 
 void boot_show_end(void) {
-    if (s.release) { if (s.empty) s.release(s.empty); if (s.land) s.release(s.land); }
+    if (s.release) { if (s.empty) s.release(s.empty); if (s.land) s.release(s.land); if (s.bare) s.release(s.bare); }
     memset(&s, 0, sizeof s);
 }
 
@@ -73,8 +74,9 @@ bool boot_show_begin(const tank_t *t, bool fill, void *(*alloc)(size_t), void (*
     if (!sc || !alloc) return false;
     s.empty = alloc((size_t)TANK_W * TANK_H * sizeof(uint16_t));
     s.land = alloc(((size_t)TANK_W * TANK_H + 1) / 2);
+    s.bare = alloc(sizeof(tank_t));
     s.release = release;
-    if (!s.empty || !s.land) { boot_show_end(); return false; }
+    if (!s.empty || !s.land || !s.bare) { boot_show_end(); return false; }
     int items[DECOR_SLOTS], n = render_boot_pieces(t, items);   /* back to front */
     if (n > BS_PIECES) n = BS_PIECES;
     /* layer k = the k pieces nearest the glass. A pixel lands at the first layer from which it is what the scene has:
@@ -106,13 +108,15 @@ bool boot_show_frame(const tank_t *t, uint16_t *fb, float ts, bool loop_whole, f
 
     if (s.life) {                               /* the animals: the tank drawn with and without them, theirs dissolving in */
         int p = prog64(ts, s.life_t0, BS_LIFE_S);
-        s_bare = *t;
-        s_bare.n_fish = 0;
-        s_bare.sd_unlocks &= ~(uint32_t)(SD_ITEM_SNAIL | SD_ITEM_SHRIMP | SD_ITEM_URCHIN | SD_ITEM_SEAHORSE | SD_ITEM_CRAB);
-        for (int i = 0; i < MAX_BUBBLE; i++) s_bare.bubble[i].y = -1000;
-        for (int i = 0; i < MAX_FOOD; i++) s_bare.food[i].alive = false;
-        memset(s_bare.algae, 0, sizeof s_bare.algae);   /* (the film on the glass comes with them) */
-        render_tank(&s_bare, s.empty, TANK_W);
+        tank_t *b = s.bare;
+        *b = *t;
+        b->n_fish = 0;
+        for (int k = 0; k < N_VISIT_MAX; k++) b->vis_used[k] = false;   /* (a visitor is an animal too) */
+        b->sd_unlocks &= ~(uint32_t)(SD_ITEM_SNAIL | SD_ITEM_SHRIMP | SD_ITEM_URCHIN | SD_ITEM_SEAHORSE | SD_ITEM_CRAB);
+        for (int i = 0; i < MAX_BUBBLE; i++) b->bubble[i].y = -1000;
+        for (int i = 0; i < MAX_FOOD; i++) b->food[i].alive = false;
+        memset(b->algae, 0, sizeof b->algae);   /* (the film on the glass comes with them) */
+        render_tank(b, s.empty, TANK_W);
         render_tank(t, fb, TANK_W);
         if (p >= 64 + BS_GLOW) return false;
         for (int y = 0; y < TANK_H; y++) for (int x = 0; x < TANK_W; x++) {

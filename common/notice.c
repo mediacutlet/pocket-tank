@@ -16,7 +16,7 @@ static int      s_cue = -1;
 static bool     s_model_told;                /* NOTICE_MODEL_DAMAGED: once per start (a sync does not forget it) */
 
 /* never announced: they belong to the birth of a tank or a fish */
-#define MS_SILENT   (MS_ARRIVED | MS_INSPECTED | MS_RETIRED_6 | MS_RETIRED_7)   /* (MS_INSPECTED: no badge since 0.3.0) */
+#define MS_SILENT   (MS_ARRIVED | MS_INSPECTED | MS_RETIRED_6 | MS_RETIRED_7 | MS_CROSSBRED)   /* (MS_INSPECTED: no badge since 0.3.0) */
 #define TMS_SILENT  (TMS_PAIR)
 #define MS_STAGES   (MS_REACHED_JUV | MS_REACHED_ADULT | MS_REACHED_ELDER)
 
@@ -85,6 +85,22 @@ void notice_tick(const tank_t *t, float dt, bool blocked) {
     s_cue = again || s_cur.kind == NOTICE_LIGHTS_OUT ? -1 : s_cur.kind == NOTICE_STAGE ? SND_STAGE_UP : s_cur.kind == NOTICE_LOW_BATTERY || s_cur.kind == NOTICE_MODEL_DAMAGED || s_cur.kind == NOTICE_WRONG_BOARD ? SND_LOW_BATTERY : SND_MILESTONE;
 }
 
+/* a fish left and the slots shifted (progression: a sale, a gift): a notice about a fish follows it; about the one that
+   left, it goes (the 11-02 sweep: queued, it would have shown another fish's badge) */
+void notice_fish_removed(int idx) {
+    int n = 0;
+    for (int i = 0; i < s_qn; i++) {
+        notice_t q = s_q[i];
+        if (q.fish >= 0 && q.fish == idx) continue;
+        if (q.fish > idx) q.fish--;
+        s_q[n++] = q;
+    }
+    s_qn = n;
+    if (s_up && s_cur.fish >= 0) {
+        if (s_cur.fish == idx) { s_up = false; s_gap = NOTICE_GAP_S; }
+        else if (s_cur.fish > idx) s_cur.fish--;
+    }
+}
 const notice_t *notice_current(void) { return s_up ? &s_cur : NULL; }
 bool notice_dismiss(void) {
     if (!s_up) return false;

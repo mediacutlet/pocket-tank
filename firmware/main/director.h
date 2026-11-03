@@ -28,4 +28,8 @@ void device_update_check(void);        /* main.c: as CHECK FOR UPDATES - save, r
 const uint16_t *device_last_frame(void);   /* main.c: the frame rendered last, for `shot` */
 void device_touch_lock(int on);         /* main.c: THE TOUCH LOCK on (1) / off (0) / said (-1), kept as the padlock keeps it */
 void device_shelf_toggle(void);
+void device_wdt(int hang);              /* main.c: THE WATCHDOG - the longest stall so far; hang = stop feeding it (a dev test, the chip restarts) */
+void device_wdt_feed(void);             /* main.c: feed it from a long director command run on the tank task (`shot`) */
+void device_stacks(void);
+void device_bake_cap(int ms);           /* main.c: the grass bake's share of core 1 within one decision, ms (-1 said) */               /* main.c: the tasks' unused stack, the heaps */
 void device_shelf_cmd(int argc, char **argv);   /* main.c: `shelf list | new | swap <place> | pause <place> | dormant <place> | name <place> <line 1>[/<line 2>] | remove <place>` */        /* main.c: as BOOT twice - MY TANKS open / closed (the tank switcher) */

@@ -44,6 +44,12 @@ static int s_up_sign = -1;   /* the round 1.75C, 2026-10-01 (Strato holding it u
  * holding still a few hundred; a pick-up thousands. */
 #define MOTION_THRESH      220    /* ~0.013 g */
 #define IMU_MOTION_HOLD_US 1000000
+/* CARRIED (the tank link's drift, 2026-11-01): a tank slid across the desk or picked up, not a knock - Strato:
+   "a very light vibration" put THE TANKS DRIFTED up, and taps on the glass kept the doors paused until they
+   closed. Three polls at three times the handling threshold was "very hard to trigger" (Strato, the same day):
+   halfway - two polls in a row (~0.5 s) at twice it. The tap rule (link_dev.c) stays. */
+#define CARRY_THRESH       (2 * MOTION_THRESH)
+#define CARRY_POLLS        2
 
 static const char *TAG = "imu";
 static i2c_master_dev_handle_t s_dev;
@@ -55,6 +61,7 @@ static int64_t s_next_us;
 static int16_t s_prev[3]; static bool s_have_prev;
 static int64_t s_moved_us; static int s_motion; static int16_t s_last[3];
 static int64_t s_handled_us; static bool s_prev_moved;   /* two polls in a row over the threshold */
+static int64_t s_carried_us; static int s_carry_run;      /* CARRY_POLLS in a row over CARRY_THRESH */
 
 static bool wr8(uint8_t reg, uint8_t val) {
     uint8_t buf[2] = { reg, val };
@@ -141,6 +148,8 @@ void imu_port_poll(int64_t now_us) {
         if (moved) s_moved_us = now_us;
         if (moved && s_prev_moved) s_handled_us = now_us;
         s_prev_moved = moved;
+        s_carry_run = m > CARRY_THRESH ? s_carry_run + 1 : 0;
+        if (s_carry_run >= CARRY_POLLS) s_carried_us = now_us;
     }
     for (int i = 0; i < 3; i++) { s_prev[i] = a[i]; s_last[i] = a[i]; }
     s_have_prev = true;
@@ -206,6 +215,7 @@ void imu_port_seed_inverted(bool inv) { s_q = inv ? 2 : 0; s_streak = 0; }
 void imu_port_seed_quarter(int q) { s_q = s_sides ? (q & 3) : (q & 2); s_streak = 0; }
 void imu_port_last(int16_t out[3], int *motion) { for (int i = 0; i < 3; i++) out[i] = s_last[i]; if (motion) *motion = s_motion; }
 bool imu_port_handled(void) { return s_handled_us && esp_timer_get_time() - s_handled_us < IMU_MOTION_HOLD_US; }
+bool imu_port_carried(void) { return s_carried_us && esp_timer_get_time() - s_carried_us < IMU_MOTION_HOLD_US; }
 bool imu_port_moving(void) { return s_moved_us && esp_timer_get_time() - s_moved_us < IMU_MOTION_HOLD_US; }
 int  imu_port_motion(void) { return s_motion; }
 

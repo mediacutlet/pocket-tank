@@ -50,7 +50,12 @@ CONFIG_SECURE_BOOT_SIGNING_KEY="keys/ota_signing_key.pem"
 # generous main stack for the tank/render task; inference has its own task
 CONFIG_ESP_MAIN_TASK_STACK_SIZE=16384
 CONFIG_FREERTOS_HZ=1000
-CONFIG_ESP_TASK_WDT_TIMEOUT_S=30
+# THE WATCHDOG (0.4): the tank task is watched (main.c wdt_watch_tank_task, which also sets these at run time -
+# a build directory keeps the sdkconfig it was made with): unfed 20 s panics and restarts (a pending image rolls back).
+# The idle tasks are not watched: with panic on, a long boot step or update mode's flash work would restart the chip
+CONFIG_ESP_TASK_WDT_TIMEOUT_S=20
+CONFIG_ESP_TASK_WDT_PANIC=y
+CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU0=n
 CONFIG_COMPILER_OPTIMIZATION_PERF=y
 
 # real board: AMOLED + touch

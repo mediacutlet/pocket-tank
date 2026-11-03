@@ -50,7 +50,7 @@ typedef struct {
 static const int16_t *s_bank;
 static uint32_t s_bank_n;
 static voice_t  s_v[AUDIO_VOICES];
-static int      s_volume = 2;
+static int      s_volume = 100;     /* percent: 0 off .. 100, the old NORMAL (0.4) */
 static uint32_t s_last_ms[SND_COUNT];        /* cooldown clocks */
 static uint32_t s_starts[AUDIO_MAX_PER_S];   /* ring of recent start times */
 static int      s_starts_i;
@@ -75,7 +75,8 @@ void audio_init(const int16_t *bank, uint32_t n_samples) {
     memset(s_last_ms, 0, sizeof s_last_ms);
     memset(s_starts, 0, sizeof s_starts);
 }
-void audio_set_volume(int level) { s_volume = level < 0 ? 0 : level > 2 ? 2 : level; }
+void audio_set_volume(int pct) { s_volume = pct < 0 ? 0 : pct > 100 ? 100 : pct; }
+int  audio_volume_from_level(int level) { return level <= 0 ? 0 : level == 1 ? 50 : 100; }
 int  audio_volume(void) { return s_volume; }
 bool audio_active(void) { for (int i = 0; i < AUDIO_VOICES; i++) if (s_v[i].cue >= 0) return true; return false; }
 const char *audio_cue_name(int cue) { return cue >= 0 && cue < SND_COUNT ? SND_CUES[cue].name : "?"; }
@@ -90,8 +91,9 @@ static int gain_for(int cue) {
      * fish's cues and took 12 dB off the keeper's - a rule from the days the
      * light went out by itself on an idle desk. Since the double-tap the dark
      * is a keeper's choice while watching, and the tank sounds the same. */
-    int db = AUDIO_MASTER_DB + (s_volume == 1 ? -12 : 0);
-    int g = (int)(SND_CUES[cue].gain_q8 * pow10_(db));
+    /* the slider (0.4) goes as the square of the percent: 50 % is -12 dB,
+     * the old QUIET, and 100 % the old NORMAL - a saved level sounds the same */
+    int g = (int)(SND_CUES[cue].gain_q8 * pow10_(AUDIO_MASTER_DB) * s_volume * s_volume / 10000);
     return g;
 }
 
@@ -104,7 +106,9 @@ bool audio_play(int cue, int pitch_q8, uint32_t now_ms) {
     if (c->loop) {                                         /* one instance of a loop */
         for (int i = 0; i < AUDIO_VOICES; i++)
             if (s_v[i].cue == cue && s_v[i].fade_left == 0) return false;
-    } else {                                               /* the global cap */
+    } else if (cue != SND_WHEEL_TICK) {                    /* the global cap; not the tick (0.4: a fast drag on the VOLUME
+                                                              slider lost most of its ticks, and the lift's confirm with
+                                                              them) - its own cooldown keeps it apart */
         uint32_t oldest = s_starts[s_starts_i];
         if (oldest && now_ms - oldest < 1000) return false;
     }
@@ -129,7 +133,7 @@ bool audio_play(int cue, int pitch_q8, uint32_t now_ms) {
     v->step = (uint32_t)((pitch_q8 <= 0 ? AUDIO_PITCH_ONE : pitch_q8) << 8);   /* q8 -> 16.16 */
     v->gain_q8 = g; v->played = 0; v->fade_left = 0; v->fade_total = 0; v->loop = c->loop != 0;
     s_last_ms[cue] = now_ms;
-    if (!c->loop) { s_starts[s_starts_i] = now_ms ? now_ms : 1; s_starts_i = (s_starts_i + 1) % AUDIO_MAX_PER_S; }
+    if (!c->loop && cue != SND_WHEEL_TICK) { s_starts[s_starts_i] = now_ms ? now_ms : 1; s_starts_i = (s_starts_i + 1) % AUDIO_MAX_PER_S; }
     return true;
 }
 

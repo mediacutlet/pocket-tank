@@ -259,13 +259,18 @@ FORGET NETWORK erases the namespace.
   download hosts redirect; the HTTP client follows redirects, and the bundle
   covers both hosts.
 - **Rollback.** Bootloader app rollback ON. A fresh image boots as "pending";
-  the app marks itself valid once the save has loaded and the tank has drawn
-  its first frames. A crash before that boots the previous slot.
+  the app marks itself valid once the tank has been on the glass ~2 s past
+  its loading (OTA_VALID_FRAMES, main.c), and before every start it asks for
+  itself (a sleep, a power-off, SWAP IN, CHECK FOR UPDATES), because the
+  bootloader rolls back on ANY start that finds the image still pending. A
+  crash before that boots the previous slot. (0.4, the 11-02 sweep: 0.3.x
+  marked it in app_main, before the tank task drew a frame.)
 - **Rollback and the save.** The save is append-only and the loader accepts
   any OLDER length. A rollback reverses that: the older build reads a save
   the newer one wrote. Rule for 0.3.0 onward: the loader reads its own prefix
-  of a LONGER save too, and a new build marks itself valid BEFORE its first
-  save write.
+  of a LONGER save too (so a rollback after a first save is safe: 0.3.9.6
+  reads a 0.4 save's head), and the tank's first timed save comes after the
+  marking (the 30 s window).
 - **Size and hash before the write** (from the manifest), the signature after.
 - **Battery gate**, above.
 

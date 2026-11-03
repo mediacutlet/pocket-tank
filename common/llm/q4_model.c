@@ -255,7 +255,7 @@ struct q4_model {
     float *x, *xb, *xb2, *hb, *hb2, *q, *att, *logits, *key_cache, *value_cache;
     qact_t xq, hq;
     /* batched-prefill state (allocated on first use): per-token activations */
-    int    bmax;
+    int    bmax, bfail;                     /* the batch's size, and the size whose allocation failed (0 none) */
     float *bx, *bxb, *bq, *bhb, *bhb2;      /* [bmax][dim] / [bmax][hidden] */
     int8_t *bxq_q; float *bxq_s;            /* [bmax][dim], [bmax][dim/gs] */
     int8_t *bhq_q; float *bhq_s;            /* [bmax][hidden], [bmax][hidden/gs] */
@@ -635,19 +635,29 @@ static void matmul_batch(float *out, const int8_t *xq, const float *xs, int n_to
     }
 }
 
+/* the batch buffers for n tokens: all of them, or the old ones kept (0.4, the 11-02 evening sweep: bmax was set before
+ * the allocations, so one that failed left NULL buffers the next call of that size trusted). The allocators have no
+ * free, so the batch is sized to grow at most once: Q4_BATCH_FIRST tokens first (the size the boot bench reserved
+ * until 0.4 - every prompt fit it; with the bench gone, growing a token at a time leaked a set per new longest prompt,
+ * 555 KB of PSRAM in two decisions on the square), then the longest a prompt can be. A size that failed once is not
+ * asked again (bfail), and what it did get stays spent */
+#define Q4_BATCH_FIRST 44
 static bool ensure_batch(q4_model_t *m, int n) {
     if (m->bmax >= n) return true;
+    if (n < Q4_BATCH_FIRST && !m->bmax) n = Q4_BATCH_FIRST;
+    else if (m->bmax && n < m->c.seq_len - 1) n = m->c.seq_len - 1;
+    if (m->bfail && n >= m->bfail) return false;
     const q4_config_t *c = &m->c; int gs = m->gs;
+    float *bx = m->alloc((size_t)n * c->dim * 4), *bxb = m->alloc((size_t)n * c->dim * 4), *bq = m->alloc((size_t)n * c->dim * 4);
+    float *bhb = m->alloc((size_t)n * c->hidden_dim * 4), *bhb2 = m->alloc((size_t)n * c->hidden_dim * 4);
+    int8_t *bxq_q = alloc16_fast(m, (size_t)n * c->dim); float *bxq_s = alloc16_fast(m, (size_t)n * (c->dim / gs) * 4);
+    int8_t *bhq_q = alloc16_fast(m, (size_t)n * c->hidden_dim); float *bhq_s = alloc16_fast(m, (size_t)n * (c->hidden_dim / gs) * 4);
+    float *btile = alloc16_fast(m, (size_t)n * Q4_TILE_D * 4);
+    if (!(bx && bxb && bq && bhb && bhb2 && bxq_q && bxq_s && bhq_q && bhq_s && btile)) { m->bfail = n; return false; }
+    m->bx = bx; m->bxb = bxb; m->bq = bq; m->bhb = bhb; m->bhb2 = bhb2;
+    m->bxq_q = bxq_q; m->bxq_s = bxq_s; m->bhq_q = bhq_q; m->bhq_s = bhq_s; m->btile = btile;
     m->bmax = n;
-    m->bx   = m->alloc((size_t)n * c->dim * 4);
-    m->bxb  = m->alloc((size_t)n * c->dim * 4);
-    m->bq   = m->alloc((size_t)n * c->dim * 4);
-    m->bhb  = m->alloc((size_t)n * c->hidden_dim * 4);
-    m->bhb2 = m->alloc((size_t)n * c->hidden_dim * 4);
-    m->bxq_q = alloc16_fast(m, (size_t)n * c->dim); m->bxq_s = alloc16_fast(m, (size_t)n * (c->dim / gs) * 4);
-    m->bhq_q = alloc16_fast(m, (size_t)n * c->hidden_dim); m->bhq_s = alloc16_fast(m, (size_t)n * (c->hidden_dim / gs) * 4);
-    m->btile = alloc16_fast(m, (size_t)n * Q4_TILE_D * 4);
-    return m->bx && m->bxb && m->bq && m->bhb && m->bhb2 && m->bxq_q && m->bxq_s && m->bhq_q && m->bhq_s && m->btile;
+    return true;
 }
 
 /* the batched pass, from position pos0: the prompt's prefill is pos0 = 0; THE TWO-PASS

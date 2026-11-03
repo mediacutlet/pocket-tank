@@ -29,7 +29,7 @@ float touch_port_confirm_frac(void);           /* time left before it gives up, 
 int  touch_port_confirm_take(void);            /* +1 / -1 once, then 0 */
 bool touch_port_pressed_since(int64_t us);     /* a finger is down and landed after `us` */
 /* the settings page (2026-09-15): opened from the milestones page's SETTINGS
- * button; a tap on a segment is handed to main as SET_TAP_BRIGHT / _VOLUME
+ * button; a tap on a segment or a slider is handed to main as SET_TAP_BRIGHT / _VOLUME (and their _LIVE)
  * with its value (one-shot), CLOSE ends the page */
 bool touch_port_settings(void);
 void touch_port_show_settings(bool on);
@@ -43,6 +43,8 @@ int  touch_port_take_adv(void);
  * the raw tap code (SHOP_TAP_BUY / SHOP_TAP_MOVE + item; 0 = none) to main
  * once, which buys (progression_buy) or opens the placement page */
 bool touch_port_shop(void);
+bool touch_port_collection(void);   /* the VISITOR COLLECTION page is up (2026-10-06) */
+void touch_port_show_collection(bool on);   /* the director's cue (0.4 pages: coll page N) */
 void touch_port_show_shop(bool on);
 int  touch_port_take_shop(void);
 /* the battery pill and its page (2026-09-24): main.c says each frame whether
@@ -54,6 +56,7 @@ void touch_port_set_pill(bool up);
 bool touch_port_finger(float *x, float *y);   /* the finger this poll, calibrated (false: none - x, y its last place) */
 void touch_port_set_touch_lock(bool on);
 bool touch_port_touch_lock(void);
+void touch_port_set_quiet(bool on);   /* LOADING (the boot show): taps over the bare tank go nowhere (0.4) */
 bool touch_port_lock_hint(void);               /* a touch on the locked glass in the last 2 s: draw render_touch_lock_hint */
 bool touch_port_battery(void);
 void touch_port_show_battery(bool on);

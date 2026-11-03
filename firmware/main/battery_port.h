@@ -19,6 +19,7 @@ bool battery_port_poweroff(void);                      /* PMIC soft power-off; f
  * + clears them: 0 nothing, 1 short press, 2 long press (IRQLEVEL, 1.5 s). */
 void battery_port_key_init(void);
 int  battery_port_key_poll(void);
+void battery_port_key_clear(void);          /* drop a press latched while nothing polled (the boot's time check): never acted on */
 void battery_port_key_trace(int seconds);   /* bench: log each press's length for N s (director `keytime`) */
 /* diagnostics: the AXP2101's rail enables + voltages, charger setting, VBAT
  * and state of charge, decoded to the log (read-only). VBAT in mV, 0 = n/a. */

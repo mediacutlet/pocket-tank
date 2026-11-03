@@ -14,12 +14,14 @@
  *                          S the first-run setup flow (welcome / names / colours),
  *                          R force an arrival (the birth flow opens: announce /
  *                          name / family; S drops it), A auto-light, Q quit,
- *                          V volume (off / quiet / normal), B the low-battery notice,
+ *                          V volume (off / 50 % / 100 %), B the low-battery notice,
  *                          P the cable in / out (a pretend battery: the pill
  *                          shows for a few seconds; with a card up it is
  *                          always there - click it for the battery page),
  *                          4 ($) the shop page, D +50 sand dollars,
  *                          T (the watch build) wear it the other way round;
+ *                          1 / 2 / 3 step the body shape / fins / pattern (the
+ *                          carded fish, or every fish), 5 roll every fish's genes;
  *                          click fish = stats; tap the water surface = feed;
  *                          drag down from the top = feed; hold >= 3 s = finger
  *                          on glass (trusting fish visit); swipe sideways
@@ -27,6 +29,10 @@
  *                          3 quick taps = startle; 2 taps = the light, in
  *                          settings' MANUAL mode, the default)
  *   ./fishsim --fresh      ignore the save (new tank: random pair)
+ *   ./fishsim --forms      the 0.4 forms: four grown fish of mixed genes, no setup, R for an arrival (own save, ~/.cache/pocket-tank/forms.sav)
+ *   ./fishsim --genes pfx  headless: the 0.4 forms, a board per pattern + tank frames (PPMs)
+ *   ./fishsim --fresh-shot pfx  headless: a tank minutes after a fresh install, two fry (PPM; the booklet)
+ *   ./fishsim --page-shot pfx   headless: the settings and keeper pages (and the keeper page with visitors collected)
  *   ./fishsim --zoom N     the window at N x the glass (whole pixels, 1..8)
  *   ./fishsim --fullscreen fill the desktop at the biggest whole-pixel zoom (bars around it)
  *   ./fishsim --fast N     tended time runs N x faster (stages, drift)
@@ -42,6 +48,8 @@
  *   ./fishsim --selftest-pop         headless population/arrival/save check
  *   ./fishsim --selftest-advanced    headless ADVANCED page (0.3.9.2): battery sizes + the warning gate, touch calibration + its check
  *   ./fishsim --selftest-card [pfx]  headless fish card: RENAME and SELL (pfx: also writes its pages as PPMs)
+ *   ./fishsim --selftest-under-card  headless: holds and swipes under the gift card / GIVE modal, the watch's touch rest, START OVER, KIN's rate
+ *   ./fishsim --selftest-fish-pair [pfx] two animals crossing at different layers: the deeper under, whole; a visitor behind the grass (the pendant 11-02; PT_FISH_PAIR_OLD=1 the control)
  *   ./fishsim --selftest-fry [pfx]   headless fry for sale (0.3.5): the first sale, the offer, buying, the day, the save
  *   ./fishsim --selftest-sleep       headless sleep metabolism + ravenous begging
  *   ./fishsim --selftest-tend        headless canopy/algae/hold-attract check
@@ -52,6 +60,7 @@
  *   ./fishsim --selftest-floor [pfx]  headless: nothing of a fish painted below the sand line (2026-10-24); pfx writes the posed frames
  *   ./fishsim --selftest-stack [pfx]  headless: the render stack as a matrix - the crab x the pieces x the passers x the light (docs/render-stack.md); pfx writes a contact sheet
  *   ./fishsim --selftest-saves       headless update promise: every save in testdata/saves, whole and cut to older builds' lengths
+ *   ./fishsim --selftest-genes       headless heredity: copies from each parent, secrets surfacing, the 5% mutation
  *   ./fishsim --bench                headless render-cost profile (veg, card)
  *   ./fishsim --pumpkin <prefix>     the pumpkin lantern (0.3.6) by day and by night, BEHIND and IN FRONT, the
  *                                    candle's flicker, and its cost with / without (PT_PUMPKIN=<x> ./fishsim
@@ -84,19 +93,38 @@
 #include "notice.h"
 #include "tank_events.h"
 #include "update.h"
+#include "passport.h"
+#include "tank_link.h"
+#include "collection.h"
+#include "gift.h"
+#include "touch_gate.h"
+int selftest_link(void);   /* selftest_link.c: the tank link engine under a hostile radio */
+int selftest_doors(void);  /* selftest_link.c: two real tanks, fish through the doors */
+int selftest_fry_cap(void);   /* selftest_link.c: a cross-tank fry never takes a tank past POP_CAP (the home holds its place) */
 #include "boot_show.h"
 #include "advanced.h"
+int selftest_give(void);   /* selftest_link.c: fish handed over for good (phase 6), crashes anywhere */
+int selftest_coll_pages(void);          /* selftest_coll.c: the visitor collection's pages (0.4) */
+int coll_shot(const char *prefix);      /* selftest_coll.c: --coll-shot, the paged look */
 void net_sim_advance(float dt);    /* net_port_sim.c: the pretend radio's clock */
 bool net_sim_radio_on(void);
 
 static tank_t tank;
 
 static void print_roster(const tank_t *t) {
-    printf("tank: %d fish\n", t->n_fish);
-    for (int i = 0; i < t->n_fish; i++)
+    printf("tank %08x: %d fish\n", t->uid, t->n_fish);
+    for (int i = 0; i < t->n_fish; i++) {
+        const fish_t *f = &t->fish[i];
         printf("  %-5s (model token %-4s) %s bold %.2f social %.2f trust %.1f\n",
-               t->fish[i].name, t->fish[i].model_name, STAGE_NAMES[t->fish[i].stage],
-               t->fish[i].bold, t->fish[i].sociable, t->fish[i].trust);
+               f->name, f->model_name, STAGE_NAMES[f->stage], f->bold, f->sociable, f->trust);
+        /* its genes (0.4): what it shows, what it carries, a mutation */
+        printf("        id %08x, parents %08x %08x\n", f->uid, f->parent_uid[0], f->parent_uid[1]);
+        printf("        %s / %s / %s, body %d markings %d; carries %s / %s / %s, body %d markings %d%s%s\n",
+               SHAPE_NAMES[f->shape], FINS_NAMES[f->fins], PATTERN_NAMES[f->pattern], tank_gene(f, GENE_BODY), tank_gene(f, GENE_ACCENT),
+               SHAPE_NAMES[f->carried[GENE_SHAPE]], FINS_NAMES[f->carried[GENE_FINS]], PATTERN_NAMES[f->carried[GENE_PATTERN]],
+               f->carried[GENE_BODY], f->carried[GENE_ACCENT],
+               f->mutated ? "; MUTATION: " : "", f->mutated ? GENE_NAMES[f->mutated - 1] : "");
+    }
 }
 
 /* ---------- the selftests' geometry (2026-10-01) ----------
@@ -117,7 +145,7 @@ static void print_roster(const tank_t *t) {
 #define MS_NAME_DY     (MSP_ROW_MID / 2)
 #define MS_BADGE_X(k)  (MSP_BADGE_X0 + (k) * MSP_BADGE_DX + MSP_ICON / 2)
 #define MS_BADGE_DY    (MSP_ROW_BADGE + MSP_ICON / 2)
-#define MS_TANK_Y      (MSP_TANK_Y + 4 + MSP_ICON / 2)             /* the TANK row's badges (and the coin) */
+#define MS_TANK_Y      (MSP_TANK_Y + 4 + MSP_ICON / 2)             /* the TANK row's badges */
 #define MS_FOOT_Y      (MSP_CLOSE_Y + 10)                          /* the foot's buttons (the shop, the settings) */
 #define MS_KFOOT_Y     (MSP_FOOT_Y + 10)                           /* the keeper page's, pinned to the bottom (0.3.9.1) */
 /* its detail modal: the arrows at the top corners, a spot on it that is no
@@ -151,6 +179,9 @@ static int ms_tap(float px, float py) { return render_milestones_tap(&tank, PG_X
 #define SHOP_PREV_X    (SHP_ARROW_X0 + SHP_ARROW_W / 2)
 #define SHOP_NEXT_X    (SHP_ARROW_X1 + SHP_ARROW_W / 2)
 static int shop_tap(float px, float py) { return render_shop_tap(&tank, PG_X(px), PG_Y(py)); }
+/* a row's modal spends taps for its first 0.6 s (MSP_SELL_WAIT_S, render.c: the row's tap doubled is no BUY): a keeper's
+   next tap, a moment later */
+#define SHOP_SETTLE()  (tank.clock += 0.7)
 /* the settings page: segment i of a row's buttons, the LIGHTS OUT row's two arrows */
 #define SETP_SEG_X(i)  (SET_SEG_X + (i) * SET_SEG_DX + SET_SEG_W / 2)
 #define SETP_PREV_X    (SET_SEG_X + SET_ARW_W / 2)
@@ -350,9 +381,12 @@ static int selftest_spawn(void) {
     /* D: the grace's quick wake (resume in place) delivers it too */
     n0 = spawn_prep(44);
     for (i = 0; i < 60 * 3; i++) { tank_tick(&tank, DT, advisor_rules); progression_tick(&tank, DT); }
-    tank_tick_sleep(&tank, 45);
+    tank.fish[0].meal_pay_wait = 100;
+    float age0 = progression_age_s(&tank, 0);
+    progression_slept(&tank, 45);                  /* (as the firmware's quick wake: the nap counts in full - 11-03 rc, it was tank_tick_sleep) */
     progression_woke(&tank);
     if (tank.n_fish != n0 + 1 || progression_arrival_pending()) { printf("FAIL: the quick wake did not deliver the fry\n"); return 1; }
+    if (tank.fish[0].meal_pay_wait > 100 - 44 || progression_age_s(&tank, 0) <= age0) { printf("FAIL: the quick wake's nap did not count (meal pay wait %.0f, age %.1f -> %.1f)\n", tank.fish[0].meal_pay_wait, age0, progression_age_s(&tank, 0)); return 1; }
     printf("selftest-pop: slept before the birth: the fry is born at the wake (deep sleep and the quick wake)\n");
     return 0;
 }
@@ -529,18 +563,25 @@ static int selftest_pop(void) {
         }
     }
     /* the newest fry is owed its welcome (the birth flow) and wears the
-       family's colours: the body of one parent, the markings of the other */
+       family's colours (0.4: each gene from either parent - the copy it
+       shows or carries - or a mutation; --selftest-genes pins the rules) */
     int nb = progression_newborn();
     if (nb != tank.n_fish - 1) { printf("FAIL: the last arrival (%d) is not owed the birth flow (%d)\n", tank.n_fish - 1, nb); return 1; }
     {
         const fish_t *f = &tank.fish[nb];
         if (f->parent_a < 0 || f->parent_b < 0 || f->parent_a >= nb || f->parent_b >= nb) { printf("FAIL: newborn parents %d/%d\n", f->parent_a, f->parent_b); return 1; }
         const fish_t *pa = &tank.fish[f->parent_a], *pb = &tank.fish[f->parent_b];
-        if (f->color != pa->color || (f->accent != pb->accent && pb->accent != pa->color)) {   /* (markings step aside from a matching body) */
-            printf("FAIL: newborn look %06x/%06x is not %s's body + %s's markings (%06x/%06x)\n", f->color, f->accent, pa->name, pb->name, pa->color, pb->accent); return 1;
+        for (int g = GENE_BODY; g <= GENE_ACCENT; g++) {
+            if (f->mutated == g + 1) continue;
+            const fish_t *from = (f->from_b >> g & 1) ? pb : pa;
+            int v = tank_gene(f, g), want = (f->from_carried >> g & 1) ? from->carried[g] : tank_gene(from, g);
+            if (v != want && !(g == GENE_ACCENT && LOOK_ACCENT[want] == f->color)) {   /* (markings step aside from a matching body) */
+                printf("FAIL: newborn %s %d is not its copy from %s (%d)\n", GENE_NAMES[g], v, from->name, want); return 1;
+            }
         }
-        printf("  newborn %s: body from %s, markings from %s, bold %.2f (%.2f/%.2f) social %.2f (%.2f/%.2f)\n", f->name, pa->name, pb->name,
-               f->bold, pa->bold, pb->bold, f->sociable, pa->sociable, pb->sociable);
+        const fish_t *bf = (f->from_b >> GENE_BODY & 1) ? pb : pa, *mf = (f->from_b >> GENE_ACCENT & 1) ? pb : pa;
+        printf("  newborn %s: body from %s, markings from %s%s, bold %.2f (%.2f/%.2f) social %.2f (%.2f/%.2f)\n", f->name, bf->name, mf->name,
+               f->mutated ? " (a mutation)" : "", f->bold, pa->bold, pb->bold, f->sociable, pa->sociable, pb->sociable);
     }
     /* round-trip the save */
     bool pending_at_save = progression_arrival_pending();
@@ -584,13 +625,18 @@ static int selftest_pop(void) {
         if (pg_hit(SETUP_NEXT_X + 20, SETUP_BTN_Y + 20) != SETUP_HIT_NEXT || pg_hit(SETUP_BACK_X + 20, SETUP_BTN_Y + 20) != SETUP_HIT_BACK ||
             pg_hit(SETUP_MID_X + 55, SETUP_FAM_ROW_Y) != 0) { printf("FAIL: family page hit-test\n"); return 1; }
         render_setup(&tank, fb, TANK_W, 1.0f);
+        setup_activate(&tank, SETUP_HIT_NEXT);            /* 0.4: the nature page (BOLD / SOCIAL / PARENTS), DONE on it */
+        if (setup_page() != SETUP_PG_NATURE || !setup_active()) { printf("FAIL: NEXT did not reach the nature page\n"); return 1; }
+        render_setup(&tank, fb, TANK_W, 1.0f);
+        setup_activate(&tank, SETUP_HIT_BACK);
+        if (setup_page() != SETUP_PG_FAMILY) { printf("FAIL: BACK from the nature page\n"); return 1; }
         setup_activate(&tank, SETUP_HIT_BACK);
         if (setup_page() != SETUP_PG_NAME_NEW || strcmp(tank.fish[nb].name, named)) { printf("FAIL: BACK from the family page lost the name\n"); return 1; }
         setup_activate(&tank, SETUP_HIT_BACK);
         if (setup_page() != SETUP_PG_BORN) { printf("FAIL: BACK did not return to the announcement\n"); return 1; }
         setup_activate(&tank, SETUP_HIT_BACK);
         if (setup_page() != SETUP_PG_BORN) { printf("FAIL: BACK left the flow\n"); return 1; }
-        setup_activate(&tank, SETUP_HIT_NEXT); setup_activate(&tank, SETUP_HIT_NEXT); setup_activate(&tank, SETUP_HIT_NEXT);   /* DONE */
+        for (int k = 0; k < SETUP_BIRTH_PAGES; k++) setup_activate(&tank, SETUP_HIT_NEXT);   /* MEET IT, NEXT, NEXT, DONE */
         if (setup_active() || progression_newborn() != -1 || tank.stage_fish != -1) { printf("FAIL: DONE did not pay the birth debt\n"); return 1; }
         if (setup_poll_birth(&tank) != -1) { printf("FAIL: the poll opened a flow with nothing owed\n"); return 1; }
         tank_init(&tank, 6); progression_boot(&tank);
@@ -626,38 +672,70 @@ static int selftest_pop(void) {
     if (!setup_active() || setup_page() != SETUP_PG_WELCOME) { printf("FAIL: setup did not open on the welcome page\n"); return 1; }
     if (pg_hit(SETUP_MID_X + 20, SETUP_BTN_Y + 20) != SETUP_HIT_NEXT || setup_hit(5, 5) != 0) { printf("FAIL: welcome NEXT hit-test\n"); return 1; }
     setup_activate(&tank, pg_hit(SETUP_MID_X + 20, SETUP_BTN_Y + 20));
-    if (setup_page() != SETUP_PG_BUBBLES) { printf("FAIL: NEXT did not reach the bubbles page\n"); return 1; }
-    /* the bubble column: a press on the water brings it there, a drag moves
-       it, the rising bubbles come along, the reef and the grass push it off;
-       the release is no tap */
-    {
-        const float bx = TANK_FLOOR_X(300.0f), by = PG_Y(200);      /* on this board's floor; in the water under the page's buttons */
-        setup_touch(&tank, bx, by, true);
-        tank_t probe = tank; tank_set_bubble_x(&probe, bx);
-        if (fabsf(tank.bubble_x - probe.bubble_x) > 0.5f) { printf("FAIL: press put the column at %.0f, not %.0f\n", tank.bubble_x, probe.bubble_x); return 1; }
-        for (int k = 1; k <= 20; k++) setup_touch(&tank, bx + k * 2, by, true);
-        probe = tank; tank_set_bubble_x(&probe, bx + 40);
-        if (fabsf(tank.bubble_x - probe.bubble_x) > 0.5f) { printf("FAIL: drag left the column at %.0f\n", tank.bubble_x); return 1; }
-        for (int i = 0; i < MAX_BUBBLE; i++)
-            if (tank.bubble[i].column && fabsf(tank.bubble[i].x - tank.bubble_x) > 12) { printf("FAIL: a column bubble stayed behind\n"); return 1; }
-        setup_touch(&tank, bx + 40, by, false);
-        if (setup_page() != SETUP_PG_BUBBLES) { printf("FAIL: the drag's release acted as a tap\n"); return 1; }
-        tank_set_bubble_x(&tank, 5);
-        if (tank.bubble_x < tank.reef_x + 50) { printf("FAIL: the column sits on the reef (%.0f)\n", tank.bubble_x); return 1; }
-        tank_set_bubble_x(&tank, 900);
-        if (tank.bubble_x > TANK_FX1 - 30) { printf("FAIL: the column sits in the glass (%.0f)\n", tank.bubble_x); return 1; }   /* (the floor's end: the glass itself in the rectangle) */
-        tank_set_bubble_x(&tank, bx + 40);
+    /* (0.4, Strato: design a fish, then name it - COLORS, FORM, NAME for
+       each fish, then the bubble column, then care) */
+    if (setup_page() != SETUP_PG_COLORS_A) { printf("FAIL: NEXT did not reach the first fish's colors page\n"); return 1; }
+    /* the editor: the fry stages at NOW */
+    setup_touch(&tank, 0, 0, false);
+    if (tank.stage_fish != 0 || tank.stage_x != SETUP_STAGE_EDIT_X || tank.stage_y != SETUP_STAGE_EDIT_Y) { printf("FAIL: the editor's NOW stage\n"); return 1; }
+    /* COLORS: a body swatch, the MASK tile, white markings; the swatch that
+       matches the body is struck out */
+    if (pg_hit(SETUP_SW_X + 6 * SETUP_SW_PX + 20, SETUP_COLOR_BODY_Y + 10) != SETUP_HIT_BODY0 + 6 ||
+        pg_hit(SETUP_PAT_TILE_X + SETUP_PAT_TILE_PX + 20, SETUP_COLOR_PAT_Y + 10) != SETUP_HIT_PAT0 + PATTERN_MASK ||
+        pg_hit(SETUP_SW_X + 5 * SETUP_SW_PX + 20, SETUP_COLOR_ACC_Y + SETUP_COLOR_SW_H + 20) != SETUP_HIT_ACC0 + 5) { printf("FAIL: colors page hit-test\n"); return 1; }
+    setup_activate(&tank, pg_hit(SETUP_SW_X + 6 * SETUP_SW_PX + 20, SETUP_COLOR_BODY_Y + 10));
+    setup_activate(&tank, SETUP_HIT_PAT0 + PATTERN_MASK);
+    setup_activate(&tank, SETUP_HIT_PAT0 + PATTERN_MASK);   /* the picked tile again: deselected - SOLID (0.4, no markings) */
+    if (tank.fish[0].pattern != PATTERN_SOLID) { printf("FAIL: deselecting MASK gave pattern %d, not SOLID\n", tank.fish[0].pattern); return 1; }
+    setup_activate(&tank, SETUP_HIT_PAT0 + PATTERN_MASK);   /* ... and a tile picks again */
+    setup_activate(&tank, SETUP_HIT_ACC0 + 5);
+    uint32_t accent0 = tank.fish[0].accent;
+    if (tank.fish[0].color != LOOK_BODY[6] || accent0 != LOOK_ACCENT[5] || tank.fish[0].pattern != PATTERN_MASK) {
+        printf("FAIL: the colors page gave body %06x accent %06x pattern %d\n", tank.fish[0].color, tank.fish[0].accent, tank.fish[0].pattern); return 1;
     }
-    float bubble_x_set = tank.bubble_x;
+    for (int i = 0; i < LOOK_N; i++)                  /* markings the body's own color: no pick */
+        if (LOOK_ACCENT[i] == LOOK_BODY[6]) { setup_activate(&tank, SETUP_HIT_ACC0 + i); if (tank.fish[0].accent != accent0) { printf("FAIL: a struck-out swatch was taken\n"); return 1; } }
+    /* SWAP (0.4, one palette): body and markings trade exactly, and back */
+    if (pg_hit(SETUP_SWAP_X + SETUP_SWAP_W / 2, SETUP_SWAP_Y + SETUP_SWAP_H / 2) != SETUP_HIT_SWAP || pg_hit(SETUP_ROLL_X + 20, SETUP_TOP_BTN_Y + 20) != SETUP_HIT_ROLL ||
+        pg_hit(SETUP_PAT_TILE_X + 2 * SETUP_PAT_TILE_PX + 20, SETUP_COLOR_PAT_Y + 10) != SETUP_HIT_PAT0 + 2)
+        { printf("FAIL: colors page ROLL / SWAP hit-test\n"); return 1; }
+    setup_activate(&tank, SETUP_HIT_SWAP);
+    if (tank.fish[0].color != accent0 || tank.fish[0].accent != LOOK_BODY[6]) { printf("FAIL: SWAP gave body %06x markings %06x\n", tank.fish[0].color, tank.fish[0].accent); return 1; }
+    setup_activate(&tank, SETUP_HIT_SWAP);
+    if (tank.fish[0].color != LOOK_BODY[6] || tank.fish[0].accent != accent0) { printf("FAIL: SWAP twice did not come back\n"); return 1; }
+    /* a body the same as the accent: the accent moves (stripes must show) */
+    tank_set_look(&tank, 0, accent0, 0);
+    if (tank.fish[0].accent == accent0) { printf("FAIL: accent did not step aside for a matching body\n"); return 1; }
+    tank_set_look(&tank, 0, LOOK_BODY[6], accent0);
     setup_activate(&tank, SETUP_HIT_NEXT);
+    if (setup_page() != SETUP_PG_FORM_A) { printf("FAIL: NEXT did not reach the form page\n"); return 1; }
+    /* FORM: a tile row takes a finger on its label and 20 px under it; SLENDER, then SAIL */
+    {
+        const int tx = SETUP_TILE_X + SETUP_TILE_PX + 20;                       /* the second tile */
+        if (pg_hit(tx, SETUP_FORM_SHAPE_Y + 20) != SETUP_HIT_SHAPE0 + SHAPE_SLENDER ||
+            pg_hit(tx, SETUP_FORM_SHAPE_Y - SETUP_LABEL_DY) != SETUP_HIT_SHAPE0 + SHAPE_SLENDER ||
+            pg_hit(SETUP_TILE_X + 2 * SETUP_TILE_PX + 60, SETUP_FORM_FINS_Y + SETUP_FORM_TILE_H + 20) != SETUP_HIT_FINS0 + FINS_SAIL ||
+            pg_hit(SETUP_ROLL_X + 20, SETUP_TOP_BTN_Y + 20) != SETUP_HIT_ROLL) { printf("FAIL: form page hit-test\n"); return 1; }
+        pg_touch(tx, SETUP_FORM_SHAPE_Y + 20, true); pg_touch(tx, SETUP_FORM_SHAPE_Y + 22, false);
+        setup_activate(&tank, pg_hit(SETUP_TILE_X + 2 * SETUP_TILE_PX + 20, SETUP_FORM_FINS_Y + 20));
+        if (tank.fish[0].shape != SHAPE_SLENDER || tank.fish[0].fins != FINS_SAIL) { printf("FAIL: the form page gave %d/%d\n", tank.fish[0].shape, tank.fish[0].fins); return 1; }
+        uint8_t keep[GENE_N]; memcpy(keep, tank.fish[0].carried, GENE_N);
+        for (int k = 0; k < 20; k++) setup_activate(&tank, SETUP_HIT_ROLL);   /* ROLL: the page's genes, never its secrets */
+        if (memcmp(keep, tank.fish[0].carried, GENE_N)) { printf("FAIL: ROLL touched the carried genes\n"); return 1; }
+        setup_activate(&tank, SETUP_HIT_SHAPE0 + SHAPE_SLENDER); setup_activate(&tank, SETUP_HIT_FINS0 + FINS_SAIL);
+    }
+    setup_activate(&tank, SETUP_HIT_BACK);            /* back to the colors page: the picks kept */
+    if (setup_page() != SETUP_PG_COLORS_A || tank.fish[0].pattern != PATTERN_MASK || tank.fish[0].color != LOOK_BODY[6]) { printf("FAIL: BACK lost the colors\n"); return 1; }
+    setup_activate(&tank, SETUP_HIT_NEXT); setup_activate(&tank, SETUP_HIT_NEXT);
     if (setup_page() != SETUP_PG_NAME_A) { printf("FAIL: NEXT did not reach the name page\n"); return 1; }
-    /* the fish being named takes the stage - the clear spot above the letters */
+    /* the fish being named - a fry - takes the stage at NOW, its GROWN UP
+       form beside it (the band over the letters) */
     setup_touch(&tank, 0, 0, false);
     if (tank.stage_fish != 0) { printf("FAIL: fish 0 not staged\n"); return 1; }
     tank.fish[0].x = 60; tank.fish[0].y = 300;
     for (int i = 0; i < 900; i++) tank_tick(&tank, 1.0f / 60.0f, advisor_rules);
-    if (tank_dist(tank.fish[0].x, tank.fish[0].y, SETUP_STAGE_X, SETUP_STAGE_NAME_Y) > 45) {
-        printf("FAIL: staged fish at (%.0f,%.0f), stage (%d,%d)\n", tank.fish[0].x, tank.fish[0].y, SETUP_STAGE_X, SETUP_STAGE_NAME_Y); return 1;
+    if (tank_dist(tank.fish[0].x, tank.fish[0].y, SETUP_STAGE_EDIT_X, PAGE_Y + SETUP_NAME_PREVIEW_Y) > 45) {
+        printf("FAIL: staged fish at (%.0f,%.0f), stage (%d,%d)\n", tank.fish[0].x, tank.fish[0].y, SETUP_STAGE_EDIT_X, PAGE_Y + SETUP_NAME_PREVIEW_Y); return 1;
     }
     const char *preset0 = tank_roster_name(tank.fish[0].preset);
     /* the wheel's bands: the row picks a slot, above / below the active one are the chevrons */
@@ -693,22 +771,12 @@ static int selftest_pop(void) {
     }
     pg_touch(SETUP_TOP_NEXT_X + 20, SETUP_TOP_BTN_Y + 20, true);     /* a tap through setup_touch */
     pg_touch(SETUP_TOP_NEXT_X + 22, SETUP_TOP_BTN_Y + 24, false);
-    if (setup_page() != SETUP_PG_LOOK_A) { printf("FAIL: NEXT did not reach the look page\n"); return 1; }
-    /* the swatch row takes a finger 30 px under it (fingers land low), never the "?" */
-    if (pg_hit(SETUP_SW_X + 6 * SETUP_SW_PX + 20, SETUP_SW_Y + SETUP_SW_H + 30) != SETUP_HIT_BODY0 + 6 ||
-        pg_hit(SETUP_SW_X + 20, SETUP_ACC_Y + 30) != 0) { printf("FAIL: swatch row hit-test\n"); return 1; }
-    setup_activate(&tank, pg_hit(SETUP_SW_X + 6 * SETUP_SW_PX + 20, SETUP_SW_Y + 25));
-    uint32_t accent0 = tank.fish[0].accent;
-    if (tank.fish[0].color != LOOK_BODY[6] || accent0 == LOOK_BODY[6]) {
-        printf("FAIL: swatch gave body %06x accent %06x\n", tank.fish[0].color, tank.fish[0].accent); return 1;
-    }
-    /* a body the same as the accent: the accent moves (stripes must show) */
-    tank_set_look(&tank, 0, accent0, 0);
-    if (tank.fish[0].accent == accent0) { printf("FAIL: accent did not step aside for a matching body\n"); return 1; }
-    tank_set_look(&tank, 0, LOOK_BODY[6], accent0);
-    setup_activate(&tank, SETUP_HIT_BACK);            /* back to the name page and forward again: name kept */
+    if (setup_page() != SETUP_PG_COLORS_B) { printf("FAIL: NEXT did not reach the second fish's colors page\n"); return 1; }
+    setup_activate(&tank, SETUP_HIT_BACK);            /* back to the first fish's name page and its form: all kept */
     if (setup_page() != SETUP_PG_NAME_A || strcmp(tank.fish[0].name, "bub")) { printf("FAIL: BACK lost the name\n"); return 1; }
-    setup_activate(&tank, SETUP_HIT_NEXT); setup_activate(&tank, SETUP_HIT_NEXT);
+    setup_activate(&tank, SETUP_HIT_BACK);
+    if (setup_page() != SETUP_PG_FORM_A || tank.fish[0].shape != SHAPE_SLENDER) { printf("FAIL: BACK lost the form\n"); return 1; }
+    for (int k = 0; k < 4; k++) setup_activate(&tank, SETUP_HIT_NEXT);   /* NAME A, COLORS B, FORM B (left as they are), NAME B */
     if (setup_page() != SETUP_PG_NAME_B) { printf("FAIL: not on the second name page\n"); return 1; }
     const char *preset1 = tank_roster_name(tank.fish[1].preset);
     for (int i = (int)strlen(tank.fish[1].name) - 1; i >= 0; i--) {   /* blank it from the end... */
@@ -719,6 +787,35 @@ static int selftest_pop(void) {
     if (tank.fish[1].name[0]) { printf("FAIL: could not blank the name ('%s')\n", tank.fish[1].name); return 1; }
     setup_activate(&tank, SETUP_HIT_NEXT);                                  /* ...and leave it empty: the preset's returns */
     if (strcmp(tank.fish[1].name, preset1)) { printf("FAIL: empty name did not fall back ('%s')\n", tank.fish[1].name); return 1; }
+    if (setup_page() != SETUP_PG_BUBBLES) { printf("FAIL: NEXT did not reach the bubbles page (%d)\n", setup_page()); return 1; }
+    /* the bubble column: a press on the water brings it there, a drag moves
+       it, the rising bubbles come along, the reef and the grass push it off;
+       the release is no tap */
+    /* the bubble column: a press on the water brings it there, a drag moves
+       it, the rising bubbles come along, the reef and the grass push it off;
+       the release is no tap */
+    {
+        const float bx = TANK_FLOOR_X(300.0f), by = PG_Y(200);      /* on this board's floor; in the water under the page's buttons */
+        float col_x[MAX_BUBBLE], x_before = tank.bubble_x;          /* where the column's bubbles were (0.4: this page comes after
+                                                                       the fish now, so they have risen and wobbled a while) */
+        for (int i = 0; i < MAX_BUBBLE; i++) col_x[i] = tank.bubble[i].x;
+        setup_touch(&tank, bx, by, true);
+        tank_t probe = tank; tank_set_bubble_x(&probe, bx);
+        if (fabsf(tank.bubble_x - probe.bubble_x) > 0.5f) { printf("FAIL: press put the column at %.0f, not %.0f\n", tank.bubble_x, probe.bubble_x); return 1; }
+        for (int k = 1; k <= 20; k++) setup_touch(&tank, bx + k * 2, by, true);
+        probe = tank; tank_set_bubble_x(&probe, bx + 40);
+        if (fabsf(tank.bubble_x - probe.bubble_x) > 0.5f) { printf("FAIL: drag left the column at %.0f\n", tank.bubble_x); return 1; }
+        for (int i = 0; i < MAX_BUBBLE; i++)                         /* each column bubble moved with it, as one */
+            if (tank.bubble[i].column && fabsf(tank.bubble[i].x - col_x[i] - (tank.bubble_x - x_before)) > 0.5f) { printf("FAIL: a column bubble stayed behind\n"); return 1; }
+        setup_touch(&tank, bx + 40, by, false);
+        if (setup_page() != SETUP_PG_BUBBLES) { printf("FAIL: the drag's release acted as a tap\n"); return 1; }
+        tank_set_bubble_x(&tank, 5);
+        if (tank.bubble_x < tank.reef_x + 50) { printf("FAIL: the column sits on the reef (%.0f)\n", tank.bubble_x); return 1; }
+        tank_set_bubble_x(&tank, 900);
+        if (tank.bubble_x > TANK_FX1 - 30) { printf("FAIL: the column sits in the glass (%.0f)\n", tank.bubble_x); return 1; }   /* (the floor's end: the glass itself in the rectangle) */
+        tank_set_bubble_x(&tank, bx + 40);
+    }
+    float bubble_x_set = tank.bubble_x;
     setup_activate(&tank, SETUP_HIT_NEXT);
     if (setup_page() != SETUP_PG_CARE) { printf("FAIL: not on the care page (%d)\n", setup_page()); return 1; }
     setup_activate(&tank, SETUP_HIT_NEXT);            /* BEGIN */
@@ -726,12 +823,12 @@ static int selftest_pop(void) {
     tank_init(&tank, 13); progression_boot(&tank);
     if (fabsf(tank.bubble_x - bubble_x_set) > 0.5f) { printf("FAIL: the bubble column did not come back from the save (%.0f)\n", tank.bubble_x); return 1; }
     if (progression_setup_pending() || strcmp(tank.fish[0].name, "bub") || strcmp(tank.fish[1].name, preset1) ||
-        tank.fish[0].color != LOOK_BODY[6] || tank.fish[0].accent != accent0 || strcmp(preset0, tank_roster_name(tank.fish[0].preset))) {
+        tank.fish[0].color != LOOK_BODY[6] || tank.fish[0].accent != accent0 || strcmp(preset0, tank_roster_name(tank.fish[0].preset)) ||
+        tank.fish[0].shape != SHAPE_SLENDER || tank.fish[0].fins != FINS_SAIL || tank.fish[0].pattern != PATTERN_MASK) {
         printf("FAIL: names/looks did not come back from the save ('%s' %06x/%06x, pending %d)\n",
                tank.fish[0].name, tank.fish[0].color, tank.fish[0].accent, progression_setup_pending()); return 1;
     }
-    printf("  setup ok: %s (blue) + %s, bubbles at x %.0f, saved and reloaded, nothing owed\n", tank.fish[0].name, tank.fish[1].name, tank.bubble_x);
-    /* notices wait for a fry's welcome (2026-09-29, Strato: the milestone and
+    printf("  setup ok: %s (blue, slender / sail / mask) + %s, bubbles at x %.0f, saved and reloaded, nothing owed\n", tank.fish[0].name, tank.fish[1].name, tank.bubble_x);    /* notices wait for a fry's welcome (2026-09-29, Strato: the milestone and
        the welcome overlapped). The frame order both platforms keep: the tank
        ticks (the fry is born, its badge set), the notices tick, THEN the
        welcome opens - so the badge came up the frame before it. */
@@ -928,8 +1025,17 @@ static int selftest_shelf_away(void) {
  * and a new tank: after each, the next boot must find both tanks, each once,
  * the right one on the glass with its own save. */
 #include "shelf.h"
-void shelf_port_sim_cut(int writes);
+int  shelf_port_sim_cut(int writes);
 void sim_clock_shift(int64_t s);
+/* the shelf selftests' scratch board: $PT_SHELF_DIR (two jobs on one Mac never share one), else /tmp/pt-shelf */
+const char *sim_shelf_dir(void) { const char *d = getenv("PT_SHELF_DIR"); return d && d[0] ? d : "/tmp/pt-shelf"; }
+static void sim_shelf_board(void) {
+    char cmd[700], p[600]; const char *d = sim_shelf_dir();
+    snprintf(cmd, sizeof cmd, "rm -rf '%s' && mkdir -p '%s/frame'", d, d); (void)system(cmd);
+    snprintf(p, sizeof p, "%s/tank.sav", d); setenv("POCKET_TANK_SAVE", p, 1);
+    snprintf(p, sizeof p, "%s/storage.bin", d); setenv("POCKET_TANK_STORAGE", p, 1);
+    snprintf(p, sizeof p, "%s/frame", d); setenv("POCKET_TANK_FRAME", p, 1);
+}
 static int shelf_reboot(void) {                    /* the board restarting: shelf first, then the tank, then the carry */
     tank_init(&tank, 5);
     shelf_boot(clock_port_now_unix());
@@ -939,33 +1045,50 @@ static int shelf_reboot(void) {                    /* the board restarting: shel
     return (int)(h < 0 ? -1 : h + 0.5f);
 }
 static void shelf_wipe(void) {
-    (void)system("rm -rf /tmp/pt-shelf && mkdir -p /tmp/pt-shelf/frame");
-    setenv("POCKET_TANK_SAVE", "/tmp/pt-shelf/tank.sav", 1);
-    setenv("POCKET_TANK_STORAGE", "/tmp/pt-shelf/storage.bin", 1);
-    setenv("POCKET_TANK_FRAME", "/tmp/pt-shelf/frame", 1);
+    sim_shelf_board();
 }
 static uint16_t s_thumb[200 * 200];
 static bool shelf_put_up(int i) {                  /* SWAP IN, as main.c will do it */
     int w, h; render_shelf_thumb_size(&w, &h);
     for (int k = 0; k < w * h; k++) s_thumb[k] = (uint16_t)(shelf_now()->id * 1000 + k);
-    progression_save(&tank);
+    if (!progression_save(&tank)) return false;   /* (main.c: a tank that would not save never swaps) */
     progression_carry_t c; progression_carry_take(&tank, &c);
     return shelf_swap(i, s_thumb, w, h, &c, sizeof c, clock_port_now_unix());
 }
 static int shelf_index_of(uint32_t id) { for (int i = 0; i < shelf_count(); i++) if (shelf_get(i)->id == id) return i; return -1; }
 #define SFAIL(...) do { printf("FAIL: shelf: "); printf(__VA_ARGS__); printf("\n"); return 1; } while (0)
 /* A (5 fish) on the glass, B (3 fish) on the shelf, both saved */
+/* THE TANK'S OWN BLOBS (0.4): the collection, KIN and gift notes marked with a tank's letter - A's as big as they get
+   (918 + 262 + 1296 bytes, every slot full), B's small - so a check can tell whose came onto the glass */
+static const char *const SH_BLOBS[3] = { COLL_NVS_KEY, KIN_NVS_KEY, GIFT_NVS_KEY };
+static size_t sh_blob_len(char tag, int k) { static const size_t FULL[3] = { COLL_BLOB_MAX, KIN_BLOB_MAX, GIFT_BLOB_MAX }; return tag == 'A' ? FULL[k] : 40 + (size_t)k; }
+static void shelf_mark(char tag) {
+    static uint8_t b[1300];
+    for (int k = 0; k < 3; k++) { memset(b, tag, sizeof b); persist_port_blob_save(SH_BLOBS[k], b, sh_blob_len(tag, k)); }
+}
+static int shelf_marked(char tag, const char *when) {   /* tag 0: none at all (a fresh tank) */
+    static uint8_t b[1300];
+    for (int k = 0; k < 3; k++) {
+        size_t got = 0; bool has = persist_port_blob_load(SH_BLOBS[k], b, sizeof b, &got);
+        if (!tag) { if (has) SFAIL("%s: a fresh tank came in with a '%s' blob (%zu bytes, '%c')", when, SH_BLOBS[k], got, b[0]); continue; }
+        bool mine = has && got == sh_blob_len(tag, k);
+        for (size_t i = 0; mine && i < got; i++) mine = b[i] == (uint8_t)tag;
+        if (!mine) SFAIL("%s: tank %c's '%s' is not its own (%s, %zu bytes, '%c')", when, tag, SH_BLOBS[k], has ? "there" : "missing", got, has ? b[0] : '-');
+    }
+    return 0;
+}
 static int shelf_two(void) {
     shelf_wipe();
     shelf_reboot();
     while (tank.n_fish < 5) tank_add_fish(&tank, 0, 1);
-    tank.sd_balance = 900; progression_save(&tank);
+    tank.sd_balance = 900; progression_save(&tank); shelf_mark('A');
     int b = shelf_new(0, clock_port_now_unix());
     if (b < 0) SFAIL("no new tank");
     if (!shelf_put_up(b)) SFAIL("the first swap failed");
     if (shelf_reboot() >= 0) SFAIL("the fresh tank loaded a save");
+    if (shelf_marked(0, "a new tank")) return 1;
     while (tank.n_fish < 3) tank_add_fish(&tank, 0, 1);
-    progression_save(&tank);
+    progression_save(&tank); shelf_mark('B');
     if (!shelf_put_up(shelf_index_of(1))) SFAIL("swap back failed");   /* A on the glass again */
     shelf_reboot();
     return 0;
@@ -977,6 +1100,359 @@ static int shelf_whole(const char *when) {
     if (a != 1 || b != 1 || shelf_count() != 1) SFAIL("%s: tank 1 x%d, tank 2 x%d, %d on the shelf", when, a, b, shelf_count());
     int want = on == 1 ? 5 : 3;
     if (tank.n_fish != want) SFAIL("%s: tank %u on the glass with %d fish (its own has %d)", when, (unsigned)on, tank.n_fish, want);
+    return shelf_marked(on == 1 ? 'A' : 'B', when);
+}
+/* --selftest-shelf-safe (the 11-02 sweep, docs/release-0.4.md 2c): no failure loses a tank. A write REFUSED while the
+ * board runs on (NVS full or worn, saving off) - one at every step of a swap both ways, every write from one on and
+ * the keeper carrying on after it, the boot finishing a cut swap with a write refused or saving off - the frame's
+ * `now` gone, a save too long for a slot, a hand-edited slot header's snapshot size, books that fill a slot's room.
+ * After each, both tanks there, each once, the one on the glass with its own fish and books. */
+int  shelf_port_sim_fail(int writes);
+void persist_port_sim_block(bool on);
+/* tanks 1 and 2 each once (other tanks may be on the shelf too), the one on the glass its own */
+static int sh_pair(const char *when) {
+    uint32_t on = shelf_now()->id;
+    int a = (on == 1) + (shelf_index_of(1) >= 0), b = (on == 2) + (shelf_index_of(2) >= 0);
+    if (a != 1 || b != 1) SFAIL("%s: tank 1 x%d, tank 2 x%d, %d on the shelf", when, a, b, shelf_count());
+    if (on != 1 && on != 2) SFAIL("%s: tank %u on the glass", when, (unsigned)on);
+    int want = on == 1 ? 5 : 3;
+    if (tank.n_fish != want) SFAIL("%s: tank %u on the glass with %d fish (its own has %d)", when, (unsigned)on, tank.n_fish, want);
+    return shelf_marked(on == 1 ? 'A' : 'B', when);
+}
+/* a shelved tank's slot in the storage file (the header's magic + its ID), -1 none */
+static long sh_slot_at(uint32_t id) {
+    FILE *f = fopen(getenv("POCKET_TANK_STORAGE"), "rb"); if (!f) return -1;
+    long at = -1;
+    for (long k = 0; k < SHELF_SLOTS_MAX && at < 0; k++) {
+        uint32_t h[4];
+        if (fseek(f, k * SHELF_SLOT_SIZE, SEEK_SET) || fread(h, 4, 4, f) != 4) break;
+        if (h[0] == 0x31535450u && h[3] == id) at = k * SHELF_SLOT_SIZE;
+    }
+    fclose(f); return at;
+}
+static void sh_poke(long at, const void *b, size_t n) { FILE *f = fopen(getenv("POCKET_TANK_STORAGE"), "r+b"); if (f) { fseek(f, at, SEEK_SET); fwrite(b, 1, n, f); fclose(f); } }
+static int selftest_shelf_safe(void) {
+    int refused = 0, held = 0;
+    char when[96];
+    const char *o = getenv("SHELF_SAFE_ONLY"); int only = o ? atoi(o) : 0;   /* (one section alone: to see each fail on older code) */
+    /* 1. ONE write refused at each step of a swap, both ways, the board running on. Then the wallet moves on: a carry
+          left behind (the journal refused after it) must not set it back at the next boot */
+    if (!only || only == 1) {
+        for (int dir = 0; dir < 2; dir++)
+            for (int n = 0; n < 80; n++) {
+                if (shelf_two()) return 1;
+                if (dir) { if (!shelf_put_up(shelf_index_of(2))) SFAIL("setup swap"); shelf_reboot(); }
+                uint32_t on = shelf_now()->id;
+                shelf_port_sim_fail(n);
+                bool done = shelf_put_up(shelf_index_of(dir ? 1 : 2));
+                bool fired = shelf_port_sim_fail(-1) < 0;
+                snprintf(when, sizeof when, "a swap %s with write %d refused", dir ? "B->A" : "A->B", n);
+                if (!done) {
+                    if (shelf_now()->id != on) SFAIL("%s: refused, but tank %u on the glass", when, (unsigned)shelf_now()->id);
+                    tank.sd_balance = 123; progression_save(&tank);
+                }
+                shelf_reboot();
+                if (sh_pair(when)) return 1;
+                if (!done && shelf_now()->id == on && tank.sd_balance != 123) SFAIL("%s: the wallet went back to %d (a carry left behind)", when, (int)tank.sd_balance);
+                refused++;
+                if (!fired) break;                       /* the swap needed fewer writes: every step covered */
+            }
+        printf("selftest-shelf-safe: one write refused at every step of a swap, both ways (%d): both tanks kept, a refused swap left the glass as it was and the wallet where it was\n", refused);
+    }
+    /* 2. EVERY write refused from write n on, the board running on; the writes come back and the keeper carries on (a
+          shelf filled with new tanks, a rename, time changes) before the restart - nothing may land on a slot holding a tank */
+    if (!only || only == 2) {
+        for (int n = 0; n < 80; n++) {
+            if (shelf_two()) return 1;
+            shelf_port_sim_cut(n);
+            shelf_put_up(shelf_index_of(2));
+            bool cut = shelf_port_sim_cut(-1) == 0;
+            int k = -1, made = 0;
+            while (shelf_new(0, clock_port_now_unix()) >= 0) k = made++;   /* (the shelf filled: every free slot taken) */
+            if (k >= 0) shelf_rename(shelf_count() - 1, "LATER");
+            for (int i = 0; i < shelf_count() && i < 4; i++) shelf_set_time(i, SHELF_TIME_PAUSED, clock_port_now_unix());
+            shelf_reboot();
+            snprintf(when, sizeof when, "writes refused from write %d of a swap, then the shelf filled", n);
+            if (sh_pair(when)) return 1;
+            held++;
+            if (!cut) break;
+        }
+    }
+    /* 3. a swap cut (power) at write n, then the boot that finishes it with one write refused - or saving off - then a
+          clean boot */
+    if (!only || only == 3) {
+        int boots = 0;
+        for (int n = 0; n < 80; n++) {
+            bool cut = true;
+            for (int m = -1; m < 10; m++) {
+                if (shelf_two()) return 1;
+                shelf_port_sim_cut(n);
+                shelf_put_up(shelf_index_of(2));
+                cut = shelf_port_sim_cut(-1) == 0;
+                if (m < 0) persist_port_sim_block(true); else shelf_port_sim_fail(m);
+                shelf_reboot();
+                persist_port_sim_block(false); shelf_port_sim_fail(-1);
+                shelf_reboot();
+                snprintf(when, sizeof when, "a swap cut at write %d, the boot after it with %s", n, m < 0 ? "saving off" : "a write refused");
+                if (m >= 0) snprintf(when + strlen(when), sizeof when - strlen(when), " (%d)", m);
+                if (sh_pair(when)) return 1;
+                boots++;
+                if (!cut) break;
+            }
+            if (!cut) break;
+        }
+        printf("selftest-shelf-safe: writes refused for good mid-swap and the keeper carrying on (%d), a cut swap finished by a boot with a write refused or saving off (%d): both tanks kept\n", held, boots);
+    }
+    /* 4. saving off (the device port's s_save_blocked): SWAP IN refused, nothing moved */
+    if (!only || only == 4) {
+        if (shelf_two()) return 1;
+        persist_port_sim_block(true);
+        bool moved = shelf_put_up(shelf_index_of(2)) || shelf_swap(shelf_index_of(2), NULL, 0, 0, NULL, 0, clock_port_now_unix());
+        persist_port_sim_block(false);
+        if (moved) SFAIL("saving off: a swap went ahead");
+        shelf_reboot();
+        if (shelf_now()->id != 1 || sh_pair("saving off")) SFAIL("saving off: tank %u on the glass", (unsigned)shelf_now()->id);
+    }
+    /* 5. the frame's `now` gone (unreadable), tank 1 on the shelf: the glass gets an ID of its own, tank 1 stays */
+    if (!only || only == 5) {
+        if (shelf_two()) return 1;
+        if (!shelf_put_up(shelf_index_of(2))) SFAIL("now: swap");
+        shelf_reboot();
+        { char p[600]; snprintf(p, sizeof p, "%s/now", getenv("POCKET_TANK_FRAME")); remove(p); }
+        shelf_reboot();
+        int a = shelf_index_of(1);
+        if (a < 0 || !shelf_get(a)->save_len) SFAIL("no `now`: tank 1 (shelved) was erased");
+        if (shelf_now()->id <= 2 || shelf_get(a)->pos == shelf_now()->pos || tank.n_fish != 3) SFAIL("no `now`: the glass is tank %u at place %d (tank 1 at %d), %d fish", (unsigned)shelf_now()->id, shelf_now()->pos, shelf_get(a)->pos, tank.n_fish);
+        if (!shelf_put_up(a)) SFAIL("no `now`: swap tank 1 in");
+        shelf_reboot();
+        if (shelf_now()->id != 1 || tank.n_fish != 5 || shelf_count() != 1 || shelf_marked('A', "no `now`, tank 1 back")) SFAIL("no `now`: tank 1 back with %d fish, %d shelved", tank.n_fish, shelf_count());
+        printf("selftest-shelf-safe: saving off refused the swap; with no `now` the glass took tank %u, shelved tank 1 kept and swapped back in\n", (unsigned)shelf_get(0)->id);
+    }
+    /* 6. a save longer than a slot (a newer build's, after a rollback - its tail kept for every save): the swap refused */
+    if (!only || only == 6) {
+        if (shelf_two()) return 1;
+        {   static uint8_t sv[4200]; size_t got = 0;
+            if (!persist_port_load(sv, sizeof sv, &got) || got > 3000) SFAIL("long save: %zu B", got);
+            memset(sv + got, 0x5a, 4000 - got);
+            persist_port_save(sv, 4000);
+            shelf_reboot();
+            if (shelf_put_up(shelf_index_of(2))) SFAIL("a 4000-byte save went on the shelf (a slot holds %d)", SHELF_SAVE_MAX);
+            shelf_reboot();
+            if (sh_pair("a 4000-byte save") || shelf_now()->id != 1) return 1;
+            if (!persist_port_load(sv, sizeof sv, &got) || got != 4000) SFAIL("the long save came back %zu B", got);
+        }
+        printf("selftest-shelf-safe: a 4000-byte save refused at SWAP IN, the tank kept whole on the glass\n");
+    }
+    /* 7. a hand-edited slot header (no checksum): its snapshot 255 x 255 - none, never a read past the buffer, also
+          through the boot's place-clash rewrite */
+    if (!only || only == 7) {
+        if (shelf_two()) return 1;
+        if (!shelf_put_up(shelf_index_of(2))) SFAIL("thumb: swap");
+        shelf_reboot();
+        {   long at = sh_slot_at(1);
+            if (at < 0) SFAIL("thumb: tank 1's slot not found");
+        int a;
+            uint16_t wh[2] = { 255, 255 }; sh_poke(at + 64, wh, sizeof wh);
+            shelf_reboot();
+            a = shelf_index_of(1);
+            if (a < 0 || shelf_get(a)->thumb_w || shelf_get(a)->thumb_h) SFAIL("thumb: a 255 x 255 header read as %dx%d", a < 0 ? -1 : shelf_get(a)->thumb_w, a < 0 ? -1 : shelf_get(a)->thumb_h);
+            sh_poke(at + 64, wh, sizeof wh);              /* (and as the boot finds it, through the clash rewrite) */
+            uint8_t pos = shelf_now()->pos; sh_poke(at + 17, &pos, 1);
+            shelf_reboot();
+            a = shelf_index_of(1);
+            if (a < 0 || shelf_get(a)->pos == shelf_now()->pos) SFAIL("thumb: the place clash was not sorted");
+            if (!shelf_rename(a, "EDITED")) SFAIL("thumb: a rename refused");
+            if (!shelf_put_up(shelf_index_of(1))) SFAIL("thumb: swap tank 1 in");
+            shelf_reboot();
+            if (sh_pair("a hand-edited snapshot size") || shelf_now()->id != 1) return 1;
+        }
+        printf("selftest-shelf-safe: a hand-edited 255 x 255 snapshot read as none; the place clash, a rename and a swap went on\n");
+    }
+    /* 8. books that fill the slot's room (2530 bytes of visitors, KIN and gift notes after them): they never wrap the
+          room left - what fits goes with the tank */
+    if (!only || only == 8) {
+        if (shelf_two()) return 1;
+        {   static uint8_t bk[2600]; memset(bk, 'A', sizeof bk);
+            persist_port_blob_save(COLL_NVS_KEY, bk, 2530);
+            if (!shelf_put_up(shelf_index_of(2)) || (shelf_reboot(), !shelf_put_up(shelf_index_of(1)))) SFAIL("books: swaps");
+            shelf_reboot();
+            size_t got = 0; memset(bk, 0, sizeof bk);
+            bool back = persist_port_blob_load(COLL_NVS_KEY, bk, sizeof bk, &got) && got == 2530;
+            for (size_t i = 0; back && i < got; i++) back = bk[i] == 'A';
+            if (!back) SFAIL("books: tank 1's 2530-byte visitor book came back %zu B", got);
+        }
+        printf("selftest-shelf-safe: books filling a slot's room never wrapped it; what fit went with the tank\n");
+    }
+    printf("selftest-shelf-safe: PASS\n");
+    return 0;
+}
+/* --selftest-double-tap (0.4 rc): kids press firmly and fast, and the touch layer hands over both taps of a double tap
+ * (the light's double tap needs them) - so a tap that opens a panel has its second half land on what the panel puts
+ * there. THE SHOP: every row of every page, with nothing owned (its modal's BUY), every piece owned (MOVE | SHELVE) and
+ * the fry for sale (FRY's BUY), tapped twice 190 ms apart (90 ms down, 100 ms up) and 550 ms apart at points across the
+ * whole row: the second tap is spent (the modal stays), and a tap 0.7 s on still buys. MY TANKS (main.c, the firmware):
+ * the wait it keeps (touch_gate.h open_wait) for THE LIBRARY's NEW TANK, a card's SWAP IN / MORE and REMOVE's hold. A
+ * fish card's SELL, armed, is disarmed by the page leaving (the reset prompt now closes the keeper page that way).
+ * THE MASH (round three): one spot hammered at 5 Hz, 4, 6 and 10 taps - every row of every page, the open_wait, the
+ * three SELLs (the fish card's, the shop's on a shelved piece, the placement page's): nothing bought, sold or acted on,
+ * since a spent tap restarts the wait (99a7c70: tap 4, 600 ms after the opening tap, bought). */
+static int selftest_double_tap(void) {
+    setenv("POCKET_TANK_SAVE", "/tmp/pocket-tank-selftest-dtap.sav", 1); remove("/tmp/pocket-tank-selftest-dtap.sav");
+    tank_init(&tank, 4242); progression_boot(&tank); progression_setup_done(&tank);
+    tank.trickle_off = true;
+    uint32_t every = 0; for (int i = 0; i < SD_ITEM_COUNT; i++) every |= SD_ITEMS[i].bit;
+    static const float GAP[2] = { 0.19f, 0.55f };
+    int doubles = 0, rows = 0;
+    for (int v = 0; v < 3; v++) {                                      /* 0: nothing owned; 1: every piece in the tank; 2: the fry for sale */
+        tank.sd_unlocks = v == 1 ? every : 0; tank.sd_shelved = 0;
+        if (v == 2) tank.tank_ms_bits |= TMS_FIRST_SALE; else tank.tank_ms_bits &= ~TMS_FIRST_SALE;
+        const int n_rows = SD_ITEM_COUNT + (v == 2) - !progression_pumpkin_offered(&tank), pages = (n_rows + SHP_PER_PAGE - 1) / SHP_PER_PAGE;
+        for (int pg = 0; pg < pages; pg++)
+            for (int r = 0; r < SHP_PER_PAGE && pg * SHP_PER_PAGE + r < n_rows; r++) {
+                const int top = SHP_ROW_Y0 + r * SHP_ROW_DY;
+                int seen = 0;
+                for (int y = top - 8; y < top + SHP_ROW_DY - 8; y += 6)
+                    for (int x = 24; x < PAGE_W - 4; x += 12)
+                        for (int g = 0; g < 2; g++) {
+                            render_shop_leave();
+                            for (int k = 0; k < pg; k++) shop_tap(SHOP_NEXT_X, SHOP_ARROW_Y);
+                            tank.sd_balance = 100000;
+                            if (shop_tap(x, y) != SHOP_TAP_KEPT) continue;   /* (CLOSE, a PUT BACK: their own single taps) */
+                            tank.clock += GAP[g];
+                            int r2 = shop_tap(x, y);
+                            if (r2 != SHOP_TAP_KEPT) { printf("FAIL: double-tap: shop page %d row %d (owned %d, fry %d) at %d,%d: the second tap %.0f ms on returned %d (want KEPT, spent)\n",
+                                                              pg + 1, r, v == 1, v == 2, x, y, GAP[g] * 1000, r2); return 1; }
+                            doubles++; seen++;
+                        }
+                if (!seen) { printf("FAIL: double-tap: shop page %d row %d: no point of the row opened a modal\n", pg + 1, r); return 1; }
+                /* the modal stayed: a deliberate tap on its button, 0.7 s on (the row's middle), still acts */
+                render_shop_leave(); for (int k = 0; k < pg; k++) shop_tap(SHOP_NEXT_X, SHOP_ARROW_Y);
+                tank.sd_balance = 100000;
+                shop_tap(SHOP_ROW_X, top + 20); tank.clock += 0.19; shop_tap(SHOP_ROW_X, top + 20);
+                tank.clock += 0.7;
+                bool fry_row = v == 2 && pg == 0 && r == 0;
+                int r3 = shop_tap(v == 1 ? SHOP_MOVE_X : SHOP_BTN_X, SHOP_BTN_Y);
+                bool acted = fry_row ? r3 >= SHOP_TAP_FRY && r3 < SHOP_TAP_SHELVE
+                           : v == 1 ? (r3 >= SHOP_TAP_MOVE && r3 < SHOP_TAP_SELL) || r3 == SHOP_TAP_KEPT   /* (KEPT: a critter's modal, no button) */
+                           : r3 >= SHOP_TAP_BUY && r3 < SHOP_TAP_MOVE;
+                if (!acted) { printf("FAIL: double-tap: shop page %d row %d (owned %d, fry %d): the modal's button 0.7 s after the double tap returned %d\n", pg + 1, r, v == 1, v == 2, r3); return 1; }
+                rows++;
+            }
+    }
+    /* THE MASH: the opening tap and N-1 more at 5 Hz on the same spot (the row's middle and points across it) - every
+       tap after the first spent, the modal still up; then a 0.7 s pause and the button still acts */
+    static const int MASH[3] = { 4, 6, 10 };
+    const double MASH_DT = 0.205;                                      /* ~5 Hz (90 ms down, 115 up): tap 4 lands 615 ms after the first */
+    int mashes = 0;
+    for (int v = 0; v < 3; v++) {
+        tank.sd_unlocks = v == 1 ? every : 0; tank.sd_shelved = 0;
+        if (v == 2) tank.tank_ms_bits |= TMS_FIRST_SALE; else tank.tank_ms_bits &= ~TMS_FIRST_SALE;
+        const int n_rows = SD_ITEM_COUNT + (v == 2) - !progression_pumpkin_offered(&tank), pages = (n_rows + SHP_PER_PAGE - 1) / SHP_PER_PAGE;
+        for (int pg = 0; pg < pages; pg++)
+            for (int r = 0; r < SHP_PER_PAGE && pg * SHP_PER_PAGE + r < n_rows; r++) {
+                const int top = SHP_ROW_Y0 + r * SHP_ROW_DY;
+                for (int y = top - 8; y < top + SHP_ROW_DY - 8; y += 12)
+                    for (int x = 24; x < PAGE_W - 4; x += 24)
+                        for (int m = 0; m < 3; m++) {
+                            render_shop_leave();
+                            for (int k = 0; k < pg; k++) shop_tap(SHOP_NEXT_X, SHOP_ARROW_Y);
+                            tank.sd_balance = 100000; const uint32_t un0 = tank.sd_unlocks, sh0 = tank.sd_shelved;
+                            if (shop_tap(x, y) != SHOP_TAP_KEPT) continue;
+                            for (int k = 1; k < MASH[m]; k++) {
+                                tank.clock += MASH_DT;
+                                int rk = shop_tap(x, y);
+                                if (rk != SHOP_TAP_KEPT) { printf("FAIL: double-tap: a %d-tap mash on shop page %d row %d (owned %d, fry %d) at %d,%d: tap %d returned %d (want KEPT, spent)\n",
+                                                                  MASH[m], pg + 1, r, v == 1, v == 2, x, y, k + 1, rk); return 1; }
+                            }
+                            if (tank.sd_balance != 100000 || tank.sd_unlocks != un0 || tank.sd_shelved != sh0) { printf("FAIL: double-tap: a %d-tap mash on shop page %d row %d changed the tank\n", MASH[m], pg + 1, r); return 1; }
+                            mashes++;
+                        }
+                /* after a mash, a 0.7 s pause: the modal's button acts */
+                render_shop_leave(); for (int k = 0; k < pg; k++) shop_tap(SHOP_NEXT_X, SHOP_ARROW_Y);
+                tank.sd_balance = 100000;
+                shop_tap(SHOP_ROW_X, top + 20); for (int k = 1; k < 6; k++) { tank.clock += MASH_DT; shop_tap(SHOP_ROW_X, top + 20); }
+                tank.clock += 0.7;
+                bool fry_row = v == 2 && pg == 0 && r == 0;
+                int r3 = shop_tap(v == 1 ? SHOP_MOVE_X : SHOP_BTN_X, SHOP_BTN_Y);
+                bool acted = fry_row ? r3 >= SHOP_TAP_FRY && r3 < SHOP_TAP_SHELVE
+                           : v == 1 ? (r3 >= SHOP_TAP_MOVE && r3 < SHOP_TAP_SELL) || r3 == SHOP_TAP_KEPT
+                           : r3 >= SHOP_TAP_BUY && r3 < SHOP_TAP_MOVE;
+                if (!acted) { printf("FAIL: double-tap: shop page %d row %d (owned %d, fry %d): the modal's button 0.7 s after a mash returned %d\n", pg + 1, r, v == 1, v == 2, r3); return 1; }
+            }
+    }
+    /* the shop's SELL on a shelved piece: armed, then mashed - never sold; a 0.7 s pause, then it sells */
+    tank.tank_ms_bits &= ~TMS_FIRST_SALE; tank.sd_unlocks = SD_ITEM_CASTLE; tank.sd_shelved = SD_ITEM_CASTLE;
+    for (int m = 0; m < 3; m++) {
+        render_shop_leave();
+        if (shop_tap(SHOP_ROW_X, SHOP_ROW_Y(2)) != SHOP_TAP_KEPT) { printf("FAIL: double-tap: the shelved castle's row\n"); return 1; }
+        tank.clock += 0.7;
+        if (shop_tap(SHOP_SELL_X, SHOP_BTN_Y) != SHOP_TAP_KEPT) { printf("FAIL: double-tap: the shop's SELL did not arm\n"); return 1; }
+        for (int k = 1; k < MASH[m]; k++) { tank.clock += MASH_DT; int rk = shop_tap(SHOP_SELL_X, SHOP_BTN_Y);
+            if (rk != SHOP_TAP_KEPT) { printf("FAIL: double-tap: the shop's armed SELL mashed %d taps: tap %d returned %d (sold)\n", MASH[m], k + 1, rk); return 1; } }
+        mashes++;
+    }
+    tank.clock += 0.7;
+    if (shop_tap(SHOP_SELL_X, SHOP_BTN_Y) != SHOP_TAP_SELL + 2) { printf("FAIL: double-tap: the shop's SELL 0.7 s after a mash did not sell\n"); return 1; }
+    /* the placement page's SELL: armed, mashed - still on the page, the castle kept; a 0.7 s pause, then it sells */
+    tank.sd_shelved = 0; tank_castle_place(&tank); render_shop_leave();
+    for (int m = 0; m < 3; m++) {
+        setup_begin_place(&tank, 2); setup_activate(&tank, SETUP_HIT_SELL);
+        for (int k = 1; k < MASH[m]; k++) { tank.clock += MASH_DT; setup_activate(&tank, SETUP_HIT_SELL);
+            if (!setup_active() || !(tank.sd_unlocks & SD_ITEM_CASTLE)) { printf("FAIL: double-tap: the placement page's armed SELL mashed %d taps sold the castle at tap %d\n", MASH[m], k + 1); return 1; } }
+        if (m < 2) setup_cancel(&tank);
+        mashes++;
+    }
+    tank.clock += 0.7; setup_activate(&tank, SETUP_HIT_SELL);
+    if (setup_active() || (tank.sd_unlocks & SD_ITEM_CASTLE)) { printf("FAIL: double-tap: the placement page's SELL 0.7 s after a mash did not sell\n"); return 1; }
+    progression_sd_take_award();
+    render_shop_leave(); tank.tank_ms_bits &= ~TMS_FIRST_SALE; tank.sd_unlocks = 0; tank.sd_shelved = 0;
+    /* MY TANKS's wait (the firmware's main.c keeps one for THE LIBRARY, the card, REMOVE) */
+    open_wait_t w = { 0 };
+    if (open_wait_spent(&w, 5000000)) { printf("FAIL: double-tap: a wait never started spends taps\n"); return 1; }
+    static const int64_t SPENT[] = { 0, 100000, 190000, 450000, 599999 }, LIVE[] = { 600000, 700000, 2000000 };
+    for (int k = 0; k < 5; k++) { open_wait_start(&w, 5000000); if (!open_wait_spent(&w, 5000000 + SPENT[k])) { printf("FAIL: double-tap: a tap %lld ms after a panel opened was not spent\n", (long long)SPENT[k] / 1000); return 1; } }
+    for (int k = 0; k < 3; k++) { open_wait_start(&w, 5000000); if (open_wait_spent(&w, 5000000 + LIVE[k])) { printf("FAIL: double-tap: a tap %lld ms after a panel opened was spent\n", (long long)LIVE[k] / 1000); return 1; } }
+    open_wait_start(&w, 5000000);
+    if (open_wait_spent(&w, 4900000)) { printf("FAIL: double-tap: a stamp from the future (a clock gone back) spends taps\n"); return 1; }
+    for (int m = 0; m < 3; m++) {                                      /* the mash: the opening tap, then N-1 at 5 Hz - all spent */
+        open_wait_start(&w, 5000000);
+        for (int k = 1; k < MASH[m]; k++) if (!open_wait_spent(&w, 5000000 + k * 205000LL)) {
+            printf("FAIL: double-tap: a %d-tap mash got through MY TANKS's wait at tap %d (%d ms after the opening tap)\n", MASH[m], k + 1, k * 205); return 1; }
+        const int64_t last = 5000000 + (MASH[m] - 1) * 205000LL;
+        if (open_wait_spent(&w, last + 700000)) { printf("FAIL: double-tap: a tap 0.7 s after a %d-tap mash was spent\n", MASH[m]); return 1; }
+        mashes++;
+    }
+    /* a fish card's SELL armed, the page left (the reset prompt), the card again: one tap arms, never sells */
+    while (tank.n_fish < 4) if (tank_add_fish(&tank, 0, 1) < 0) break;
+    for (int i = 0; i < tank.n_fish; i++) tank.fish[i].stage = STAGE_ADULT;
+    progression_newborn_done(&tank);
+    const int fish = 2; float sx = -1, sy = -1;
+    for (int y = TANK_H / 3; y < TANK_H && sx < 0; y += 2)
+        for (int x = 0; x < TANK_W; x += 2) {
+            render_milestones_leave(); render_milestones_show_fish(&tank, fish);
+            int a = render_milestones_tap(&tank, x, y); tank.clock += 1; int b = render_milestones_tap(&tank, x, y);
+            if (a == MS_TAP_KEPT && b == MS_TAP_SELL + fish) { sx = x; sy = y; break; }
+        }
+    if (sx < 0) { printf("FAIL: double-tap: no SELL on %s's card\n", tank.fish[fish].name); return 1; }
+    render_milestones_leave(); render_milestones_show_fish(&tank, fish);
+    if (render_milestones_tap(&tank, sx, sy) != MS_TAP_KEPT) { printf("FAIL: double-tap: SELL's first tap\n"); return 1; }
+    render_milestones_leave();                                         /* the reset prompt (touch_port_confirm_open) */
+    tank.clock += 21; render_milestones_show_fish(&tank, fish); tank.clock += 1;
+    int r = render_milestones_tap(&tank, sx, sy);
+    if (r != MS_TAP_KEPT) { printf("FAIL: double-tap: SELL stayed armed through the page leaving - one tap returned %d\n", r); return 1; }
+    for (int m = 0; m < 3; m++) {                                      /* the card's SELL armed, then mashed at 5 Hz: never sold */
+        render_milestones_leave(); render_milestones_show_fish(&tank, fish); tank.clock += 1;
+        if (render_milestones_tap(&tank, sx, sy) != MS_TAP_KEPT) { printf("FAIL: double-tap: SELL's arming tap\n"); return 1; }
+        for (int k = 1; k < MASH[m]; k++) { tank.clock += MASH_DT; int rk = render_milestones_tap(&tank, sx, sy);
+            if (rk != MS_TAP_KEPT) { printf("FAIL: double-tap: a fish card's armed SELL mashed %d taps: tap %d returned %d (sold)\n", MASH[m], k + 1, rk); return 1; } }
+        mashes++;
+    }
+    tank.clock += 0.7;
+    if (render_milestones_tap(&tank, sx, sy) != MS_TAP_SELL + fish) { printf("FAIL: double-tap: a fish card's SELL 0.7 s after a mash did not sell\n"); return 1; }
+    render_milestones_leave();
+    printf("selftest-double-tap: the shop: %d rows (nothing owned, every piece owned, the fry for sale), %d double taps at 190 / 550 ms - "
+           "every second tap spent, every modal's button live 0.7 s on; MY TANKS's 600 ms wait; a card's SELL disarmed by the page leaving; "
+           "%d mashes (4 / 6 / 10 taps at 5 Hz: every shop row, the three SELLs, MY TANKS's wait) - nothing bought, sold or acted on, each button live after a 0.7 s pause\n", rows, doubles, mashes);
     return 0;
 }
 /* --selftest-touch-lock (0.3.9.3): MY TANKS's padlock - a tap target of its own, clear of the title's neighbors, wholly on
@@ -990,6 +1466,8 @@ static int selftest_touch_lock(void) {
     if (y1 - y0 < 30 || x1 - x0 < 40) { printf("FAIL: touch-lock: the padlock's tap area is only %dx%d\n", x1 - x0 + 1, y1 - y0 + 1); return 1; }
     shelf_slot_t sl[8]; for (int i = 0; i < 8; i++) sl[i] = (shelf_slot_t){ i ? SHELF_EMPTY : SHELF_NOW, i ? "" : "MY TANK", false, NULL };
     render_shelf_set_touch_lock(false); render_shelf(fa, TANK_W, sl, 1, 1);
+    render_shelf_free(); render_shelf(fb, TANK_W, sl, 1, 1);        /* (0.4: MY TANKS closed frees the planks' wood - the next open draws the same page) */
+    if (memcmp(fa, fb, sizeof fa)) { printf("FAIL: touch-lock: the page after render_shelf_free differs from before\n"); return 1; }
     render_shelf_set_touch_lock(true);  render_shelf(fb, TANK_W, sl, 1, 1); render_shelf_set_touch_lock(false);
     int in = 0, out = 0, bx0 = TANK_W, by0 = TANK_H, bx1 = -1, by1 = -1;   /* ... and the button as drawn: where open and shut differ in it */
     for (int y = 0; y < TANK_H; y++) for (int x = 0; x < TANK_W; x++)
@@ -1012,13 +1490,15 @@ static int selftest_touch_lock(void) {
         float dx = (cxs[i] < TANK_W / 2 ? cxs[i] < cx : cxs[i] > cx) ? cxs[i] - cx : 0, dy = (cys[j] < TANK_H / 2 ? cys[j] < cy : cys[j] > cy) ? cys[j] - cy : 0;
         if (dx * dx + dy * dy > r * r) { printf("FAIL: touch-lock: the padlock button reaches off the glass at %d,%d\n", cxs[i], cys[j]); return 1; }
     }
-    {   int tx0 = TANK_W, tx1 = -1, ty0 = TANK_H, ty1 = -1, v = 0;   /* the settings page's MY TANKS (0.3.9.3): a tap target of its own */
+    {   int tx0 = TANK_W, tx1 = -1, ty0 = TANK_H, ty1 = -1;   /* MY TANKS on the keeper page's foot (0.4; the settings page's in 0.3.9.3): a tap target of its own */
+        render_milestones(&tank, fa, TANK_W);
         for (int y = 0; y < TANK_H; y++) for (int x = 0; x < TANK_W; x++)
-            if (render_settings_tap((float)x, (float)y, &v) == SET_TAP_TANKS) { if (x < tx0) tx0 = x; if (x > tx1) tx1 = x; if (y < ty0) ty0 = y; if (y > ty1) ty1 = y; }
-        if (tx1 < 0 || tx1 - tx0 < 80 || ty1 - ty0 < 24) { printf("FAIL: touch-lock: the settings page's MY TANKS has no tap area of its own (%d..%d x %d..%d)\n", tx0, tx1, ty0, ty1); return 1; }
-        float cx = (tx0 + tx1) * 0.5f, cy = (ty0 + ty1) * 0.5f;
-        if (render_settings_tap(cx - (tx1 - tx0) * 0.5f - 30, cy, &v) == SET_TAP_TANKS) { printf("FAIL: touch-lock: MY TANKS reaches past its button\n"); return 1; }
-        printf("selftest-touch-lock: the settings page's MY TANKS %dx%d at %d,%d\n", tx1 - tx0 + 1, ty1 - ty0 + 1, tx0, ty0);
+            if (render_milestones_tap(&tank, (float)x, (float)y) == MS_TAP_TANKS) { if (x < tx0) tx0 = x; if (x > tx1) tx1 = x; if (y < ty0) ty0 = y; if (y > ty1) ty1 = y; }
+        render_milestones_leave();
+        if (tx1 < 0 || tx1 - tx0 < MSP_FOOT_SQ - 1 || ty1 - ty0 < MSP_FOOT_SQ - 1) { printf("FAIL: touch-lock: the keeper page's MY TANKS has no tap area of its own (%d..%d x %d..%d)\n", tx0, tx1, ty0, ty1); return 1; }
+        int bx, by; render_ms_foot_box(MSF_TANKS, &bx, &by);
+        if (tx0 > bx + PAGE_X || tx1 < bx + PAGE_X + MSP_FOOT_SQ - 1) { printf("FAIL: touch-lock: MY TANKS's square is not all its own (%d..%d, the square %d..%d)\n", tx0, tx1, bx + PAGE_X, bx + PAGE_X + MSP_FOOT_SQ - 1); return 1; }
+        printf("selftest-touch-lock: the keeper page's MY TANKS %dx%d at %d,%d\n", tx1 - tx0 + 1, ty1 - ty0 + 1, tx0, ty0);
     }
     printf("selftest-touch-lock: the padlock %dx%d at %d,%d on the glass (tap area %dx%d); %d px between open and shut, the NOW tank's sign %d px\n",
            bx1 - bx0 + 1, by1 - by0 + 1, bx0, by0, x1 - x0 + 1, y1 - y0 + 1, in, out);
@@ -1082,11 +1562,13 @@ static int selftest_shelf(void) {
     tank.sd_balance = 900; tank_light_choice_set(&tank, 3); tank_screen_set(&tank, true);
     tank.sd_unlocks |= SD_ITEM_CASTLE | SD_ITEM_CORAL | SD_ITEM_SNAIL;   /* (pieces for REMOVE to value below - the snail is no piece) */
     progression_save(&tank);
+    collection_reset(); kin_learn(0xc0ffeeu, "kelp", 0xffd166, 0.3f, 0.6f);   /* (a visitor's name in tank 1's KIN book) */
     int b = shelf_new(0, clock_port_now_unix());
     if (b != 0 || strcmp(shelf_get(0)->name, "TANK 2") || shelf_get(0)->pos != 1 || shelf_get(0)->save_len) SFAIL("new tank: index %d '%s' at %d, %u bytes", b, shelf_get(0)->name, shelf_get(0)->pos, shelf_get(0)->save_len);
     if (!shelf_put_up(0)) SFAIL("swap to the new tank");
     int lived = shelf_reboot();
     if (lived >= 0) SFAIL("the new tank was not fresh (lived %d h)", lived);
+    if (kin_find(0xc0ffeeu)) SFAIL("the new tank knew tank 1's visitor kelp (the KIN book stayed with the board)");
     if (shelf_now()->id != 2 || shelf_now()->pos != 1) SFAIL("tank 2 not on the glass at its place");
     if (tank.sd_balance != 900 || !tank.light_auto || (TANK_WORN && !tank.screen_turned)) SFAIL("carry: %d SD, auto %d, turned %d", (int)tank.sd_balance, tank.light_auto, tank.screen_turned);   /* (SCREEN is the watch's alone) */
     int a = shelf_index_of(1);
@@ -1100,10 +1582,20 @@ static int selftest_shelf(void) {
     shelf_reboot(); a = shelf_index_of(1);
     if (a < 0 || strcmp(shelf_get(a)->name, "SAM'S TANK") || strcmp(shelf_now()->name, "REEF") || !shelf_get(a)->save_len) SFAIL("names after a restart: '%s', '%s'", a >= 0 ? shelf_get(a)->name : "?", shelf_now()->name);
     if (!shelf_rename(a, "   ") || strcmp(shelf_get(a)->name, "TANK 1")) SFAIL("an empty name: '%s' (want TANK 1)", shelf_get(a)->name);
+    {   /* (11-01) an empty name never repeats another tank's: the place's TANK n is worn (a MOVE left it there) - the lowest free one */
+        shelf_rename(-1, "TANK 1");
+        if (!shelf_rename(a, "") || !strcmp(shelf_get(a)->name, "TANK 1") || !strcmp(shelf_get(a)->name, shelf_now()->name)) SFAIL("an empty name repeated another tank's: '%s'", shelf_get(a)->name);
+        shelf_rename(-1, "TANK 2"); }
     if (!shelf_thumb(a, back, sizeof back / 2) || memcmp(back, s_thumb, (size_t)w * h * 2)) SFAIL("the snapshot did not survive a rename");
     if (!shelf_rename(a, " NIGHT \n REEF ") || strcmp(shelf_get(a)->name, "NIGHT\nREEF")) SFAIL("two lines: '%s'", shelf_get(a)->name);
     if (!shelf_rename(a, "\nREEF") || strcmp(shelf_get(a)->name, "REEF")) SFAIL("line 2 alone: '%s'", shelf_get(a)->name);
     shelf_rename(a, "MY TANK"); shelf_rename(-1, "TANK 2");
+    {   /* the name a tank's fish carry next door (passport v2): a keeper's name on one line, never a default one */
+        char kn[PASSPORT_TANK_NAME];
+        shelf_rename(-1, "MY TANK"); shelf_keeper_name(kn); if (kn[0]) SFAIL("MY TANK travels as '%s'", kn);
+        shelf_rename(-1, "  "); shelf_keeper_name(kn); if (kn[0]) SFAIL("a default %s travels as '%s'", shelf_now()->name, kn);
+        shelf_rename(-1, "NIGHT\nREEF"); shelf_keeper_name(kn); if (strcmp(kn, "NIGHT REEF")) SFAIL("NIGHT/REEF travels as '%s'", kn);
+        shelf_rename(-1, "TANK 2"); }
     printf("selftest-shelf: RENAME - shelved and on the glass, trimmed, kept over a restart, an empty name its place's, the snapshot kept\n");
     /* 2. the wallet spent here is the wallet there; time on the shelf */
     tank.sd_balance = 600; while (tank.n_fish < 3) tank_add_fish(&tank, 0, 1); progression_save(&tank);
@@ -1113,6 +1605,7 @@ static int selftest_shelf(void) {
     lived = shelf_reboot();
     if (lived > 0) SFAIL("PAUSED 3 days lived %d h, want 0", lived);   /* (-1: the wake had no time to live - the save loaded, see the fish below) */
     if (tank.n_fish != 5 || tank.sd_balance != 600) SFAIL("tank 1 back with %d fish, %d SD (want 5, 600)", tank.n_fish, (int)tank.sd_balance);
+    { const kin_t *k = kin_find(0xc0ffeeu); if (!k || strcmp(k->name, "kelp")) SFAIL("tank 1 came back without its KIN book (kelp %s)", k ? k->name : "missing"); }
     sim_clock_shift(2 * 86400);                      /* tank 2 has been DORMANT (the default) 2 days */
     if (!shelf_put_up(shelf_index_of(2))) SFAIL("swap to 2");
     lived = shelf_reboot();
@@ -1157,7 +1650,12 @@ static int selftest_shelf(void) {
         char when[64]; snprintf(when, sizeof when, "PAUSED cut after %d writes", n);
         if (shelf_whole(when)) return 1;
         cuts++;
-        if (done) break;
+        if (done) {                                   /* (the rewrite carried B's blobs to its new slot) */
+            if (!shelf_put_up(shelf_index_of(2))) SFAIL("swap to B after a time change");
+            shelf_reboot();
+            if (shelf_whole("B swapped in after its time change")) return 1;
+            break;
+        }
     }
     for (int n = 0; n < 20; n++) {
         if (shelf_two()) return 1;
@@ -1170,7 +1668,7 @@ static int selftest_shelf(void) {
         cuts++;
         if (made >= 0) break;
     }
-    printf("selftest-shelf: %d power cuts (every write of a swap both ways, a time change, a new tank): both tanks found every time, each once, the right one on the glass\n", cuts);
+    printf("selftest-shelf: %d power cuts (every write of a swap both ways, a time change, a new tank): both tanks found every time, each once, the right one on the glass with its own visitors, KIN and gift notes\n", cuts);
     /* 5. the shelf filled: 119 shelved + the one on the glass, then no more */
     shelf_wipe(); shelf_reboot();
     int made = 0;
@@ -1350,7 +1848,7 @@ static int selftest_sleep(void) {
                     if (r != SET_TAP_BRIGHT_LIVE || v != pct) { printf("FAIL: BRIGHTNESS press at %d%% -> %d/%d\n", pct, r, v); return 1; }
                     r = SET_TOUCH(SET_BRT_X(pct), bry, false);
                     if (r != SET_TAP_BRIGHT || v != pct) { printf("FAIL: BRIGHTNESS tap at %d%% -> %d/%d\n", pct, r, v); return 1; }
-                    render_settings(&tank, sfb, TANK_W, pct, 2);
+                    render_settings(&tank, sfb, TANK_W, pct, 100);
                 }
                 r = SET_TOUCH(SET_BRT_X(100), bry, true);
                 r = SET_TOUCH(SET_BRT_X(50), bry + 4, true);
@@ -1367,12 +1865,41 @@ static int selftest_sleep(void) {
                 if (r != SET_TAP_NONE) { printf("FAIL: BRIGHTNESS label tapped -> %d\n", r); return 1; }
                 printf("selftest-sleep: BRIGHTNESS slider: %d .. 100%% by %d, every step a tap, a drag follows (past both ends), the lift keeps it\n", SET_BRT_MIN, SET_BRT_STEP);
             }
+            /* VOLUME (0.4): the same slider, OFF (0) .. 100 %, the knob at the left
+               end the way to mute; a 0.3.x level reads as the percent that
+               sounds the same (QUIET was -12 dB: 50 %, the gain the square) */
+            {
+                const int voy = SET_ROW2_Y + 10;
+                for (int pct = 0; pct <= 100; pct += SET_VOL_STEP) {
+                    r = SET_TOUCH(SET_VOL_X(pct), voy, true);
+                    if (r != SET_TAP_VOLUME_LIVE || v != pct) { printf("FAIL: VOLUME press at %d%% -> %d/%d\n", pct, r, v); return 1; }
+                    r = SET_TOUCH(SET_VOL_X(pct), voy, false);
+                    if (r != SET_TAP_VOLUME || v != pct) { printf("FAIL: VOLUME tap at %d%% -> %d/%d\n", pct, r, v); return 1; }
+                    render_settings(&tank, sfb, TANK_W, 60, pct);
+                }
+                r = SET_TOUCH(SET_VOL_X(100), voy, true);
+                r = SET_TOUCH(SET_VOL_X(30), voy - 6, true);
+                if (r != SET_TAP_VOLUME_LIVE || v != 30) { printf("FAIL: VOLUME drag to 30%% -> %d/%d\n", r, v); return 1; }
+                r = SET_TOUCH(SET_VOL_X(30) + 1, voy - 6, true);
+                if (r != SET_TAP_NONE) { printf("FAIL: VOLUME reported a step it had already shown (%d)\n", r); return 1; }
+                r = SET_TOUCH(SET_BRT_X0 - 60, SET_ROW1_Y + 10, true);         /* past the left end, wandered up onto BRIGHTNESS: OFF */
+                if (r != SET_TAP_VOLUME_LIVE || v != 0) { printf("FAIL: VOLUME past the left end -> %d/%d\n", r, v); return 1; }
+                r = SET_TOUCH(SET_BRT_X0 - 60, SET_ROW1_Y + 10, false);
+                if (r != SET_TAP_VOLUME || v != 0) { printf("FAIL: VOLUME lift at OFF -> %d/%d\n", r, v); return 1; }
+                SET_TOUCH(SET_VOL_X(0), voy, true); SET_TOUCH(SET_BRT_X1 + 60, voy, true); r = SET_TOUCH(SET_BRT_X1 + 60, voy, false);
+                if (r != SET_TAP_VOLUME || v != 100) { printf("FAIL: VOLUME past the right end -> %d/%d\n", r, v); return 1; }
+                r = SET_TAP_AT(SET_LABEL_X + 10, voy);
+                if (r != SET_TAP_NONE) { printf("FAIL: VOLUME label tapped -> %d\n", r); return 1; }
+                if (audio_volume_from_level(0) != 0 || audio_volume_from_level(1) != 50 || audio_volume_from_level(2) != 100) {
+                    printf("FAIL: the 0.3.x levels read as %d / %d / %d %%\n", audio_volume_from_level(0), audio_volume_from_level(1), audio_volume_from_level(2)); return 1; }
+                printf("selftest-sleep: VOLUME slider: OFF .. 100%% by %d, every step a tap, a drag follows (past both ends, OFF at the left), OFF / QUIET / NORMAL read as 0 / 50 / 100%%\n", SET_VOL_STEP);
+            }
             if (tank.light_idle_s != LIGHT_IDLE_S || tank.light_auto) { printf("FAIL: light settings not at the default (%d s, auto %d)\n", tank.light_idle_s, tank.light_auto); return 1; }
             r = SET_TAP_AT(SETP_PREV_X, light_y);                             /* LIGHTS OUT: already at the first choice, the double-tap */
             if (r != SET_TAP_NONE || tank.light_auto || tank_light_choice(&tank) != 0) { printf("FAIL: back from the first LIGHTS OUT choice -> %d, auto %d\n", r, tank.light_auto); return 1; }
             for (int i = 0; i < 30 * 60; i++) tank_tick(&tank, 1.0f / 60.0f, advisor_rules);
             if (tank.night) { printf("FAIL: lights went out in MANUAL\n"); return 1; }
-            render_settings(&tank, sfb, TANK_W, 60, 2);
+            render_settings(&tank, sfb, TANK_W, 60, 100);
             /* in MANUAL a double-tap on the glass flips the light, and the flip rides in the save */
             notice_sync(&tank);
             tank_touch_tap(&tank, 200, 200); tank_touch_tap(&tank, 200, 200);
@@ -1412,7 +1939,7 @@ static int selftest_sleep(void) {
                   if (r != SET_TAP_IDLE || tank.light_idle_s != want[k]) { printf("FAIL: LIGHTS OUT choice %d -> %d, %d s (want %d)\n", k + 3, r, tank.light_idle_s, want[k]); return 1; } } }
             r = SET_TAP_AT(SETP_NEXT_X, light_y);                             /* the end of the list holds */
             if (r != SET_TAP_NONE || tank.light_idle_s != 1800) { printf("FAIL: past the last LIGHTS OUT choice -> %d, %d s\n", r, tank.light_idle_s); return 1; }
-            render_settings(&tank, sfb, TANK_W, 60, 2);
+            render_settings(&tank, sfb, TANK_W, 60, 100);
             for (int k = 0; k < 5; k++) r = SET_TAP_AT(SETP_PREV_X, light_y);  /* back to 30 SEC */
             if (r != SET_TAP_IDLE || tank.light_idle_s != 30) { printf("FAIL: back five choices -> %d, %d s\n", r, tank.light_idle_s); return 1; }
             tank_handled(&tank);
@@ -1436,7 +1963,7 @@ static int selftest_sleep(void) {
                 r = SET_TAP_AT(SETP_SEG_X(0), feed_y);
                 if (r != SET_TAP_FEED || v != 1 || tank.autofeed_off) { printf("FAIL: AUTO FEED ON -> %d/%d\n", r, v); return 1; }
                 r = SET_TAP_AT(SETP_SEG_X(1), feed_y);                               /* OFF, for the save below */
-                render_settings(&tank, sfb, TANK_W, 60, 2);
+                render_settings(&tank, sfb, TANK_W, 60, 100);
             }
 #if TANK_WORN
             /* SCREEN (the watch, 2026-10-02): NORMAL by default, the toggle
@@ -1449,7 +1976,7 @@ static int selftest_sleep(void) {
                 r = SET_TAP_AT(SETP_SEG_X(0), scr_y);                                /* NORMAL */
                 if (r != SET_TAP_SCREEN || v != 0 || tank_screen_turned(&tank)) { printf("FAIL: SCREEN NORMAL -> %d/%d\n", r, v); return 1; }
                 r = SET_TAP_AT(SETP_SEG_X(1), scr_y);
-                render_settings(&tank, sfb, TANK_W, 60, 2);
+                render_settings(&tank, sfb, TANK_W, 60, 100);
                 progression_save(&tank); tank_init(&tank, 8); progression_boot(&tank);
                 if (!tank_screen_turned(&tank)) { printf("FAIL: SCREEN TURNED did not survive the save\n"); return 1; }
                 tank_screen_set(&tank, false);
@@ -1467,7 +1994,7 @@ static int selftest_sleep(void) {
                 r = SET_TAP_AT(SETP_SEG_X(0), rot_y);                                /* locked, while turned over */
                 if (r != SET_TAP_ROTATE || v != 1 || !tank.orient_lock) { printf("FAIL: ROTATION lock -> %d/%d\n", r, v); return 1; }
                 if (tank_orient(&tank, 0) != 2 || tank_orient(&tank, 2) != 2) { printf("FAIL: a locked picture turned with the tank\n"); return 1; }
-                render_settings(&tank, sfb, TANK_W, 60, 2);
+                render_settings(&tank, sfb, TANK_W, 60, 100);
                 progression_save(&tank); tank_init(&tank, 8); progression_boot(&tank);
                 if (!tank.orient_lock || tank_orient(&tank, 0) != 2) { printf("FAIL: the locked way up did not survive the save\n"); return 1; }
                 r = SET_TAP_AT(SET_ROT_WORD_X + 20, rot_y);                          /* its word is the button too: unlocked */
@@ -1563,6 +2090,140 @@ static int selftest_sleep(void) {
     return night_shift_check();
 }
 
+/* --selftest-genes (0.4): heredity. 20000 fry of one pair (each added, read,
+ * sold back): a fry's copies are one from each parent - that parent's shown
+ * copy or its carried one - shown on a coin; GENE_MUTATION of them show, in
+ * one gene, a value neither parent shows; a fry shows a parent's secret in
+ * GENE_PASS_CARRIED of its genes. Founders carry rolled secrets; the genes
+ * draw on their own stream, so the tank's rng moves exactly as before. */
+static int selftest_genes(void) {
+    #define GFAIL(...) do { printf("FAIL: "); printf(__VA_ARGS__); printf("\n"); return 1; } while (0)
+    /* founders: secrets rolled, not copies of what they show */
+    int differ = 0;
+    for (int seed = 1; seed <= 40; seed++) {
+        tank_init(&tank, (uint32_t)seed); tank_new_population(&tank);
+        for (int i = 0; i < 2; i++) for (int g = 0; g < GENE_N; g++) {
+            if (tank.fish[i].carried[g] >= tank_gene_values(g)) GFAIL("founder carries %d for %s", tank.fish[i].carried[g], GENE_NAMES[g]);
+            differ += tank.fish[i].carried[g] != tank_gene(&tank.fish[i], g);
+        }
+        if (tank.fish[0].shape || tank.fish[0].fins || tank.fish[0].pattern) GFAIL("a founder is not CLASSIC");
+    }
+    if (differ < 200) GFAIL("founders' secrets: only %d of 400 differ from what they show", differ);
+    /* motion feel (0.4): the form scales the turn rate; a classic is exactly 1 */
+    { fish_t m; memset(&m, 0, sizeof m);
+      if (tank_form_turn(&m) != 1.0f) GFAIL("a classic fish's turn factor is %f", tank_form_turn(&m));
+      m.shape = SHAPE_SLENDER; m.fins = FINS_VEIL;
+      if (fabsf(tank_form_turn(&m) - TURN_SLENDER * TURN_VEIL) > 1e-6f) GFAIL("slender veil turns at %f", tank_form_turn(&m));
+      m.shape = SHAPE_BULBOUS; m.fins = FINS_SAIL;
+      if (tank_form_turn(&m) != TURN_BULBOUS) GFAIL("bulbous sail turns at %f", tank_form_turn(&m)); }
+    /* identity (0.4, the tank link's IDs): never 0, never shared, a fry knows
+       its parents by ID and keeps knowing after one is sold; minting IDs
+       never moves the tank's rng */
+    { tank_init(&tank, 11); tank_new_population(&tank); tank_ensure_ids(&tank);
+      if (!tank.uid || !tank.fish[0].uid || !tank.fish[1].uid || tank.fish[0].uid == tank.fish[1].uid) GFAIL("founders' IDs %08x/%08x (tank %08x)", tank.fish[0].uid, tank.fish[1].uid, tank.uid);
+      tank_t probe; tank_init(&probe, 11); tank_new_population(&probe);
+      if (tank.rng != probe.rng) GFAIL("IDs moved the tank's rng");
+      int s = tank_add_fish(&tank, 0, 1); const fish_t *c = &tank.fish[s];
+      if (c->parent_uid[0] != tank.fish[c->parent_a].uid || c->parent_uid[1] != tank.fish[c->parent_b].uid) GFAIL("a fry's parents by ID");
+      uint32_t mom = c->parent_uid[0], kid = c->uid;
+      tank_remove_fish(&tank, c->parent_a);                    /* a parent sold: the fry moves down a slot, its IDs with it */
+      const fish_t *k = &tank.fish[s - 1];
+      if (k->uid != kid || k->parent_uid[0] != mom) GFAIL("the sale lost the fry's IDs (%08x/%08x)", k->uid, k->parent_uid[0]); }
+    /* a pre-0.4 save: the secrets and IDs made up at its load are saved at the
+       next window (30 s), so a reboot after that finds the same ones */
+    { const char *sav = "/tmp/pocket-tank-selftest-genes.sav";
+      setenv("POCKET_TANK_SAVE", sav, 1);
+      FILE *in = fopen("testdata/saves/2026-10-02-1688-urchin.sav", "rb"); if (!in) in = fopen("sim/testdata/saves/2026-10-02-1688-urchin.sav", "rb");
+      if (!in) GFAIL("no 1688 fixture");
+      static uint8_t buf[4096]; size_t len = fread(buf, 1, sizeof buf, in); fclose(in);
+      setenv("POCKET_TANK_SAVE", "/tmp/pocket-tank-selftest-genes-scratch.sav", 1);
+      progression_save(&tank);                         /* the save clock back to 0, as a freshly booted device's */
+      remove("/tmp/pocket-tank-selftest-genes-scratch.sav");
+      setenv("POCKET_TANK_SAVE", sav, 1);
+      FILE *out = fopen(sav, "wb"); fwrite(buf, 1, len, out); fclose(out);
+      tank_init(&tank, 21); progression_wake(&tank, 0);
+      if (!progression_dirty()) GFAIL("a pre-0.4 load made up IDs and secrets but did not ask for a save");
+      uint32_t id0 = tank.fish[0].uid, tid = tank.uid; uint8_t sec[GENE_N]; memcpy(sec, tank.fish[0].carried, GENE_N);
+      for (int k = 0; k < 31 * 10; k++) progression_tick(&tank, 0.1f);       /* past SAVE_MIN_GAP_S, short of the heartbeat */
+      tank_init(&tank, 22); progression_wake(&tank, 0);                       /* a reboot */
+      if (tank.fish[0].uid != id0 || tank.uid != tid || memcmp(sec, tank.fish[0].carried, GENE_N))
+          GFAIL("a pre-0.4 tank's made-up IDs / secrets were not saved within the window (%08x vs %08x)", tank.fish[0].uid, id0);
+      remove(sav); }
+    /* the tank's own stream is untouched by heredity: the same seed, the same
+       draws after a birth, whatever the genes are */
+    { uint32_t r[2];
+      for (int k = 0; k < 2; k++) {
+          tank_init(&tank, 77); tank_new_population(&tank);
+          if (k) { tank.gene_rng ^= 0xdeadbeef; tank_set_gene(&tank, 0, GENE_SHAPE, SHAPE_BULBOUS); tank.fish[1].carried[GENE_FINS] = FINS_SAIL; }
+          tank_add_fish(&tank, 0, 1); r[k] = tank.rng;
+      }
+      if (r[0] != r[1]) GFAIL("the genes moved the tank's rng (%08x vs %08x)", r[0], r[1]); }
+    /* the badge (0.4): a mutated fry earns the tank its "first mutation" on the next tick */
+    { setenv("POCKET_TANK_SAVE", "/tmp/pocket-tank-selftest-genes.sav", 1);   /* never the real save */
+      remove("/tmp/pocket-tank-selftest-genes.sav");
+      tank_init(&tank, 3); progression_boot(&tank);   /* no save: a new pair (the tick needs a booted progression) */
+      progression_tick(&tank, 0.1f);
+      if (tank.tank_ms_bits & TMS_FIRST_MUTATION) GFAIL("the mutation badge with no mutation");
+      tank.fish[1].mutated = GENE_FINS + 1; progression_tick(&tank, 0.1f);
+      if (!(tank.tank_ms_bits & TMS_FIRST_MUTATION)) GFAIL("a mutated fry did not earn the badge");
+      remove("/tmp/pocket-tank-selftest-genes.sav"); }
+    /* the director's `arrive mutant` (0.4): the flag makes the next fry a
+       mutation whatever the odds, and is spent on it */
+    { tank_init(&tank, 5); tank_new_population(&tank);
+      for (int k = 0; k < 20; k++) {
+          tank.mutate_next = true;
+          int s = tank_add_fish(&tank, 0, 1);
+          if (s < 0 || !tank.fish[s].mutated || tank.mutate_next) GFAIL("a forced mutation (%d) left mutated %d, flag %d", k, s < 0 ? -1 : tank.fish[s].mutated, tank.mutate_next);
+          tank_remove_fish(&tank, s);
+      } }
+    /* the pair: A shows CLASSIC and carries SLENDER, B shows CLASSIC and carries
+       BULBOUS - a non-classic fry shape is a secret surfacing (or a mutation) */
+    tank_init(&tank, 2026); tank_new_population(&tank);
+    fish_t *A = &tank.fish[0], *B = &tank.fish[1];
+    tank_set_gene(&tank, 0, GENE_SHAPE, SHAPE_CLASSIC); A->carried[GENE_SHAPE] = SHAPE_SLENDER;
+    tank_set_gene(&tank, 1, GENE_SHAPE, SHAPE_CLASSIC); B->carried[GENE_SHAPE] = SHAPE_BULBOUS;
+    tank_set_gene(&tank, 0, GENE_FINS, FINS_VEIL); A->carried[GENE_FINS] = FINS_VEIL;
+    tank_set_gene(&tank, 1, GENE_FINS, FINS_SAIL); B->carried[GENE_FINS] = FINS_SAIL;
+    tank_set_gene(&tank, 0, GENE_BODY, 0); tank_set_gene(&tank, 1, GENE_BODY, 3);
+    const int N = 20000;
+    int mut = 0, mut_g[GENE_N] = { 0 }, secret = 0, shape_new = 0, fins_b = 0;
+    for (int k = 0; k < N; k++) {
+        int s = tank_add_fish(&tank, 0, 1);
+        if (s < 0) GFAIL("no room for a fry");
+        const fish_t *f = &tank.fish[s], *pa = &tank.fish[f->parent_a], *pb = &tank.fish[f->parent_b];
+        if (f->mutated) {
+            int g = f->mutated - 1, v = tank_gene(f, g);
+            mut++; mut_g[g]++;
+            if (v == tank_gene(pa, g) || v == tank_gene(pb, g)) GFAIL("a mutation of %s shows %d, which a parent shows", GENE_NAMES[g], v);
+        }
+        for (int g = 0; g < GENE_N; g++) {
+            if (f->mutated == g + 1) continue;
+            const fish_t *from = (f->from_b >> g & 1) ? pb : pa, *other = (f->from_b >> g & 1) ? pa : pb;
+            int v = tank_gene(f, g), want = (f->from_carried >> g & 1) ? from->carried[g] : tank_gene(from, g);
+            if (g == GENE_ACCENT && v != want && LOOK_ACCENT[want] == f->color) continue;   /* markings kept off a matching body */
+            if (v != want) GFAIL("fry shows %d for %s, its copy from %s is %d", v, GENE_NAMES[g], from->name, want);
+            if (f->carried[g] != other->carried[g] && f->carried[g] != tank_gene(other, g))
+                GFAIL("fry carries %d for %s: neither of %s's copies", f->carried[g], GENE_NAMES[g], other->name);
+        }
+        for (int g = 0; g < GENE_N; g++) secret += f->from_carried >> g & 1;
+        shape_new += f->shape != SHAPE_CLASSIC;
+        fins_b += f->fins == FINS_SAIL;
+        if (!tank_remove_fish(&tank, s)) GFAIL("could not sell the fry back");
+    }
+    float pm = (float)mut / N, ps = (float)shape_new / N, pc = (float)secret / (N * GENE_N), pf = (float)fins_b / N;
+    printf("selftest-genes: %d fry - mutations %.2f%% (shape %d fins %d pattern %d body %d markings %d), "
+           "a parent's secret shown %.1f%% of genes, non-classic shape %.1f%%, B's sail %.1f%%\n",
+           N, 100 * pm, mut_g[0], mut_g[1], mut_g[2], mut_g[3], mut_g[4], 100 * pc, 100 * ps, 100 * pf);
+    if (fabsf(pm - GENE_MUTATION) > 0.006f) GFAIL("mutation rate %.3f, want %.3f", pm, GENE_MUTATION);
+    for (int g = 0; g < GENE_N; g++) if (mut_g[g] < mut / GENE_N / 2) GFAIL("%s barely mutates (%d of %d)", GENE_NAMES[g], mut_g[g], mut);
+    if (ps < 0.235f || ps > 0.28f) GFAIL("non-classic shapes %.3f, want ~0.26 (a secret surfacing 1 in 4, + shape mutations)", ps);
+    if (pf < 0.47f || pf > 0.53f) GFAIL("B's fins in %.3f of fry, want ~0.5", pf);
+    if (pc < 0.235f || pc > 0.265f) GFAIL("secrets shown %.3f of genes, want ~0.25 (the copy shown is a carried one 1 time in 4)", pc);
+    printf("selftest-genes ok\n");
+    return 0;
+    #undef GFAIL
+}
+
 /* --selftest-saves (2026-09-29): the update promise - a browser update never
  * loses the tank. Every save in testdata/saves (frozen: the board's, the
  * sim's, one with every tail set; see the README there) loads, whole and cut
@@ -1572,8 +2233,10 @@ static int selftest_sleep(void) {
  * tail reading as the defaults - and again after a save and a reload. */
 #ifndef _MSC_VER
 #include <dirent.h>
-static const size_t SAVE_CUTS[] = { 448, 1112, 1304, 1408, 1432, 1440, 1456, 1480, 1608, 1616, 1624, 1640, 1656, 1664, 1672, 1680, 1688, 1880, 1896, 1904, 1912, 1920, 1928, 1936, 1944, 1952 };
-#define SAVE_NOW 1952                    /* today's sizeof(save_t): the world it was laid out in, 0.3.9.3 (1940..1951; the crab's saved wait at 1936, the crab at 1924, the LOCK at 1920, the volcano's tail at 1912, the shelf at 1908) */
+static const size_t SAVE_CUTS[] = { 448, 1112, 1304, 1408, 1432, 1440, 1456, 1480, 1608, 1616, 1624, 1640, 1656, 1664, 1672, 1680, 1688, 1760, 1840, 1864, 1880, 1896, 1904, 1912, 1920, 1928, 1936, 1944, 1952, 1960 };
+#define SAVE_NOW 1960                    /* today's sizeof(save_t): the seahorse's whole seconds, 0.4 (1952..1955); the world it was laid out in, 0.3.9.3 (1940..1951; the crab's saved wait at 1936, the crab at 1924, the LOCK at 1920, the volcano's tail at 1912, the shelf at 1908) */
+#define SAVE_FIELDS 1956                 /* where today's fields end and a newer build's tail begins (save_t.newer_tail) */
+#define SAVE_032 1688                    /* 0.3.2's save: an older build's head */
 static uint32_t sv_u32(const uint8_t *e, size_t off) { uint32_t v; memcpy(&v, e + off, 4); return v; }
 static float    sv_f32(const uint8_t *e, size_t off) { float v; memcpy(&v, e + off, 4); return v; }
 static int name_cmp(const void *a, const void *b) { return strcmp(*(char *const *)a, *(char *const *)b); }
@@ -1600,7 +2263,22 @@ static int saves_check(const char *what, const uint8_t *e, float bubble_default)
         if (sv_u32(e, 1356 + 4 * i) && f->color != sv_u32(e, 1356 + 4 * i)) SV_FAIL("fish %d color %06x", i, f->color);
         int pa = e[1437 + 2 * i] - 1; if (pa >= n) pa = -1;
         if (f->parent_a != pa) SV_FAIL("fish %d parent %d, want %d", i, f->parent_a, pa);
+        const uint8_t *gs = e + 1688 + 12 * i;          /* the genes tail (0.4) */
+        if (gs[0]) {
+            if (f->shape != gs[1] || f->fins != gs[2] || f->pattern != gs[3]) SV_FAIL("fish %d form %d/%d/%d, want %d/%d/%d", i, f->shape, f->fins, f->pattern, gs[1], gs[2], gs[3]);
+            for (int g = 0; g < GENE_N; g++) if (f->carried[g] != gs[4 + g]) SV_FAIL("fish %d carries %d for %s, want %d", i, f->carried[g], GENE_NAMES[g], gs[4 + g]);
+            if (f->mutated != gs[9] || f->from_b != gs[10] || f->from_carried != gs[11]) SV_FAIL("fish %d mutated %d from %02x/%02x", i, f->mutated, f->from_b, f->from_carried);
+        } else if (f->shape || f->fins || f->pattern || f->mutated) SV_FAIL("fish %d from before 0.4 is not CLASSIC (%d/%d/%d)", i, f->shape, f->fins, f->pattern);
+        for (int g = 0; g < GENE_N; g++) if (f->carried[g] >= tank_gene_values(g)) SV_FAIL("fish %d carries %d for %s", i, f->carried[g], GENE_NAMES[g]);
+        uint32_t uid = sv_u32(e, 1764 + 4 * i);          /* the identity tail (0.4): kept as saved, or a fresh one */
+        if (!f->uid || (uid && f->uid != uid)) SV_FAIL("fish %d ID %08x, the file says %08x", i, f->uid, uid);
+        if (uid && (f->parent_uid[0] != sv_u32(e, 1788 + 8 * i) || f->parent_uid[1] != sv_u32(e, 1792 + 8 * i)))
+            SV_FAIL("fish %d parents %08x/%08x", i, f->parent_uid[0], f->parent_uid[1]);
+        if (!uid && f->parent_a >= 0 && f->parent_a < n && f->parent_uid[0] != tank.fish[f->parent_a].uid)
+            SV_FAIL("fish %d did not learn its parent's ID from its slot", i);
+        for (int j = 0; j < i; j++) if (tank.fish[j].uid == f->uid) SV_FAIL("fish %d and %d share an ID", j, i);
     }
+    if (!tank.uid || (sv_u32(e, 1760) && tank.uid != sv_u32(e, 1760))) SV_FAIL("tank ID %08x", tank.uid);
     int nb = e[1436] && e[1436] <= n ? e[1436] - 1 : -1;
     if (progression_newborn() != nb) SV_FAIL("newborn %d, want %d", progression_newborn(), nb);
     if (tank.player_feedings != (int32_t)sv_u32(e, 28) || tank.tank_ms_bits != sv_u32(e, 36) ||
@@ -1673,6 +2351,13 @@ static int saves_check(const char *what, const uint8_t *e, float bubble_default)
     #undef SV_FAIL
 }
 
+/* the save file as it is now, into buf; its length (-1 = none) */
+static long saves_read(uint8_t *buf, size_t max) {
+    FILE *f = fopen(getenv("POCKET_TANK_SAVE"), "rb"); if (!f) return -1;
+    size_t n = fread(buf, 1, max, f); fseek(f, 0, SEEK_END); long l = ftell(f); fclose(f);
+    return n == (size_t)l ? l : -1;
+}
+
 /* write len bytes as the save, boot it, check it; then save, reload, check again */
 static int saves_load(const char *what, const uint8_t *bytes, size_t len, const uint8_t *e) {
     const char *sav = getenv("POCKET_TANK_SAVE");
@@ -1681,10 +2366,20 @@ static int saves_load(const char *what, const uint8_t *bytes, size_t len, const 
     tank_init(&tank, 8); float bx0 = tank.bubble_x;
     progression_wake(&tank, 0);                          /* no clock: a plain restore, nothing lived through */
     if (saves_check(what, e, bx0)) return 1;
+    uint8_t carried[N_FISH_MAX][GENE_N];                 /* a pre-0.4 fish's rolled secrets must survive the save */
+    uint32_t uids[N_FISH_MAX][3], tank_uid = tank.uid;   /* ... and the IDs it was handed */
+    for (int i = 0; i < tank.n_fish; i++) { memcpy(carried[i], tank.fish[i].carried, GENE_N);
+        uids[i][0] = tank.fish[i].uid; uids[i][1] = tank.fish[i].parent_uid[0]; uids[i][2] = tank.fish[i].parent_uid[1]; }
     if (progression_loaded_release() != sv_u32(e, 1664)) { printf("FAIL: %s: the release stamp read %06x, the file says %06x\n", what, progression_loaded_release(), sv_u32(e, 1664)); return 1; }
     progression_save(&tank);
     tank_init(&tank, 9); progression_wake(&tank, 0);
     char again[300]; snprintf(again, sizeof again, "%s, saved and reloaded", what);
+    for (int i = 0; i < tank.n_fish; i++) {
+        if (memcmp(carried[i], tank.fish[i].carried, GENE_N)) { printf("FAIL: %s: fish %d's carried genes changed\n", again, i); return 1; }
+        if (uids[i][0] != tank.fish[i].uid || uids[i][1] != tank.fish[i].parent_uid[0] || uids[i][2] != tank.fish[i].parent_uid[1])
+            { printf("FAIL: %s: fish %d's IDs changed\n", again, i); return 1; }
+    }
+    if (tank.uid != tank_uid) { printf("FAIL: %s: the tank's ID changed\n", again); return 1; }
     if (progression_loaded_release() != PT_RELEASE_NUM) { printf("FAIL: %s: re-saved, the stamp is %06x, not this release's %06x\n", again, progression_loaded_release(), PT_RELEASE_NUM); return 1; }
     if (saves_check(again, e, bx0)) return 1;
     /* every fish keeps the stage it was saved at (0.3.5): these tanks grew up
@@ -1745,16 +2440,70 @@ static int selftest_saves(void) {
                names[k], tank.n_fish, who, (int)tank.sd_balance, cuts);
     }
     /* a rollback: a NEWER build's save (today's layout + 200 bytes of tail
-     * this build never heard of) loads its head, and the next save writes
-     * today's length. Before 2026-09-29 it started a fresh tank over it. */
+     * this build never heard of) loads its head, and every save writes the
+     * tail back as it found it, so the update back up still has it. Before
+     * 2026-09-29 a rollback started a fresh tank over it; until 2026-10-05
+     * it dropped the tail (0.4 -> 0.3.2 -> 0.4 lost every fish's form and ID). */
     {
         memset(e, 0, sizeof e); memcpy(e, cur, SAVE_NOW);
         memcpy(cut, cur, SAVE_NOW); memset(cut + SAVE_NOW, 0xa5, 200);
         if (saves_load("a newer build's save, 200 bytes longer (a rollback)", cut, SAVE_NOW + 200, e)) return 1;
-        FILE *f = fopen(getenv("POCKET_TANK_SAVE"), "rb"); fseek(f, 0, SEEK_END); long l = ftell(f); fclose(f);
-        if (l != SAVE_NOW) { printf("FAIL: after a rollback the save is %ld bytes, want %d\n", l, SAVE_NOW); return 1; }
+        long l = saves_read(file, sizeof file);
+        if (l != SAVE_NOW + 200) { printf("FAIL: after a rollback the save is %ld bytes, want the newer build's %d\n", l, SAVE_NOW + 200); return 1; }
+        for (int k = SAVE_NOW; k < SAVE_NOW + 200; k++)
+            if (file[k] != 0xa5) { printf("FAIL: after a rollback byte %d of the newer tail is %02x, want a5\n", k, file[k]); return 1; }
         loads++;
-        printf("selftest-saves: a rollback: a newer build's %d-byte save loads its first %d and saves back at %d\n", SAVE_NOW + 200, SAVE_NOW, SAVE_NOW);
+        /* a newer field in today's padding (bytes SAVE_FIELDS..SAVE_NOW): same length, kept too
+           (while there is padding: the tank link's byte filled it, 2026-10-05) */
+        if (SAVE_NOW > SAVE_FIELDS) {
+            memcpy(cut, cur, SAVE_NOW); memset(cut + SAVE_FIELDS, 0x5a, SAVE_NOW - SAVE_FIELDS);
+            if (saves_load("a newer build's field in today's padding", cut, SAVE_NOW, e)) return 1;
+            if ((l = saves_read(file, sizeof file)) != SAVE_NOW || file[SAVE_FIELDS] != 0x5a || file[SAVE_NOW - 1] != 0x5a)
+                { printf("FAIL: a newer field in the padding was not kept (%ld bytes, %02x)\n", l, file[SAVE_FIELDS]); return 1; }
+            loads++;
+        }
+        /* our own save keeps no tail: today's length, zero padding */
+        memcpy(cut, cur, SAVE_NOW);
+        if (saves_load("today's own save", cut, SAVE_NOW, e)) return 1;
+        if ((l = saves_read(file, sizeof file)) != SAVE_NOW || (SAVE_NOW > SAVE_FIELDS && file[SAVE_FIELDS])) { printf("FAIL: today's save came back %ld bytes\n", l); return 1; }
+        /* a reset after a rollback: the new tank carries no old tail */
+        memcpy(cut, cur, SAVE_NOW); memset(cut + SAVE_NOW, 0xa5, 200);
+        if (saves_load("a rollback, then a reset", cut, SAVE_NOW + 200, e)) return 1;
+        progression_reset(&tank, 11);
+        if ((l = saves_read(file, sizeof file)) != SAVE_NOW) { printf("FAIL: a reset after a rollback saved %ld bytes, want %d\n", l, SAVE_NOW); return 1; }
+        printf("selftest-saves: a rollback: a newer build's %d-byte save loads its first %d and saves back whole; a newer field in the padding stays; a reset drops it\n", SAVE_NOW + 200, SAVE_NOW);
+    }
+    /* the way back up: an OLDER build kept today's tail (genes, IDs, prints)
+     * but wrote its own head under it - it sold a fish (the rest moved down a
+     * slot) and bred one the tail never saw. Every fish must get its OWN
+     * form and ID back (by print, not slot); the new one a fresh ID. */
+    {
+        FILE *f = fopen(getenv("POCKET_TANK_SAVE"), "wb"); fwrite(cur, 1, SAVE_NOW, f); fclose(f);
+        tank_init(&tank, 8); progression_wake(&tank, 0); progression_save(&tank);
+        static uint8_t a[4096]; if (saves_read(a, sizeof a) != SAVE_NOW) { printf("FAIL: today's save is not %d bytes\n", SAVE_NOW); return 1; }
+        int n0 = tank.n_fish; char nm[N_FISH_MAX][FISH_NAME_MAX + 1]; uint32_t uid[N_FISH_MAX]; int form[N_FISH_MAX];
+        for (int i = 0; i < n0; i++) { snprintf(nm[i], sizeof nm[i], "%s", tank.fish[i].name); uid[i] = tank.fish[i].uid;
+            form[i] = tank.fish[i].shape * 100 + tank.fish[i].fins * 10 + tank.fish[i].pattern; }
+        tank_remove_fish(&tank, 1);                                    /* sold under the older build */
+        progression_save(&tank);
+        if (saves_read(cut, sizeof cut) != SAVE_NOW) { printf("FAIL: the sold tank's save is not %d bytes\n", SAVE_NOW); return 1; }
+        float other = 0.4321f; memcpy(cut + 40 + 68 * 3 + 20, &other, 4);   /* slot 3: another fish now (bold0 is for life) */
+        memcpy(cut + SAVE_032, a + SAVE_032, SAVE_NOW - SAVE_032);     /* the older build's head, the kept tail */
+        f = fopen(getenv("POCKET_TANK_SAVE"), "wb"); fwrite(cut, 1, SAVE_NOW, f); fclose(f);
+        tank_init(&tank, 9); progression_wake(&tank, 0);
+        if (tank.n_fish != n0 - 1) { printf("FAIL: the way back up: %d fish, want %d\n", tank.n_fish, n0 - 1); return 1; }
+        for (int i = 0; i < tank.n_fish; i++) {
+            const fish_t *g = &tank.fish[i]; int k = 0;
+            while (k < n0 && strcmp(nm[k], g->name)) k++;
+            if (k == n0) { printf("FAIL: the way back up: who is %s?\n", g->name); return 1; }
+            for (int m = 0; m < n0; m++) if (g->uid == uid[m] && (i == 3 || m != k))
+                { printf("FAIL: the way back up: %s has %s's ID %08x\n", g->name, nm[m], (unsigned)uid[m]); return 1; }
+            if (i == 3) continue;                                      /* the new one: a fresh ID, its own genes */
+            if (g->uid != uid[k] || g->shape * 100 + g->fins * 10 + g->pattern != form[k])
+                { printf("FAIL: the way back up: %s (slot %d) has ID %08x form %d, want its own %08x form %d\n", g->name, i, (unsigned)g->uid, g->shape * 100 + g->fins * 10 + g->pattern, (unsigned)uid[k], form[k]); return 1; }
+        }
+        loads++;
+        printf("selftest-saves: the way back up: an older head over the kept tail (a fish sold, one new) - each fish gets its own form and ID back\n");
     }
     /* not ours: shorter than the smallest PTK2, or another magic -> a fresh tank (setup owed) */
     {
@@ -1765,6 +2514,24 @@ static int selftest_saves(void) {
         f = fopen(getenv("POCKET_TANK_SAVE"), "wb"); fwrite(cut, 1, SAVE_NOW, f); fclose(f);
         tank_init(&tank, 8); progression_wake(&tank, 0);
         if (!progression_setup_pending() || tank.n_fish != 2) { printf("FAIL: a save with another magic loaded\n"); return 1; }
+    }
+    /* the tank link (0.4): a fish next door when the tank was saved - after the
+       reboot it is away (not drawn), and comes home from bubbles 10 s in */
+    {
+        tank_init(&tank, 21); progression_wake(&tank, 0);
+        if (tank.n_fish < 2) { printf("FAIL: no tank for the away check\n"); return 1; }
+        uint32_t uid = tank.fish[1].uid;
+        tank.fish[1].away = true; progression_save(&tank);
+        tank_init(&tank, 22); progression_wake(&tank, 0);
+        int i = -1; for (int k = 0; k < tank.n_fish; k++) if (tank.fish[k].uid == uid) i = k;
+        if (i < 0 || !tank.fish[i].away || tank.link_restore_at <= 0) { printf("FAIL: a fish next door at the save came back %s\n", i < 0 ? "missing" : "home"); return 1; }
+        for (int n = 0; n < 9 * 30; n++) { tank_tick(&tank, 1 / 30.0f, NULL); tank_link_tick(&tank, NULL); }
+        if (!tank.fish[i].away) { printf("FAIL: the fish next door came home before the host's lease was surely over\n"); return 1; }
+        for (int n = 0; n < 2 * 30; n++) { tank_tick(&tank, 1 / 30.0f, NULL); tank_link_tick(&tank, NULL); }
+        if (tank.fish[i].away || !tank_swims(&tank, i)) { printf("FAIL: the fish next door never came home after the reboot\n"); return 1; }
+        progression_save(&tank); tank_init(&tank, 23); progression_wake(&tank, 0);
+        if (tank.fish[i].away) { printf("FAIL: home again, it was saved as away\n"); return 1; }
+        printf("selftest-saves: a fish next door at the save: away after the reboot, home from bubbles 10 s in, saved home\n");
     }
     remove(getenv("POCKET_TANK_SAVE"));
     for (int k = 0; k < nf; k++) free(names[k]);
@@ -1958,6 +2725,34 @@ static int selftest_update(void) {
       render_settings_touch(&tank, PG_X(SETP_SEG_X(0)), PG_Y(SET_ROW5_Y + 10), true, &v); r = render_settings_touch(&tank, PG_X(SETP_SEG_X(0)), PG_Y(SET_ROW5_Y + 10), false, &v);
       EXPECT(r != SET_TAP_UPDATES && r != SET_TAP_CLOSE, "settings: the last row read as a foot button (%d)", r);
       render_settings_touch(&tank, PG_X(SETP_SEG_X(0)), PG_Y(SET_ROW5_Y + 10), true, &v); render_settings_touch(&tank, PG_X(SETP_SEG_X(0)), PG_Y(SET_ROW5_Y + 10), false, &v);   /* (and back) */
+      /* LINK (0.4, the tank link): the settings button, and link mode's holds */
+      render_settings_touch(&tank, PG_X(SET_LINK_X + SET_LINK_W / 2), PG_Y(SET_LINK_Y + 15), true, &v); r = render_settings_touch(&tank, PG_X(SET_LINK_X + SET_LINK_W / 2), PG_Y(SET_LINK_Y + 15), false, &v);
+      EXPECT(r == SET_TAP_LINK, "settings: the LINK button -> %d", r);
+      { link_view_t lv; memset(&lv, 0, sizeof lv); float lx, ly, dx, dy, wx = TANK_W / 2.0f, wy = TANK_BOT * 0.8f; int got = 0, fired = 0;
+        render_link_leave();
+        render_link_where(LINK_RIGHT, &lx, &ly);
+        for (int i = 0; i < 30; i++) { got = render_link_touch(&lv, lx, ly, true, 0.03f); if (got) { fired++; EXPECT(got == LINK_UI_ARM_RIGHT && i >= 25, "link mode: the right arrow fired %d after %d ms", got, (i + 1) * 30); } }
+        EXPECT(fired == 1, "link mode: a 0.9 s hold on the right arrow asked %d times (want once, at 0.8 s)", fired);
+        EXPECT(render_link_touch(&lv, lx, ly, false, 0.03f) == LINK_UI_NONE, "link mode: the release after a hold did something");
+        lv.edge[LINK_LEFT].state = LV_OPEN; render_link_where(LINK_LEFT, &lx, &ly); fired = 0;
+        for (int i = 0; i < 33; i++) { got = render_link_touch(&lv, lx, ly, true, 0.03f); if (got) { fired++; EXPECT(got == LINK_UI_CLOSE_LEFT && i >= 38, "link mode: an open door closed after %d ms (want 1.2 s)", (i + 1) * 30); } }
+        render_link_touch(&lv, lx, ly, false, 0.03f);
+        EXPECT(fired == 0, "link mode: a 1 s hold closed an open door");
+        for (int i = 0; i < 45 && !fired; i++) if (render_link_touch(&lv, lx, ly, true, 0.03f) == LINK_UI_CLOSE_LEFT) fired = 1;
+        render_link_touch(&lv, lx, ly, false, 0.03f);
+        EXPECT(fired, "link mode: a long hold on an open door did not close it");
+        render_link_where(2, &dx, &dy);
+        render_link_touch(&lv, dx, dy, true, 0.03f); EXPECT(render_link_touch(&lv, dx, dy, false, 0.03f) == LINK_UI_DONE, "link mode: DONE");
+        render_link_where(3, &dx, &dy);                                    /* DISCONNECT: there while a door is open (the left one is) */
+        render_link_touch(&lv, dx, dy, true, 0.03f); EXPECT(render_link_touch(&lv, dx, dy, false, 0.03f) == LINK_UI_DISCONNECT, "link mode: DISCONNECT");
+        { link_view_t shut = lv; shut.edge[LINK_LEFT].state = LV_FREE;
+          render_link_touch(&shut, dx, dy, true, 0.03f); EXPECT(render_link_touch(&shut, dx, dy, false, 0.03f) != LINK_UI_DISCONNECT, "link mode: DISCONNECT with no door open"); }
+        { link_view_t dr = lv; dr.drifting = true; render_link_where(4, &dx, &dy);
+          EXPECT(render_link_drift_hit(&dr, dx, dy) && !render_link_drift_hit(&dr, wx, wy), "the DRIFTED notice: DISCONNECT");
+          dr.drifting = false; EXPECT(!render_link_drift_hit(&dr, dx, dy), "DISCONNECT answered with no notice up"); }
+        for (int i = 0; i < 60; i++) EXPECT(render_link_touch(&lv, wx, wy, true, 0.03f) == LINK_UI_NONE, "link mode: a hold on the water did something");
+        EXPECT(render_link_touch(&lv, wx, wy, false, 0.03f) == LINK_UI_NONE, "link mode: a tap on the water did something");
+        printf("selftest-update: LINK on settings; link mode - an arrow asks at 0.8 s, an open door closes at 1.2 s, DONE, DISCONNECT, the water does nothing; the DRIFTED notice's DISCONNECT\n"); }
       EXPECT(updates_page_tap(PG_X(UPD_CLOSE_X + 40), PG_Y(UPD_CLOSE_Y + 12)) == UPD_TAP_CLOSE, "updates page: CLOSE");
       EXPECT(updates_page_tap(PG_X(UPD_CHECK_X + UPD_CHECK_W / 2), PG_Y(UPD_CHECK_Y + 20)) == UPD_TAP_CHECK, "updates page: CHECK");
       const float fx = PG_X(UPD_FORGET_X + UPD_FORGET_W / 2), fy = PG_Y(UPD_FORGET_Y + 16);
@@ -2576,21 +3371,28 @@ static int selftest_tend(void) {
     printf("selftest-tend: hold dist at 2 s %.0f px, at 8 s %.0f px\n", d_early, d_late);
     if (d_early < 45) { printf("FAIL: fish approached before the 3 s gate\n"); return 1; }
     if (!tank_at_finger(&tank, 0)) { printf("FAIL: settled hold never drew the fish in (%.0f px)\n", d_late); return 1; }   /* (round the finger since 0.3.9.3, not under it) */
-    /* a starving fish ignores the finger */
+    /* a starving fish ignores the finger: its swim with the finger held is the swim it makes without one (the 0.4 merge,
+       2026-11-01: a distance alone failed on the bowl, where its own way to the food happens to pass 28 px from the spot -
+       the same 28 px with no finger at all) */
     f->x = 200; f->y = 200; f->hunger = 9.4f;
     for (int i = 0; i < MAX_FOOD; i++) tank.food[i].alive = false;   /* nothing to chase */
-    for (int step = 1; step <= 60 * 8; step++) {
-        tank_touch_hold(&tank, hx, hy);
+    static tank_t starve_pre; starve_pre = tank;
+    float free_x = 0, free_y = 0;
+    for (int pass = 0; pass < 2; pass++) {
+      if (pass == 1) { free_x = f->x; free_y = f->y; tank = starve_pre; }
+      for (int step = 1; step <= 60 * 8; step++) {
+        if (pass == 1) tank_touch_hold(&tank, hx, hy);
         tank_tick(&tank, 1.0f / 60.0f, advisor_rules);
         f->hunger = 9.4f;
         for (int i = 0; i < MAX_FOOD; i++) tank.food[i].alive = false;
         /* the others parked far from the finger (2026-09-29): a trusting
            friend drawn to it led the starving fish there by follow_friend */
         for (int i = 1; i < tank.n_fish; i++) { tank.fish[i].x = 40; tank.fish[i].y = 60; tank_glass_clamp(&tank.fish[i].x, &tank.fish[i].y, 30); }
+      }
     }
-    float d_hungry = tank_dist(f->x, f->y, hx, hy);
-    printf("selftest-tend: starving fish dist after 8 s hold %.0f px\n", d_hungry);
-    if (d_hungry < 40) { printf("FAIL: a starving fish came to the finger\n"); return 1; }
+    float d_hungry = tank_dist(f->x, f->y, hx, hy), d_free = tank_dist(free_x, free_y, hx, hy), d_off = tank_dist(f->x, f->y, free_x, free_y);
+    printf("selftest-tend: starving fish dist after 8 s hold %.0f px (%.0f px with no finger; the two ends %.1f px apart)\n", d_hungry, d_free, d_off);
+    if (d_hungry < d_free - 10 || (d_hungry < 40 && d_off > 3)) { printf("FAIL: a starving fish came to the finger\n"); return 1; }
     /* the milestone is per fish (2026-09-15): two trusting fish drawn in by
      * ONE hold both earn first hold-approach, and the hold counts once */
     if (tank.n_fish < 2) { printf("FAIL: tend test needs two fish\n"); return 1; }
@@ -2649,12 +3451,27 @@ static uint16_t canvas_buf[TANK_W * TANK_H];
 static uint16_t scene_buf[TANK_W * TANK_H];
 static uint8_t  vig_buf[TANK_W * TANK_H];     /* vignette LUT, as on the device */
 static uint16_t card_buf[RENDER_CARD_W * RENDER_CARD_H];   /* stats card cache, as on the device */
+static uint16_t give_buf[GIFT_CARD_W * GIFT_CARD_H], gift_buf[GIFT_CARD_W * GIFT_CARD_H];   /* the GIVE modal's and the gift card's bakes, as on the device */
 static uint32_t dirty_buf[RENDER_DIRTY_WORDS];
 static lv_obj_t *canvas;
 static uint32_t last_ms;
 static bool llm_available = false;
 static bool llm_active = false;
 static int  selected_fish = -1;      /* click a fish for its stat card */
+/* the live tank's own gestures from the finger, as the boards' touch port has them: a stroke wipes / cuts, a still 0.7 s
+   hold on a piece opens its page (not with a tool in hand, 2026-09-24), a 0.3 s hold calls the fish. None while a page or a
+   prompt has the glass (`page`), nor under a card over the tank - the GIVE modal, a gift offered to us (the 11-02 evening
+   sweep: a hold on the modal's buttons opened a piece's page with SELL, called the fish, a swipe wiped) */
+static void sim_tank_gestures(bool down, int x, int y, int px, int py, uint32_t held_ms, bool page, bool *held_page) {
+    bool modal = page || render_card_over_tank(&tank);
+    if (down && !modal) tank_touch_drag(&tank, (float)x, (float)y);   /* stroke -> wipe/slash */
+    if (down && !modal && !*held_page && tank.tool == TOOL_HAND && held_ms > 700 && abs(x - px) < 24 && abs(y - py) < 24) {
+        int it = tank_decor_hit(&tank, (float)px, (float)py);
+        if (it >= 0) { setup_begin_place(&tank, it); *held_page = true; selected_fish = -1; printf("held on the %s: placement page up (MOVE / DEPTH / SELL)\n", SD_ITEMS[it].name); }
+    }
+    if (!down) *held_page = false;
+    if (down && !modal && !*held_page && held_ms > 300 && abs(y - py) < 30) tank_touch_hold(&tank, (float)x, (float)y);
+}
 static bool ui_visible = true;       /* U toggles all overlays */
 static bool milestones_view = false; /* M toggles the milestones screen */
 static bool confirm_view = false;    /* X: the reset prompt (YES wipes the save) */
@@ -2855,6 +3672,12 @@ static void frame_cb(lv_timer_t *timer) {
         render_sd_toast(&tank, canvas_buf, TANK_W);      /* "+N" sand dollars, as they are earned */
         if (ui_visible) {
             draw_brain_dot();
+            {   static uint8_t gen; static bool seen;    /* a fish left: the card follows its fish (as the boards' touch port) */
+                if (seen && tank.roster_gen != gen && selected_fish >= 0 && selected_fish < N_FISH_MAX) {
+                    int r = tank.removed_slot;
+                    if ((uint8_t)(gen + 1) != tank.roster_gen || r < 0 || selected_fish == r) selected_fish = -1; else if (selected_fish > r) selected_fish--;
+                }
+                gen = tank.roster_gen; seen = true; }
             if (selected_fish >= 0)
                 render_stats_card(&tank, selected_fish, canvas_buf, TANK_W);
             if (!battery_view) render_tool_chip(&tank, selected_fish, canvas_buf, TANK_W);   /* a tool in hand: the chip (2026-10-01) */
@@ -2866,6 +3689,7 @@ static void frame_cb(lv_timer_t *timer) {
         } else if (sim_pill_up()) render_battery(canvas_buf, TANK_W, sim_bat_gauge() / 100.0f, sim_bat_state, tank.clock);
         const notice_t *nt = notice_current();
         if (nt) render_notice(&tank, canvas_buf, TANK_W, nt->kind, nt->fish, nt->bit, 1.0f - nt->age / NOTICE_UP_S);
+        render_give_modal(&tank, canvas_buf, TANK_W);   /* the GIVE modal (0.4), as the boards draw it */
     }
     if (setup_active()) render_setup(&tank, canvas_buf, TANK_W, tank.clock);
     if (confirm_view) render_confirm_reset(canvas_buf, TANK_W, 1.0f - (SDL_GetTicks() - confirm_ms) / (float)CONFIRM_MS);
@@ -3154,13 +3978,19 @@ static uint16_t *hero_stage(void) {               /* the hero tank staged and dr
     tank_decor_set(&tank, 4, 92, DECOR_Z_FRONT);                         /* the reef cluster in bloom, left */
     tank_cluster_set_scheme(&tank, 0); tank.cluster_growth = CLUSTER_FULL;
     for (int i = 0; i < 12 * 60; i++) tank_tick(&tank, 1.0f / 60.0f, advisor_rules);   /* bubbles up the column */
-    tank_veg_set(&tank, 0, 0.62f); tank_veg_set(&tank, 1, 0.5f); tank_veg_set(&tank, 2, 0.7f);
+    /* the beds grown the real way (2026-10-13, Strato: a set bed is flat on
+       top): from a fresh tank's height through a night's sleep, each frond at
+       its own pace toward its own ceiling, so the tops are ragged */
+    for (int b = 0; b < VEG_BEDS; b++) tank_veg_set(&tank, b, VEG_START);
+    tank_tick_sleep(&tank, 11 * 3600);
     memset(tank.algae, 0, sizeof tank.algae);
+    for (int i = 0; i < n; i++) { tank.fish[i].hunger = 2; tank.fish[i].stress = 1; tank.fish[i].energy = 8; }
+    tank.ravenous = false;
     tank.night = false; for (int i = 0; i < MAX_FOOD; i++) tank.food[i].alive = false;
     static uint16_t fb[TANK_W * TANK_H], scene[TANK_W * TANK_H];
     render_set_scene_cache(scene);
     render_set_vignette_cache(vig_buf);
-    render_set_card_cache(card_buf);
+    render_set_card_cache(card_buf); render_set_modal_cache(give_buf, gift_buf);
     render_set_dirty_mask(dirty_buf);
     for (int k = 0; k < 90; k++) {                       /* the pose held for the frames the scene draws */
         for (int i = 0; i < n; i++) {
@@ -3179,10 +4009,397 @@ static int hero_shot(const char *prefix) {
     snprintf(path, sizeof path, "%s_hero.ppm", prefix); write_ppm(path, fb);
     render_tank(&tank, fb, TANK_W); render_stats_card(&tank, 0, fb, TANK_W);
     snprintf(path, sizeof path, "%s_hero_card.ppm", prefix); write_ppm(path, fb);
+    /* HERO_MOVIE=<seconds>: then the scene let loose, raw RGB888 frames at
+       60 fps in <prefix>_movie.rgb - the home page's looping clip
+       (tools/hero_loop.py; 2026-10-04 as a patch beside the preview video,
+       in the tree since 2026-10-13). HERO_HUNGER=<0-10> sets the cast's
+       appetite, HERO_FEED=<seconds> drops HERO_FEED_N pellets mid-tank. */
+    if (getenv("HERO_MOVIE")) {
+        int frames = atoi(getenv("HERO_MOVIE")) * 60;
+        int feed_at = getenv("HERO_FEED") ? (int)(atof(getenv("HERO_FEED")) * 60) : -1;
+        if (getenv("HERO_HUNGER")) for (int i = 0; i < tank.n_fish; i++) tank.fish[i].hunger = (float)atof(getenv("HERO_HUNGER"));
+        snprintf(path, sizeof path, "%s_movie.rgb", prefix);
+        FILE *mf = fopen(path, "wb"); if (!mf) return 1;
+        static unsigned char rgb[TANK_W * TANK_H * 3];
+        for (int k = 0; k < frames; k++) {
+            if (k == feed_at) tank_feed(&tank, 232, getenv("HERO_FEED_N") ? atoi(getenv("HERO_FEED_N")) : 4);
+            tank_tick(&tank, 1.0f / 60.0f, advisor_rules);
+            render_tank(&tank, fb, TANK_W);
+            for (int i = 0; i < TANK_W * TANK_H; i++) {
+                uint16_t q = fb[i];
+                rgb[3 * i] = (unsigned char)(((q >> 11) & 31) << 3); rgb[3 * i + 1] = (unsigned char)(((q >> 5) & 63) << 2);
+                rgb[3 * i + 2] = (unsigned char)((q & 31) << 3);
+            }
+            fwrite(rgb, 1, sizeof rgb, mf);
+        }
+        fclose(mf);
+        printf("hero: wrote %s (%d frames)\n", path, frames);
+    }
     printf("hero: wrote %s_hero.ppm, %s_hero_card.ppm\n", prefix, prefix);
     return 0;
 }
 
+/* --fresh-shot <prefix>: a tank a few minutes after a fresh install (2026-10-13,
+ * the instruction booklet's prologue picture): the two fry a new tank starts
+ * with, the beds as tank_new_population leaves them, a clean glass, the light
+ * on; the fry posed side-on like the hero's cast. <prefix>_fresh.ppm */
+static int fresh_shot(const char *prefix) {
+    tank_init(&tank, 2026);
+    tank_new_population(&tank);
+    for (int i = 0; i < 4 * 60 * 60; i++) tank_tick(&tank, 1.0f / 60.0f, advisor_rules);   /* four minutes */
+    tank_tick_sleep(&tank, 3 * 3600);                    /* the first hours' growth: the tops begin to vary */
+    memset(tank.algae, 0, sizeof tank.algae);
+    for (int i = 0; i < tank.n_fish; i++) { tank.fish[i].hunger = 2; tank.fish[i].energy = 8; }
+    tank.ravenous = false;
+    tank.night = false; for (int i = 0; i < MAX_FOOD; i++) tank.food[i].alive = false;
+    static uint16_t fb[TANK_W * TANK_H], scene[TANK_W * TANK_H];
+    render_set_scene_cache(scene);
+    render_set_vignette_cache(vig_buf);
+    render_set_card_cache(card_buf); render_set_modal_cache(give_buf, gift_buf);
+    render_set_dirty_mask(dirty_buf);
+    const float px[2] = { TANK_W * 0.40f, TANK_W * 0.62f }, py[2] = { TANK_H * 0.42f, TANK_H * 0.58f };
+    const float ph[2] = { 0.0f, 3.14159f };
+    for (int k = 0; k < 90; k++) {
+        for (int i = 0; i < tank.n_fish && i < 2; i++) {
+            fish_t *f = &tank.fish[i];
+            f->x = px[i]; f->y = py[i]; f->heading = ph[i]; tank_fish_face(f);
+            f->speed = f->target_speed = 30; f->hesitate = 0;
+        }
+        tank.clock += 1.0f / 60.0f;
+        render_tank(&tank, fb, TANK_W);
+    }
+    char path[512];
+    snprintf(path, sizeof path, "%s_fresh.ppm", prefix); write_ppm(path, fb);
+    printf("fresh: wrote %s_fresh.ppm (%d fish)\n", prefix, tank.n_fish);
+    return 0;
+}
+/* --selftest-under-card (0.4, the 11-02 evening sweep: holes under the gift card and the GIVE modal, the watch's rest):
+ *   a. a press that met the gift card is hidden from the page under it until it lifts (touch_gate.h's finger_gate: MY TANKS's
+ *      HOLD TO SELL, RENAME and MOVE read the finger - holding NO THANKS 2 s sold a shelved tank);
+ *   b. the watch's touch rest: one failed read (20 ms + the 50 ms rest > the 60 ms lift) no longer splits a held press;
+ *   c. the GIVE modal / a gift card over the live tank: no hold opens a piece's page, calls the fish, no swipe wipes
+ *      (the sim's routing, sim_tank_gestures, as the boards' touch port);
+ *   d. "start over" closes the GIVE modal (its CANNOT BE GIVEN RIGHT NOW sat over the new tank);
+ *   e. three fish, one on its way out: the GIVE modal's and the SELL line's reason is KEEP AT LEAST TWO FISH;
+ *   f. the KIN book: fresh uids by the hundred write it once, then once a minute; a save writes what waits */
+extern int g_sim_blob_saves;
+static int selftest_under_card(void) {
+    int fails = 0;
+    #define UC_FAIL(...) do { printf("FAIL: under-card: " __VA_ARGS__); printf("\n"); fails++; } while (0)
+    setenv("POCKET_TANK_SAVE", "/tmp/pocket-tank-selftest-under-card/tank.sav", 1);   /* (never the real save) */
+    /* a. HOLD TO SELL under the card (2 s held on the button = sold), 60 polls a second */
+    {   const float HOLD = 2.0f, DT = 1.0f / 60;
+        for (int sc = 0; sc < 3; sc++) {                      /* 0: the card up all along; 1: up at 0.5 s, gone at 1.5 s, held to 3 s; 2: no card */
+            finger_gate_t g = { 0 }; bool prev = false; float held = 0, most = 0; int presses = 0;
+            for (float t = 0; t < 3.0f; t += DT) {
+                bool card = sc == 0 || (sc == 1 && t >= 0.5f && t < 1.5f);
+                bool seen = finger_gate(&g, true, card);
+                if (seen && !prev) { presses++; held = 0; }
+                held = seen ? held + DT : 0; if (held > most) most = held;
+                prev = seen;
+            }
+            if (sc == 0 && (presses || most > 0)) UC_FAIL("a. a press under the card reached the page (%d presses, held %.1f s)", presses, most);
+            if (sc == 1 && (presses != 1 || most >= HOLD)) UC_FAIL("a. the card came and went mid-press: %d presses, held %.1f s (sold at %.0f)", presses, most, HOLD);
+            if (sc == 2 && (presses != 1 || most < HOLD)) UC_FAIL("a. no card: the hold did not reach the page (%d presses, %.1f s)", presses, most);
+        }
+        finger_gate_t g = { 0 };
+        finger_gate(&g, true, true); finger_gate(&g, false, false);
+        if (!finger_gate(&g, true, false)) UC_FAIL("a. the press after the card's lift was hidden too");
+    }
+    /* b. the watch: a frame every 45 ms, a read that fails costs its 20 ms timeout, then FT_REST_US (50 ms) */
+    {   const int64_t FRAME = 45000, FAIL_T = 20000, REST = 50000, LIFT = 60000, ON = 100000, OFF = 1600000;
+        for (int sc = 0; sc < 3; sc++) {                      /* 0: one failed read mid-press; 1: the old rule on the same reads; 2: the chip silent for good */
+            press_rest_t p = { 0 }; bool prev = false, old_down = false; int presses = 0, lifts_at = -1; int64_t old_seen = 0, old_rest = 0;
+            for (int64_t now = 0; now < 2000000; now += FRAME) {
+                bool on = now >= ON && now < OFF, fail = sc == 2 ? now >= 800000 : now >= 800000 && now < 800000 + FRAME;
+                bool answered = false, finger = false, down;
+                if (sc == 1) {                                    /* (da89534's rule: silence over 60 ms is a lift, the rest counted) */
+                    if (now >= old_rest) { if (fail) old_rest = now + FAIL_T + REST; else { answered = true; finger = on; } }
+                    if (finger) { old_seen = now; old_down = true; } else if (old_down && (answered || now - old_seen > LIFT)) old_down = false;
+                    down = old_down;
+                } else {
+                    if (press_rest_may_read(&p, now)) { if (fail) press_rest_failed(&p, now + FAIL_T, REST); else { answered = true; finger = on; } }
+                    down = press_rest_step(&p, now, answered, finger, LIFT);
+                }
+                if (down && !prev) presses++;
+                if (!down && prev && lifts_at < 0) lifts_at = (int)(now / 1000);
+                prev = down;
+            }
+            if (sc == 0 && (presses != 1 || lifts_at < OFF / 1000 || lifts_at > OFF / 1000 + 45)) UC_FAIL("b. a failed read split the press (%d presses, lift at %d ms)", presses, lifts_at);
+            if (sc == 1 && presses != 2) UC_FAIL("b. the scene does not show the old split (%d presses) - the test no longer tests it", presses);
+            if (sc == 2 && (presses != 1 || lifts_at < 800 || lifts_at > 800 + 200)) UC_FAIL("b. a chip silent for good: the press lifted at %d ms (silent from 800)", lifts_at);
+        }
+    }
+    /* c. the GIVE modal and a gift card over the live tank: the plant under the finger, a hold 1 s, a swipe */
+    static gift_book_t ugb;
+    tank_init(&tank, 77); tank_new_population(&tank);
+    while (tank.n_fish < 4) { tank_make_fish(&tank, tank.n_fish, tank.n_fish % 3, 0.5f, 0.5f, STAGE_ADULT); tank.n_fish++; }
+    tank_ensure_ids(&tank);
+    while (progression_newborn() >= 0) progression_newborn_done(&tank);
+    tank.sd_unlocks |= SD_ITEM_PLANT; tank_plant_place(&tank);
+    const int PX = TANK_W * 56 / 100, PY = TANK_BOT - 12;
+    tank_decor_set(&tank, 0, (float)PX, DECOR_Z_BACK);
+    memset(&ugb, 0, sizeof ugb); gift_attach(&tank, &ugb);
+    tank.door_open[LINK_LEFT] = true; ugb.door_peer[LINK_LEFT] = 0x49439648u;
+    for (int sc = 0; sc < 3; sc++) {                          /* 0: the GIVE modal; 1: a gift card; 2: nothing over the tank (the gestures still work) */
+        if (sc == 0) { render_give_tap(&tank, 0); if (render_give_modal_step(&tank) == RENDER_GM_OFF) UC_FAIL("c. the GIVE modal did not open"); }
+        if (sc == 1) { render_give_modal_close(); ugb.ask.on = true; ugb.ask.uid = 0x77u; render_gift_allow(true);
+                       if (!render_gift_up(&tank)) UC_FAIL("c. the gift card not up"); }
+        if (sc == 2) { ugb.ask.on = false; if (render_card_over_tank(&tank)) UC_FAIL("c. a card over the tank with none up"); }
+        bool held_page = false, hold = false, drag = false;
+        for (int ms = 0; ms <= 1000; ms += 16) {              /* held still on the plant */
+            tank.hold_active = tank.drag_active = false;
+            sim_tank_gestures(true, PX, PY, PX, PY, (uint32_t)ms, false, &held_page);
+            hold |= tank.hold_active; drag |= tank.drag_active;
+        }
+        bool page = setup_active();
+        if (page) setup_cancel(&tank);
+        sim_tank_gestures(false, PX, PY, PX, PY, 1000, false, &held_page);
+        for (int ms = 0, x = 40; x < TANK_W - 40; ms += 16, x += 12) {   /* a swipe across the glass */
+            tank.drag_active = false;
+            sim_tank_gestures(true, x, TANK_H / 2, 40, TANK_H / 2, (uint32_t)ms, false, &held_page);
+            drag |= tank.drag_active;
+        }
+        sim_tank_gestures(false, TANK_W - 40, TANK_H / 2, 40, TANK_H / 2, 1000, false, &held_page);
+        static const char *const WHAT[3] = { "the GIVE modal", "a gift card", "nothing" };
+        if (sc < 2 && (page || hold || drag)) UC_FAIL("c. under %s: %s%s%s", WHAT[sc], page ? "a hold opened the plant's page " : "", hold ? "a hold called the fish " : "", drag ? "a swipe reached the glass" : "");
+        if (sc == 2 && !(page && drag)) UC_FAIL("c. with nothing up the gestures did not work (page %d, drag %d) - the test no longer tests them", page, drag);
+    }
+    /* d. "start over" with CANNOT BE GIVEN RIGHT NOW up */
+    render_give_tap(&tank, 0);
+    tank.door_open[LINK_LEFT] = false;                        /* (its door shut under it: the words) */
+    if (render_give_modal_step(&tank) != RENDER_GM_SAID || strcmp(render_give_modal_line(&tank), "CANNOT BE GIVEN RIGHT NOW")) UC_FAIL("d. no CANNOT to start from (\"%s\")", render_give_modal_line(&tank));
+    progression_reset(&tank, 5);
+    if (render_give_modal_step(&tank) != RENDER_GM_OFF) UC_FAIL("d. the GIVE modal survived START OVER (\"%s\")", render_give_modal_line(&tank));
+    if (render_card_over_tank(&tank)) UC_FAIL("d. after START OVER a card still held the new tank's glass");
+    /* e. three fish, one on its way out (want / asking): the reason is the last pair */
+    gift_attach(&tank, &ugb); memset(&ugb, 0, sizeof ugb);
+    while (progression_newborn() >= 0) progression_newborn_done(&tank);
+    while (tank.n_fish < 3) { tank_make_fish(&tank, tank.n_fish, tank.n_fish % 3, 0.5f, 0.5f, STAGE_ADULT); tank.n_fish++; }
+    while (tank.n_fish > 3) tank_remove_fish(&tank, tank.n_fish - 1);
+    tank_ensure_ids(&tank);
+    tank.door_open[LINK_LEFT] = true; ugb.door_peer[LINK_LEFT] = 0x49439648u;
+    if (!progression_fish_givable(&tank, 0)) UC_FAIL("e. three fish and none going: fish 0 not givable");
+    ugb.want_uid = tank.fish[2].uid;                          /* fish 2: GIVE confirmed, on its way */
+    render_give_tap(&tank, 0);
+    if (render_give_modal_step(&tank) != RENDER_GM_WHY || strcmp(render_give_modal_line(&tank), "KEEP AT LEAST TWO FISH"))
+        UC_FAIL("e. the GIVE modal said \"%s\" (step %d), not KEEP AT LEAST TWO FISH", render_give_modal_line(&tank), render_give_modal_step(&tank));
+    render_give_modal_close();
+    {   static uint16_t ufb[TANK_W * TANK_H]; int nx, ny, fish, rx, sx, by;
+        tank.door_open[LINK_LEFT] = false; ugb.door_peer[LINK_LEFT] = 0;   /* (unlinked: the line is SELL's, not GIVE's) */
+        render_milestones(&tank, ufb, TANK_W); render_milestones_row(0, &nx, &ny);
+        render_milestones_tap(&tank, (float)nx, (float)ny); render_milestones(&tank, ufb, TANK_W);
+        if (!render_milestones_card(&tank, &fish, &rx, &sx, &by) || fish != 0) UC_FAIL("e. no card for fish 0");
+        else {
+            render_milestones_tap(&tank, (float)sx, (float)by); render_milestones(&tank, ufb, TANK_W);
+            if (strcmp(render_milestones_line(), "KEEP AT LEAST TWO FISH")) UC_FAIL("e. the card's SELL said \"%s\", not KEEP AT LEAST TWO FISH", render_milestones_line());
+        }
+        render_milestones_leave();
+    }
+    ugb.want_uid = 0; gift_attach(&tank, NULL);
+    /* f. the KIN book */
+    collection_reset();
+    collection_tick(&tank, 61.0f);                            /* (a minute since any write) */
+    int s0 = g_sim_blob_saves;
+    for (int i = 0; i < 300; i++) { kin_learn(0xA0000000u + (uint32_t)i, "kiru", 0x336699, 0.5f, 0.5f); collection_tick(&tank, 0.02f); }
+    int s1 = g_sim_blob_saves - s0;
+    if (s1 != 1) UC_FAIL("f. 300 fresh uids in 6 s wrote the KIN book %d times (once, then a minute)", s1);
+    for (int i = 0; i < 60 * 60; i++) collection_tick(&tank, 1.0f / 60);
+    int s2 = g_sim_blob_saves - s0;
+    if (s2 != 2) UC_FAIL("f. a minute on, %d writes (want 2: the waiting change)", s2);
+    kin_learn(0xB0000001u, "mira", 0x993366, 0.5f, 0.5f);
+    if (g_sim_blob_saves - s0 != 2) UC_FAIL("f. a change inside the minute wrote at once");
+    progression_save(&tank);
+    if (g_sim_blob_saves - s0 != 3) UC_FAIL("f. the tank's save did not write the waiting KIN change");
+    kin_learn(0xB0000002u, "obi", 0x669933, 0.5f, 0.5f); collection_flush();
+    if (g_sim_blob_saves - s0 != 4) UC_FAIL("f. collection_flush (before a SWAP IN) did not write the waiting KIN change");
+    for (int i = 0; i < 2 * 60 * 60; i++) collection_tick(&tank, 1.0f / 60);
+    if (g_sim_blob_saves - s0 != 4) UC_FAIL("f. nothing new, and it wrote again");
+    collection_load();                                        /* (the book read back from the flash) */
+    if (!kin_find(0xB0000002u) || !kin_find(0xB0000001u)) UC_FAIL("f. the flushed names were not on the flash");
+    collection_reset();
+    if (fails) return 1;
+    printf("selftest-under-card: PASS (a press under the gift card never reaches MY TANKS's holds; the watch's rest bridged once; no hold or swipe under the GIVE modal or the card; START OVER closes the modal; keep-two's reason with a gift out; KIN written once a minute and on a save)\n");
+    return 0;
+}
+/* --selftest-keeper (THE PAGE KEPT, 0.4; Strato 11-01: the keeper page "pretty slow" with four or five fish): the
+ * keeper page as a board draws it - two framebuffers in turn, render_frame_begin each frame, so a buffer keeps its page and
+ * only the fish are drawn again - against the page drawn whole (render_debug_page_whole) every frame, pixel for pixel:
+ * 2..6 fish of every form and stage (the NEW FRY row and its GROW gate's fish in), the still page changing under it (the
+ * balance, a badge, a name, the meals bar, a tank badge seen), things drawn over the page or instead of it (the lock hint,
+ * the reset prompt, a tank frame, a frame written with no draw target at all), a fish's card, a badge's modal and the
+ * TANK tally over it, and one buffer alone (the sim's way). The kept frames are counted: most frames must be kept. */
+static uint16_t kp_buf[2][TANK_W * TANK_H], kp_ref[TANK_W * TANK_H];
+static int kp_cur, kp_frames, kp_one;
+enum { KP_PAGE, KP_HINT, KP_PROMPT, KP_TANK, KP_BLANK };
+#define KEEP_FAIL(...) do { printf("FAIL: " __VA_ARGS__); printf("\n"); return 1; } while (0)
+static int kp_frame(tank_t *t, int what, const char *scene) {
+    render_frame_begin();
+    uint16_t *fb = kp_buf[kp_one ? 0 : kp_cur];
+    kp_cur ^= 1; t->clock += 0.04f; kp_frames++;
+    if (what == KP_TANK) { render_tank(t, fb, TANK_W); return 0; }
+    if (what == KP_BLANK) { memset(fb, 0x5a, sizeof kp_buf[0]); return 0; }
+    for (int pass = 0; pass < 2; pass++) {                /* the frame, then the reference drawn whole */
+        uint16_t *out = pass ? kp_ref : fb;
+        render_debug_page_whole(pass == 1);
+        render_milestones(t, out, TANK_W);
+        if (what == KP_HINT) render_touch_lock_hint(out, TANK_W);
+        if (what == KP_PROMPT) render_confirm_reset(out, TANK_W, 0.5f);
+    }
+    render_debug_page_whole(false);
+    int n = 0, x0 = TANK_W, y0 = TANK_H, x1 = -1, y1 = -1;
+    for (int y = 0; y < TANK_H; y++) for (int x = 0; x < TANK_W; x++)
+        if (fb[y * TANK_W + x] != kp_ref[y * TANK_W + x]) { n++; if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
+    if (n) {
+        write_ppm("/tmp/pocket-tank-keeper-kept.ppm", fb); write_ppm("/tmp/pocket-tank-keeper-whole.ppm", kp_ref);
+        KEEP_FAIL("%s, frame %d: %d px differ from the page drawn whole, in x %d..%d y %d..%d (/tmp/pocket-tank-keeper-{kept,whole}.ppm)", scene, kp_frames, n, x0, x1, y0, y1);
+    }
+    return 0;
+}
+static int kp_run(tank_t *t, int n, int what, const char *scene) { for (int i = 0; i < n; i++) if (kp_frame(t, what, scene)) return 1; return 0; }
+static int selftest_keeper(void) {
+    static uint16_t scene[TANK_W * TANK_H];
+    setenv("POCKET_TANK_SAVE", "/tmp/pocket-tank-selftest-keeper.sav", 1);
+    (void)system("rm -f /tmp/pocket-tank-selftest-keeper.sav");
+    render_set_scene_cache(scene); render_set_vignette_cache(vig_buf); render_set_card_cache(card_buf); render_set_modal_cache(give_buf, gift_buf); render_set_dirty_mask(dirty_buf);
+    int kept0, whole0, kept, whole, total_kept = 0, total = 0;
+    for (int nf = 2; nf <= POP_CAP; nf++) {             /* (every count a keeper's tank can have: it ran to N_FISH_MAX, 6 - one past the cap) */
+        tank_init(&tank, 300 + nf);
+        progression_boot(&tank); progression_setup_done(&tank);
+        while (tank.n_fish < nf) { progression_force_arrival(&tank); progression_newborn_done(&tank); }
+        if (tank.n_fish != nf) KEEP_FAIL("%d fish staged, want %d", tank.n_fish, nf);
+        static const float AGE[N_FISH_MAX] = { STAGE_ELDER_AGE + 60, STAGE_ADULT_AGE + 60, STAGE_JUV_AGE + 60, STAGE_ELDER_AGE + 90, STAGE_ADULT_AGE + 30, 60 };
+        for (int i = 0; i < nf; i++) {                    /* every form; the youngest a fry (the GROW gate) */
+            progression_set_age(&tank, i, i == nf - 1 ? 60 : AGE[i]);
+            fish_t *f = &tank.fish[i];
+            f->shape = (uint8_t)(i % SHAPE_N); f->fins = (uint8_t)((i + 1) % FINS_N); f->pattern = (uint8_t)((i + 2) % PATTERN_N);
+            f->ms_bits = 0x15u << (i % 2); f->ms_seen = i % 3 ? f->ms_bits : 0;
+        }
+        progression_tick(&tank, 0.04f);
+        fry_req_t req[FRY_REQ_MAX]; bool staged;
+        int nreq = progression_next_fry(&tank, req, &staged), grow = 0;
+        for (int k = 0; k < nreq; k++) grow += req[k].kind == FRY_REQ_GROW;
+        tank.sd_balance = 697;
+        char sc[64];
+        render_milestones_leave();
+        render_milestones_counts(&kept0, &whole0, NULL);
+        snprintf(sc, sizeof sc, "%d fish, the page", nf);
+        if (kp_run(&tank, 120, KP_PAGE, sc)) return 1;
+        render_milestones_counts(&kept, &whole, NULL);
+        if (kept - kept0 < 110) KEEP_FAIL("%s: only %d of 120 frames kept (%d whole) - a box left its zone?", sc, kept - kept0, whole - whole0);
+        printf("keeper: %d fish (the fry row %s, GROW %s): %d of 120 frames kept\n", nf, nreq ? "up" : "off", grow ? "in" : "out", kept - kept0);
+        snprintf(sc, sizeof sc, "%d fish, the page changing", nf);   /* each of what the still page is drawn from */
+        for (int step = 0; step < 8; step++) {
+            switch (step) {
+            case 0: tank.sd_balance += 7; break;
+            case 1: tank.fish[1].ms_bits |= MS_FIRST_DART; break;
+            case 2: tank.fish[1].ms_seen |= MS_FIRST_DART; break;
+            case 3: tank_set_name(&tank, 0, "zed"); break;
+            case 4: tank.player_feedings += 3; break;
+            case 5: tank.tank_ms_bits |= TMS_FIRST_FEEDING | TMS_FIRST_TRIM; break;
+            case 6: tank.tank_ms_seen |= TMS_FIRST_FEEDING; break;
+            case 7: progression_set_age(&tank, nf - 1, STAGE_JUV_AGE + 5); progression_tick(&tank, 0.04f); break;   /* the fry grows: GROW met */
+            }
+            if (kp_run(&tank, 6, KP_PAGE, sc)) return 1;
+        }
+        snprintf(sc, sizeof sc, "%d fish, over and instead of the page", nf);
+        static const int SEQ[] = { KP_HINT, KP_PAGE, KP_PAGE, KP_PAGE, KP_PROMPT, KP_PROMPT, KP_PAGE, KP_PAGE, KP_PAGE, KP_TANK, KP_PAGE, KP_PAGE, KP_PAGE,
+                                   KP_BLANK, KP_PAGE, KP_PAGE, KP_PAGE, KP_TANK, KP_TANK, KP_PAGE, KP_PAGE, KP_BLANK, KP_BLANK, KP_PAGE, KP_PAGE, KP_PAGE };
+        for (size_t q = 0; q < sizeof SEQ / sizeof SEQ[0]; q++) if (kp_frame(&tank, SEQ[q], sc)) return 1;
+        snprintf(sc, sizeof sc, "%d fish, a fish's card", nf);
+        render_milestones_show_fish(&tank, nf / 2);
+        render_milestones_counts(&kept0, &whole0, NULL);
+        if (kp_run(&tank, 80, KP_PAGE, sc)) return 1;
+        render_milestones_counts(&kept, &whole, NULL);
+        if (kept - kept0 < 60) KEEP_FAIL("%s: only %d of 80 frames kept", sc, kept - kept0);
+        {   /* the GIVE modal over the card (0.4, 11-02): part of the page while it is up (kept frames too), the page whole as it goes */
+            static gift_book_t kgb; memset(&kgb, 0, sizeof kgb); gift_attach(&tank, &kgb);
+            tank.door_open[1] = true; kgb.door_peer[1] = 0xf63b8f6bu; kgb.door_badge[1] = 2;
+            snprintf(sc, sizeof sc, "%d fish, the GIVE modal over the card", nf);
+            render_give_tap(&tank, nf / 2);
+            if (render_give_modal_step(&tank) == RENDER_GM_OFF) KEEP_FAIL("%s: the modal did not open", sc);
+            render_milestones_counts(&kept0, &whole0, NULL);
+            if (kp_run(&tank, 60, KP_PAGE, sc)) return 1;
+            render_milestones_counts(&kept, &whole, NULL);
+            if (kept - kept0 < 45) KEEP_FAIL("%s: only %d of 60 frames kept", sc, kept - kept0);   /* (the card's own bar: 3 in 4, its boxes growing) */
+            int bx, by;
+            if (!render_give_modal_button(&tank, RENDER_GM_TAP_BACK, &bx, &by) && !render_give_modal_button(&tank, RENDER_GM_TAP_OK, &bx, &by))
+                KEEP_FAIL("%s: no BACK or OK", sc);                       /* (the last two: why, OK - past its hold by now) */
+            render_milestones_tap(&tank, (float)bx, (float)by);
+            if (render_give_modal_step(&tank) != RENDER_GM_OFF) KEEP_FAIL("%s: BACK / OK did not close it", sc);
+            snprintf(sc, sizeof sc, "%d fish, the GIVE modal gone", nf);
+            if (kp_run(&tank, 6, KP_PAGE, sc)) return 1;
+            /* a gift offered to us over the page (the 11-02 sweep): drawn as part of the page, kept frames still kept */
+            snprintf(sc, sizeof sc, "%d fish, a gift card over the page", nf);
+            kgb.ask.on = true; kgb.ask.uid = 0x77u; passport_from_fish(&kgb.ask.pp, &tank.fish[0], 0x49439648u, 3600); kgb.ask.pp.uid = 0x77u;
+            kgb.ask.since = tank.clock; kgb.ask.shown = false; render_gift_allow(true);
+            render_milestones_counts(&kept0, &whole0, NULL);
+            if (kp_run(&tank, 60, KP_PAGE, sc)) return 1;
+            render_milestones_counts(&kept, &whole, NULL);
+            if (!kgb.ask.shown) KEEP_FAIL("%s: the card was not drawn over the page", sc);
+            if (kept - kept0 < 45) KEEP_FAIL("%s: only %d of 60 frames kept", sc, kept - kept0);
+            kgb.ask.on = false;
+            snprintf(sc, sizeof sc, "%d fish, the gift card gone", nf);
+            if (kp_run(&tank, 6, KP_PAGE, sc)) return 1;
+            tank.door_open[1] = false; gift_attach(&tank, NULL);
+        }
+        render_milestones_leave();
+        if (kp_run(&tank, 4, KP_PAGE, sc)) return 1;
+        snprintf(sc, sizeof sc, "%d fish, a badge's modal", nf);
+        int r = render_milestones_tap(&tank, (float)(MSP_BADGE_X0 + 2 * MSP_BADGE_DX + 16 + PAGE_X), (float)(MSP_ROW_Y0 + MSP_ROW_BADGE + 16 + PAGE_Y));
+        if (r != MS_TAP_KEPT) KEEP_FAIL("%s: the tap on fish 0's third badge gave %d", sc, r);
+        if (kp_run(&tank, 40, KP_PAGE, sc)) return 1;
+        render_milestones_leave();
+        snprintf(sc, sizeof sc, "%d fish, the TANK tally", nf);
+        r = render_milestones_tap(&tank, (float)(100 + PAGE_X), (float)(MSP_TANK_Y + 9 + PAGE_Y));
+        if (kp_run(&tank, 40, KP_PAGE, sc)) return 1;
+        render_milestones_leave();
+        snprintf(sc, sizeof sc, "%d fish, one buffer", nf);
+        kp_one = 1; render_milestones_counts(&kept0, &whole0, NULL);
+        if (kp_run(&tank, 40, KP_PAGE, sc)) { kp_one = 0; return 1; }
+        kp_one = 0; render_milestones_counts(&kept, &whole, NULL);
+        if (kept - kept0 < 35) KEEP_FAIL("%s: only %d of 40 frames kept", sc, kept - kept0);
+        render_milestones_counts(&kept, &whole, NULL); total_kept = kept; total = kept + whole;
+    }
+    printf("selftest-keeper: PASS (%d frames, every one the page drawn whole pixel for pixel; %d of %d pages kept)\n", kp_frames, total_kept, total);
+    return 0;
+}
+/* --page-shot <prefix> (the 0.4 merge, 2026-11-01): the settings page and the keeper page as they stand in this world -
+ * the keeper page twice more with a visitor collected (the foot's arrow; its second page, VISITORS) - for the look of
+ * the pieces 0.4 and the 0.3.9 line both put on them (LINK beside MY TANKS, VISITORS on the pinned foot) */
+static int page_shot(const char *prefix) {
+    static uint16_t fb[TANK_W * TANK_H], scene[TANK_W * TANK_H];
+    char path[512];
+    tank_init(&tank, 2026); tank_new_population(&tank); tank_ensure_ids(&tank);
+    for (int i = 0; i < 2 * 60; i++) tank_tick(&tank, 1.0f / 60.0f, advisor_rules);
+    render_set_scene_cache(scene); render_set_vignette_cache(vig_buf); render_set_card_cache(card_buf); render_set_modal_cache(give_buf, gift_buf); render_set_dirty_mask(dirty_buf);
+    render_tank(&tank, fb, TANK_W); render_settings(&tank, fb, TANK_W, 60, 100);
+    snprintf(path, sizeof path, "%s_settings.ppm", prefix); write_ppm(path, fb);
+    render_tank(&tank, fb, TANK_W); render_settings(&tank, fb, TANK_W, 60, 60);     /* both sliders at 60 %: one above the other; then VOLUME OFF */
+    snprintf(path, sizeof path, "%s_settings_vol60.ppm", prefix); write_ppm(path, fb);
+    render_tank(&tank, fb, TANK_W); render_settings(&tank, fb, TANK_W, 60, 0);
+    snprintf(path, sizeof path, "%s_settings_off.ppm", prefix); write_ppm(path, fb);
+    tank.sd_balance = 697;                           /* (a keeper's balance, three digits, on the foot's sand dollar) */
+    render_tank(&tank, fb, TANK_W); render_milestones(&tank, fb, TANK_W);
+    snprintf(path, sizeof path, "%s_keeper.ppm", prefix); write_ppm(path, fb);
+    collection_reset();
+    bool ok = true;
+    static const uint32_t VC[3][3] = { { 0x6db9ff, 0xffd166, 0xffffff }, { 0xf25b65, 0x38dcc7, 0xffd166 }, { 0x78d67d, 0x9b72ff, 0xffffff } };
+    for (int j = 0; j < 3; j++) {                    /* three visitors collected, each its own look */
+        fish_t *w = &tank.fish[N_FISH_MAX]; *w = tank.fish[0]; w->uid = 0x5000 + j; w->stage = STAGE_ADULT;
+        w->color = VC[j][0]; w->fin = VC[j][1]; w->accent = VC[j][2]; w->shape = (uint8_t)(j % SHAPE_N); w->fins = (uint8_t)((j + 1) % FINS_N);
+        snprintf(w->name, sizeof w->name, "%s", j == 0 ? "NEMO" : j == 1 ? "ZOLT" : "NORI");
+        tank.vis_used[0] = true; tank.vis_badge[0] = (int8_t)j;
+        ok = collection_add(&tank, 0) && ok;
+        tank.vis_used[0] = false;
+    }
+    render_tank(&tank, fb, TANK_W); render_milestones(&tank, fb, TANK_W);
+    snprintf(path, sizeof path, "%s_keeper_more.ppm", prefix); write_ppm(path, fb);
+    render_milestones_leave();
+    collection_reset();
+    printf("page-shot: %s_{settings,keeper,keeper_more}.ppm (visitors collected: %s)\n", prefix, ok ? "yes" : "NO");
+    return ok ? 0 : 1;
+}
 /* --depth-shot <prefix> (EXPLORATION 10-31, Strato: fish and critters choose to swim in front of, behind or through
  * the grass and the pieces; a piece's depth only orders the pieces). Each frame is built the way the board would:
  * the creature drawn, then the occluder's own pixels put back where it is behind them - here taken from renders
@@ -3239,7 +4456,7 @@ static int urchin_frond_shot(const char *prefix) {
     tank.sd_unlocks |= SD_ITEM_URCHIN; tank.urchin_x = (x0 + x1) / 2; tank.urchin_dy = 0; tank.urchin_rest = 99;
     if (getenv("PT_URCHIN_X")) tank.urchin_x = (float)atoi(getenv("PT_URCHIN_X"));
     static uint16_t scene[TANK_W * TANK_H];
-    render_set_scene_cache(scene); render_set_vignette_cache(vig_buf); render_set_card_cache(card_buf); render_set_dirty_mask(dirty_buf);
+    render_set_scene_cache(scene); render_set_vignette_cache(vig_buf); render_set_card_cache(card_buf); render_set_modal_cache(give_buf, gift_buf); render_set_dirty_mask(dirty_buf);
     static uint16_t X[TANK_W * TANK_H], U[TANK_W * TANK_H], N[TANK_W * TANK_H], A[TANK_W * TANK_H], E[TANK_W * TANK_H], D[TANK_W * TANK_H];
     static tank_t base; base = tank;
     #define UFR(tk, out) do { for (int q = 0; q < 3; q++) render_tank((tk), (out), TANK_W); } while (0)
@@ -3325,7 +4542,7 @@ static int selftest_depth(void) {
     f->x = (x0 + x1) / 2; f->y = top + (TANK_BOT - 16 - top) * 0.45f; f->heading = 0.1f; tank_fish_face(f);
     f->speed = f->target_speed = 0; f->hesitate = 0;
     static uint16_t scene[TANK_W * TANK_H];
-    render_set_scene_cache(scene); render_set_vignette_cache(vig_buf); render_set_card_cache(card_buf); render_set_dirty_mask(dirty_buf);
+    render_set_scene_cache(scene); render_set_vignette_cache(vig_buf); render_set_card_cache(card_buf); render_set_modal_cache(give_buf, gift_buf); render_set_dirty_mask(dirty_buf);
     static uint16_t F[TANK_W * TANK_H], A[TANK_W * TANK_H], G[TANK_W * TANK_H], E[TANK_W * TANK_H], X[TANK_W * TANK_H];
     static tank_t base; base = tank;
     int fails = 0;
@@ -3512,7 +4729,7 @@ static int selftest_depth(void) {
            urchin on the sand of a bed, IN FRONT of it - every pixel of each as with no grass at all */
         static uint16_t S1[TANK_W * TANK_H], N1[TANK_W * TANK_H], N0[TANK_W * TANK_H];
         for (int pass = 0; pass < 6; pass++) {
-            const int who = pass % 3; const bool sword = pass >= 3;   /* the back grass; then a sword plant placed IN FRONT */
+            const int who = pass % 3; const bool sword = pass >= 3;   /* the back grass; then the sword plant (one depth since 0.4) */
             const char *nm = who == 0 ? "snail" : who == 1 ? "crab" : "urchin";
             tank = base; tank.fish[0].x = -400;
             float bx0, bx1, btop; int bnf; tank_veg_bed(&tank, 0, &bx0, &bx1, &btop, &bnf);
@@ -3520,7 +4737,7 @@ static int selftest_depth(void) {
             if (sword) {
                 for (int b = 0; b < VEG_BEDS_MAX; b++) tank_veg_set(&tank, b, 0);
                 tank.sd_unlocks |= SD_ITEM_PLANT; tank_plant_place(&tank); tank_veg_set(&tank, 3, 0.8f);
-                tank_decor_set(&tank, 0, (int)tank_decor_x(&tank, 0), DECOR_Z_FRONT);
+                tank_decor_set(&tank, 0, (int)tank_decor_x(&tank, 0), DECOR_Z_BACK);
                 float sx0, sx1, stop; int snf; tank_veg_bed(&tank, 3, &sx0, &sx1, &stop, &snf); mx = (sx0 + sx1) / 2;
             }
             if (who == 0) { tank.sd_unlocks |= SD_ITEM_SNAIL; tank.snail_cell = -1; tank.snail_x = mx; tank.snail_y = SNAIL_FLOOR_Y; tank.snail_dy = 0; tank.snail_front = false; tank.snail_heading = 0; tank.snail_gdepth = tank.snail_gdepth_want = FISH_DEPTH_FRONT; }
@@ -3543,28 +4760,34 @@ static int selftest_depth(void) {
                 if (S1[i] != N1[i] && S1[i] == L0[i]) { wrong++;   /* (a leaf's own pixel over it - not a soft edge blending with the leaf behind) */ int x = i % TANK_W, y = i / TANK_W; if (x < wx0) wx0 = x; if (x > wx1) wx1 = x; if (y < wy0) wy0 = y; if (y > wy1) wy1 = y; }
             }
             if (body < 30 || crossed < 10) { printf("FAIL: depth whole: the %s drew %d px, %d of them on leaves (the staging)\n", nm, body, crossed); fails++; continue; }
-            const char *gn = sword ? "the sword plant placed IN FRONT" : "the grass";
+            const char *gn = sword ? "the sword plant" : "the grass";
             if (wrong) { printf("FAIL: depth whole: the %s IN FRONT of %s shows a leaf on %d of its %d px (at %d,%d..%d,%d)\n", nm, gn, wrong, body, wx0, wy0, wx1, wy1); fails++; }
             else printf("depth whole: the %s IN FRONT of %s - all %d of its px its own (%d of them over leaves)\n", nm, gn, body, crossed);
             #undef DEPTH_R
         }
     }
-    {   /* the sword plant ranked over the pumpkin, both IN FRONT, side by side (Strato on the square 10-31: "when i try to put at the
-           top of the stack over the pumpkin it clips through"): every leaf of it the same with the pumpkin's face lit or not drawn */
+    {   /* the sword plant ranked over the pumpkin, side by side (Strato on the square 10-31: "when i try to put at the top of the
+           stack over the pumpkin it clips through"): every leaf of it the same with the pumpkin's face lit or not drawn. Both IN FRONT
+           until 0.4; the plant has one depth since (BEHIND), so the pumpkin BEHIND beside it */
         static uint16_t R1[TANK_W * TANK_H], R2[TANK_W * TANK_H];
         tank = base; tank.fish[0].x = -400; for (int b = 0; b < VEG_BEDS_MAX; b++) tank_veg_set(&tank, b, 0);
         tank.sd_unlocks |= SD_ITEM_PLANT | SD_ITEM_PUMPKIN; tank_plant_place(&tank); tank_pumpkin_place(&tank); tank_veg_set(&tank, 3, 0.8f);
         float sx0, sx1, stp; int snf; tank_veg_bed(&tank, 3, &sx0, &sx1, &stp, &snf);
-        tank_decor_set(&tank, 8, (int)((sx0 + sx1) / 2), DECOR_Z_FRONT); tank_decor_set(&tank, 0, (int)tank_decor_x(&tank, 0), DECOR_Z_FRONT);
+        tank_decor_set(&tank, 8, (int)((sx0 + sx1) / 2), DECOR_Z_BACK); tank_decor_set(&tank, 0, (int)tank_decor_x(&tank, 0), DECOR_Z_BACK);
         tank_decor_raise(&tank, 0);
         static tank_t pp; pp = tank;
         #define DEPTH_R(tk, out) do { for (int q = 0; q < 3; q++) render_tank((tk), (out), TANK_W); } while (0)
         tank = pp; DEPTH_R(&tank, R1);
         int leaves = 0, wrong = 0; static uint8_t leaf[TANK_W * TANK_H];
-        for (int i = 0; i < TANK_W * TANK_H; i++) leaf[i] = (uint8_t)(render_bed_leaf(i % TANK_W, i / TANK_W) | render_piece_covers(8, i % TANK_W, i / TANK_W) << 1);
+        for (int i = 0; i < TANK_W * TANK_H; i++) leaf[i] = (uint8_t)(render_piece_covers(8, i % TANK_W, i / TANK_W) << 1);
+        { static uint16_t R0[TANK_W * TANK_H]; tank = pp; tank_veg_set(&tank, 3, 0); DEPTH_R(&tank, R0);   /* the leaves: where the plant changes the frame
+                                                                                                         (the bed's leaf mask is the front bed's; a BEHIND plant is baked) */
+          for (int i = 0; i < TANK_W * TANK_H; i++) leaf[i] |= R1[i] != R0[i]; }
         render_set_pumpkin_hidden(true); tank = pp; DEPTH_R(&tank, R2); render_set_pumpkin_hidden(false);
         int over = 0;
-        for (int i = 0; i < TANK_W * TANK_H; i++) if (leaf[i] & 1) { leaves++; over += leaf[i] >> 1; wrong += R1[i] != R2[i] && (leaf[i] >> 1); }
+        for (int i = 0; i < TANK_W * TANK_H; i++) if ((leaf[i] & 1) && i / TANK_W < (int)FISH_FLOOR_Y - 8) {   /* (above the sand: the lantern's shadow and glow
+                                                                                                                 fall on the leaves' base, a light, not the piece) */
+            leaves++; over += leaf[i] >> 1; wrong += R1[i] != R2[i] && (leaf[i] >> 1); }
         if (leaves < 50 || over < 20) { printf("FAIL: depth plant over the pumpkin: %d leaf px, %d over the pumpkin (the staging)\n", leaves, over); fails++; }
         else if (wrong) { printf("FAIL: depth plant over the pumpkin: the pumpkin shows through on %d of the %d leaf px over it\n", wrong, over); fails++; }
         else printf("depth plant over the pumpkin: all %d leaf px over it are the plant's\n", over);
@@ -3576,8 +4799,8 @@ static int selftest_depth(void) {
         tank = base; tank.fish[0].x = -400; for (int b = 0; b < VEG_BEDS_MAX; b++) tank_veg_set(&tank, b, 0);
         tank.sd_unlocks |= SD_ITEM_PLANT | SD_ITEM_PUMPKIN; tank_plant_place(&tank); tank_pumpkin_place(&tank); tank_veg_set(&tank, 3, 0.8f);
         float sx0, sx1, stp; int snf; tank_veg_bed(&tank, 3, &sx0, &sx1, &stp, &snf);
-        tank_decor_set(&tank, 8, (int)((sx0 + sx1) / 2), DECOR_Z_FRONT); tank_decor_set(&tank, 0, (int)tank_decor_x(&tank, 0), DECOR_Z_FRONT);
-        tank_decor_raise(&tank, 8);                           /* the pumpkin on top: the plant behind it */
+        tank_decor_set(&tank, 8, (int)((sx0 + sx1) / 2), DECOR_Z_BACK); tank_decor_set(&tank, 0, (int)tank_decor_x(&tank, 0), DECOR_Z_BACK);
+        tank_decor_raise(&tank, 8);                           /* the pumpkin on top: the plant behind it (both BEHIND since 0.4) */
         if (!tank_decor_above(&tank, 8, 0)) { printf("FAIL: depth plant under the pumpkin: the staging's order\n"); fails++; }
         int frames_bad = 0, worst = 0, body = 0;
         for (int f = 0; f < 60; f++) {
@@ -3592,17 +4815,17 @@ static int selftest_depth(void) {
         if (body < 100 || frames_bad) { printf("FAIL: depth plant under the pumpkin: a leaf on its body in %d of 60 frames (at worst %d of %d px)\n", frames_bad, worst, body); fails++; }
         else printf("depth plant under the pumpkin: its %d px its own in all 60 frames\n", body);
     }
-    {   /* the sword plant placed IN FRONT (0.3.9.4): a fish IN FRONT of it shows whole over its leaves, BEHIND it the leaves are
-           over it, THROUGH it the odd leaves over it and the even ones under it */
+    {   /* the sword plant (IN FRONT 0.3.9.4 .. 0.3.9.6; its one depth BEHIND since 0.4): a fish IN FRONT of it shows whole over its
+           leaves, BEHIND it the leaves are over it, THROUGH it the odd leaves over it and the even ones under it */
         static uint16_t K[TANK_W * TANK_H], E2[TANK_W * TANK_H];
         tank = base; for (int b = 0; b < VEG_BEDS_MAX; b++) tank_veg_set(&tank, b, 0);
         tank.sd_unlocks |= SD_ITEM_PLANT; tank_plant_place(&tank); tank_veg_set(&tank, 3, 0.8f);
         float sx0, sx1, stop; int snf; tank_veg_bed(&tank, 3, &sx0, &sx1, &stop, &snf);
         fish_t *g = &tank.fish[0]; g->x = (sx0 + sx1) / 2; g->y = stop + (TANK_BOT - 16 - stop) * 0.4f; g->heading = 0.1f; tank_fish_face(g);
-        tank_decor_set(&tank, 0, (int)tank_decor_x(&tank, 0), DECOR_Z_FRONT);
+        tank_decor_set(&tank, 0, (int)tank_decor_x(&tank, 0), DECOR_Z_BACK);
         static tank_t pb; pb = tank;
         #define DEPTH_R(tk, out) do { for (int q = 0; q < 3; q++) render_tank((tk), (out), TANK_W); } while (0)
-        if (tank_bed_z(&pb, 3) != DECOR_Z_FRONT) { printf("FAIL: depth sword: the plant did not go IN FRONT\n"); fails++; }
+        if (tank_bed_z(&pb, 3) != DECOR_Z_BACK) { printf("FAIL: depth sword: the plant is not in its one depth (BEHIND)\n"); fails++; }
         tank = pb; tank.fish[0].x = -400; DEPTH_R(&tank, A);                                         /* the plant, no fish */
         render_proto_veg_layer(0); DEPTH_R(&tank, E2); render_proto_veg_layer(-1);                   /* ... its even leaves alone */
         tank = pb; tank_veg_set(&tank, 3, 0); DEPTH_R(&tank, K);                                     /* the fish, no plant */
@@ -3652,7 +4875,7 @@ static int pumpkin_grass(void) {
     tank_veg_set(&tank, 0, 0.7f); tank_veg_set(&tank, 1, 0.7f); tank_veg_set(&tank, 2, 0.7f);
     tank.night = false; memset(tank.algae, 0, sizeof tank.algae);
     static uint16_t scene[TANK_W * TANK_H], fb[TANK_W * TANK_H], ng[TANK_W * TANK_H];
-    render_set_scene_cache(scene); render_set_vignette_cache(vig_buf); render_set_card_cache(card_buf); render_set_dirty_mask(dirty_buf);
+    render_set_scene_cache(scene); render_set_vignette_cache(vig_buf); render_set_card_cache(card_buf); render_set_modal_cache(give_buf, gift_buf); render_set_dirty_mask(dirty_buf);
     render_set_grass_loop(bs_alloc64, free, 3u << 20); render_grass_loop_lock(64); render_grass_loop_on(true);
     float bx0, bx1, top; int nf; tank_veg_bed(&tank, 0, &bx0, &bx1, &top, &nf);
     tank.sd_unlocks |= SD_ITEM_PUMPKIN; tank_pumpkin_place(&tank);
@@ -3731,7 +4954,7 @@ static int pumpkin_show(bool show, int px) {
     tank_decor_set(&tank, 0, 45, DECOR_Z_FRONT); tank_decor_set(&tank, 9, 250, DECOR_Z_BACK);
     tank_decor_set(&tank, 3, 420 * TANK_W / 480, DECOR_Z_FRONT); tank_decor_set(&tank, 8, px, DECOR_Z_FRONT); tank_decor_raise(&tank, 8);
     static uint16_t scene[TANK_W * TANK_H], fb[TANK_W * TANK_H], ng[TANK_W * TANK_H];
-    render_set_scene_cache(scene); render_set_vignette_cache(vig_buf); render_set_card_cache(card_buf); render_set_dirty_mask(dirty_buf);
+    render_set_scene_cache(scene); render_set_vignette_cache(vig_buf); render_set_card_cache(card_buf); render_set_modal_cache(give_buf, gift_buf); render_set_dirty_mask(dirty_buf);
     render_set_grass_loop(bs_alloc64, free, 3u << 20); render_grass_loop_lock(64); render_grass_loop_on(true);
     bool tried = false; float ts = 0;
     for (int fr = 0; fr < 400; fr++) {                 /* the start, as main.c's loading path */
@@ -3792,7 +5015,7 @@ static int selftest_cave(const char *prefix) {
         /* the crab roosting in the shelter, as the stack matrix stages it */
         tank.cr_x = X; tank.cr_y = 0; tank.cr_tilt = 0; tank.cr_facing = 1; tank.cr_timer = 999; tank.cr_find = 0; tank.cr_hide = 0; tank.cr_back = 0; tank.cr_poke = 0; tank.cr_startle_cool = 999;
         tank.cr_mode = CR_ROOST; tank.cr_cave = (int8_t)item; tank.cr_lane_front = false; tank.cr_fidget_kind = CR_FID_NONE;
-        render_set_scene_cache(scene); render_set_vignette_cache(vig_buf); render_set_card_cache(card_buf); render_set_dirty_mask(dirty_buf);
+        render_set_scene_cache(scene); render_set_vignette_cache(vig_buf); render_set_card_cache(card_buf); render_set_modal_cache(give_buf, gift_buf); render_set_dirty_mask(dirty_buf);
         render_set_grass_loop(bs_alloc64, free, 8u << 20); render_grass_loop_lock(0); render_grass_loop_on(true);
         for (int k = 0; k < 400 && (!render_grass_loop_n() || render_grass_loop_ready() < render_grass_loop_n()); k++) { render_grass_loop_bake_more(&tank, 4); render_tank(&tank, A, TANK_W); }
         if (render_grass_loop_ready() < render_grass_loop_n()) { printf("FAIL: cave: the loop never came whole\n"); fails++; }
@@ -3825,6 +5048,174 @@ static int selftest_cave(const char *prefix) {
     return fails ? 1 : 0;
 }
 
+/* --selftest-roost [prefix] (Strato 2026-11-02, the watch: the crab "roosting in the volcano" with the castle standing in front of
+ * it - "the crab should always choose the uppermost roosting spot"): with a castle and a volcano in the water, in every depth order
+ * (BEHIND / IN FRONT each, and at one depth either rank above), either side, the crab starting left, between and right, it roosts in
+ * the FRONTMOST by the depth scheme (tank_decor_above) - on its own, at night, scared, sent by the director (to either), after a SWAP
+ * IN - and a change while it roosts sends it over: the order flipped, the piece moved, shelved, sold (a lock changes nothing; in the
+ * dark after a scare it waits). Then the frame: the crab in its roost is not covered by the other piece (at most 1 in 20 of its
+ * pixels) - in a castle IN FRONT that stands before a volcano IN FRONT too. And THE CRAB'S STACK (docs/render-stack.md): in either
+ * shelter at either depth, a pumpkin, a coral or a cluster at that depth over the crab's spot - ranked above the shelter it covers
+ * the crab, ranked below it the crab shows (each at most 1 in 20 the other way). PT_ROOST_OLD=1 = the control for the pick (0.3.9's:
+ * the nearer), PT_CRAB_STACK_OLD=1 the render's: each must FAIL. */
+static int roost_frontmost(void) { return tank_decor_above(&tank, 2, 9) ? 2 : 9; }
+static float roost_x(int c) { return fminf(fmaxf(tank_decor_x(&tank, c), TANK_FX0 + DECOR_MARGIN + CR_HALF_W), TANK_FX1 - DECOR_MARGIN - CR_HALF_W); }
+static bool roost_in(int c) { return tank.cr_mode == CR_ROOST && tank.cr_cave == c && fabsf(tank.cr_x - roost_x(c)) <= 1.0f; }
+static void roost_tick(float secs) { for (int i = 0; i < (int)(secs * 20); i++) { tank.cr_find_cool = 1e9f; tank.cr_since_climb = 0; tank_tick(&tank, 1.0f / 20, advisor_rules); } }
+static bool roost_until(int c, float secs) {   /* tick until it roosts in c (or the time is up) */
+    for (int i = 0; i < (int)(secs * 20); i++) { if (roost_in(c)) return true; roost_tick(0.05f); }
+    return roost_in(c);
+}
+static void roost_go(void) {   /* out long enough: it heads for its shelter now, on its own */
+    tank.cr_mode = CR_REST; tank.cr_mode_s = 0; tank.cr_timer = 0; tank.cr_outing = 1e4f;   /* (past CR_OUTING_S x CR_NIGHT_OUT) */ tank.cr_cave = -1; tank.cr_hide = 0;
+    tank.cr_fidget_kind = CR_FID_NONE; tank.cr_fidget = 0; tank.cr_poke = 0; tank.cr_find = 0;
+}
+static void roost_stage(int zc, int zv, bool castle_over, int side, float cr0, bool night) {
+    tank_init(&tank, 4242); tank_new_population(&tank); tank.n_fish = 0;
+    for (int i = 0; i < MAX_FOOD; i++) tank.food[i].alive = false;
+    tank.night = night; tank.light_override = true; tank.light_on = !night; memset(tank.algae, 0, sizeof tank.algae);
+    tank_veg_set(&tank, 0, 0.15f); tank_veg_set(&tank, 1, 0.15f); tank_veg_set(&tank, 2, 0.15f);
+    tank.sd_unlocks |= SD_ITEM_CASTLE | SD_ITEM_VOLCANO | SD_ITEM_CRAB;
+    tank_castle_place(&tank); tank_volcano_place(&tank); tank_crab_place(&tank);
+    const float X = (TANK_FX0 + TANK_FX1) / 2.0f;
+    tank_decor_set(&tank, 2, X + side * 30, zc); tank_decor_set(&tank, 9, X - side * 30, zv);   /* overlapping: each one's middle inside the other */
+    tank.decor_rank[tank_decor_slot(2)] = castle_over ? 2 : 1; tank.decor_rank[tank_decor_slot(9)] = castle_over ? 1 : 2;
+    tank.bubble_x = TANK_FX1 - 20;
+    tank.cr_x = cr0; tank.cr_y = 0; tank.cr_find_cool = 1e9f; tank.cr_since_climb = 0; tank.cr_startle_cool = 999;
+    roost_go();
+}
+static int selftest_roost(const char *prefix) {
+    static uint16_t scene[TANK_W * TANK_H], A[TANK_W * TANK_H], B[TANK_W * TANK_H], C[TANK_W * TANK_H], D[TANK_W * TANK_H];
+    static tank_t keep;
+    const bool old = getenv("PT_ROOST_OLD") != NULL;
+    tank_debug_roost_nearer(old);
+    render_debug_crab_stack_old(getenv("PT_CRAB_STACK_OLD") != NULL);   /* (the render's control: it must FAIL too) */
+    static const struct { int zc, zv; bool castle_over; const char *name; } ORD[] = {
+        { DECOR_Z_BACK,  DECOR_Z_BACK,  true,  "both BEHIND, the castle above" }, { DECOR_Z_BACK,  DECOR_Z_BACK,  false, "both BEHIND, the volcano above" },
+        { DECOR_Z_FRONT, DECOR_Z_FRONT, true,  "both IN FRONT, the castle above" }, { DECOR_Z_FRONT, DECOR_Z_FRONT, false, "both IN FRONT, the volcano above" },
+        { DECOR_Z_FRONT, DECOR_Z_BACK,  true,  "the castle IN FRONT, the volcano BEHIND" }, { DECOR_Z_BACK,  DECOR_Z_FRONT, true,  "the castle BEHIND, the volcano IN FRONT" } };
+    const int NORD = (int)(sizeof ORD / sizeof ORD[0]);
+    int fails = 0, runs = 0;
+    #define RFAIL(...) do { if (fails < 24) { printf("FAIL: roost: %s, castle %s: ", ORD[o].name, side < 0 ? "left" : "right"); printf(__VA_ARGS__); printf("\n"); } fails++; } while (0)
+    for (int o = 0; o < NORD; o++) for (int side = -1; side <= 1; side += 2) {
+        /* the picks: on its own (day, night), scared, the director (the frontmost / the other named) - from three starts */
+        const float starts[3] = { TANK_FX0 + 40.0f, (TANK_FX0 + TANK_FX1) / 2.0f, TANK_FX1 - 40.0f };
+        for (int s = 0; s < 3; s++) for (int path = 0; path < 5; path++) {
+            roost_stage(ORD[o].zc, ORD[o].zv, ORD[o].castle_over, side, starts[s], path == 1);
+            const int want = roost_frontmost();
+            if (path == 2) { tank.cr_mode = CR_REST; tank.cr_timer = 60; tank_crab_scare(&tank, tank.cr_x + 20); }
+            if (path == 3) { tank.cr_timer = 60; tank.cr_outing = 0; tank_crab_roost(&tank, -1); }
+            if (path == 4) { tank.cr_timer = 60; tank.cr_outing = 0; tank_crab_roost(&tank, want == 2 ? 9 : 2); }
+            runs++;
+            if (!roost_until(want, 200)) {
+                static const char *P[] = { "on its own", "on its own at night", "scared", "the director's roost", "the director naming the other" };
+                RFAIL("%s from x %.0f: mode %d in %d at x %.0f, not in the %s at %.0f", P[path], starts[s], tank.cr_mode, tank.cr_cave, tank.cr_x, want == 2 ? "castle" : "volcano", roost_x(want));
+            }
+        }
+        /* the changes while it roosts in the frontmost */
+        for (int ch = 0; ch < 7; ch++) {
+            roost_stage(ORD[o].zc, ORD[o].zv, ORD[o].castle_over, side, starts[1], false);
+            int want = roost_frontmost();
+            runs++;
+            if (!roost_until(want, 200)) { RFAIL("change %d: never roosted in the frontmost", ch); continue; }
+            tank.cr_timer = 1e5f;                                             /* a long roost: only the change may end it */
+            const int other = want == 2 ? 9 : 2;
+            const unsigned wbit = want == 2 ? SD_ITEM_CASTLE : SD_ITEM_VOLCANO;
+            if (ch == 0 || ch == 6) {                                         /* the order flipped (the ranks at one depth, else the depths) - 6: hidden in the dark first */
+                if (ch == 6) { tank_crab_scare(&tank, tank.cr_x + 20); if (tank.cr_hide <= 0) { RFAIL("a scare in the roost did not hide it"); continue; } }
+                if (ORD[o].zc == ORD[o].zv) { uint8_t *rc = &tank.decor_rank[tank_decor_slot(2)], *rv = &tank.decor_rank[tank_decor_slot(9)]; uint8_t k = *rc; *rc = *rv; *rv = k; }
+                else { tank_decor_set(&tank, 2, tank_decor_x(&tank, 2), ORD[o].zv); tank_decor_set(&tank, 9, tank_decor_x(&tank, 9), ORD[o].zc); }
+                if (roost_frontmost() != other) { RFAIL("change %d: the flip did not flip the order", ch); continue; }
+                if (ch == 6) { roost_tick(1.0f); if (!roost_in(want)) RFAIL("hidden in the dark, it left at once (mode %d in %d)", tank.cr_mode, tank.cr_cave); }
+                if (!roost_until(other, 300)) RFAIL("change %d: the order flipped, it stays (mode %d in %d at %.0f)", ch, tank.cr_mode, tank.cr_cave, tank.cr_x);
+            } else if (ch == 1) {                                             /* its piece moved */
+                tank_decor_set(&tank, want, tank_decor_x(&tank, want) + side * 40, tank_decor_z(&tank, want));
+                if (!roost_until(want, 200)) RFAIL("its piece moved, it did not follow (mode %d in %d at %.0f, the piece at %.0f)", tank.cr_mode, tank.cr_cave, tank.cr_x, roost_x(want));
+            } else if (ch == 2) {                                             /* locked: nothing changes */
+                tank.sd_locked |= wbit; roost_tick(30);
+                if (!roost_in(want)) RFAIL("its piece locked, it left (mode %d in %d)", tank.cr_mode, tank.cr_cave);
+            } else if (ch == 3) {                                             /* shelved: out, the other; back from the shelf: over again if it is the frontmost */
+                tank.sd_shelved |= wbit; tank.decor_rank[tank_decor_slot(want)] = 0; roost_tick(1.0f);
+                if (tank.cr_mode == CR_ROOST && tank.cr_cave == want) RFAIL("its piece shelved, it still roosts in it");
+                roost_go();
+                if (!roost_until(other, 300)) RFAIL("its piece shelved, it never took the other (mode %d in %d)", tank.cr_mode, tank.cr_cave);
+                tank.cr_timer = 1e5f; tank.sd_shelved &= ~wbit; tank_decor_raise(&tank, want);
+                const int now = roost_frontmost();
+                if (!roost_until(now, 300)) RFAIL("back from the shelf, the %s is the frontmost: mode %d in %d", now == 2 ? "castle" : "volcano", tank.cr_mode, tank.cr_cave);
+            } else if (ch == 4) {                                             /* sold: out, the other */
+                tank.sd_unlocks &= ~wbit; tank_decor_reset(&tank, want); roost_tick(1.0f);
+                if (tank.cr_mode == CR_ROOST && tank.cr_cave == want) RFAIL("its piece sold, it still roosts in it");
+                roost_go();
+                if (!roost_until(other, 300)) RFAIL("its piece sold, it never took the other (mode %d in %d)", tank.cr_mode, tank.cr_cave);
+            } else if (ch == 5) {                                             /* a SWAP IN: the load sets it down where it was (progression.c), then its life */
+                const float x = tank.cr_x; tank_crab_place(&tank); tank.cr_x = x; tank.cr_find_cool = 1e9f; roost_go();
+                if (!roost_until(want, 200)) RFAIL("after a SWAP IN: mode %d in %d at %.0f", tank.cr_mode, tank.cr_cave, tank.cr_x);
+            }
+        }
+        /* the frame: the crab roosting in the frontmost is not covered by the other */
+        roost_stage(ORD[o].zc, ORD[o].zv, ORD[o].castle_over, side, starts[1], false);
+        const int want = roost_frontmost();
+        if (!roost_until(want, 200) && !old) continue;
+        tank.cr_timer = 1e5f; tank.cr_fidget_kind = CR_FID_NONE; tank.cr_fidget = 0; tank.cr_next_fidget = 1e5f; tank.cr_poke = 0; tank.cr_hide = 0; tank.cr_back = 0; tank.cr_mode_s = 30;
+        const int cave = tank.cr_cave, other = cave == 2 ? 9 : 2;
+        if (cave < 0) { RFAIL("the frame: no roost"); continue; }
+        render_set_scene_cache(scene); render_set_vignette_cache(vig_buf); render_set_card_cache(card_buf); render_set_modal_cache(give_buf, gift_buf); render_set_dirty_mask(dirty_buf);
+        keep = tank;
+        tank = keep; tank.sd_unlocks &= ~SD_ITEM_CRAB; tank.cr_x = -1; render_tank(&tank, B, TANK_W); render_tank(&tank, B, TANK_W);
+        tank = keep; tank.sd_shelved |= other == 2 ? SD_ITEM_CASTLE : SD_ITEM_VOLCANO; render_tank(&tank, C, TANK_W); render_tank(&tank, C, TANK_W);
+        tank.sd_unlocks &= ~SD_ITEM_CRAB; tank.cr_x = -1; render_tank(&tank, D, TANK_W); render_tank(&tank, D, TANK_W);
+        tank = keep; render_tank(&tank, A, TANK_W); render_tank(&tank, A, TANK_W);
+        int body = 0, hidden = 0;
+        for (int i = 0; i < TANK_W * TANK_H; i++) if (C[i] != D[i]) { body++; if (A[i] == B[i]) { hidden++; if (prefix) A[i] = (((i % TANK_W) >> 1) ^ ((i / TANK_W) >> 1)) & 1 ? 0xFFFF : 0x0000; } }
+        if (prefix) { char path[300]; snprintf(path, sizeof path, "%s_roost_%d%s.ppm", prefix, o, side < 0 ? "L" : "R"); write_ppm(path, A); }
+        if (body < 150) RFAIL("the frame: the crab in the %s is not drawn (%d px)", cave == 2 ? "castle" : "volcano", body);
+        else if (hidden * 20 > body) RFAIL("the frame: the crab in the %s is covered on %d of its %d px", cave == 2 ? "castle" : "volcano", hidden, body);
+        else printf("roost: %s, castle %s: in the %s, shown on %d of %d px\n", ORD[o].name, side < 0 ? "left" : "right", cave == 2 ? "castle" : "volcano", body - hidden, body);
+    }
+    #undef RFAIL
+    /* THE CRAB'S STACK: a piece that is no shelter before or behind the crab's shelter */
+    static const int SH[2] = { 2, 9 }, PC[3] = { 8, 3, 4 }; static const unsigned PB[3] = { SD_ITEM_PUMPKIN, SD_ITEM_CORAL, SD_ITEM_CLUSTER };
+    static const char *PN[3] = { "pumpkin", "coral", "cluster" };
+    for (int si = 0; si < 2; si++) for (int z = 0; z < 2; z++) for (int pi = 0; pi < 3; pi++) for (int above = 0; above < 2; above++) {
+        const int sh = SH[si], zz = z ? DECOR_Z_FRONT : DECOR_Z_BACK;
+        roost_stage(zz, zz, true, -1, (TANK_FX0 + TANK_FX1) / 2.0f, false);
+        tank.sd_unlocks &= ~(sh == 2 ? SD_ITEM_VOLCANO : SD_ITEM_CASTLE);           /* (its shelter alone) */
+        for (int b = 0; b < tank_veg_beds(&tank); b++) tank_veg_set(&tank, b, 0);   /* (no fronds: a frond over the crab's box takes the box's sweep, a step off in
+                                                                                 tint whatever stands behind it - every crab in a cave, not this stack) */
+        tank.sd_unlocks |= PB[pi];
+        if (PC[pi] == 8) tank_pumpkin_place(&tank); else if (PC[pi] == 3) tank_coral_place(&tank); else tank_cluster_place(&tank);
+        if (PC[pi] == 3) tank.coral_growth = 1.0f;
+        if (PC[pi] == 4) tank.cluster_growth = 1.0f;
+        tank_decor_set(&tank, PC[pi], tank_decor_x(&tank, sh) + 6, zz);
+        tank.decor_rank[tank_decor_slot(sh)] = above ? 1 : 2; tank.decor_rank[tank_decor_slot(PC[pi])] = above ? 2 : 1;
+        runs++;
+        char what[120]; snprintf(what, sizeof what, "the crab in the %s %s, the %s %s it", sh == 2 ? "castle" : "volcano", z ? "IN FRONT" : "BEHIND", PN[pi], above ? "before" : "behind");
+        if (!roost_until(sh, 200)) { printf("FAIL: roost: %s: never roosted\n", what); fails++; continue; }
+        tank.cr_timer = 1e5f; tank.cr_fidget_kind = CR_FID_NONE; tank.cr_fidget = 0; tank.cr_next_fidget = 1e5f; tank.cr_poke = 0; tank.cr_hide = 0; tank.cr_back = 0; tank.cr_mode_s = 30;
+        render_set_scene_cache(scene); render_set_vignette_cache(vig_buf); render_set_card_cache(card_buf); render_set_modal_cache(give_buf, gift_buf); render_set_dirty_mask(dirty_buf);
+        keep = tank;
+        tank = keep; tank.sd_unlocks &= ~SD_ITEM_CRAB; tank.cr_x = -1; render_tank(&tank, B, TANK_W); render_tank(&tank, B, TANK_W);
+        tank = keep; tank.sd_shelved |= PB[pi]; render_tank(&tank, C, TANK_W); render_tank(&tank, C, TANK_W);
+        tank.sd_unlocks &= ~SD_ITEM_CRAB; tank.cr_x = -1; render_tank(&tank, D, TANK_W); render_tank(&tank, D, TANK_W);
+        tank = keep; render_tank(&tank, A, TANK_W); render_tank(&tank, A, TANK_W);
+        int under = 0, wrong = 0;                                             /* the crab's pixels where the piece lies: shown there when it is behind, hidden when before */
+        for (int i = 0; i < TANK_W * TANK_H; i++) {
+            if (C[i] == D[i] || !render_piece_covers(PC[pi], i % TANK_W, i / TANK_W)) continue;
+            under++;
+            if ((A[i] != B[i]) == (bool)above) { wrong++; if (prefix) A[i] = (((i % TANK_W) >> 1) ^ ((i / TANK_W) >> 1)) & 1 ? 0xFFFF : 0x0000; }
+        }
+        if (prefix) { char path[300]; snprintf(path, sizeof path, "%s_stack_%d%d%d%d.ppm", prefix, si, z, pi, above); write_ppm(path, A); }
+        if (under < 100) { printf("FAIL: roost: %s: the piece is not over the crab's spot (%d px)\n", what, under); fails++; }
+        else if (wrong * 20 > under) { printf("FAIL: roost: %s: the crab %s on %d of its %d px there\n", what, above ? "shows through the piece" : "is covered by it", wrong, under); fails++; }
+        else printf("roost: %s: %s (%d of %d px the other way)\n", what, above ? "covered" : "shown", wrong, under);
+    }
+    tank_debug_roost_nearer(false);
+    render_debug_crab_stack_old(false);
+    printf("selftest-roost: %d runs, %s\n", runs, fails ? "FAIL" : "PASS");
+    if (fails) printf("FAIL: roost: %d of %d\n", fails, runs);
+    return fails ? 1 : 0;
+}
+
 /* --selftest-front-keep [prefix] (0.3.9.6, Bananna's #help thread 10-31 "Fish clipping into pumpkin", the pendant: a resting fish IN FRONT
  * of the pumpkin IN FRONT, its tail cut by the carved face). A fish passing BEHIND a piece puts the piece back over itself from the scene
  * (dep_draw); that restore took every pixel the frame had drawn in its box - a fish drawn BEFORE it and IN FRONT of the pieces too.
@@ -3854,7 +5245,7 @@ static int selftest_front_keep(const char *prefix) {
             else if (item == 9) tank_volcano_place(&tank); else tank_castle_place(&tank);
             const float X = TANK_FLOOR_X(224.0f);
             tank_decor_set(&tank, item, X, DECOR_Z_FRONT);
-            render_set_scene_cache(scene); render_set_vignette_cache(vig_buf); render_set_card_cache(card_buf); render_set_dirty_mask(dirty_buf);
+            render_set_scene_cache(scene); render_set_vignette_cache(vig_buf); render_set_card_cache(card_buf); render_set_modal_cache(give_buf, gift_buf); render_set_dirty_mask(dirty_buf);
             g = tank; g.fish[0].x = g.fish[1].x = -400;
             render_tank(&g, N, TANK_W); render_tank(&g, N, TANK_W);
             static uint8_t cov[TANK_W * TANK_H]; int n = 0;                       /* the piece's body: where most of it lies under a fish */
@@ -3893,6 +5284,120 @@ static int selftest_front_keep(const char *prefix) {
     return fails ? 1 : 0;
 }
 
+/* --selftest-seahorse-stack [prefix] (0.3.9.7, a keeper's square on #help 11-01 "Seahorse hold": the seahorse HOLDING A BLADE of the
+ * seagrass behind a castle IN FRONT was drawn over the castle's tower, and HOLDING A LEAF of the sword plant ranked under the volcano
+ * it sat on the volcano's peak): coiled on a frond, every piece that stands before the frond's bed stands before the seahorse too
+ * (THE BED'S STACK, tank.h sh_obed). Each cell stages it on the frond whose coil and body lie most inside the piece, renders the
+ * frame with it and without it (sh_hidden), and counts the pixels inside the piece's whole body where the two differ: none where the
+ * piece stands before the bed, plenty where the bed stands before the piece. PT_SH_STACK_OFF=1 is the control (0.3.9.6's drawing:
+ * the hidden cells fail). With a prefix: <prefix>_shstack_<cell>.ppm, the offending pixels magenta */
+static const struct { const char *name; int item, iz, bed, bz, plant_over; bool hidden; float ph; } SHS_C[] = {
+    { "leaf_at_volcano_peak",       9, DECOR_Z_BACK,  3, DECOR_Z_BACK,  0, true,  0.80f },   /* the keeper's photo: the coil at the peak, the body above it */
+    { "leaf_under_volcano_behind",  9, DECOR_Z_BACK,  3, DECOR_Z_BACK,  0, true,  0.55f },   /* both BEHIND, the volcano ranked above */
+    { "leaf_behind_volcano_front",  9, DECOR_Z_FRONT, 3, DECOR_Z_BACK,  0, true,  0.55f },   /* (0.3.9.6 had it right: the back lane - no staging check) */
+    { "blade_behind_castle_front",  2, DECOR_Z_FRONT, 0, DECOR_Z_BACK,  0, true,  0.55f },   /* the keeper's castle: the tower */
+    /* (0.4: the plant has one depth, BEHIND - its IN FRONT cells, both IN FRONT under the volcano or the castle and over the volcano, are
+       retired; the castle before the plant in their place (BEHIND ranked above it, and IN FRONT) - the plant over a piece BEHIND is the volcano's cell, the watch
+       cannot stage the castle's) */
+    { "leaf_under_castle_behind",   2, DECOR_Z_BACK,  3, DECOR_Z_BACK,  0, true,  0.55f },   /* both BEHIND, the castle ranked above */
+    { "leaf_behind_castle_front",   2, DECOR_Z_FRONT, 3, DECOR_Z_BACK,  0, true,  0.35f },
+    { "leaf_over_volcano_behind",   9, DECOR_Z_BACK,  3, DECOR_Z_BACK,  1, false, 0.55f },   /* the plant ranked above: the seahorse shows */
+    { "blade_before_castle_behind", 2, DECOR_Z_BACK,  0, DECOR_Z_BACK,  0, false, 0.55f },   /* the grass before a castle BEHIND */
+};
+/* one staging of a cell: the grass (or the plant) at height ph, the piece at its spot shifted xo; the frond whose coil and body lie
+   most inside the piece in *frond, the overlap returned (-1: no body) */
+static int shs_stage(int ci, int bed, float ph, float xo, int *frond, uint16_t *scene, uint16_t *fb) {
+    const int item = SHS_C[ci].item;
+    tank_init(&tank, 91); tank_new_population(&tank); tank.n_fish = 0;
+    for (int i = 0; i < MAX_FOOD; i++) tank.food[i].alive = false;
+    tank.night = false; tank.light_override = true; tank.light_on = true; memset(tank.algae, 0, sizeof tank.algae);
+    tank.sd_unlocks |= SD_ITEM_SEAHORSE | SD_ITEM_PLANT | (item == 9 ? SD_ITEM_VOLCANO : item == 4 ? SD_ITEM_CLUSTER : SD_ITEM_CASTLE);
+    tank_plant_place(&tank);
+    if (item == 9) tank_volcano_place(&tank); else if (item == 4) tank_cluster_place(&tank); else tank_castle_place(&tank);
+    for (int b = 0; b < 3; b++) tank_veg_set(&tank, b, bed == 3 ? 0.6f : ph);
+    tank_veg_set(&tank, 3, bed == 3 ? ph : 0.6f);
+    float bx0, bx1; tank_veg_bed(&tank, bed, &bx0, &bx1, NULL, NULL);
+    float X = bed == 3 ? TANK_FLOOR_X(224.0f) : 0.5f * (bx0 + bx1);
+    tank_decor_set(&tank, item, X + xo, SHS_C[ci].iz);
+    if (bed == 3) tank_decor_set(&tank, 0, X, SHS_C[ci].bz);
+    else tank_decor_set(&tank, 0, TANK_FX1 - 30, DECOR_Z_BACK);                      /* (the plant out of the way) */
+    tank.decor_rank[tank_decor_slot(0)] = SHS_C[ci].plant_over ? 2 : 1; tank.decor_rank[tank_decor_slot(item)] = SHS_C[ci].plant_over ? 1 : 2;
+    tank_seahorse_place(&tank);
+    render_set_scene_cache(scene); render_set_vignette_cache(vig_buf); render_set_card_cache(card_buf); render_set_modal_cache(give_buf, gift_buf); render_set_dirty_mask(dirty_buf);
+    tank.sh_hidden = true; render_tank(&tank, fb, TANK_W); render_tank(&tank, fb, TANK_W);
+    int n = 0; for (int y = 0; y < TANK_H; y++) for (int x = 0; x < TANK_W; x++) n += render_decor_covers(item, x, y);
+    if (n < 400) return -1;
+    int nf; tank_veg_bed(&tank, bed, NULL, NULL, NULL, &nf);
+    int best = 0; *frond = -1;
+    for (int i = 0; i < nf; i++) {
+        if (!tank_seahorse_hold(&tank, bed, i)) continue;
+        int m = 0;
+        for (int y = (int)tank.sh_y - 46; y <= (int)tank.sh_y + 4; y += 2) for (int x = (int)tank.sh_x - 12; x <= (int)tank.sh_x + 12; x += 2)
+            if (x >= 0 && x < TANK_W && y >= 0 && y < TANK_H)                         /* (behind a castle IN FRONT, its front row hid the back lane already:
+                                                                                          the towers and the keep are what 0.3.9.6 left the seahorse over) */
+                m += render_decor_covers(item, x, y) && !(item == 2 && SHS_C[ci].iz == DECOR_Z_FRONT && SHS_C[ci].bz == DECOR_Z_BACK && render_piece_covers(item, x, y));
+        if (m > best) { best = m; *frond = i; }
+    }
+    return best;
+}
+static int selftest_seahorse_stack(const char *prefix) {
+    static uint16_t scene[TANK_W * TANK_H], R0[TANK_W * TANK_H], R1[TANK_W * TANK_H];
+    const bool off = getenv("PT_SH_STACK_OFF") != NULL;
+    render_debug_seahorse_stack_off(off);
+    const int NC = (int)(sizeof SHS_C / sizeof SHS_C[0]);
+#define C SHS_C
+    int fails = 0;
+    for (int ci = 0; ci < NC; ci++) {
+        const int item = C[ci].item;
+        /* the staging that puts the coil and body most inside the piece in this world: the cell's height first, then a sweep; the
+           castle shifted so a tower can stand over the frond */
+        static const float PH[] = { 0, 0.30f, 0.40f, 0.50f, 0.60f, 0.70f, 0.80f, 0.90f }, XO[] = { 0, -39, 39, -20, 20 };
+        int best = -1, bi = -1, bbed = C[ci].bed; float bph = C[ci].ph, bxo = 0;
+        for (int g = C[ci].bed; g < (C[ci].bed == 3 ? 4 : 3); g++)                  /* (a seagrass cell: whichever bed a tower can stand before) */
+            for (int h = 0; h < 8; h++) for (int o = 0; o < (item == 2 ? 5 : 1); o++) {
+                const float ph = h ? PH[h] : C[ci].ph; int fr;
+                int m = shs_stage(ci, g, ph, XO[o], &fr, scene, R0);
+                if (m > best) { best = m; bi = fr; bph = ph; bxo = XO[o]; bbed = g; }
+                if (g == C[ci].bed && h == 0 && o == 0 && m >= 30) { h = 8; g = 4; }   /* (the cell's own staging holds: kept - the peak stays a peak) */
+            }
+        if (best < 0) { printf("FAIL: seahorse-stack %s: the piece has no body\n", C[ci].name); fails++; continue; }
+        { int fr; shs_stage(ci, bbed, bph, bxo, &fr, scene, R0); }
+        if (getenv("PT_SH_DBG")) printf("  %s: height %.2f, piece shifted %.0f, frond %d, %d inside\n", C[ci].name, bph, bxo, bi, best);
+        if (bi < 0 || best < 30) { printf("FAIL: seahorse-stack %s: no frond of bed %d inside the piece (%d) - the staging\n", C[ci].name, bbed, best); fails++; continue; }
+        tank_seahorse_hold(&tank, bbed, bi);
+        if (getenv("PT_SH_DBG")) printf("  %s: held at %.0f,%.0f, lane %s (wants %s), grass %d, stack %d, mode %d\n", C[ci].name, tank.sh_x, tank.sh_y, tank.sh_front ? "FRONT" : "BACK", tank.sh_front_want ? "FRONT" : "BACK", tank.sh_gdepth, tank.sh_obed, tank.sh_mode);
+        tank.sh_hidden = true; for (int k = 0; k < 3; k++) render_tank(&tank, R0, TANK_W);
+        tank.sh_hidden = false; for (int k = 0; k < 3; k++) render_tank(&tank, R1, TANK_W);
+        int over = 0, seen = 0;
+        for (int y = 0; y < TANK_H; y++) for (int x = 0; x < TANK_W; x++) {
+            const int i = y * TANK_W + x;
+            if (R1[i] == R0[i]) continue;
+            seen++;
+            if (!render_decor_covers(item, x, y)) continue;
+            over++;
+            if (C[ci].hidden && prefix) R1[i] = FB_SWAP16(0xF81F);
+        }
+        if (prefix) { char path[300]; snprintf(path, sizeof path, "%s_shstack_%s.ppm", prefix, C[ci].name); write_ppm(path, R1); }
+        int was = over;                                                                  /* a hidden cell's staging: drawn as 0.3.9.6 did, over the piece */
+        if (C[ci].hidden) {
+            static uint16_t R2[TANK_W * TANK_H];
+            render_debug_seahorse_stack_off(true); for (int k = 0; k < 3; k++) render_tank(&tank, R2, TANK_W); render_debug_seahorse_stack_off(off);
+            tank.sh_hidden = true; for (int k = 0; k < 3; k++) render_tank(&tank, R0, TANK_W);
+            was = 0; for (int i = 0; i < TANK_W * TANK_H; i++) was += R2[i] != R0[i] && render_decor_covers(item, i % TANK_W, i / TANK_W);
+            seen = was > seen ? was : seen;
+        }
+        const bool regress = C[ci].iz == DECOR_Z_FRONT && C[ci].bz == DECOR_Z_BACK && bbed == 3;   /* (the back lane: right before the fix too) */
+        if ((seen < 150 && !regress) || (C[ci].hidden && was < 40 && !regress)) { printf("FAIL: seahorse-stack %s: the seahorse barely drawn (%d px) - the staging\n", C[ci].name, seen); fails++; }
+        else if (C[ci].hidden && over) { printf("FAIL: seahorse-stack %s: coiled on frond %d of bed %d, it shows over the piece that stands before the bed (%d px of %d)\n", C[ci].name, bi, bbed, over, seen); fails++; }
+        else if (!C[ci].hidden && over < 40) { printf("FAIL: seahorse-stack %s: coiled on a frond before the piece, the piece covers it (%d px of %d over it)\n", C[ci].name, over, seen); fails++; }
+        else printf("seahorse-stack %s: frond %d of bed %d, %d over the piece (%s; drawn over it, it had %d)\n", C[ci].name, bi, bbed, over, C[ci].hidden ? "behind it" : "before it", was);
+    }
+    render_debug_seahorse_stack_off(false);
+#undef C
+    printf("selftest-seahorse-stack: %s (%d cells%s)\n", fails ? "FAIL" : "PASS", NC, off ? ", the control" : "");
+    return fails ? 1 : 0;
+}
+
 /* --square-boot [prefix] (Strato on the square 10-31, right after the 14:12 boot: "small cut outs in the left and right edge" of the
  * pumpkin with a frond showing through, and fronds through the volcano where the pumpkin overlaps its base; gone after the loop's
  * 15-minute rebake): his square - coral < sword plant IN FRONT < pumpkin < volcano, all IN FRONT, the pumpkin standing in the left
@@ -3915,7 +5420,7 @@ static int square_boot(const char *prefix) {
     tank_decor_set(&tank, 0, px, DECOR_Z_FRONT); tank_decor_set(&tank, 3, cx, DECOR_Z_FRONT); tank_decor_set(&tank, 8, kx, DECOR_Z_FRONT); tank_decor_set(&tank, 9, vx, DECOR_Z_FRONT);
     tank.decor_rank[tank_decor_slot(3)] = 1; tank.decor_rank[tank_decor_slot(0)] = 2; tank.decor_rank[tank_decor_slot(8)] = 3; tank.decor_rank[tank_decor_slot(9)] = 4;
     static uint16_t scene[TANK_W * TANK_H], fb[TANK_W * TANK_H], ng[TANK_W * TANK_H];
-    render_set_scene_cache(scene); render_set_vignette_cache(vig_buf); render_set_card_cache(card_buf); render_set_dirty_mask(dirty_buf);
+    render_set_scene_cache(scene); render_set_vignette_cache(vig_buf); render_set_card_cache(card_buf); render_set_modal_cache(give_buf, gift_buf); render_set_dirty_mask(dirty_buf);
     render_set_grass_loop(bs_alloc64, free, 3u << 20); render_grass_loop_lock(64); render_grass_loop_on(true);
     bool tried = false; float ts = 0; int frames = 0;
     for (int fr = 0; fr < 600; fr++) {                 /* the start, as main.c's loading path */
@@ -3990,7 +5495,8 @@ static int square_boot(const char *prefix) {
                                                                                                            critters stay, drawn the same in both (a fish passing in front
                                                                                                            of the volcano is its own business) */
           render_tank(&h, ng, TANK_W); render_tank(&h, ng, TANK_W);
-          render_tank(&tank, fb, TANK_W);
+          render_tank(&tank, fb, TANK_W); render_tank(&tank, fb, TANK_W);   /* (twice, as above: a fish's depth box is its slot's last frame,
+                                                                                and h put other fish in slots 0 and 1 - the 0.4 merge's forms met it) */
           for (int i = 0; i < TANK_W * TANK_H; i++) if (fb[i] != ng[i]) { if (render_piece_covers(8, i % TANK_W, i / TANK_W)) ab8++; else if (render_piece_covers(9, i % TANK_W, i / TANK_W)) ab9++; }
           if (prefix && f == 10) { char path[300]; snprintf(path, sizeof path, "%s_square_boot_animals.ppm", prefix); write_ppm(path, fb); snprintf(path, sizeof path, "%s_square_boot_noanimals.ppm", prefix); write_ppm(path, ng); }
       }
@@ -4001,10 +5507,104 @@ static int square_boot(const char *prefix) {
     return fails ? 1 : 0;
 }
 
+/* --selftest-order-squares (0.4, Strato 11-02: "a universal object in front / behind squares", the sword plant's page): taps on the
+ * two squares in the DEPTH bar's place, through setup_touch as a finger. Alone: no piece to show, a tap does nothing. Beside the
+ * pumpkin: IN FRONT puts the plant over it, BEHIND under it, and the page goes live. Between the coral and the pumpkin: the squares
+ * show the pumpkin (the one in front), toggle against it only; an arrow's step past the coral makes the coral theirs, and IN FRONT
+ * then puts the plant over the coral and still under the pumpkin. The arrows and the top row keep their boxes. */
+static int selftest_order_squares(void) {
+#define OQ_FAIL(...) do { printf("FAIL: order squares: " __VA_ARGS__); printf("\n"); fails++; } while (0)
+    int fails = 0;
+    const int sx = SETUP_ORDSQ_X, sy = SETUP_DEPTH_Y + SETUP_DEPTH_H / 2, bx = sx + SETUP_DEPTH_SEG_W / 2, fx = sx + SETUP_DEPTH_SEG_W * 3 / 2;
+    #define OQ_TAP(px) do { pg_touch((px), sy, true); pg_touch((px) + 2, sy + 2, false); } while (0)
+    tank_init(&tank, 77); tank_new_population(&tank); tank.n_fish = 0;
+    tank.sd_unlocks |= SD_ITEM_PLANT | SD_ITEM_PUMPKIN | SD_ITEM_CORAL;
+    tank_plant_place(&tank); tank_pumpkin_place(&tank); tank_coral_place(&tank);
+    const float PX = TANK_W * 56 / 100;
+    tank_decor_set(&tank, 0, PX, DECOR_Z_BACK); tank_decor_set(&tank, 8, PX - 44, DECOR_Z_BACK); tank_decor_set(&tank, 3, PX + 56, DECOR_Z_BACK);
+    if (pg_hit(bx, sy) != SETUP_HIT_ORD0 && setup_active()) OQ_FAIL("a page up before the test");
+    /* alone */
+    tank.sd_unlocks &= ~(SD_ITEM_PUMPKIN | SD_ITEM_CORAL);
+    setup_begin_place(&tank, 0);
+    if (pg_hit(bx, sy) != SETUP_HIT_ORD0 || pg_hit(fx, sy) != SETUP_HIT_ORD0 + 1) OQ_FAIL("the squares' boxes (%d %d)", pg_hit(bx, sy), pg_hit(fx, sy));
+    if (pg_hit(SETUP_ORD_X0 + SETUP_ORD_W / 2, SETUP_ORD_Y + SETUP_BTN_H / 2) != SETUP_HIT_BCK || pg_hit(SETUP_ORD_X1 + SETUP_ORD_W / 2, SETUP_ORD_Y + SETUP_BTN_H / 2) != SETUP_HIT_FWD) OQ_FAIL("the arrows lost their boxes");
+    if (pg_hit(SETUP_TOP_DONE_X + 20, SETUP_TOP_BTN_Y + 20) != SETUP_HIT_NEXT) OQ_FAIL("DONE lost its box");
+    OQ_TAP(fx); OQ_TAP(bx);
+    if (setup_place_live() || !setup_active()) OQ_FAIL("alone, a tap on the squares changed something");
+    setup_cancel(&tank);
+    /* beside the pumpkin (ranked over the plant) */
+    tank.sd_unlocks |= SD_ITEM_PUMPKIN;
+    tank.decor_rank[tank_decor_slot(0)] = 1; tank.decor_rank[tank_decor_slot(8)] = 2;
+    setup_begin_place(&tank, 0);
+    OQ_TAP(fx);
+    if (!tank_decor_above(&tank, 0, 8)) OQ_FAIL("IN FRONT did not put the plant over the pumpkin");
+    if (!setup_place_live()) OQ_FAIL("the plant moved in the stack, the page is not live");
+    OQ_TAP(fx);
+    if (!tank_decor_above(&tank, 0, 8)) OQ_FAIL("IN FRONT twice took the plant back");
+    OQ_TAP(bx);
+    if (tank_decor_above(&tank, 0, 8)) OQ_FAIL("BEHIND did not put the plant under the pumpkin");
+    setup_cancel(&tank);
+    /* between the coral and the pumpkin */
+    tank.sd_unlocks |= SD_ITEM_CORAL;
+    tank.decor_rank[tank_decor_slot(3)] = 1; tank.decor_rank[tank_decor_slot(0)] = 2; tank.decor_rank[tank_decor_slot(8)] = 3;
+    setup_begin_place(&tank, 0);
+    OQ_TAP(fx);                                                                       /* the squares show the pumpkin (in front of it) */
+    if (!tank_decor_above(&tank, 0, 8) || !tank_decor_above(&tank, 0, 3)) OQ_FAIL("between: IN FRONT did not put the plant over the pumpkin");
+    OQ_TAP(bx);                                                                       /* ... and back: still the pumpkin's squares */
+    if (tank_decor_above(&tank, 0, 8) || !tank_decor_above(&tank, 0, 3)) OQ_FAIL("between: BEHIND did not put it back between them (the squares lost the pumpkin)");
+    pg_touch(SETUP_ORD_X0 + SETUP_ORD_W / 2, SETUP_ORD_Y + SETUP_BTN_H / 2, true); pg_touch(SETUP_ORD_X0 + SETUP_ORD_W / 2, SETUP_ORD_Y + SETUP_BTN_H / 2, false);   /* the arrow: past the coral */
+    if (tank_decor_above(&tank, 0, 3)) OQ_FAIL("between: the back arrow did not take the plant under the coral");
+    OQ_TAP(fx);                                                                       /* the squares follow the piece just passed: the coral */
+    if (!tank_decor_above(&tank, 0, 3) || tank_decor_above(&tank, 0, 8)) OQ_FAIL("between: after the arrow, IN FRONT did not put the plant over the coral alone");
+    setup_cancel(&tank);
+    #undef OQ_TAP
+#undef OQ_FAIL
+    printf("selftest-order-squares: %s\n", fails ? "FAIL" : "PASS (alone, beside the pumpkin, between it and the coral, the arrows)");
+    return fails ? 1 : 0;
+}
+/* --order-shot <prefix> (0.4 ART, Strato 11-02: "a universal object in front / behind squares"): the sword plant's page alone (no
+ * squares), beside the pumpkin (behind it, then in front), between the coral and the pumpkin - <prefix>_order_<case>.ppm (Strato:
+ * the plant's page only - the other pieces keep their DEPTH bar and arrows) */
+static int order_shot(const char *prefix) {
+    hero_shot(prefix);
+    static uint16_t fb[TANK_W * TANK_H]; char path[512];
+    const int PX = TANK_W * 56 / 100;
+    tank.n_fish = 0;
+    tank.sd_unlocks = SD_ITEM_PLANT | SD_ITEM_PUMPKIN | SD_ITEM_CORAL; tank.sd_shelved = 0;
+    tank_plant_place(&tank); tank_pumpkin_place(&tank); tank_coral_place(&tank); tank_veg_set(&tank, 3, 0.66f);
+    tank_decor_set(&tank, 0, PX, DECOR_Z_BACK); tank_decor_set(&tank, 8, PX - 44, DECOR_Z_BACK); tank_decor_set(&tank, 3, PX + 56, DECOR_Z_BACK);
+    #define OSHOT(name, item) do { setup_begin_place(&tank, (item)); \
+        for (int k = 0; k < 3; k++) { render_tank(&tank, fb, TANK_W); render_setup(&tank, fb, TANK_W, 1.0f); } \
+        snprintf(path, sizeof path, "%s_order_%s.ppm", prefix, (name)); write_ppm(path, fb); setup_cancel(&tank); } while (0)
+    tank.sd_unlocks &= ~(SD_ITEM_PUMPKIN | SD_ITEM_CORAL);
+    OSHOT("plant_alone", 0);
+    tank.sd_unlocks |= SD_ITEM_PUMPKIN;
+    tank.decor_rank[tank_decor_slot(0)] = 1; tank.decor_rank[tank_decor_slot(8)] = 2;
+    OSHOT("plant_behind_pumpkin", 0);
+    tank.decor_rank[tank_decor_slot(0)] = 2; tank.decor_rank[tank_decor_slot(8)] = 1;
+    OSHOT("plant_before_pumpkin", 0);
+    tank.sd_unlocks |= SD_ITEM_CORAL;
+    tank.decor_rank[tank_decor_slot(3)] = 1; tank.decor_rank[tank_decor_slot(0)] = 2; tank.decor_rank[tank_decor_slot(8)] = 3;
+    OSHOT("plant_between", 0);
+    #undef OSHOT
+    printf("order-shot: %s_order_*.ppm\n", prefix);
+    return 0;
+}
 /* --place-shot <prefix> (0.3.9.4 ART, Strato: the sword plant's stacking UI as the other decorations'): the square's own stack -
  * the sword plant, the coral, the pumpkin - and the plant's placement page at each depth, then the pumpkin's to compare */
 static int place_shot(const char *prefix) {
     hero_shot(prefix);
+    static uint16_t fb0[TANK_W * TANK_H]; char path0[512];
+    {   /* the sword plant's page, its one depth (0.4): alone, as Strato's watch had it; then beside a pumpkin BEHIND (the arrows) */
+        tank.sd_unlocks = SD_ITEM_PLANT; tank_plant_place(&tank); tank_veg_set(&tank, 3, 0.66f); tank_decor_set(&tank, 0, TANK_W * 2 / 3, DECOR_Z_BACK);
+        setup_begin_place(&tank, 0);
+        for (int k = 0; k < 3; k++) { render_tank(&tank, fb0, TANK_W); render_setup(&tank, fb0, TANK_W, 1.0f); }
+        snprintf(path0, sizeof path0, "%s_place_plant_alone.ppm", prefix); write_ppm(path0, fb0); setup_cancel(&tank);
+        tank.sd_unlocks |= SD_ITEM_PUMPKIN; tank_pumpkin_place(&tank); tank_decor_set(&tank, 8, TANK_W * 2 / 3 - 40, DECOR_Z_BACK); tank_decor_raise(&tank, 8);
+        setup_begin_place(&tank, 0);
+        for (int k = 0; k < 3; k++) { render_tank(&tank, fb0, TANK_W); render_setup(&tank, fb0, TANK_W, 1.0f); }
+        snprintf(path0, sizeof path0, "%s_place_plant_by_pumpkin.ppm", prefix); write_ppm(path0, fb0); setup_cancel(&tank);
+    }
     tank.sd_unlocks = SD_ITEM_PLANT | SD_ITEM_CORAL | SD_ITEM_PUMPKIN;
     tank_plant_place(&tank); tank_coral_place(&tank); tank_pumpkin_place(&tank); tank_veg_set(&tank, 3, 0.66f);
     tank_decor_set(&tank, 0, 60, DECOR_Z_FRONT); tank_decor_set(&tank, 3, TANK_W - 70, DECOR_Z_FRONT); tank_decor_set(&tank, 8, 150, DECOR_Z_FRONT);
@@ -4029,7 +5629,7 @@ static int place_shot(const char *prefix) {
         snprintf(path, sizeof path, "%s_place_%s_%s.ppm", prefix, it == 3 ? "coral" : "cluster", z ? "front" : "behind"); write_ppm(path, fb);
         setup_cancel(&tank);
     }
-    printf("place-shot: %s_place_plant_{behind,front}.ppm, %s_place_pumpkin.ppm, %s_place_{coral,cluster}_{behind,front}.ppm\n", prefix, prefix, prefix);
+    printf("place-shot: %s_place_plant_{alone,by_pumpkin}.ppm (0.4), %s_place_plant_{behind,front}.ppm, %s_place_pumpkin.ppm, %s_place_{coral,cluster}_{behind,front}.ppm\n", prefix, prefix, prefix, prefix);
     return 0;
 }
 
@@ -4071,6 +5671,57 @@ static int plant_order(void) {
 }
 
 
+/* --selftest-bake-order [prefix] (coral-sliver, 2026-11-02): the scene a step of growth bakes is the scene a fresh bake makes. The pumpkin's
+ * store kept off the pieces above it by their MASKS - right for its face and flame drawn every frame, after the bake; in the bake itself
+ * those pieces are painted after it, so their masks were still the LAST bake's: a coral or a reef cluster above the lantern that changed its
+ * shape (a growth step) left the lantern a hole where only its old shape covered, the water showing through, until the next bake. The coral
+ * and the cluster above the lantern, each depth, every growth step of their size phase and a step back; after each, the scene against the
+ * same tank baked again twice (the light off and on: the second bake reads masks of this shape) - pixel for pixel. With a prefix:
+ * <prefix>_bakeorder_<case>.ppm, the step's scene with the pixels that differ as a black and white checkerboard. */
+static int selftest_bake_order(const char *prefix) {
+    static uint16_t S1[TANK_W * TANK_H], S2[TANK_W * TANK_H], fb[TANK_W * TANK_H];
+    int fails = 0, checked = 0;
+    render_set_scene_cache(scene_buf); render_set_vignette_cache(vig_buf); render_set_card_cache(card_buf); render_set_modal_cache(give_buf, gift_buf); render_set_dirty_mask(dirty_buf);
+    for (int up = 3; up <= 4; up++) for (int pz = 0; pz <= 2; pz += 2) for (int uz = pz; uz <= 2; uz += 2) {
+        tank_init(&tank, 5); tank_new_population(&tank); tank.n_fish = 0;
+        for (int i = 0; i < MAX_FOOD; i++) tank.food[i].alive = false;
+        tank.night = false; tank.light_override = true; tank.light_on = true; memset(tank.algae, 0, sizeof tank.algae);
+        tank.sd_unlocks |= SD_ITEM_PUMPKIN | (up == 3 ? SD_ITEM_CORAL : SD_ITEM_CLUSTER);
+        tank_pumpkin_place(&tank);
+        const int px = TANK_W / 2 - 20;
+        tank_decor_set(&tank, 8, px, pz);
+        if (up == 3) { tank_coral_place(&tank); tank_coral_set_rgb(&tank, CORAL_PAL[0]); } else tank_cluster_place(&tank);
+        tank_decor_set(&tank, up, px + (int)(tank_decor_half_w(8) * 0.6f), uz);
+        tank_decor_raise(&tank, up);                                                                 /* over the lantern at one depth too */
+        const float g0 = up == 3 ? CORAL_START : 0.0f, g1 = 1.0f, step = up == 3 ? 1.0f / 128 : 1.0f / 64;   /* (CORAL_Q, CL_Q: one sprite rebuild a step) */
+        int bad_steps = 0, worst = 0, first = 0; float worst_g = 0, worst_from = 0;
+        float prev = g0;
+        const int nsteps = (int)ceilf((g1 - g0) / step);
+        for (int i = 0; i <= nsteps + 1; i++) {
+            const bool back = i > nsteps;                                                            /* (the last: a step back, 1.0 -> 0.7) */
+            const float g = i < nsteps ? g0 + i * step : g1, gg = back ? 0.7f : g;
+            if (up == 3) tank.coral_growth = gg; else tank.cluster_growth = gg + 1e-4f;
+            for (int k = 0; k < 2; k++) render_tank(&tank, fb, TANK_W);
+            unsigned ep; memcpy(S1, render_scene_buf(&ep), sizeof S1);
+            tank.night = true; render_tank(&tank, fb, TANK_W); tank.night = false; for (int k = 0; k < 2; k++) render_tank(&tank, fb, TANK_W);
+            memcpy(S2, render_scene_buf(&ep), sizeof S2);
+            int d = 0; for (int i = 0; i < TANK_W * TANK_H; i++) d += S1[i] != S2[i];
+            if (prefix && getenv("PT_BAKEORDER_AT") && fabsf(gg - (float)atof(getenv("PT_BAKEORDER_AT"))) < 1e-4f && up == (getenv("PT_BAKEORDER_UP") ? atoi(getenv("PT_BAKEORDER_UP")) : 4)
+                && pz == 0 && uz == 2) { char path[300]; snprintf(path, sizeof path, "%s_bakeorder_at.ppm", prefix); write_ppm(path, S1); }   /* (the sheet: one step as baked) */
+            if (d && g == g0) first = d;                                                             /* (the tank's first bake: masks of the tank drawn before it) */
+            if (d) { bad_steps++; if (d > worst && g != g0) { worst = d; worst_g = gg; worst_from = prev;
+                if (prefix) { for (int i = 0; i < TANK_W * TANK_H; i++) if (S1[i] != S2[i]) S1[i] = ((i % TANK_W + i / TANK_W) & 1) ? 0xFFFF : 0x0000;
+                    char path[300]; snprintf(path, sizeof path, "%s_bakeorder_%s_lantern-%s_%s.ppm", prefix, up == 3 ? "coral" : "cluster", pz ? "front" : "behind", uz ? "front" : "behind"); write_ppm(path, S1); } } }
+            checked++; prev = gg;
+        }
+        printf("%s bake-order: the %s %s over the lantern %s - %d growth steps left a hole (the first bake %d px; the worst step %d px, %.3f -> %.3f)\n", bad_steps ? "FAIL:" : "ok",
+               up == 3 ? "coral" : "cluster", uz ? "IN FRONT" : "BEHIND", pz ? "IN FRONT" : "BEHIND", bad_steps, first, worst, worst_from, worst_g);
+        fails += bad_steps > 0;
+    }
+    printf("selftest-bake-order: %s (%d steps)\n", fails ? "FAIL" : "PASS", checked);
+    return fails ? 1 : 0;
+}
+
 /* --selftest-footprint [prefix] (0.3.9.4, Strato on the square 10-31: "grass clicking on the edges" of the pumpkin): every piece IN
  * FRONT among the back grass, the sword plant IN FRONT ranked under it with its leaves across it - first with the grass loop on and
  * whole, then with the grass drawn live. On the piece's BODY (its recorded mask) every pixel is the piece's own, frame for frame
@@ -4088,7 +5739,7 @@ static int selftest_footprint(const char *prefix) {
     static uint16_t scene[TANK_W * TANK_H], A[TANK_W * TANK_H], B[NF][TANK_W * TANK_H], Q[TANK_W * TANK_H];
     static uint8_t rim[TANK_W * TANK_H];                                                            /* 1 body, 2 the near rim, 3 the far rim */
     int fails = 0;
-    render_set_scene_cache(scene); render_set_vignette_cache(vig_buf); render_set_card_cache(card_buf); render_set_dirty_mask(dirty_buf);
+    render_set_scene_cache(scene); render_set_vignette_cache(vig_buf); render_set_card_cache(card_buf); render_set_modal_cache(give_buf, gift_buf); render_set_dirty_mask(dirty_buf);
     for (int it = 0; it < 5; it++) {
         const int item = ITEMS[it];
         const uint32_t bit = item == 2 ? SD_ITEM_CASTLE : item == 3 ? SD_ITEM_CORAL : item == 4 ? SD_ITEM_CLUSTER : item == 8 ? SD_ITEM_PUMPKIN : SD_ITEM_VOLCANO;
@@ -4119,7 +5770,7 @@ static int selftest_footprint(const char *prefix) {
         if (nmask < 100 || nrim < 50) { printf("FAIL: footprint: the %s - body %d px, rim %d px (the staging)\n", NAMES[it], nmask, nrim); fails++; continue; }
         for (int pass = 0; pass < 2; pass++) {                                                      /* 0: the grass from the loop; 1: the grass live */
             int bad_body = 0, bad_plain = 0, bad_bright = 0, shaded = 0, worst = 0;
-            const float clock0 = tank.clock;
+            const double clock0 = tank.clock;
             for (int shade = 0; shade < 2; shade++) {                                               /* the shade off first (B, kept a frame), then on (A) */
                 render_debug_rim_off(!shade);
                 tank.clock = clock0;
@@ -4164,8 +5815,9 @@ static int selftest_footprint(const char *prefix) {
 }
 
 /* --selftest-place (0.3.9.4, Strato on the square 10-31: on the plant's page "behind the pumpkin" picked, the preview still had the plant
- * on top; the volcano's page the same; and with any page up "the frame rate drops to a crawl"): his stack - coral < sword plant IN
- * FRONT < pumpkin < volcano, all IN FRONT, the pumpkin standing in the plant's leaves - through the placement pages, judged on the
+ * on top; the volcano's page the same; and with any page up "the frame rate drops to a crawl"): his stack - coral < sword plant <
+ * pumpkin < volcano, the pumpkin standing in the plant's leaves (0.4: the plant has one depth, BEHIND over the seagrass, so the
+ * coral and the pumpkin stand BEHIND with it and the volcano IN FRONT, clear of them) - through the placement pages, judged on the
  * tank's own frames (the page's widgets are the page's). A page just opened changes nothing: no scene bake, the loop whole, the stack
  * as it was; its piece goes live only once it is changed on the page, and then by its rank: a live pumpkin ranked over the plant shows
  * no leaf, under it the leaves; a live coral dragged under the pumpkin stays under it (the pumpkin back from the scene over it), at
@@ -4173,8 +5825,12 @@ static int selftest_footprint(const char *prefix) {
 static int place_body_leaves(int item, uint16_t *fb, uint16_t *ng, bool live) {   /* leaf px on item's body: the frame against the same frame with the plant bare */
     static tank_t g; g = tank; tank_veg_set(&g, 3, 0);
     render_debug_live_mask(live);
+    render_grass_loop_bypass(true);                   /* (both frames with the grass live: the plant bare is another tank to the loop - the plant BEHIND
+                                                         is in its look since 0.4 - and the loop's moment is a sway step off the live grass, a seagrass
+                                                         frond over the pumpkin's edge counted as a leaf. Bypassed, the loop stays as the tank had it) */
     render_tank(&g, ng, TANK_W); render_tank(&g, ng, TANK_W);
     render_tank(&tank, fb, TANK_W); render_tank(&tank, fb, TANK_W);
+    render_grass_loop_bypass(false);
     int body = 0, bad = 0;
     for (int i = 0; i < TANK_W * TANK_H; i++) if (render_piece_covers(item, i % TANK_W, i / TANK_W)) { body++; bad += fb[i] != ng[i]; }
     render_debug_live_mask(false);
@@ -4204,10 +5860,11 @@ static int selftest_place(const char *prefix) {
     tank_plant_place(&tank); tank_volcano_place(&tank); tank_coral_place(&tank); tank_pumpkin_place(&tank); tank_veg_set(&tank, 3, 0.8f);
     tank.bubble_x = TANK_FX1 - 20;
     const int plx = TANK_W * 42 / 100, cox = TANK_W * 17 / 100, vox = TANK_W * 80 / 100;   /* the plant and the pumpkin together, the coral left, the volcano right - clear of each other */
-    tank_decor_set(&tank, 0, plx, DECOR_Z_FRONT); tank_decor_set(&tank, 8, plx + 6, DECOR_Z_FRONT);   /* the pumpkin in the leaves */
-    tank_decor_set(&tank, 3, cox, DECOR_Z_FRONT); tank_decor_set(&tank, 9, vox, DECOR_Z_FRONT);
+    tank_decor_set(&tank, 0, plx, DECOR_Z_BACK); tank_decor_set(&tank, 8, plx + 6, DECOR_Z_BACK);     /* the pumpkin in the leaves, in the plant's one depth (BEHIND, 0.4) */
+    tank_decor_set(&tank, 3, cox, DECOR_Z_BACK); tank_decor_set(&tank, 9, vox, DECOR_Z_FRONT);
+    if (tank_decor_z(&tank, 0) != DECOR_Z_BACK) PL_FAIL("the plant is not BEHIND (its one depth)");
     tank.decor_rank[tank_decor_slot(3)] = 1; tank.decor_rank[tank_decor_slot(0)] = 2; tank.decor_rank[tank_decor_slot(8)] = 3; tank.decor_rank[tank_decor_slot(9)] = 4;
-    render_set_scene_cache(scene); render_set_vignette_cache(vig_buf); render_set_card_cache(card_buf); render_set_dirty_mask(dirty_buf);
+    render_set_scene_cache(scene); render_set_vignette_cache(vig_buf); render_set_card_cache(card_buf); render_set_modal_cache(give_buf, gift_buf); render_set_dirty_mask(dirty_buf);
     render_set_grass_loop(bs_alloc64, free, 8u << 20); render_grass_loop_lock(64); render_grass_loop_on(true);
     for (int k = 0; k < 400 && (!render_grass_loop_n() || render_grass_loop_ready() < render_grass_loop_n()); k++) { render_grass_loop_bake_more(&tank, 4); render_tank(&tank, fb, TANK_W); }
     const int nloop = render_grass_loop_n();
@@ -4417,7 +6074,7 @@ static void shelf_stage(int seed, int fish, int seconds) {
 static int shelf_shot(const char *prefix, const char *jelly_ppm) {
     static uint16_t fb[TANK_W * TANK_H], scene[TANK_W * TANK_H], th[5][200 * 200];
     int tw, thh; render_shelf_thumb_size(&tw, &thh);
-    render_set_vignette_cache(vig_buf); render_set_card_cache(card_buf); render_set_dirty_mask(dirty_buf);
+    render_set_vignette_cache(vig_buf); render_set_card_cache(card_buf); render_set_modal_cache(give_buf, gift_buf); render_set_dirty_mask(dirty_buf);
     for (int k = 0; k < 4; k++) {
         if (k == 0) shelf_stage(2024, 5, 20);                       /* on the glass: five fish by day */
         if (k == 1) {                                               /* a castle tank */
@@ -4493,7 +6150,7 @@ static int shelf_shot(const char *prefix, const char *jelly_ppm) {
     render_touch_lock_hint(fb, TANK_W);
     snprintf(path, sizeof path, "%s_lock_hint.ppm", prefix); write_ppm(path, fb);
     shelf_stage(2024, 5, 20); render_set_scene_cache(scene); for (int f = 0; f < 3; f++) render_tank(&tank, fb, TANK_W);
-    render_settings(&tank, fb, TANK_W, 60, 2);                                        /* the settings page (its TANKS button, 0.3.9.3) */
+    render_settings(&tank, fb, TANK_W, 60, 100);                                        /* the settings page (its TANKS button, 0.3.9.3) */
     snprintf(path, sizeof path, "%s_settings.ppm", prefix); write_ppm(path, fb);
     for (int k = 0; k < 3; k++) { render_loading(fb, TANK_W, "SAM'S\nTANK", k * 0.1f, NULL); snprintf(path, sizeof path, "%s_loading_%d.ppm", prefix, k); write_ppm(path, fb); }   /* LOADING (0.3.9.3 ART) */
     render_loading(fb, TANK_W, "SAM'S\nTANK", 0, "WAKING THE TANK"); snprintf(path, sizeof path, "%s_loading_wake.ppm", prefix); write_ppm(path, fb);   /* ... any start but a SWAP IN */
@@ -4530,14 +6187,16 @@ static int clip(const char *prefix, int seconds) {
     tank_coral_set_rgb(&tank, CORAL_PAL[7]); tank.coral_growth = CORAL_FULL;
     tank_decor_set(&tank, 4, 92 * sx, DECOR_Z_FRONT);
     tank_cluster_set_scheme(&tank, 0); tank.cluster_growth = CLUSTER_FULL;
-    tank_veg_set(&tank, 0, 0.62f); tank_veg_set(&tank, 1, 0.5f); tank_veg_set(&tank, 2, 0.7f);
+    for (int b = 0; b < VEG_BEDS; b++) tank_veg_set(&tank, b, VEG_START);   /* grown, not set: ragged tops (as the hero's) */
+    tank_tick_sleep(&tank, 11 * 3600);
+    tank.ravenous = false;
     for (int i = 0; i < 20 * 60; i++) tank_tick(&tank, 1.0f / 60.0f, advisor_rules);   /* settle: bubbles up, fish spread */
     memset(tank.algae, 0, sizeof tank.algae);
     tank.night = false; for (int i = 0; i < MAX_FOOD; i++) tank.food[i].alive = false;
     static uint16_t fb[TANK_W * TANK_H], scene[TANK_W * TANK_H];
     render_set_scene_cache(scene);
     render_set_vignette_cache(vig_buf);
-    render_set_card_cache(card_buf);
+    render_set_card_cache(card_buf); render_set_modal_cache(give_buf, gift_buf);
     render_set_dirty_mask(dirty_buf);
     char path[512]; int shot = 0;
     for (int k = 0; k < seconds * 60; k++) {
@@ -4547,6 +6206,227 @@ static int clip(const char *prefix, int seconds) {
         if (k % 4 == 0) { snprintf(path, sizeof path, "%s_%03d.ppm", prefix, shot++); write_ppm(path, fb); }
     }
     printf("clip: wrote %d frames, %s_000.ppm ..\n", shot, prefix);
+    return 0;
+}
+
+/* --fluid <prefix> (0.4, the trail - Strato 11-02: "long fish don't move as
+ * naturally as smaller fish"): three elders - CLASSIC / CLASSIC, SLENDER /
+ * VEIL, BULBOUS / SAIL - swim one scripted line, each twice: rigid as 0.3
+ * drew them (tank_trail_off) and with the trail. The script steers as
+ * update_fish does (the turn rate, the yaw, the speed's ease): cruise, a
+ * climb, a dive, level, a U-turn, a burst, a stop. Every 2nd frame (30 a
+ * second) a grid of tiles following each fish - forms down, BEFORE | AFTER
+ * across - is written as <prefix>_NNN.ppm. */
+static float norm_ang_sim(float a) { while (a > 3.14159265f) a -= 6.2831853f; while (a < -3.14159265f) a += 6.2831853f; return a; }
+#define FL_TW 200
+#define FL_TH 140
+static int fluid(const char *prefix) {
+    static const struct { int sh, fi; uint32_t rgb; } FORM[3] = {
+        { SHAPE_CLASSIC, FINS_CLASSIC, 0 }, { SHAPE_SLENDER, FINS_VEIL, 0 }, { SHAPE_BULBOUS, FINS_SAIL, 0 } };
+    const float DT = 1.0f / 60, T_END = 7.0f;
+    const int frames = (int)(T_END / DT) / 2;
+    static uint16_t fb[TANK_W * TANK_H], scene[TANK_W * TANK_H];
+    uint16_t *tiles = calloc((size_t)frames * 6 * FL_TW * FL_TH, 2);
+    for (int form = 0; form < 3; form++)
+        for (int v = 0; v < 2; v++) {
+            tank_trail_off = v == 0;
+            tank_init(&tank, 2024);
+            tank_new_population(&tank);
+            tank_make_fish(&tank, 0, 1, 0.6f, 0.6f, STAGE_ELDER);
+            tank.n_fish = 1;
+            fish_t *f = &tank.fish[0];
+            progression_set_age(&tank, 0, STAGE_ELDER_AGE + 1);
+            f->shape = (uint8_t)FORM[form].sh; f->fins = (uint8_t)FORM[form].fi; f->pattern = PATTERN_BARS;
+            f->hunger = 2; f->stress = 0; f->energy = 8; f->size = 1.3f;
+            f->x = TANK_W * 0.36f; f->y = TANK_H * 0.48f; f->heading = 0; f->speed = 28; f->goal.urgency = 3;
+            tank_fish_face(f);
+            tank.night = false;
+            render_set_scene_cache(scene); render_set_vignette_cache(vig_buf);
+            render_set_card_cache(card_buf); render_set_modal_cache(give_buf, gift_buf); render_set_dirty_mask(dirty_buf);
+            float rate = f->turn_rate * tank_form_turn(f);
+            int shot = 0;
+            for (int k = 0; (float)k * DT < T_END && shot < frames; k++) {
+                float tt = k * DT, want = 0, spd = 28;
+                if (tt >= 0.6f && tt < 1.6f) want = -0.75f;                     /* climb */
+                else if (tt >= 1.6f && tt < 2.6f) want = 0.75f;                 /* dive */
+                if (tt >= 3.0f && f->facing > 0) { f->facing = -1; f->heading = norm_ang_sim(3.14159f - f->heading); }   /* the U-turn commits */
+                if (tt >= 4.3f && tt < 5.3f) spd = 90;                          /* burst */
+                else if (tt >= 5.3f) spd = 6;                                    /* and stop */
+                if (f->facing < 0) want = norm_ang_sim(3.14159f - want);
+                float turn = norm_ang_sim(want - f->heading), lim = rate * DT;
+                f->heading = norm_ang_sim(f->heading + (turn > lim ? lim : turn < -lim ? -lim : turn));
+                float yr = rate * 1.2f * (1 + f->goal.urgency * 0.06f) * DT, dy = f->facing - f->yaw;
+                f->yaw += dy > yr ? yr : dy < -yr ? -yr : dy;
+                f->speed += (spd - f->speed) * fminf(1, DT * 2.6f);
+                float hc = cosf(f->heading), ahc = fabsf(hc), w = fminf(fmaxf((ahc - 0.2f) / 0.4f, 0), 1);
+                float brake = 1 - 0.6f * (1 - fabsf(f->yaw)) * ahc * w;
+                f->x += (hc + (f->yaw * ahc - hc) * w) * f->speed * brake * DT;
+                f->y += sinf(f->heading) * f->speed * brake * DT;
+                tank_fish_trail(f, DT);
+                tank.clock += DT;
+                if (k % 2) continue;
+                render_tank(&tank, fb, TANK_W);
+                int x0 = (int)f->x - FL_TW / 2, y0 = (int)f->y - FL_TH / 2;
+                x0 = x0 < 0 ? 0 : x0 > TANK_W - FL_TW ? TANK_W - FL_TW : x0;
+                y0 = y0 < 0 ? 0 : y0 > TANK_H - FL_TH ? TANK_H - FL_TH : y0;
+                uint16_t *d = tiles + ((size_t)shot * 6 + form * 2 + v) * FL_TW * FL_TH;
+                for (int y = 0; y < FL_TH; y++) memcpy(d + y * FL_TW, fb + (y0 + y) * TANK_W + x0, FL_TW * 2);
+                shot++;
+            }
+        }
+    tank_trail_off = false;
+    /* the grid: 2 x 3 tiles, 2 px seams */
+    const int GW = FL_TW * 2 + 2, GH = FL_TH * 3 + 4;
+    uint16_t *g = calloc((size_t)GW * GH, 2);
+    char path[512];
+    for (int s = 0; s < frames; s++) {
+        for (int form = 0; form < 3; form++)
+            for (int v = 0; v < 2; v++) {
+                const uint16_t *t = tiles + ((size_t)s * 6 + form * 2 + v) * FL_TW * FL_TH;
+                for (int y = 0; y < FL_TH; y++)
+                    memcpy(g + (form * (FL_TH + 2) + y) * GW + v * (FL_TW + 2), t + y * FL_TW, FL_TW * 2);
+            }
+        static const char *const NAME[3] = { "CLASSIC", "SLENDER VEIL", "BULBOUS SAIL" };
+        for (int form = 0; form < 3; form++)
+            for (int v = 0; v < 2; v++) {
+                char lab[40]; snprintf(lab, sizeof lab, "%s %s", NAME[form], v ? "- AFTER" : "- BEFORE");
+                render_text(g, GW, v * (FL_TW + 2) + 5, form * (FL_TH + 2) + 5, 1, v ? 0xffe08a : 0xb8c8cc, lab);
+            }
+        snprintf(path, sizeof path, "%s_%03d.ppm", prefix, s);
+        FILE *o = fopen(path, "wb"); if (!o) return 1;
+        fprintf(o, "P6\n%d %d\n255\n", GW, GH);
+        for (int i = 0; i < GW * GH; i++) {
+            uint16_t px = FB_SWAP16(g[i]);
+            uint8_t rgb[3] = { (uint8_t)((px >> 11) << 3), (uint8_t)(((px >> 5) & 63) << 2), (uint8_t)((px & 31) << 3) };
+            fwrite(rgb, 1, 3, o);
+        }
+        fclose(o);
+    }
+    free(g); free(tiles);
+    printf("fluid: wrote %d frames %dx%d, %s_000.ppm .. (rows CLASSIC/CLASSIC, SLENDER/VEIL, BULBOUS/SAIL; BEFORE | AFTER)\n", frames, GW, GH, prefix);
+    return 0;
+}
+
+/* grown fish, every body / fin set / pattern at least once in the first
+ * four, in the roster's colors: --genes's tank frames (all six, one a
+ * juvenile) and --forms (four: room for two arrivals - R - to show heredity) */
+static void forms_cast(int count) {
+    static const struct { int sh, fi, pat; stage_t stage; } CAST[] = {
+        { SHAPE_CLASSIC, FINS_CLASSIC, PATTERN_BARS,  STAGE_ELDER }, { SHAPE_SLENDER, FINS_VEIL,    PATTERN_MASK,  STAGE_ADULT },
+        { SHAPE_BULBOUS, FINS_SAIL,    PATTERN_EYEBAND, STAGE_ADULT }, { SHAPE_SLENDER, FINS_SAIL,    PATTERN_BARS,  STAGE_ELDER },
+        { SHAPE_BULBOUS, FINS_VEIL,    PATTERN_MASK,  STAGE_ADULT }, { SHAPE_CLASSIC, FINS_VEIL,    PATTERN_EYEBAND, STAGE_JUV } };
+    const int n = count < (int)(sizeof CAST / sizeof CAST[0]) ? count : (int)(sizeof CAST / sizeof CAST[0]);
+    for (int i = 0; i < n; i++) {
+        tank_make_fish(&tank, i, i, 0.6f, 0.6f, CAST[i].stage);
+        tank.fish[i].shape = (uint8_t)CAST[i].sh; tank.fish[i].fins = (uint8_t)CAST[i].fi; tank.fish[i].pattern = (uint8_t)CAST[i].pat;
+        tank_roll_carried(&tank, i);                     /* secrets, so an arrival (R) can surprise */
+    }
+    tank.n_fish = n;
+    for (int i = 0; i < n; i++) {
+        tank.fish[i].eaten = 60;
+        progression_set_age(&tank, i, CAST[i].stage == STAGE_ELDER ? STAGE_ELDER_AGE + 1
+                                    : CAST[i].stage == STAGE_ADULT ? STAGE_ADULT_AGE + 1 : STAGE_JUV_AGE + 1);
+    }
+}
+
+/* --genes <prefix> (0.4, docs/genetics-0.4.md): the forms on the glass.
+ * <prefix>_genes_<pattern>.ppm: one board per pattern - the body shapes down,
+ * the fin sets across, grown fish side-on at 1.6x, three of them life size
+ * along the foot; <prefix>_genes_tank_N.ppm: six fish of mixed forms (one a
+ * juvenile: the plain tail until ADULT) swimming under the rules brain, a
+ * frame every 2 s so a turn or two is caught mid-way. */
+static int genes_shot(const char *prefix) {
+    static uint16_t fb[TANK_W * TANK_H], scene[TANK_W * TANK_H];
+    static const uint32_t ROW[SHAPE_N][3] = {                  /* body, fin, accent per body row */
+        { 0x38dcc7, 0x1d9f98, 0xffbd59 }, { 0x4da3ff, 0x2c5e93, 0x1a2a30 }, { 0xffd166, 0xc98a1e, 0xf25b65 } };
+    char path[512];
+    for (int pat = 0; pat < PATTERN_N; pat++) {
+        for (int i = 0; i < TANK_W * TANK_H; i++) fb[i] = 0x0884;   /* the tank's deep water, about */
+        char title[64]; snprintf(title, sizeof title, "PATTERN %s", PATTERN_NAMES[pat]);
+        render_text(fb, TANK_W, 8, 6, 2, 0xe8f1f2, title);
+        for (int fi = 0; fi < FINS_N; fi++) render_text(fb, TANK_W, PAGE_W * (2 * fi + 1) / 6 - 24, 28, 1, 0x9fd8e2, FINS_NAMES[fi]);
+        for (int sh = 0; sh < SHAPE_N; sh++) {
+            render_text(fb, TANK_W, 4, 66 + sh * 92, 1, 0x7fa8b0, SHAPE_NAMES[sh]);
+            for (int fi = 0; fi < FINS_N; fi++) {
+                fish_t f; memset(&f, 0, sizeof f);
+                f.stage = STAGE_ADULT; f.color = ROW[sh][0]; f.fin = ROW[sh][1]; f.accent = ROW[sh][2];
+                f.shape = (uint8_t)sh; f.fins = (uint8_t)fi; f.pattern = (uint8_t)pat;
+                render_fish_sample(fb, TANK_W, PAGE_W * (2 * fi + 1) / 6.0f + 14, 82 + sh * 92, 1.6f, &f, 0.4f);
+            }
+        }
+        render_text(fb, TANK_W, 4, 332, 1, 0x7fa8b0, "LIFE SIZE");
+        for (int sh = 0; sh < SHAPE_N; sh++) {
+            fish_t f; memset(&f, 0, sizeof f);
+            f.stage = STAGE_ADULT; f.color = ROW[sh][0]; f.fin = ROW[sh][1]; f.accent = ROW[sh][2];
+            f.shape = (uint8_t)sh; f.fins = (uint8_t)sh; f.pattern = (uint8_t)pat;
+            render_fish_sample(fb, TANK_W, PAGE_W * (2 * sh + 1) / 6.0f + 30, 340, 1.0f, &f, 0.4f);
+        }
+        snprintf(path, sizeof path, "%s_genes_%s.ppm", prefix, PATTERN_NAMES[pat]);
+        for (char *q = path + strlen(prefix); *q; q++) if (*q == ' ') *q = '_';   /* EYE BAND -> EYE_BAND */
+        write_ppm(path, fb);
+    }
+    tank_init(&tank, 2024);
+    forms_cast(6);
+    const int n = tank.n_fish;
+    tank_veg_set(&tank, 0, 0.5f); tank_veg_set(&tank, 1, 0.4f); tank_veg_set(&tank, 2, 0.5f);
+    for (int i = 0; i < 20 * 60; i++) tank_tick(&tank, 1.0f / 60.0f, advisor_rules);
+    memset(tank.algae, 0, sizeof tank.algae);
+    tank.night = false;
+    render_set_scene_cache(scene);
+    render_set_vignette_cache(vig_buf);
+    render_set_card_cache(card_buf); render_set_modal_cache(give_buf, gift_buf);
+    render_set_dirty_mask(dirty_buf);
+    int shot = 0;
+    for (int k = 0; k < 12 * 60; k++) {
+        for (int i = 0; i < n; i++) { tank.fish[i].hunger = 2; tank.fish[i].stress = 1; }
+        tank_tick(&tank, 1.0f / 60.0f, advisor_rules);
+        render_tank(&tank, fb, TANK_W);
+        if (k % 120 == 0) { snprintf(path, sizeof path, "%s_genes_tank_%d.ppm", prefix, shot++); write_ppm(path, fb); }
+    }
+    /* the pages that draw a fish (0.4: they fit a form into a classic's room);
+       the last fish a bulbous sail FRY - Strato's speck of 10-04 */
+    tank.fish[n - 1].stage = STAGE_FRY; tank.fish[n - 1].size = tank.fish[n - 1].base_size * 0.55f;
+    tank.fish[n - 1].shape = SHAPE_BULBOUS; tank.fish[n - 1].fins = FINS_SAIL;
+    for (int i = 0; i < n; i++) tank.fish[i].ms_seen = tank.fish[i].ms_bits;
+    render_milestones(&tank, fb, TANK_W);
+    snprintf(path, sizeof path, "%s_genes_milestones.ppm", prefix); write_ppm(path, fb);
+    for (int i = 1; i <= 5; i++) {                       /* a fish's card: the big portrait (5: the fry) */
+        render_milestones_show_fish(&tank, i); render_milestones(&tank, fb, TANK_W);
+        snprintf(path, sizeof path, "%s_genes_fishcard%d.ppm", prefix, i); write_ppm(path, fb);
+        render_milestones_leave();
+    }
+    render_tank(&tank, fb, TANK_W); render_notice(&tank, fb, TANK_W, 2, 2, 0, 1.0f);
+    snprintf(path, sizeof path, "%s_genes_notice.ppm", prefix); write_ppm(path, fb);
+    /* the first run on a new tank (0.4's order: COLORS, FORM, NAME per fish,
+       then the bubbles): each page with the fry on stage */
+    {
+        tank_init(&tank, 77); tank_new_population(&tank);
+        render_set_scene_cache(scene);
+        setup_begin(&tank);
+        static const char *const fr_name[SETUP_PG_N] = { "welcome", "colors", "form", "name", "colors2", "form2", "name2", "bubbles", "care" };
+        for (int pg = 0; pg < SETUP_PG_N; pg++) {
+            if (pg == SETUP_PG_COLORS_A) { setup_activate(&tank, SETUP_HIT_BODY0 + 8); setup_activate(&tank, SETUP_HIT_PAT0 + PATTERN_EYEBAND); setup_activate(&tank, SETUP_HIT_ACC0 + 7);
+                                           setup_activate(&tank, SETUP_HIT_ACC0 + 8); }   /* charcoal + silver; the struck-out swatch (the body's own): its note shows */
+            if (pg == SETUP_PG_FORM_A) { setup_activate(&tank, SETUP_HIT_SHAPE0 + SHAPE_BULBOUS); setup_activate(&tank, SETUP_HIT_FINS0 + FINS_SAIL); }
+            if (pg == SETUP_PG_COLORS_B) setup_activate(&tank, SETUP_HIT_PAT0 + tank.fish[1].pattern % PATTERN_TILES);   /* deselected: SOLID */
+            if (pg == SETUP_PG_NAME_A) { tank_set_name(&tank, 0, "MIRA"); setup_activate(&tank, SETUP_HIT_SLOT0 + 4); }
+            setup_touch(&tank, 0, 0, false);
+            for (int i = 0; i < 300; i++) tank_tick(&tank, 1.0f / 60.0f, advisor_rules);
+            render_tank(&tank, fb, TANK_W); render_setup(&tank, fb, TANK_W, 1.0f);
+            snprintf(path, sizeof path, "%s_genes_setup_%s.ppm", prefix, fr_name[pg]); write_ppm(path, fb);
+            if (pg + 1 < SETUP_PG_N) setup_activate(&tank, SETUP_HIT_NEXT);
+        }
+        setup_cancel(&tank);
+    }
+    /* the "first mutation" badge (0.4): the tank row's second page, its notice */
+    tank.tank_ms_bits |= TMS_TRIO | TMS_FIRST_MUTATION; tank.tank_ms_seen = tank.tank_ms_bits & ~TMS_FIRST_MUTATION;
+    render_milestones_tap(&tank, PAGE_X + 426, PAGE_Y + 254 + 20);   /* the row's arrow: page 2 */
+    render_milestones(&tank, fb, TANK_W);
+    snprintf(path, sizeof path, "%s_genes_badge_page.ppm", prefix); write_ppm(path, fb);
+    render_milestones_leave();
+    render_tank(&tank, fb, TANK_W); render_notice(&tank, fb, TANK_W, 1, -1, TMS_FIRST_MUTATION, 1.0f);
+    snprintf(path, sizeof path, "%s_genes_badge_notice.ppm", prefix); write_ppm(path, fb);
+    printf("genes: wrote %s_genes_{BARS,MASK,EYE_BAND}.ppm, %d tank frames, the milestones page, 4 fish cards, a notice\n", prefix, shot);
     return 0;
 }
 
@@ -4741,7 +6621,7 @@ static int pumpkin_fish_shot(const char *prefix) {
     tank_pumpkin_place(&tank);
     for (int i = 0; i < 5 * 60; i++) tank_tick(&tank, 1.0f / 60.0f, advisor_rules);
     for (int i = 0; i < MAX_FOOD; i++) tank.food[i].alive = false;
-    render_set_scene_cache(scene_buf); render_set_vignette_cache(vig_buf); render_set_card_cache(card_buf); render_set_dirty_mask(dirty_buf);
+    render_set_scene_cache(scene_buf); render_set_vignette_cache(vig_buf); render_set_card_cache(card_buf); render_set_modal_cache(give_buf, gift_buf); render_set_dirty_mask(dirty_buf);
     const float px = TANK_FLOOR_X(90.0f);
     static tank_t base; base = tank;
     static uint16_t fb[TANK_W * TANK_H];
@@ -4806,7 +6686,7 @@ static int pumpkin_fish_hunt(const char *prefix) {
     const float px = getenv("PF_X") ? TANK_FLOOR_X((float)atof(getenv("PF_X"))) : (b0x0 + b0x1) * 0.5f;
     tank_decor_set(&tank, 8, px, getenv("PF_Z") ? atoi(getenv("PF_Z")) : DECOR_Z_FRONT);
     tank_decor_set(&tank, 3, px + 70, DECOR_Z_FRONT);
-    render_set_scene_cache(scene_buf); render_set_vignette_cache(vig_buf); render_set_card_cache(card_buf); render_set_dirty_mask(dirty_buf);
+    render_set_scene_cache(scene_buf); render_set_vignette_cache(vig_buf); render_set_card_cache(card_buf); render_set_modal_cache(give_buf, gift_buf); render_set_dirty_mask(dirty_buf);
     static uint16_t fb[TANK_W * TANK_H];
     static tank_t snap;
     int frames = 0, checked = 0, mixed = 0, wrote = 0, worst = 0, n_front = 0, n_behind = 0, n_none = 0;
@@ -4842,6 +6722,690 @@ static int pumpkin_fish_hunt(const char *prefix) {
     return mixed ? 1 : 0;
 }
 
+
+/* --depth-pop-hunt <prefix> (0.3.9.7, the #help thread of 2026-11-01: "they choose to be on a layer behind the volcano while
+ * they're in front of the volcano. So they just poof disappear" - the shrimp mostly, a fish too): a tank with the volcano, the
+ * castle, the coral and the cluster and a school of shrimp, lived for DP_SECS seconds. Every frame a fish's or the school's
+ * depths change (the grass's or the pieces'), a forked copy of the sim renders that moment with the new depths and the OLD:
+ * the pixels that differ on a piece's silhouette are the ones the change took away or brought at once (the pop). Must be
+ * none. DP_VZ the volcano's depth (0 BEHIND, 2 IN FRONT), DP_SEED, DP_ALL=1 every change; PT_DEPTH_POP_OLD=1 0.3.9.6's rule */
+static const int DP_ITEMS[5] = { 2, 3, 4, 8, 9 };
+static int dp_child(const tank_t *snap, int who, uint8_t og, uint8_t op, int out[2]) {
+    static uint16_t F[TANK_W * TANK_H], N[TANK_W * TANK_H];
+    tank = *snap;                                    /* the new depths (as the frame drew them) ... */
+    for (int k = 0; k < 2; k++) render_tank(&tank, N, TANK_W);
+    tank = *snap;                                    /* ... and the old ones, the same moment */
+    if (who < 0) { tank.shr_gdepth = og; tank.shr_pdepth = op; } else { tank.fish[who].gdepth = og; tank.fish[who].pdepth = op; }
+    for (int k = 0; k < 2; k++) render_tank(&tank, F, TANK_W);
+    if (g_pf_dump && getenv("DP_PAIR")) {           /* (the pair, clean: the old depths, the new) */
+        char path[600]; snprintf(path, sizeof path, "%s_before.ppm", g_pf_dump); write_ppm(path, F);
+        snprintf(path, sizeof path, "%s_after.ppm", g_pf_dump); write_ppm(path, N);
+    }
+    /* the same two moments with the animal alone (the other fish and the school out of the water): a pixel that flips only
+       with the others about is the animals' own order - since 0.4 the fish are drawn deepest first (Strato on the pendant
+       11-02, --selftest-fish-pair), so a fish that comes to the front over another fish is over it from that frame on, the
+       piece under them standing still. A pop is the piece's: it flips with the animal alone too */
+    static uint16_t FA[TANK_W * TANK_H], NA[TANK_W * TANK_H];
+    #define DP_ALONE(tk) do { for (int j = 0; j < N_FISH_SLOTS; j++) if (j != who) (tk)->fish[j].x = -400; \
+                              if (who >= 0) for (int j = 0; j < (tk)->shrimp_n; j++) (tk)->shrimp[j].x = -400; } while (0)
+    tank = *snap; DP_ALONE(&tank);
+    for (int k = 0; k < 2; k++) render_tank(&tank, NA, TANK_W);
+    tank = *snap; DP_ALONE(&tank);
+    if (who < 0) { tank.shr_gdepth = og; tank.shr_pdepth = op; } else { tank.fish[who].gdepth = og; tank.fish[who].pdepth = op; }
+    for (int k = 0; k < 2; k++) render_tank(&tank, FA, TANK_W);
+    #undef DP_ALONE
+    int on = 0, all = 0;
+    for (int y = 0; y < TANK_H; y++) for (int x = 0; x < TANK_W; x++) {
+        const int p = y * TANK_W + x;
+        if (F[p] == N[p]) continue; all++;
+        if (FA[p] == NA[p]) continue;                /* (the others' order, not the piece) */
+        bool s = false; for (int k = 0; k < 5 && !s; k++) s = render_decor_covers(DP_ITEMS[k], x, y);
+        if (s) { on++; F[p] = FB_SWAP16(0xF81F); }
+    }
+    out[0] = on; out[1] = all;
+    if (g_pf_dump && on > 0) write_ppm(g_pf_dump, F);
+    return 0;
+}
+static int dp_run(const char *prefix, float secs, int seed, int vz, bool verbose, int *n_changes) {
+    tank_init(&tank, (uint32_t)seed);
+    tank_new_population(&tank);
+    for (int i = 0; i < 4; i++) tank_make_fish(&tank, i, i, 0.3f + 0.2f * i, 0.3f + 0.15f * i, STAGE_ADULT);
+    tank.n_fish = 4;
+    for (int i = 0; i < 4; i++) { progression_set_age(&tank, i, STAGE_ADULT_AGE + 1); tank.fish[i].eaten = 60; tank.fish[i].hunger = 2; tank.fish[i].stress = 1; tank.fish[i].energy = 0.5f + i; }
+    tank.sd_unlocks |= SD_ITEM_CORAL | SD_ITEM_CASTLE | SD_ITEM_CLUSTER | SD_ITEM_VOLCANO | SD_ITEM_SHRIMP;
+    tank_castle_place(&tank); tank_coral_place(&tank); tank_cluster_place(&tank); tank_volcano_place(&tank);
+    tank_shrimp_place(&tank, 8);
+    if (vz >= 0) tank_decor_set(&tank, 9, tank_decor_x(&tank, 9), vz);
+    render_set_scene_cache(scene_buf); render_set_vignette_cache(vig_buf); render_set_card_cache(card_buf); render_set_modal_cache(give_buf, gift_buf); render_set_dirty_mask(dirty_buf);
+    static uint16_t fb[TANK_W * TANK_H];
+    static tank_t snap, prev;
+    int frames = 0, changes = 0, pops = 0, wrote = 0, worst = 0;
+    const float dt = 1.0f / 25;
+    prev = tank;
+    for (float tt = 0; tt < secs; tt += dt) {
+        tank_tick(&tank, dt, advisor_rules);
+        for (int i = 0; i < tank.n_fish; i++) if (tank.fish[i].energy > 1.5f && (frames / 25) % 240 == 0) tank.fish[i].energy = 0.4f;   /* a breather now and then */
+        if ((frames / 25) % 300 == 150 && frames % 25 == 0) tank_feed(&tank, TANK_FX0 + 40 + (frames * 37) % (int)(TANK_FX1 - TANK_FX0 - 80), 3);
+        snap = tank;
+        render_tank(&tank, fb, TANK_W);
+        frames++;
+        for (int who = -1; who < tank.n_fish; who++) {
+            const uint8_t wg = who < 0 ? prev.shr_gdepth : prev.fish[who].gdepth, wp = who < 0 ? prev.shr_pdepth : prev.fish[who].pdepth;
+            const uint8_t ng = who < 0 ? tank.shr_gdepth : tank.fish[who].gdepth, np = who < 0 ? tank.shr_pdepth : tank.fish[who].pdepth;
+            if ((wg == ng && wp == np) || (who < 0 && tank.shrimp_n == 0)) continue;
+            changes++;
+            int fd[2]; if (pipe(fd)) return -1;
+            char dump[512]; snprintf(dump, sizeof dump, "%s_pop%d.ppm", prefix ? prefix : "", wrote); g_pf_dump = prefix && wrote < 8 ? dump : NULL;
+            fflush(stdout);
+            pid_t pid = fork();
+            if (pid == 0) { close(fd[0]); int out[2]; dp_child(&snap, who, wg, wp, out); fflush(stdout); if (write(fd[1], out, sizeof out) < 0) _exit(1); _exit(0); }
+            close(fd[1]); int out[2] = {0}; if (read(fd[0], out, sizeof out) < 0) out[0] = -1; close(fd[0]); waitpid(pid, NULL, 0);
+            const float x = who < 0 ? tank.shrimp[0].x : tank.fish[who].x, y = who < 0 ? tank.shrimp[0].y : tank.fish[who].y;
+            if ((verbose && getenv("DP_ALL")) || (verbose && out[0] > 0))
+                printf("%s t=%.1f %s at %.0f,%.0f  grass %c->%c pieces %c->%c  %d px flipped on a piece (of %d flipped)  goal %d food %d flee %.1f\n", out[0] > 0 ? "POP" : "ok ",
+                       tt, who < 0 ? "shrimp" : tank.fish[who].name, x, y, "FBT"[wg % 3], "FBT"[ng % 3], "FBT"[wp % 3], "FBT"[np % 3], out[0], out[1],
+                       who < 0 ? -1 : (int)tank.fish[who].goal.id, who < 0 ? tank.shrimp_fp : -1, who < 0 ? tank.shrimp_flee : 0.0f);
+            if (out[0] > 0) { pops++; if (out[0] > worst) worst = out[0]; if (wrote < 8) wrote++; }
+        }
+        prev = tank;
+    }
+    if (verbose) printf("depth-pop-hunt: %d frames, %d depth changes, %d pops (worst %d px), the volcano at %.0f z%d\n", frames, changes, pops, worst, tank_decor_x(&tank, 9), tank_decor_z(&tank, 9));
+    if (n_changes) *n_changes = changes;
+    return pops;
+}
+static int depth_pop_hunt(const char *prefix) {
+    tank_debug_depth_pop_old(getenv("PT_DEPTH_POP_OLD") != NULL);
+    return dp_run(prefix, getenv("DP_SECS") ? (float)atof(getenv("DP_SECS")) : 1800, getenv("DP_SEED") ? atoi(getenv("DP_SEED")) : 7,
+                  getenv("DP_VZ") ? atoi(getenv("DP_VZ")) : -1, true, NULL) ? 1 : 0;
+}
+/* --selftest-fish-pair [prefix] (0.4, Strato on the pendant 11-02: "one fish behind the seagrass and one fish in front. when
+ * they layer, the seagrass gets the drawing wrong"; then, for 0.4: the deeper animal is always under, every animal): two
+ * animals crossing in a bed of back grass, at every pair of depths that puts them at different LAYERS of the animal pass
+ * (docs/render-stack.md ranks 4-7), the grass live and from the loop. With N the tank without either, A the deeper alone
+ * and B the shallower alone, the frame with both must be B's wherever B drew and A's everywhere else - the shallower over
+ * the deeper WHOLE. Drawn by kind and slot, an animal behind the grass drawn after one in front went over it everywhere
+ * but on the grass's own pixels, where its put-back brought the front one back: the front one cut into frond-shaped
+ * stripes. The pairs: two fish (and with the coral IN FRONT under them, one behind it too), then a fish and each of the
+ * shrimp, the seahorse in its back lane, the crab, the snail and the urchin in their back lane. PT_FISH_PAIR_OLD=1 draws
+ * the pass by the old ranks again (the control: it fails). Then a VISITOR behind the grass while every home fish is in
+ * front: the grass over it as over a home fish (PT_FISH_PAIR_OLD=1: only the home fish's depths count, as before 0.4).
+ * [prefix]: <prefix>_<pass>_<pair>.ppm of each frame, the misses in magenta beside it (_miss) */
+enum { FP_SHRIMP, FP_SEAHORSE, FP_FISH, FP_CRAB, FP_SNAIL, FP_URCHIN };   /* (the pass's old ranks, 4 5 6 7 7 7) */
+static const char *FP_N[6] = { "shrimp", "seahorse", "fish", "crab", "snail", "urchin" };
+static const char *FP_DN[3] = { "FRONT", "BEHIND", "THROUGH" };
+static int fp_layer(int g, int p, bool lane) {        /* (the doc's layers, L0..L4 - written here from the table, not from render.c) */
+    if (g == FISH_DEPTH_THROUGH) return 2;
+    if (g == FISH_DEPTH_BEHIND) return !lane && p == FISH_DEPTH_BEHIND ? 0 : 1;
+    return lane || p == FISH_DEPTH_BEHIND ? 3 : 4;
+}
+static void fp_hide(tank_t *t, int kind, int slot) {
+    switch (kind) {
+    case FP_SHRIMP: for (int s = 0; s < t->shrimp_n; s++) t->shrimp[s].x = -400; break;
+    case FP_SEAHORSE: t->sh_hidden = true; break;
+    case FP_FISH: t->fish[slot].x = -400; break;
+    case FP_CRAB: t->cr_x = -1; break;
+    case FP_SNAIL: t->snail_x = -400; break;
+    case FP_URCHIN: t->urchin_x = -1; break;
+    }
+}
+static void fp_depth(tank_t *t, int kind, int slot, int g, int p) {
+    switch (kind) {
+    case FP_SHRIMP: t->shr_gdepth = t->shr_gdepth_want = (uint8_t)g; t->shr_pdepth = t->shr_pdepth_want = (uint8_t)p; break;
+    case FP_SEAHORSE: t->sh_gdepth = t->sh_gdepth_want = (uint8_t)g; break;
+    case FP_FISH: t->fish[slot].gdepth = t->fish[slot].gdepth_want = (uint8_t)g; t->fish[slot].pdepth = t->fish[slot].pdepth_want = (uint8_t)p; break;
+    case FP_CRAB: t->cr_gdepth = t->cr_gdepth_want = (uint8_t)g; break;
+    case FP_SNAIL: t->snail_gdepth = t->snail_gdepth_want = (uint8_t)g; break;
+    case FP_URCHIN: t->urchin_gdepth = t->urchin_gdepth_want = (uint8_t)g; break;
+    }
+}
+static int g_fp_worst;
+/* one pair at one pair of depths: 1 if wrong. a = (kind, slot, g, p), b the same; the one drawn over the other by the doc */
+static int fp_check(const tank_t *pb, const char *pn, int ka, int sa, int ga, int pa, int kb, int sb, int gb, int pb_, int min_both, const char *prefix, bool *skipped) {
+    static uint16_t N[TANK_W * TANK_H], S0[TANK_W * TANK_H], S1[TANK_W * TANK_H], X[TANK_W * TANK_H], D[TANK_W * TANK_H];
+    static tank_t tt;
+    const int la = fp_layer(ga, pa, ka != FP_SHRIMP && ka != FP_FISH), lb = fp_layer(gb, pb_, kb != FP_SHRIMP && kb != FP_FISH);
+    *skipped = la == lb;
+    if (la == lb) return 0;                          /* (one layer: the old ranks, as ever - nothing new to see) */
+    #define FP_R(out) do { for (int q = 0; q < 3; q++) render_tank(&tank, (out), TANK_W); } while (0)
+    tt = *pb; fp_depth(&tt, ka, sa, ga, pa); fp_depth(&tt, kb, sb, gb, pb_);
+    tank = tt; fp_hide(&tank, ka, sa); fp_hide(&tank, kb, sb); FP_R(N);
+    tank = tt; fp_hide(&tank, kb, sb); FP_R(S0);
+    tank = tt; fp_hide(&tank, ka, sa); FP_R(S1);
+    tank = tt; FP_R(X);
+    #undef FP_R
+    const uint16_t *B = lb > la ? S1 : S0, *A = lb > la ? S0 : S1;   /* (B the shallower: over A) */
+    int both = 0, wrong = 0, elsewhere = 0;
+    for (int i = 0; i < TANK_W * TANK_H; i++) {
+        const bool bd = B[i] != N[i], ad = A[i] != N[i];
+        bool bad;
+        if (bd && ad) { both++; bad = X[i] != B[i] && (X[i] == A[i] || X[i] == N[i]); wrong += bad; }   /* (the front one's: its own pixel, or - where
+                                                                     it is see-through, a shrimp's legs, a fin's edge - itself over the deeper one; never
+                                                                     the deeper one's own pixel, never the tank's) */
+        else { bad = X[i] != (bd ? B[i] : ad ? A[i] : N[i]); elsewhere += bad; }   /* (the deeper one where the front one is not, else the tank) */
+        D[i] = bad ? FB_SWAP16(0xF81F) : X[i];
+    }
+    wrong += elsewhere;
+    const bool ok = both >= min_both && wrong <= both / 20;
+    char an[40], bn[40];
+    snprintf(an, sizeof an, "%s%s %s%s", FP_N[ka], ka == FP_FISH ? (sa ? "1" : "0") : "", FP_DN[ga], (ka == FP_FISH || ka == FP_SHRIMP) && pa == FISH_DEPTH_BEHIND ? "/pb" : "");
+    snprintf(bn, sizeof bn, "%s%s %s%s", FP_N[kb], kb == FP_FISH ? (sb ? "1" : "0") : "", FP_DN[gb], (kb == FP_FISH || kb == FP_SHRIMP) && pb_ == FISH_DEPTH_BEHIND ? "/pb" : "");
+    printf("fish-pair %-5s %-18s L%d vs %-20s L%d: overlap %d px, %d wrong (%d off the overlap)%s\n", pn, an, la, bn, lb, both, wrong, elsewhere, ok ? "" : "  <- FAIL");
+    if (wrong > g_fp_worst) g_fp_worst = wrong;
+    if (prefix) { char path[600]; for (char *q = an; *q; q++) if (*q == ' ' || *q == '/') *q = '_';
+                  for (char *q = bn; *q; q++) if (*q == ' ' || *q == '/') *q = '_';
+                  snprintf(path, sizeof path, "%s_%s_%s_%s.ppm", prefix, pn, an, bn); write_ppm(path, X);
+                  snprintf(path, sizeof path, "%s_%s_%s_%s_miss.ppm", prefix, pn, an, bn); write_ppm(path, D); }
+    return ok ? 0 : 1;
+}
+static int selftest_fish_pair(const char *prefix) {
+    const bool old = getenv("PT_FISH_PAIR_OLD") != NULL;
+    render_debug_fish_slot_order(old); render_debug_dep_home_only(old);
+    tank_init(&tank, 2024); tank_new_population(&tank);
+    tank_make_fish(&tank, 0, 0, 0.6f, 0.6f, STAGE_ADULT); tank_make_fish(&tank, 1, 1, 0.6f, 0.6f, STAGE_ADULT); tank.n_fish = 2;
+    for (int i = 0; i < 2; i++) { tank.fish[i].eaten = 60; progression_set_age(&tank, i, STAGE_ADULT_AGE + 1); }
+    tank_veg_set(&tank, 0, 0.7f); tank_veg_set(&tank, 1, 0.7f); tank_veg_set(&tank, 2, 0.7f);
+    memset(tank.algae, 0, sizeof tank.algae); tank.night = false;
+    float x0, x1, top; int nf; tank_veg_bed(&tank, 0, &x0, &x1, &top, &nf);
+    const float mx = (x0 + x1) / 2;
+    for (int i = 0; i < 2; i++) {                        /* (one over the other: half a body along, a little up and down) */
+        fish_t *f = &tank.fish[i];
+        f->x = mx + (i ? 10.0f : -10.0f); f->y = top + (TANK_BOT - 16 - top) * 0.45f + (i ? 5.0f : -4.0f);
+        f->heading = i ? 0.05f : 0.1f; tank_fish_face(f); f->speed = f->target_speed = 0; f->hesitate = 0;
+        f->gdepth = f->gdepth_want = f->pdepth = f->pdepth_want = FISH_DEPTH_FRONT;
+    }
+    static uint16_t scene[TANK_W * TANK_H], X[TANK_W * TANK_H];
+    render_set_scene_cache(scene); render_set_vignette_cache(vig_buf); render_set_card_cache(card_buf); render_set_modal_cache(give_buf, gift_buf); render_set_dirty_mask(dirty_buf);
+    static tank_t base, pb; base = tank;
+    int fails = 0, ran = 0; bool sk; g_fp_worst = 0;
+    static const int GP[6][2] = { { FISH_DEPTH_FRONT, FISH_DEPTH_FRONT }, { FISH_DEPTH_FRONT, FISH_DEPTH_BEHIND }, { FISH_DEPTH_BEHIND, FISH_DEPTH_FRONT },
+                                  { FISH_DEPTH_BEHIND, FISH_DEPTH_BEHIND }, { FISH_DEPTH_THROUGH, FISH_DEPTH_FRONT }, { FISH_DEPTH_THROUGH, FISH_DEPTH_BEHIND } };
+    for (int pass = 0; pass < 3; pass++) {               /* 0: the grass live; 1: the grass loop baked (the board's path); 2: the loop + the coral IN FRONT */
+        if (pass == 1) { render_set_grass_loop(bs_alloc64, free, 3u << 20); render_grass_loop_lock(0); render_grass_loop_on(true);
+                         tank = base; for (int k = 0; k < 400 && (!render_grass_loop_n() || render_grass_loop_ready() < render_grass_loop_n()); k++) { render_grass_loop_bake_more(&tank, 4); render_tank(&tank, X, TANK_W); }
+                         if (!render_grass_loop_n() || render_grass_loop_ready() != render_grass_loop_n()) { printf("FAIL: fish-pair: the grass loop did not bake\n"); fails++; break; } }
+        const char *pn = pass == 0 ? "live" : pass == 1 ? "loop" : "coral";
+        pb = base;
+        if (pass == 2) {                                 /* (the coral IN FRONT under the pair's noses: the pieces' put-back and the keep marks in play) */
+            pb.sd_unlocks |= SD_ITEM_CORAL; tank_coral_place(&pb); pb.coral_growth = CORAL_FULL;
+            tank_decor_set(&pb, 3, (int)mx + 26, DECOR_Z_FRONT);
+            pb.fish[0].y = TANK_BOT - 66; pb.fish[1].y = TANK_BOT - 57;   /* (down over the coral's branches, in the grass still) */
+            tank = pb; for (int k = 0; k < 400 && render_grass_loop_ready() < render_grass_loop_n(); k++) { render_grass_loop_bake_more(&tank, 4); render_tank(&tank, X, TANK_W); }
+        }
+        /* two fish, every pair of depths */
+        for (int a = 0; a < 6; a++) for (int b = 0; b < 6; b++) {
+            if (pass < 2 && (GP[a][1] == FISH_DEPTH_BEHIND || GP[b][1] == FISH_DEPTH_BEHIND)) continue;   /* (behind the pieces: with the coral) */
+            fails += fp_check(&pb, pn, FP_FISH, 0, GP[a][0], GP[a][1], FP_FISH, 1, GP[b][0], GP[b][1], 60, prefix, &sk); ran += !sk;
+        }
+        if (pass == 2) continue;
+        /* a fish and each other animal of the pass, at their own spots in the bed */
+        for (int kind = FP_SHRIMP; kind <= FP_URCHIN; kind++) {
+            if (kind == FP_FISH) continue;
+            static tank_t kb; kb = pb; kb.fish[1].x = -400;
+            fish_t *f = &kb.fish[0];
+            if (kind == FP_SHRIMP) {
+                kb.sd_unlocks |= SD_ITEM_SHRIMP; tank_shrimp_place(&kb, 6);
+                for (int s = 0; s < kb.shrimp_n; s++) { kb.shrimp[s].x = mx - 26 + s * 9; kb.shrimp[s].y = f->y - 2 + (s & 1) * 7; }
+            } else if (kind == FP_SEAHORSE) {
+                kb.sd_unlocks |= SD_ITEM_SEAHORSE; tank_seahorse_place(&kb);
+                kb.sh_x = mx - 2; kb.sh_y = f->y - 4; kb.sh_front = false; kb.sh_hidden = false;
+                kb.sh_mode = SH_DRIFT; kb.sh_akind = SH_ANCHOR_NONE; kb.sh_vx = kb.sh_vy = 0; kb.sh_obed = -1; kb.sh_opost = -1;
+            } else {
+                float cy = 0;
+                if (kind == FP_CRAB) { kb.sd_unlocks |= SD_ITEM_CRAB; kb.cr_x = mx + 8; kb.cr_y = 0; kb.cr_tilt = 0; kb.cr_mode = CR_REST; kb.cr_timer = 999; kb.cr_cave = -1;
+                                       kb.cr_find = 0; kb.cr_hide = 0; kb.cr_poke = 0; kb.cr_lane_front = false; cy = CR_FLOOR_Y - 10; }
+                if (kind == FP_SNAIL) { kb.sd_unlocks |= SD_ITEM_SNAIL; kb.snail_cell = -1; kb.snail_x = mx + 8; kb.snail_y = SNAIL_FLOOR_Y; kb.snail_dy = 0; kb.snail_front = false; kb.snail_heading = 0; cy = SNAIL_FLOOR_Y - 4; }
+                if (kind == FP_URCHIN) { kb.sd_unlocks |= SD_ITEM_URCHIN; kb.urchin_x = mx + 8; kb.urchin_dy = 0; kb.urchin_front = false; kb.urchin_rest = 99; cy = URCHIN_FLOOR_Y - 8; }
+                f->y = cy; f->x = mx - 14;               /* (low over the sand: its nose over the critter) */
+            }
+            const int np = kind == FP_SHRIMP ? 6 : 3;    /* (the school has piece depths too; the lane animals only the grass's) */
+            for (int a = 0; a < 6; a++) for (int b = 0; b < np; b++)
+                { fails += fp_check(&kb, pn, FP_FISH, 0, GP[a][0], GP[a][1], kind, 0, kind == FP_SHRIMP ? GP[b][0] : b, kind == FP_SHRIMP ? GP[b][1] : FISH_DEPTH_FRONT, 40, prefix, &sk); ran += !sk; }
+        }
+    }
+    /* a VISITOR behind the grass, every home fish in front (and out of sight): the grass over it as with a home fish behind */
+    {
+        static uint16_t R[TANK_W * TANK_H];
+        tank = base; tank.fish[1].x = -400;
+        tank.fish[N_FISH_MAX] = tank.fish[0]; tank.vis_used[0] = true; tank.vis_badge[0] = -1;
+        tank.fish[0].x = -400;
+        tank.fish[N_FISH_MAX].gdepth = tank.fish[N_FISH_MAX].gdepth_want = FISH_DEPTH_BEHIND;
+        static tank_t vb; vb = tank;
+        tank = vb; tank.fish[1].gdepth = tank.fish[1].gdepth_want = FISH_DEPTH_BEHIND;   /* (a home fish behind too, out of sight: the masks asked for) */
+        for (int q = 0; q < 3; q++) render_tank(&tank, R, TANK_W);
+        tank = vb; for (int q = 0; q < 3; q++) render_tank(&tank, X, TANK_W);
+        int diff = 0; for (int i = 0; i < TANK_W * TANK_H; i++) diff += X[i] != R[i];
+        printf("fish-pair visitor BEHIND, the home fish in front: %d px unlike a home fish's frame%s\n", diff, diff ? "  <- FAIL" : "");
+        if (diff) fails++;
+        if (prefix) { char path[600]; snprintf(path, sizeof path, "%s_visitor.ppm", prefix); write_ppm(path, X); }
+    }
+    render_grass_loop_on(false); render_debug_fish_slot_order(false); render_debug_dep_home_only(false);
+    printf("selftest-fish-pair: %s (%d pairs at different layers, worst %d px)%s\n", fails ? "FAIL" : "PASS", ran, g_fp_worst, old ? " (the control: the old ranks)" : "");
+    return fails ? 1 : 0;
+}
+/* --selftest-depth-pop [prefix] (0.3.9.7): the hunt, short, with the volcano BEHIND and IN FRONT: no pop, and depths still
+ * change (a guard that froze them would pass). PT_DEPTH_POP_OLD=1 = the control (0.3.9.6's rule): it must FAIL */
+static int selftest_depth_pop(const char *prefix) {
+    const bool old = getenv("PT_DEPTH_POP_OLD") != NULL;
+    tank_debug_depth_pop_old(old);
+    static const int VZ[2] = { DECOR_Z_BACK, DECOR_Z_FRONT };
+    int fails = 0;
+    for (int v = 0; v < 2; v++) {
+        int ch = 0; const int pops = dp_run(prefix, 1200, 1, VZ[v], false, &ch);
+        if (pops || ch < 20) { printf("FAIL: depth-pop the volcano %s: %d pops in %d depth changes\n", VZ[v] == DECOR_Z_FRONT ? "IN FRONT" : "BEHIND", pops, ch); fails++; }
+    }
+    tank_debug_depth_pop_old(false);
+    printf("selftest-depth-pop: %s%s\n", fails ? "FAIL" : "PASS", old ? " (the control)" : "");
+    return fails ? 1 : 0;
+}
+
+/* --castle-shot <prefix> (0.3.9.7, #help "Castle Tower Oddness", a square): a fish on the castle's rear tower (the keep) at every
+ * pair of depths - the grass front/through/behind across, the pieces front/behind down - one sheet. CS_DX/CS_DY move the fish
+ * from the rear tower's cone, CS_Z the castle's depth (2 IN FRONT, 0 BEHIND), CS_G the beds' growth */
+static int castle_shot(const char *prefix) {
+    tank_init(&tank, 3);
+    tank_new_population(&tank);
+    for (int i = 0; i < 4; i++) tank_make_fish(&tank, i, i, 0.5f, 0.5f, STAGE_ADULT);
+    tank.n_fish = 4;
+    for (int i = 0; i < 4; i++) progression_set_age(&tank, i, STAGE_ADULT_AGE + 1);
+    tank.sd_unlocks |= SD_ITEM_CASTLE;
+    tank_castle_place(&tank);
+    const int z = getenv("CS_Z") ? atoi(getenv("CS_Z")) : DECOR_Z_FRONT;
+    tank_decor_set(&tank, 2, tank_decor_x(&tank, 2), z);
+    for (int b = 0; b < tank_veg_beds(&tank); b++) tank_veg_set(&tank, b, getenv("CS_G") ? (float)atof(getenv("CS_G")) : 0.9f);
+    render_set_scene_cache(scene_buf); render_set_vignette_cache(vig_buf); render_set_card_cache(card_buf); render_set_modal_cache(give_buf, gift_buf); render_set_dirty_mask(dirty_buf);
+    const int cx = (int)tank_decor_x(&tank, 2), fy = (int)DECOR_FY(z);
+    const float fx = cx + 39 + (getenv("CS_DX") ? (float)atof(getenv("CS_DX")) : 0), fyy = fy - 118 + (getenv("CS_DY") ? (float)atof(getenv("CS_DY")) : 0);
+    static uint16_t fb[TANK_W * TANK_H];
+    if (getenv("CS_LOOP")) {                         /* the grass loop on (0.3.9.6's square): baked whole before the sheet */
+        for (int i = 0; i < 4; i++) tank.fish[i].x = -400;
+        render_set_grass_loop(bs_alloc64, free, 3u << 20); render_grass_loop_lock(0); render_grass_loop_on(true);
+        for (int k = 0; k < 400 && (!render_grass_loop_n() || render_grass_loop_ready() < render_grass_loop_n()); k++) { render_grass_loop_bake_more(&tank, 4); render_tank(&tank, fb, TANK_W); }
+        printf("castle-shot: the grass loop %d of %d moments\n", render_grass_loop_ready(), render_grass_loop_n());
+    }
+    const int x0 = cx - 100 < 0 ? 0 : cx - 100, x1 = cx + 100 >= TANK_W ? TANK_W - 1 : cx + 100, y0 = fy - 175 < 0 ? 0 : fy - 175, y1 = fy + 6 >= TANK_H ? TANK_H - 1 : fy + 6;
+    const int cw = x1 - x0 + 1, ch = y1 - y0 + 1, W = cw * 3 + 8, H = ch * 2 + 4;
+    static uint16_t sheet[1400 * 900];
+    if (W * H > (int)(sizeof sheet / 2)) return 1;
+    for (int k = 0; k < W * H; k++) sheet[k] = 0;
+    static const uint8_t G[3] = { FISH_DEPTH_FRONT, FISH_DEPTH_THROUGH, FISH_DEPTH_BEHIND }, P[2] = { FISH_DEPTH_FRONT, FISH_DEPTH_BEHIND };
+    for (int pi = 0; pi < 2; pi++) for (int gi = 0; gi < 3; gi++) {
+        for (int i = 0; i < 4; i++) { tank.fish[i].x = -400; tank.fish[i].speed = tank.fish[i].target_speed = 0; }
+        fish_t *f = &tank.fish[0];
+        f->x = fx; f->y = fyy; f->heading = 3.14159f;
+        f->gdepth = f->gdepth_want = f->gdepth_rest = G[gi]; f->pdepth = f->pdepth_want = P[pi];
+        for (int r = 0; r < 3; r++) render_tank(&tank, fb, TANK_W);
+        for (int y = 0; y < ch; y++) for (int x = 0; x < cw; x++) sheet[(pi * (ch + 4) + y) * W + gi * (cw + 4) + x] = fb[(y0 + y) * TANK_W + x0 + x];
+    }
+    char path[512]; snprintf(path, sizeof path, "%s_castle.ppm", prefix);
+    FILE *o = fopen(path, "wb"); if (!o) return 1;
+    fprintf(o, "P6\n%d %d\n255\n", W, H);
+    for (int k = 0; k < W * H; k++) { uint16_t v = FB_SWAP16(sheet[k]); uint8_t rgb[3] = { (uint8_t)((v >> 11) << 3), (uint8_t)(((v >> 5) & 63) << 2), (uint8_t)((v & 31) << 3) }; fwrite(rgb, 1, 3, o); }
+    fclose(o);
+    printf("castle-shot: %s (castle at %d %s, fish at %.0f,%.0f; across grass front/through/behind, down pieces front/behind)\n", path, cx, z == DECOR_Z_FRONT ? "IN FRONT" : "BEHIND", fx, fyy);
+    return 0;
+}
+
+/* --selftest-castle-keep [prefix] (0.3.9.7, #help "Castle Tower Oddness", a square): a fish on the castle's rear tower (the keep)
+ * - at its cone and at its window - at every pair of depths, the castle IN FRONT, the grass grown, the grass loop off and on.
+ * In front of the grass it is over the keep (the keep is behind every fish there); behind or through the grass it is behind
+ * ALL of the castle IN FRONT, keep included (the grass stands behind the keep: a fish over the keep with fronds over it is a
+ * loop). Counts, on the keep alone where the fish has pixels, the fish shown (F its own pixel, as drawn in front of
+ * everything: B) and hidden (anything else - the keep, a shade of it at the cone's edge).
+ * PT_CASTLE_ROW_ONLY=1 = the control (0.3.9.6's castle, the front row alone): it must FAIL */
+static int selftest_castle_keep(const char *prefix) {
+    const bool old = getenv("PT_CASTLE_ROW_ONLY") != NULL;
+    render_debug_castle_row_only(old);
+    static uint16_t F[TANK_W * TANK_H], A[TANK_W * TANK_H], B[TANK_W * TANK_H], B0[TANK_W * TANK_H];
+    static tank_t base;
+    tank_init(&tank, 3);
+    tank_new_population(&tank);
+    for (int i = 0; i < 4; i++) tank_make_fish(&tank, i, i, 0.5f, 0.5f, STAGE_ADULT);
+    tank.n_fish = 4;
+    for (int i = 0; i < 4; i++) { progression_set_age(&tank, i, STAGE_ADULT_AGE + 1); tank.fish[i].x = -400; tank.fish[i].speed = tank.fish[i].target_speed = 0; }
+    tank.sd_unlocks |= SD_ITEM_CASTLE;
+    tank_castle_place(&tank);
+    tank_decor_set(&tank, 2, tank_decor_x(&tank, 2), DECOR_Z_FRONT);
+    for (int b = 0; b < tank_veg_beds(&tank); b++) tank_veg_set(&tank, b, 0.9f);
+    render_set_scene_cache(scene_buf); render_set_vignette_cache(vig_buf); render_set_card_cache(card_buf); render_set_modal_cache(give_buf, gift_buf); render_set_dirty_mask(dirty_buf);
+    base = tank;
+    const int cx = (int)tank_decor_x(&tank, 2), fy = (int)DECOR_FY(DECOR_Z_FRONT);
+    static const uint8_t G[3] = { FISH_DEPTH_FRONT, FISH_DEPTH_THROUGH, FISH_DEPTH_BEHIND }, P[2] = { FISH_DEPTH_FRONT, FISH_DEPTH_BEHIND };
+    static const char *GN[3] = { "front", "through", "behind" }, *PN[2] = { "front", "behind" };
+    static const int DY[2] = { -118, -84 };          /* the cone, the window */
+    int fails = 0, cells = 0;
+    for (int loop = 0; loop < 2; loop++) {
+        if (loop) {
+            tank = base; render_set_grass_loop(bs_alloc64, free, 3u << 20); render_grass_loop_lock(0); render_grass_loop_on(true);
+            for (int k = 0; k < 3000 && (!render_grass_loop_n() || render_grass_loop_ready() < render_grass_loop_n()); k++) { render_grass_loop_bake_more(&tank, 4); render_tank(&tank, F, TANK_W); }
+            if (!render_grass_loop_n()) { printf("FAIL: castle-keep: no grass loop\n"); fails++; break; }
+            if (render_grass_loop_ready() != render_grass_loop_n()) printf("castle-keep: the grass loop baked %d of %d moments (tall grass) - the cells it draws count\n", render_grass_loop_ready(), render_grass_loop_n());
+        }
+        int used = 0;
+        for (int d = 0; d < 2; d++) for (int gi = 0; gi < 3; gi++) for (int pi = 0; pi < 2; pi++) {
+            tank = base;
+            fish_t *f = &tank.fish[0];
+            f->x = cx + 39; f->y = fy + DY[d]; f->heading = 3.14159f;
+            f->gdepth = f->gdepth_want = f->gdepth_rest = G[gi]; f->pdepth = f->pdepth_want = P[pi];
+            static tank_t snap; snap = tank;
+            for (int r = 0; r < 3; r++) render_tank(&tank, F, TANK_W);
+            const uint16_t *ls, *lb; size_t lt, lo, ln; unsigned lep;
+            const bool lp = loop && render_grass_loop_parts(snap.clock, &ls, &lt, &lb, &lo, &ln, &lep);
+            used += lp;
+            static uint8_t keep[TANK_W * TANK_H];
+            for (int y = 0; y < TANK_H; y++) for (int x = 0; x < TANK_W; x++) keep[y * TANK_W + x] = render_decor_covers(2, x, y) && !render_piece_covers(2, x, y);
+            tank = snap; tank.fish[0].x = -400; for (int r = 0; r < 3; r++) render_tank(&tank, A, TANK_W);
+            tank = snap; tank.fish[0].gdepth = tank.fish[0].pdepth = FISH_DEPTH_FRONT; for (int r = 0; r < 3; r++) render_tank(&tank, B, TANK_W);   /* (its outline:
+                                                                 in front of everything, the castle kept - removing it would throw the loop away) */
+            for (int p = 0; p < TANK_W * TANK_H; p++) B0[p] = A[p];
+            int shown = 0, hid = 0;
+            int sx0 = TANK_W, sx1 = -1, sy0 = TANK_H, sy1 = -1;
+            for (int p = 0; p < TANK_W * TANK_H; p++) {
+                if (B[p] == B0[p] || !keep[p]) continue;
+                if (F[p] == B[p] && F[p] != A[p]) { shown++; const int x = p % TANK_W, y = p / TANK_W;
+                    if (getenv("PT_CK_PX") && shown <= 6) printf("    px %d,%d  F %04x A %04x B %04x B0 %04x  front-row %d\n", x, y, F[p], A[p], B[p], B0[p], render_piece_covers(2, x, y)); if (x < sx0) sx0 = x; if (x > sx1) sx1 = x; if (y < sy0) sy0 = y; if (y > sy1) sy1 = y; }
+                else hid++;
+            }
+            if (getenv("PT_CK_DBG") && shown) printf("  (the fish's shown px on the keep: x %d..%d y %d..%d; the fish at %.0f,%.0f)\n", sx0, sx1, sy0, sy1, snap.fish[0].x, snap.fish[0].y);
+            cells++;
+            const bool want_shown = G[gi] == FISH_DEPTH_FRONT;
+            const bool ok = shown + hid >= 40 && (want_shown ? hid <= 2 : shown <= 2);
+            if (!ok || getenv("PT_CK_DBG"))
+                printf("%s: castle-keep loop %s%s, the %s, grass %s pieces %s: on the keep the fish shows %d px, the keep %d px (wants the %s)\n", ok ? "ok" : "FAIL",
+                       loop ? "on" : "off", loop && !lp ? " (NOT USED)" : "", d ? "window" : "cone", GN[gi], PN[pi], shown, hid, want_shown ? "fish" : "keep");
+            if (!ok) fails++;
+            if (prefix && !ok) { char path[512]; snprintf(path, sizeof path, "%s_ck_%s_%s_%s_%s.ppm", prefix, loop ? "loop" : "live", d ? "win" : "cone", GN[gi], PN[pi]); write_ppm(path, F); }
+        }
+        if (loop && !used) { printf("FAIL: castle-keep: the grass loop drew none of the cells\n"); fails++; }
+    }
+    render_grass_loop_on(false);
+    render_debug_castle_row_only(false);
+    printf("selftest-castle-keep: %s (%d cells%s)\n", fails ? "FAIL" : "PASS", cells, old ? ", the control" : "");
+    return fails ? 1 : 0;
+}
+
+/* --castle-keep-hunt <prefix> (0.3.9.7, #help "Castle Tower Oddness", a square: the rear tower's cone over a fish that a frond
+ * crosses): a lived square-like tank - the castle IN FRONT, the sword plant, the shrimp, the grass loop on - for CK_SECS. Every
+ * frame a fish's box meets the castle, a forked copy renders the moment without the fish (A), and without the castle with and
+ * without it (B, B0): on the keep alone (the castle's mask, not its front row) where the fish has pixels, the frame must show the
+ * fish - the keep is behind every fish at every depth. Counts where it shows the keep instead (F == A) */
+static int ck_child(const tank_t *snap, int i, const uint16_t *F, int out[2], const char *dump) {
+    static uint16_t A[TANK_W * TANK_H], B[TANK_W * TANK_H], B0[TANK_W * TANK_H];
+    static uint8_t keep[TANK_W * TANK_H];
+    tank = *snap; tank.fish[i].x = -400; for (int k = 0; k < 2; k++) render_tank(&tank, A, TANK_W);
+    for (int y = 0; y < TANK_H; y++) for (int x = 0; x < TANK_W; x++) keep[y * TANK_W + x] = render_decor_covers(2, x, y) && !render_piece_covers(2, x, y);
+    tank = *snap; tank.sd_unlocks &= ~SD_ITEM_CASTLE; for (int k = 0; k < 2; k++) render_tank(&tank, B, TANK_W);
+    tank.fish[i].x = -400; for (int k = 0; k < 2; k++) render_tank(&tank, B0, TANK_W);
+    int bad = 0, fish = 0;
+    static uint16_t M[TANK_W * TANK_H]; memcpy(M, F, sizeof M);
+    for (int p = 0; p < TANK_W * TANK_H; p++) {
+        if (B[p] == B0[p] || !keep[p]) continue;
+        fish++;
+        if (F[p] == A[p]) { bad++; M[p] = FB_SWAP16(0xF81F); }
+    }
+    out[0] = bad; out[1] = fish;
+    if (dump && bad >= 8) write_ppm(dump, M);
+    return 0;
+}
+static int castle_keep_hunt(const char *prefix) {
+    const float secs = getenv("CK_SECS") ? (float)atof(getenv("CK_SECS")) : 900;
+    tank_init(&tank, (uint32_t)(getenv("CK_SEED") ? atoi(getenv("CK_SEED")) : 5));
+    tank_new_population(&tank);
+    for (int i = 0; i < 4; i++) tank_make_fish(&tank, i, i, 0.3f + 0.2f * i, 0.3f + 0.15f * i, STAGE_ADULT);
+    tank.n_fish = 4;
+    for (int i = 0; i < 4; i++) { progression_set_age(&tank, i, STAGE_ADULT_AGE + 1); tank.fish[i].eaten = 60; tank.fish[i].hunger = 2; tank.fish[i].stress = 1; tank.fish[i].energy = 0.5f + i; }
+    tank.sd_unlocks |= SD_ITEM_CASTLE | SD_ITEM_CORAL | SD_ITEM_SHRIMP | SD_ITEM_PLANT | (getenv("CK_SEAHORSE") ? SD_ITEM_SEAHORSE : 0);
+    tank_castle_place(&tank); tank_coral_place(&tank); tank_shrimp_place(&tank, 8);
+    if (getenv("CK_SEAHORSE")) tank_seahorse_place(&tank);
+    tank_decor_set(&tank, 2, tank_decor_x(&tank, 2), DECOR_Z_FRONT);
+    for (int b = 0; b < tank_veg_beds(&tank); b++) tank_veg_set(&tank, b, 0.9f);
+    render_set_scene_cache(scene_buf); render_set_vignette_cache(vig_buf); render_set_card_cache(card_buf); render_set_modal_cache(give_buf, gift_buf); render_set_dirty_mask(dirty_buf);
+    static uint16_t fb[TANK_W * TANK_H];
+    if (!getenv("CK_NOLOOP")) {
+        render_set_grass_loop(bs_alloc64, free, 3u << 20); render_grass_loop_lock(0); render_grass_loop_on(true);
+        for (int k = 0; k < 400 && (!render_grass_loop_n() || render_grass_loop_ready() < render_grass_loop_n()); k++) { render_grass_loop_bake_more(&tank, 4); render_tank(&tank, fb, TANK_W); }
+        printf("castle-keep-hunt: the grass loop %d of %d moments\n", render_grass_loop_ready(), render_grass_loop_n());
+    }
+    static tank_t snap;
+    const int cx = (int)tank_decor_x(&tank, 2), fy = (int)DECOR_FY(DECOR_Z_FRONT);
+    int frames = 0, checked = 0, badn = 0, wrote = 0, worst = 0;
+    const float dt = 1.0f / 25;
+    for (float tt = 0; tt < secs; tt += dt) {
+        tank_tick(&tank, dt, advisor_rules);
+        for (int i = 0; i < tank.n_fish; i++) if (tank.fish[i].energy > 1.5f && (frames / 25) % 240 == 0) tank.fish[i].energy = 0.4f;
+        snap = tank;
+        render_tank(&tank, fb, TANK_W);
+        if (getenv("CK_LOOPKEEP")) render_grass_loop_bake_more(&tank, 1);
+        frames++;
+        for (int i = 0; i < tank.n_fish; i++) {
+            const fish_t *f = &tank.fish[i];
+            if (fabsf(f->x - (cx + 39)) > 60 || f->y < fy - 170 || f->y > fy - 40) continue;   /* (on the rear tower) */
+            checked++;
+            int fd[2]; if (pipe(fd)) return 1;
+            char dump[512]; snprintf(dump, sizeof dump, "%s_keep%d.ppm", prefix, wrote);
+            fflush(stdout);
+            pid_t pid = fork();
+            if (pid == 0) { close(fd[0]); int out[2]; ck_child(&snap, i, fb, out, wrote < 6 ? dump : NULL); fflush(stdout); if (write(fd[1], out, sizeof out) < 0) _exit(1); _exit(0); }
+            close(fd[1]); int out[2] = {0}; if (read(fd[0], out, sizeof out) < 0) out[0] = -1; close(fd[0]); waitpid(pid, NULL, 0);
+            if (out[0] >= 8) {
+                badn++; if (out[0] > worst) worst = out[0];
+                if (badn <= 12) printf("KEEP t=%.1f fish %d %s at %.0f,%.0f  keep over it %d px (of %d on the keep)  grass %c pieces %c\n", tt, i, f->name, f->x, f->y, out[0], out[1], "FBT"[f->gdepth % 3], "FBT"[f->pdepth % 3]);
+                if (wrote < 6) wrote++;
+            }
+        }
+    }
+    printf("castle-keep-hunt: %d frames, %d fish-on-the-keep checks, %d with the keep over the fish (worst %d px), the castle at %d\n", frames, checked, badn, worst, cx);
+    return badn ? 1 : 0;
+}
+
+/* --selftest-hold-emerge [prefix] (0.4, Strato 11-01: "if fish are on a lane behind the volcano and i tap and hold on the volcano
+ * ... they'll swim toward my finger but still are behind the volcano ... it should find the nearest available area to emerge
+ * from around the volcano, then move to the lane closest to the glass"): four fish hidden behind the volcano (BEHIND, then IN
+ * FRONT), a finger held on its middle for HE_SECS. Every depth change must be no pop (--depth-pop-hunt's measure); at the end
+ * every fish is in front of everything and at the finger. PT_HOLD_EMERGE_OFF=1 = the control (no call): it must FAIL */
+static int he_sh_child(const tank_t *snap, bool of, uint8_t og, int8_t ob, int out[2]) {
+    static uint16_t F[TANK_W * TANK_H], N[TANK_W * TANK_H];
+    tank = *snap; for (int k = 0; k < 2; k++) render_tank(&tank, N, TANK_W);
+    tank = *snap; tank.sh_front = of; tank.sh_gdepth = og; tank.sh_obed = ob; for (int k = 0; k < 2; k++) render_tank(&tank, F, TANK_W);
+    int on = 0, all = 0;
+    for (int y = 0; y < TANK_H; y++) for (int x = 0; x < TANK_W; x++) {
+        const int p = y * TANK_W + x;
+        if (F[p] == N[p]) continue; all++;
+        bool c = false; for (int k = 0; k < 5 && !c; k++) c = render_decor_covers(DP_ITEMS[k], x, y);
+        on += c;
+    }
+    out[0] = on; out[1] = all;
+    return 0;
+}
+/* (every depth change of the moment - the fish's, the seahorse's lane / grass / stack - rendered old and new: the pixels it
+   flipped on a piece) */
+static int he_pops(const tank_t *prev, const tank_t *snap, bool sh, const char *what, int *changes) {
+    int pops = 0;
+    if (sh && (snap->sh_front != prev->sh_front || snap->sh_gdepth != prev->sh_gdepth || snap->sh_obed != prev->sh_obed)) {
+        (*changes)++;
+        int fd[2]; if (pipe(fd)) return 1;
+        fflush(stdout);
+        pid_t pid = fork();
+        if (pid == 0) { close(fd[0]); int out[2]; he_sh_child(snap, prev->sh_front, prev->sh_gdepth, prev->sh_obed, out); if (write(fd[1], out, sizeof out) < 0) _exit(1); _exit(0); }
+        close(fd[1]); int out[2] = {0}; if (read(fd[0], out, sizeof out) < 0) out[0] = -1; close(fd[0]); waitpid(pid, NULL, 0);
+        if (out[0] > 0) { pops++; printf("FAIL: hold-emerge %s: the seahorse popped %d px at %.0f,%.0f (lane %s->%s grass %c->%c stack %d->%d)\n", what, out[0], snap->sh_x, snap->sh_y,
+                                        prev->sh_front ? "F" : "B", snap->sh_front ? "F" : "B", "FBT"[prev->sh_gdepth % 3], "FBT"[snap->sh_gdepth % 3], prev->sh_obed, snap->sh_obed);
+                         printf("  (mode %d->%d anchor kind %d item %d bed %d at %.0f,%.0f, want lane %d)\n", prev->sh_mode, snap->sh_mode, snap->sh_akind, snap->sh_aitem, snap->sh_bed, snap->sh_ax, snap->sh_ay, snap->sh_front_want); }
+    }
+    for (int i = 0; i < snap->n_fish; i++) {
+        const fish_t *f = &snap->fish[i], *q = &prev->fish[i];
+        if (f->gdepth == q->gdepth && f->pdepth == q->pdepth) continue;
+        (*changes)++;
+        int fd[2]; if (pipe(fd)) return 1;
+        g_pf_dump = NULL; fflush(stdout);
+        pid_t pid = fork();
+        if (pid == 0) { close(fd[0]); int out[2]; dp_child(snap, i, q->gdepth, q->pdepth, out); if (write(fd[1], out, sizeof out) < 0) _exit(1); _exit(0); }
+        close(fd[1]); int out[2] = {0}; if (read(fd[0], out, sizeof out) < 0) out[0] = -1; close(fd[0]); waitpid(pid, NULL, 0);
+        if (out[0] > 0) { pops++; printf("FAIL: hold-emerge %s: %s popped %d px at %.0f,%.0f (grass %c->%c pieces %c->%c)\n", what, f->name, out[0], f->x, f->y,
+                                        "FBT"[q->gdepth % 3], "FBT"[f->gdepth % 3], "FBT"[q->pdepth % 3], "FBT"[f->pdepth % 3]); }
+    }
+    return pops;
+}
+static int selftest_hold_emerge(const char *prefix) {
+    const bool off = getenv("PT_HOLD_EMERGE_OFF") != NULL;
+    tank_debug_hold_emerge_off(off);
+    const float secs = getenv("HE_SECS") ? (float)atof(getenv("HE_SECS")) : 30;
+    static const int VZ[2] = { DECOR_Z_BACK, DECOR_Z_FRONT };
+    static uint16_t fb[TANK_W * TANK_H];
+    static tank_t snap, prev;
+    int fails = 0;
+    for (int v = 0; v < 2; v++) {
+        tank_init(&tank, 11);
+        tank_new_population(&tank);
+        for (int i = 0; i < 4; i++) tank_make_fish(&tank, i, i, 0.5f, 0.5f, STAGE_ADULT);
+        tank.n_fish = 4;
+        tank.sd_unlocks |= SD_ITEM_VOLCANO | (VZ[v] == DECOR_Z_FRONT ? SD_ITEM_SEAHORSE : 0);   /* (the seahorse's back lane: behind a piece IN FRONT) */
+        tank_volcano_place(&tank);
+        tank_decor_set(&tank, 9, tank_decor_x(&tank, 9), VZ[v]);
+        for (int b = 0; b < tank_veg_beds(&tank); b++) tank_veg_set(&tank, b, 0.7f);
+        render_set_scene_cache(scene_buf); render_set_vignette_cache(vig_buf); render_set_card_cache(card_buf); render_set_modal_cache(give_buf, gift_buf); render_set_dirty_mask(dirty_buf);
+        const float vx = tank_decor_x(&tank, 9), vy = TANK_BOT - 16 - 90;
+        const uint8_t hg = VZ[v] == DECOR_Z_FRONT ? FISH_DEPTH_FRONT : FISH_DEPTH_BEHIND;
+        for (int i = 0; i < 4; i++) {
+            fish_t *f = &tank.fish[i];
+            progression_set_age(&tank, i, STAGE_ADULT_AGE + 1);
+            f->eaten = 60; f->hunger = 2; f->stress = 1; f->energy = 6; f->trust = 8;
+            f->x = vx - 30 + 20 * i; f->y = vy + (i & 1 ? 20 : -15); f->speed = f->target_speed = 0;
+            f->gdepth = f->gdepth_want = f->gdepth_rest = hg; f->pdepth = f->pdepth_want = FISH_DEPTH_BEHIND;
+        }
+        const bool sh = VZ[v] == DECOR_Z_FRONT;
+        if (sh) {                                    /* behind the volcano in its back lane, drifting */
+            tank_seahorse_place(&tank);
+            tank.sh_mode = SH_DRIFT; tank.sh_akind = SH_ANCHOR_NONE; tank.sh_bed = tank.sh_frond = -1;
+            tank.sh_x = vx + 40; tank.sh_y = vy + 10; tank.sh_tx = tank.sh_x; tank.sh_ty = tank.sh_y; tank.sh_vx = tank.sh_vy = 0;
+            tank.sh_front = tank.sh_front_want = false; tank.sh_gdepth = tank.sh_gdepth_want = FISH_DEPTH_BEHIND; tank.sh_obed = -1;
+        }
+        for (int r = 0; r < 2; r++) render_tank(&tank, fb, TANK_W);
+        int hidden0 = 0;
+        for (int i = 0; i < 4; i++) hidden0 += depth_piece_cover(VZ[v], false, tank.fish[i].gdepth, tank.fish[i].pdepth) > 0;
+        prev = tank;
+        int pops = 0, changes = 0;
+        const float dt = 1.0f / 25;
+        for (float tt = 0; tt < secs; tt += dt) {
+            tank_touch_hold(&tank, vx, vy);
+            tank_tick(&tank, dt, advisor_rules);
+            snap = tank;
+            render_tank(&tank, fb, TANK_W);
+            if (prefix && getenv("HE_STRIP")) {          /* (a frame every 1.5 s, for a strip) */
+                const int fr = (int)(tt * 25 + 0.5f);
+                if (fr % 38 == 0) { char path[512]; snprintf(path, sizeof path, "%s_%s_%03d.ppm", prefix, VZ[v] == DECOR_Z_FRONT ? "front" : "behind", fr / 38); write_ppm(path, fb); }
+            }
+            pops += he_pops(&prev, &snap, sh, VZ[v] == DECOR_Z_FRONT ? "the volcano IN FRONT" : "the volcano BEHIND", &changes);
+            prev = tank;
+        }
+        if (pops) fails++;
+        int ok = 0;
+        for (int i = 0; i < 4; i++) {
+            const fish_t *f = &tank.fish[i];
+            const float d = tank_dist(f->x, f->y, vx, vy);
+            const bool front = f->gdepth == FISH_DEPTH_FRONT && f->pdepth == FISH_DEPTH_FRONT;
+            if (front && d < 64 + 50) ok++;
+            else printf("%s: hold-emerge the volcano %s: %s at %.0f,%.0f, %.0f px from the finger, grass %c pieces %c\n", off ? "(control)" : "FAIL",
+                        VZ[v] == DECOR_Z_FRONT ? "IN FRONT" : "BEHIND", f->name, f->x, f->y, d, "FBT"[f->gdepth % 3], "FBT"[f->pdepth % 3]);
+        }
+        if (ok < 4) fails++;
+        if (sh) {
+            const bool shok = tank.sh_front && tank.sh_gdepth == FISH_DEPTH_FRONT && tank.sh_obed < 0 && tank.sh_hitched;
+            printf("%s: hold-emerge the seahorse at %.0f,%.0f, lane %s, grass %c, stack %d, %s\n", shok ? "ok" : off ? "(control)" : "FAIL", tank.sh_x, tank.sh_y,
+                   tank.sh_front ? "FRONT" : "BACK", "FBT"[tank.sh_gdepth % 3], tank.sh_obed, tank.sh_hitched ? "on the finger" : "NOT on the finger");
+            if (!shok) fails++;
+        }
+        {                                            /* the finger lifted: they go back to their goals, the seahorse to a hold - no pop either */
+            int rel_pops = 0, rel_ch = 0;
+            for (float tt = 0; tt < 25; tt += dt) {
+                tank_tick(&tank, dt, advisor_rules);
+                snap = tank;
+                render_tank(&tank, fb, TANK_W);
+                rel_pops += he_pops(&prev, &snap, sh, "the finger lifted", &rel_ch);
+                prev = tank;
+            }
+            printf("hold-emerge the volcano %s, the finger lifted: %d depth changes, %d pops\n", VZ[v] == DECOR_Z_FRONT ? "IN FRONT" : "BEHIND", rel_ch, rel_pops);
+            if (rel_pops) fails++;
+        }
+        printf("hold-emerge the volcano %s: %d of 4 hidden at the start, %d depth changes, %d pops, %d of 4 in front at the finger\n",
+               VZ[v] == DECOR_Z_FRONT ? "IN FRONT" : "BEHIND", hidden0, changes, pops, ok);
+        if (prefix) { char path[512]; snprintf(path, sizeof path, "%s_hold_%s.ppm", prefix, VZ[v] == DECOR_Z_FRONT ? "front" : "behind"); write_ppm(path, fb); }
+    }
+    tank_debug_hold_emerge_off(false);
+    printf("selftest-hold-emerge: %s%s\n", fails ? "FAIL" : "PASS", off ? " (the control)" : "");
+    return fails ? 1 : 0;
+}
+
+/* --selftest-seahorse-post [prefix] (0.4, a keeper's pendant 11-01: "seahorse is holding on to the castle" - on its rear tower,
+ * drawn under the volcano the castle stands before): the seahorse set down on a post, THE PIECE'S STACK - drawn right before the
+ * piece it holds, under every piece that stands before that piece (and the rear tower under the castle's own front row).
+ *   rear_tower_over_volcano: the castle IN FRONT ranked over the volcano IN FRONT, its rear tower's cone on the volcano - the
+ *                            seahorse shows over the volcano
+ *   shoulder_under_castle:   the volcano IN FRONT ranked under the castle IN FRONT, whose left tower stands over the volcano's
+ *                            left shoulder - the seahorse on the shoulder hidden where the castle is
+ *   rear_tower_under_volcano: both BEHIND, the castle ranked under the volcano, its rear tower's cone inside the volcano - the
+ *                            seahorse on it hidden where the volcano is
+ * PT_SH_STACK_OFF=1 = the control (the stacks ignored, the rear tower in the back lane as before): it must FAIL */
+static int selftest_seahorse_post(const char *prefix) {
+    const bool off = getenv("PT_SH_STACK_OFF") != NULL;
+    render_debug_seahorse_stack_off(off);
+    static uint16_t R0[TANK_W * TANK_H], R1[TANK_W * TANK_H];
+    static const struct { const char *name; int hold, post, cz, vz, castle_over; float dx; } C[] = {
+        { "rear_tower_over_volcano",  2, 0, DECOR_Z_FRONT, DECOR_Z_FRONT, 1, -60 },
+        { "shoulder_under_castle",    9, 1, DECOR_Z_FRONT, DECOR_Z_FRONT, 1, -30 },
+        { "rear_tower_under_volcano", 2, 0, DECOR_Z_BACK,  DECOR_Z_BACK,  0, -39 },
+    };
+    int fails = 0;
+    for (int ci = 0; ci < 3; ci++) {
+        tank_init(&tank, 91); tank_new_population(&tank); tank.n_fish = 0;
+        for (int i = 0; i < MAX_FOOD; i++) tank.food[i].alive = false;
+        tank.night = false; tank.light_override = true; tank.light_on = true; memset(tank.algae, 0, sizeof tank.algae);
+        tank.sd_unlocks |= SD_ITEM_SEAHORSE | SD_ITEM_CASTLE | SD_ITEM_VOLCANO;
+        tank_castle_place(&tank); tank_volcano_place(&tank);
+        for (int b = 0; b < tank_veg_beds(&tank); b++) tank_veg_set(&tank, b, 0.3f);
+        const float vx = (TANK_FX0 + TANK_FX1) * 0.5f;
+        tank_decor_set(&tank, 9, vx, C[ci].vz);
+        tank_decor_set(&tank, 2, vx + C[ci].dx, C[ci].cz);
+        tank.decor_rank[tank_decor_slot(2)] = C[ci].castle_over ? 2 : 1; tank.decor_rank[tank_decor_slot(9)] = C[ci].castle_over ? 1 : 2;
+        tank_seahorse_place(&tank);
+        render_set_scene_cache(scene_buf); render_set_vignette_cache(vig_buf); render_set_card_cache(card_buf); render_set_modal_cache(give_buf, gift_buf); render_set_dirty_mask(dirty_buf);
+        tank.sh_hidden = true; for (int k = 0; k < 2; k++) render_tank(&tank, R0, TANK_W);
+        if (!tank_seahorse_post(&tank, C[ci].hold, C[ci].post)) { printf("FAIL: seahorse-post %s: no post\n", C[ci].name); fails++; continue; }
+        if (off && C[ci].hold == 2 && C[ci].post == 0) tank.sh_front = tank.sh_front_want = false;   /* (the control: the rear tower's old lane, the back) */
+        tank.sh_hidden = true; for (int k = 0; k < 3; k++) render_tank(&tank, R0, TANK_W);
+        tank.sh_hidden = false; for (int k = 0; k < 3; k++) render_tank(&tank, R1, TANK_W);
+        int seen = 0, on_vol = 0, on_row = 0, on_castle = 0, on_vany = 0;
+        for (int y = 0; y < TANK_H; y++) for (int x = 0; x < TANK_W; x++) {
+            const int i = y * TANK_W + x;
+            if (R1[i] == R0[i]) continue;
+            seen++;
+            const bool cas = render_decor_covers(2, x, y), row = render_piece_covers(2, x, y), vol = render_decor_covers(9, x, y);
+            if (vol && !cas) on_vol++;
+            if (vol) on_vany++;
+            if (row) on_row++;
+            if (cas) on_castle++;
+            if (prefix) R1[i] = FB_SWAP16(0xF81F);
+        }
+        bool ok;
+        int was = 0;                                 /* (a hidden cell's staging: drawn with the stacks ignored, it is over the covering piece) */
+        if (ci > 0) {
+            static uint16_t R2[TANK_W * TANK_H];
+            render_debug_seahorse_stack_off(true); for (int k = 0; k < 3; k++) render_tank(&tank, R2, TANK_W); render_debug_seahorse_stack_off(off);
+            for (int i = 0; i < TANK_W * TANK_H; i++) was += R2[i] != R0[i] && render_decor_covers(ci == 1 ? 2 : 9, i % TANK_W, i / TANK_W);
+            if (was < 40) { printf("FAIL: seahorse-post %s: the staging - %d px over the piece even with the stacks ignored\n", C[ci].name, was); fails++; continue; }
+        }
+        if (ci == 0) ok = on_vol >= 40 && on_row <= 2;
+        else if (ci == 1) ok = on_castle <= 2;
+        else ok = on_vany <= 2;
+        printf("%s: seahorse-post %s: held at %.0f,%.0f (lane %s), %d px drawn - on the volcano %d (%d off the castle), on the castle %d, on its front row %d\n",
+               ok ? "ok" : off ? "(control)" : "FAIL", C[ci].name, tank.sh_x, tank.sh_y, tank.sh_front ? "FRONT" : "BACK", seen, on_vany, on_vol, on_castle, on_row);
+        if (!ok) fails++;
+        if (prefix) { char path[300]; snprintf(path, sizeof path, "%s_shpost_%s.ppm", prefix, C[ci].name); write_ppm(path, R1); }
+    }
+    render_debug_seahorse_stack_off(false);
+    printf("selftest-seahorse-post: %s (3 cells%s)\n", fails ? "FAIL" : "PASS", off ? ", the control" : "");
+    return fails ? 1 : 0;
+}
+
 static int pumpkin_shot(const char *prefix) {
     static const struct { int preset; stage_t stage; float x, y, h; } CAST[] = {
         { 0, STAGE_ELDER, 318, 292, 3.14159f }, { 3, STAGE_ADULT, 150, 236, 0.08f }, { 1, STAGE_ADULT, 260, 130, 3.10f } };
@@ -4868,7 +7432,7 @@ static int pumpkin_shot(const char *prefix) {
     static uint16_t fb[TANK_W * TANK_H];
     render_set_scene_cache(scene_buf);
     render_set_vignette_cache(vig_buf);
-    render_set_card_cache(card_buf);
+    render_set_card_cache(card_buf); render_set_modal_cache(give_buf, gift_buf);
     render_set_dirty_mask(dirty_buf);
     char path[512];
     /* the cost first: the same frames with and without, day and night, both depths */
@@ -5010,7 +7574,7 @@ static int volcano_shot(const char *prefix) {
     static uint16_t fb[TANK_W * TANK_H];
     render_set_scene_cache(scene_buf);
     render_set_vignette_cache(vig_buf);
-    render_set_card_cache(card_buf);
+    render_set_card_cache(card_buf); render_set_modal_cache(give_buf, gift_buf);
     render_set_dirty_mask(dirty_buf);
     render_set_volcano_style(getenv("PT_VOLCANO_SMOOTH") ? 1 : 0);   /* the smooth rock, for a look (Strato picked the boulders 10-23) */
     const float vx = tank_decor_x(&tank, 9);
@@ -5129,6 +7693,24 @@ static int volcano_shot(const char *prefix) {
  * them; and with the clock running it is rebuilt at its period, no more. */
 static int64_t sim_clock_us(void) { struct timespec ts; clock_gettime(CLOCK_MONOTONIC, &ts); return (int64_t)ts.tv_sec * 1000000 + ts.tv_nsec / 1000; }
 static void *gl_alloc64(size_t n) { void *p = NULL; return posix_memalign(&p, 64, n) ? NULL : p; }
+#define GL_FINE_TEST 8                                /* (render.c GL_FINE: fine moments a band, unstepped) */
+static int gl_big_seen, gl_big_refuse;              /* (three bands) the nth big piece refused once: the bake + three bands, then no fourth */
+static size_t gl_arena_max, gl_band_sz;                 /* (fewer moments) the moments' arena no bigger than this; a band's size (the plan's first big piece) */
+static void *gl_band_p[8];
+static void *gl_alloc_four(size_t n) {                  /* four band-sized pieces at most at once (the bake + three bands), the arena capped - every plan */
+    if (n >= 100 * 1024 && !gl_band_sz) gl_band_sz = n;
+    if (n == gl_band_sz) {
+        int k = 0, slot = -1; for (int i = 0; i < 8; i++) { if (gl_band_p[i]) k++; else if (slot < 0) slot = i; }
+        if (k >= 4 || slot < 0) return NULL;
+        return gl_band_p[slot] = gl_alloc64(n);
+    }
+    if (n >= 100 * 1024 && n > gl_arena_max) return NULL;
+    return gl_alloc64(n);
+}
+static void gl_free_four(void *p) { for (int i = 0; i < 8; i++) if (gl_band_p[i] == p) gl_band_p[i] = NULL; free(p); }
+static void *gl_alloc_nth(size_t n) { if (n >= 100 * 1024 && ++gl_big_seen == gl_big_refuse) return NULL; return gl_alloc64(n); }
+static bool gl_refusing;                              /* (the retry) PSRAM held back, as at a boot on Strato's square 11-01 */
+static void *gl_alloc_tight(size_t n) { return gl_refusing ? NULL : gl_alloc64(n); }
 /* --selftest-grassloop (0.3.9.3, THE GRASS LOOP in render.c): every moment of the loop, day and night, a frame
  * primed from it is the old frame with the sway pinned to that moment, pixel for pixel (the lava, the bubbles,
  * the crown and the candle under the baked blades, a castle IN FRONT's arch); a frond trimmed makes the loop
@@ -5148,7 +7730,7 @@ static int selftest_grassloop(void) {
     veg_ragged(&tank, 0, 0.7f); veg_ragged(&tank, 1, 0.6f); veg_ragged(&tank, 2, 0.75f);
     tank_seahorse_place(&tank); tank_shrimp_place(&tank, 6);
     for (int i = 0; i < 3 * 60; i++) tank_tick(&tank, 1.0f / 60.0f, advisor_rules);
-    render_set_scene_cache(scene_buf); render_set_vignette_cache(vig_buf); render_set_card_cache(card_buf); render_set_dirty_mask(dirty_buf);
+    render_set_scene_cache(scene_buf); render_set_vignette_cache(vig_buf); render_set_card_cache(card_buf); render_set_modal_cache(give_buf, gift_buf); render_set_dirty_mask(dirty_buf);
     render_set_grass_loop(gl_alloc64, free, 3u << 20); render_grass_loop_on(true);
     int checked = 0;
     for (int night = 0; night < 2; night++) {
@@ -5235,25 +7817,29 @@ static int selftest_grassloop(void) {
             int fr = 0; while ((!render_grass_loop_n() || render_grass_loop_ready() < render_grass_loop_n()) && fr < 400) { tank.clock += 0.04f; render_tank(&tank, pa, TANK_W); fr++; }
             const int n = render_grass_loop_n();
             if (!n || render_grass_loop_ready() < n) continue;            /* (the memory did not run to it) */
-            int last = render_grass_loop_moment(), cur = 0;
+            int last = render_grass_loop_moment(), cur = 0, walked = 0;
+            const float rate = 0.04f * n / 3.5f;                              /* (moments a frame: under a half, a short loop holds - THE PACE, 0.4) */
+            const int lo = rate >= 0.5f ? 1 : 0;
             for (int f = 0; f < 2 * n + 3; f++) {
                 uint16_t *buf = bufs[cur]; cur ^= 1;
                 tank.clock += 0.04f; render_tank(&tank, buf, TANK_W);
                 const int m = render_grass_loop_moment();
-                { int d = (m - last + n) % n; if (d < 1 || d > 3) GLFAIL("primed stepping, %d moments (target %d): a frame showed moment %d after %d (%d steps)", n, target, m, last, d); }
+                { int d = (m - last + n) % n; walked += d; if (d < lo || d > 3) GLFAIL("primed stepping, %d moments (target %d): a frame showed moment %d after %d (%d steps)", n, target, m, last, d); }
                 last = m;
                 const uint16_t *sc, *bd; size_t top, off, blen; unsigned ep;          /* the next frame's prefetch, as main.c does it */
                 if (render_grass_loop_parts(tank.clock + 0.04f, &sc, &top, &bd, &off, &blen, &ep)) {
                     uint16_t *nx = bufs[cur]; memcpy(nx, sc, top); memcpy((uint8_t *)nx + off, bd, blen); render_fb_primed(nx, ep);
                 }
             }
+            if (!lo) { const float want = (2 * n + 3) * rate;                  /* a short loop held moments: the sway kept its own speed */
+                       if (walked < want - 3 || walked > want + 3) GLFAIL("primed stepping, %d moments: %d walked in %d frames, the sway's pace is %.1f", n, walked, 2 * n + 3, want); }
             for (int bpf = 6; bpf <= 12; bpf++) if (n % bpf == 0 && n / bpf <= 16) fseen[bpf] = 1;
         }
         render_grass_loop_lock(48);
         { int fr = 0; while ((!render_grass_loop_n() || render_grass_loop_ready() < render_grass_loop_n()) && fr < 400) { tank.clock += 0.04f; render_tank(&tank, fb, TANK_W); fr++; } }
         int odd = fseen[7] + fseen[9] + fseen[11];
         if (!odd) GLFAIL("primed stepping: no odd count of moments a band was tried");
-        printf("selftest-grassloop: primed stepping - %d sway lengths, each moment once a frame with the prefetch's band (odd counts a band among them)\n", tried);
+        printf("selftest-grassloop: primed stepping - %d sway lengths, each moment once a frame with the prefetch's band (odd counts a band among them; a loop too short for the frame rate holding moments at the sway's pace)\n", tried);
     }
     /* the heights (0.3.9.3, the 1.8's urchin): a frond a segment taller keeps the loop as it was - even past the wait's
        length since the bake; four segments, or 15 minutes of tank time from when the change showed, rebake it */
@@ -5295,6 +7881,64 @@ static int selftest_grassloop(void) {
         render_grass_loop_bake_more(&tank, 1);
         if (render_grass_loop_warming()) GLFAIL("loading: warming again once whole");
         printf("selftest-grassloop: loading - %d moments baked in %d frames under the loading screen (%d of them tank frames), never again\n", render_grass_loop_n(), frames, tank_frames); }
+    /* THE RETRY (0.4, 11-01): a plan that found no memory - the square at a boot, PSRAM still held by the start - is
+       not tried again for GL_RETRY_S, then is: the memory given back meanwhile, the loop comes, whole */
+    {   render_grass_loop_on(false); render_set_grass_loop(gl_alloc_tight, free, 3u << 20); render_grass_loop_on(true);
+        gl_refusing = true; tank.clock = 100.0f;
+        for (int k = 0; k < 10; k++) { tank.clock += 0.04f; render_tank(&tank, fb, TANK_W); }
+        int why; if (render_grass_loop_n() || !render_grass_loop_nomem(&why)) GLFAIL("retry: the memory refused, and the plan did not give up (%d moments)", render_grass_loop_n());
+        gl_refusing = false;
+        for (int k = 0; k < 200; k++) { tank.clock += 0.1f; render_tank(&tank, fb, TANK_W); }   /* (20 s: not yet) */
+        if (render_grass_loop_n()) GLFAIL("retry: planned again %.0f s after it gave up (the retry waits 30)", 20.0f);
+        int frames = 0;
+        while ((!render_grass_loop_n() || render_grass_loop_ready() < render_grass_loop_n()) && frames < 600) { tank.clock += 0.1f; render_tank(&tank, fb, TANK_W); frames++; }
+        if (!render_grass_loop_n() || render_grass_loop_ready() != render_grass_loop_n() || render_grass_loop_nomem(&why))
+            GLFAIL("retry: the memory back, and no whole loop %d frames past the wait (%d of %d moments)", frames, render_grass_loop_ready(), render_grass_loop_n());
+        printf("selftest-grassloop: the retry - refused at the plan, not tried for 30 s, then %d moments whole %.1f s later\n", render_grass_loop_n(), 20.0f + frames * 0.1f);
+        render_grass_loop_on(false); render_set_grass_loop(gl_alloc64, free, 3u << 20); render_grass_loop_on(true); }
+    /* THREE BANDS (0.4, 11-01: the tall-grass fix): memory for three bands and no more - four was the floor and a grown bed on the
+       square found no loop at all - plans a loop of three, and each of its moments is the old frame pixel for pixel */
+    {   int rows0, b0, l0; int64_t u0; render_grass_loop_prof(&b0, &l0, &u0, &rows0);
+        render_grass_loop_on(false); render_grass_loop_lock(0);
+        gl_big_seen = 0; gl_big_refuse = 5;                                    /* (the bake, three bands - the fourth refused: the platform's memory ran out) */
+        render_set_grass_loop(gl_alloc_nth, free, 3u << 20);
+        render_grass_loop_on(true); tank.night = false;
+        int fr3 = 0; for (; fr3 < 3000 && (!render_grass_loop_n() || render_grass_loop_ready() < render_grass_loop_n()); fr3++) render_tank(&tank, fb, TANK_W);
+        if (getenv("PT_GL3_TRACE")) printf("three bands: %d of %d ready after %d frames\n", render_grass_loop_ready(), render_grass_loop_n(), fr3);
+        const int n3 = render_grass_loop_n();
+        if (n3 != 3 * GL_FINE_TEST || render_grass_loop_ready() != n3) GLFAIL("three bands: %d moments, %d baked (want %d: three bands of %d)", n3, render_grass_loop_ready(), 3 * GL_FINE_TEST, GL_FINE_TEST);
+        for (int k = 0; k < n3; k++) {
+            tank.clock = k * 3.5f / n3 + 0.013f;
+            render_grass_loop_bypass(false); render_tank(&tank, fb, TANK_W);
+            render_grass_loop_bypass(true); render_force_veg_clock(k * 3.5f / n3); render_tank(&tank, fa, TANK_W); render_tank(&tank, fa, TANK_W);
+            render_force_veg_clock(-1); render_grass_loop_bypass(false);
+            int diff = 0; for (int i = 0; i < TANK_W * TANK_H; i++) diff += fa[i] != fb[i];
+            if (diff) GLFAIL("three bands, moment %d of %d: %d px differ from the old way", k, n3, diff);
+            render_tank(&tank, fb, TANK_W);
+        }
+        printf("selftest-grassloop: three bands - no memory for a fourth, a loop of %d moments planned anyway, baked in %d frames, each the old frame pixel for pixel (a %d-row band)\n", n3, fr3, rows0);
+        /* ... and stepping (48 asked), the arena short too: fewer moments a band before a band fewer, every frame still the old one */
+        render_grass_loop_on(false); render_grass_loop_lock(48);
+        gl_band_sz = 0; memset(gl_band_p, 0, sizeof gl_band_p); gl_arena_max = (size_t)(rows0 + 24) * TANK_W * 2;   /* (about a band: ~21 moments' worth) */
+        render_set_grass_loop(gl_alloc_four, gl_free_four, 3u << 20);
+        render_grass_loop_on(true);
+        { int fr = 0; for (; fr < 600 && (!render_grass_loop_n() || render_grass_loop_ready() < render_grass_loop_n()); fr++) { tank.clock += 0.04f; render_tank(&tank, fb, TANK_W); }
+          const int nf = render_grass_loop_n();
+          if (getenv("PT_GL3_TRACE")) { int why, nm = render_grass_loop_nomem(&why); printf("fewer moments: n %d, gave up for %d rows (why %d), band %zu, arena max %zu\n", nf, nm, why, gl_band_sz, gl_arena_max); }
+          if (!nf || nf % 3 || nf >= 36 || render_grass_loop_ready() != nf) GLFAIL("fewer moments: %d moments, %d baked (want three bands of fewer than 12)", nf, render_grass_loop_ready());
+          for (int k = 0; k < 8; k++) {
+              tank.clock += 0.04f; render_tank(&tank, fb, TANK_W);
+              const int m = render_grass_loop_moment();
+              render_grass_loop_bypass(true); render_force_veg_clock(m * 3.5f / nf); render_tank(&tank, fa, TANK_W); render_tank(&tank, fa, TANK_W);
+              render_force_veg_clock(-1); render_grass_loop_bypass(false);
+              int diff = 0; for (int i = 0; i < TANK_W * TANK_H; i++) diff += fa[i] != fb[i];
+              if (diff) GLFAIL("fewer moments, frame %d (moment %d of %d): %d px differ from the old way", k, m, nf, diff);
+              render_tank(&tank, fb, TANK_W);
+          }
+          printf("selftest-grassloop: fewer moments - stepping 48, no fourth band and a short arena: %d moments on three bands, each frame the old one\n", nf); }
+        gl_big_refuse = 0; gl_arena_max = 0; render_grass_loop_on(false); render_grass_loop_lock(0);
+        render_set_grass_loop(gl_alloc64, free, 3u << 20); render_grass_loop_on(true);
+        render_grass_loop_on(false); render_set_grass_loop(gl_alloc64, free, 3u << 20); render_grass_loop_on(true); }
     /* the host's time: the same tank, the grass drawn and the grass from the loop */
     double us[2];
     for (int m = 0; m < 2; m++) {
@@ -5313,7 +7957,7 @@ static int selftest_grassloop(void) {
 
 /* --selftest-grasspatch (0.3.9.4, THE PATCH in render.c; in make check, all four worlds): a loop whole, then a change that is
  * BOXES - the pumpkin hidden and shown (director `pumpkin off|on`), a piece IN FRONT moved, one sent BEHIND and moved there, the
- * coral grown, two moves on top of each other, the sword plant sent BEHIND, moved and brought back, a frond grown past the wait,
+ * coral grown, two moves on top of each other, the sword plant moved three times (one depth since 0.4), a frond grown past the wait,
  * a trim, the castle bought, moved and sold - keeps its bands and differences. Checked: the loop goes stale inside boxes (not
  * whole); every frame meanwhile is the old frame at its moment pixel for pixel (the boxes repainted live, stepping as the
  * boards do and by the clock); and once the rebake is done every moment the loop holds - its rows and its grass mask - is what
@@ -5354,7 +7998,7 @@ static int gp_whole(uint16_t *fb, int cap) {           /* frames until the loop 
 }
 static int gp_frame_diff(uint16_t *fb, uint16_t *fa, int lock, int *where) {   /* one frame from the loop against the old way at its moment: px that differ (where: the first's x, y) */
     tank.clock += 0.04f; render_tank(&tank, fb, TANK_W);
-    const int n = render_grass_loop_n(); int m = lock ? render_grass_loop_moment() : (int)(fmodf(tank.clock, 3.5f) * n / 3.5f) % n;
+    const int n = render_grass_loop_n(); int m = lock ? render_grass_loop_moment() : (int)((float)fmod(tank.clock, 3.5) * n / 3.5f) % n;
     render_grass_loop_bypass(true); render_force_veg_clock(m * 3.5f / n); render_tank(&tank, fa, TANK_W); render_tank(&tank, fa, TANK_W);
     render_force_veg_clock(-1); render_grass_loop_bypass(false);
     int diff = 0; for (int i = 0; i < TANK_W * TANK_H; i++) if (fa[i] != fb[i]) { if (!diff) { where[0] = i % TANK_W; where[1] = i / TANK_W; } diff++; }
@@ -5386,11 +8030,11 @@ static int selftest_grasspatch(void) {
     for (int i = 0; i < tank.n_fish; i++) { tank.fish[i].x = TANK_FLOOR_X(60 + 70 * i); tank.fish[i].y = TANK_BOT - 70 - 20 * i; tank_fish_face(&tank.fish[i]); }
     for (int i = 0; i < 60; i++) tank_tick(&tank, 1.0f / 12.0f, advisor_rules);
     tank.night = false;
-    render_set_scene_cache(scene_buf); render_set_vignette_cache(vig_buf); render_set_card_cache(card_buf); render_set_dirty_mask(dirty_buf);
+    render_set_scene_cache(scene_buf); render_set_vignette_cache(vig_buf); render_set_card_cache(card_buf); render_set_modal_cache(give_buf, gift_buf); render_set_dirty_mask(dirty_buf);
     render_clock_us = bench_clock_us;
     static const char *const CASE[] = { "the pumpkin hidden", "the pumpkin shown", "the pumpkin moved", "the volcano sent BEHIND", "the volcano moved BEHIND",
-                                        "the coral grown", "the pumpkin and the coral moved, two frames apart", "the sword plant sent BEHIND", "the sword plant moved BEHIND",
-                                        "the sword plant brought IN FRONT", "a frond grown past the wait", "bed 1 trimmed", "the castle bought IN FRONT", "the castle moved",
+                                        "the coral grown", "the pumpkin and the coral moved, two frames apart", "the sword plant moved", "the sword plant moved again",
+                                        "the sword plant moved back", "a frond grown past the wait", "bed 1 trimmed", "the castle bought IN FRONT", "the castle moved",
                                         "the castle sold", "the ring's fallback: the pumpkin moved, the splice refused", "thirty moves in a tight ring", "a frond nibbled while the loop rebakes", "three fronds nibbled across the beds: three stale intervals in a row", "the pumpkin moved, by the clock" };
     enum { NCASE = (int)(sizeof CASE / sizeof CASE[0]) };
     int64_t patch_us = 0, whole_us = 0; int patch_n = 0, whole_n = 0, boxes_most = 0;
@@ -5410,9 +8054,9 @@ static int selftest_grasspatch(void) {
                 case 4:  tank_decor_set(&tank, 9, vx - 50, DECOR_Z_BACK); break;
                 case 5:  tank.coral_growth = 1.0f; break;
                 case 6:  tank_decor_set(&tank, 8, kx + 10, DECOR_Z_FRONT); break;                /* (the coral two frames on, below) */
-                case 7:  tank_decor_set(&tank, 0, px, DECOR_Z_BACK); break;
+                case 7:  tank_decor_set(&tank, 0, px + 40, DECOR_Z_BACK); break;              /* (one depth since 0.4: the plant only moves) */
                 case 8:  tank_decor_set(&tank, 0, px - 70, DECOR_Z_BACK); break;
-                case 9:  tank_decor_set(&tank, 0, px - 70, DECOR_Z_FRONT); break;
+                case 9:  tank_decor_set(&tank, 0, px, DECOR_Z_BACK); break;
                 case 10: tank.veg_h[0][2] += 1.3f / (VEG_SEGS_FULL - 2); break;                   /* (a segment: the wait, then one strip) */
                 case 11: for (int i = 0; i < VEG_FRONDS_MAX; i++) tank.veg_h[1][i] *= 0.5f; break;
                 case 12: tank.sd_unlocks |= SD_ITEM_CASTLE; tank_castle_place(&tank); tank_decor_set(&tank, 2, TANK_W * 30 / 100, DECOR_Z_FRONT); break;
@@ -5530,7 +8174,7 @@ static int selftest_grasscache(void) {
     veg_ragged(&tank, 0, 0.7f); veg_ragged(&tank, 1, 0.6f); veg_ragged(&tank, 2, 0.75f);
     tank_seahorse_place(&tank); tank_shrimp_place(&tank, 6);
     for (int i = 0; i < 3 * 60; i++) tank_tick(&tank, 1.0f / 60.0f, advisor_rules);
-    render_set_scene_cache(scene_buf); render_set_vignette_cache(vig_buf); render_set_card_cache(card_buf); render_set_dirty_mask(dirty_buf);
+    render_set_scene_cache(scene_buf); render_set_vignette_cache(vig_buf); render_set_card_cache(card_buf); render_set_modal_cache(give_buf, gift_buf); render_set_dirty_mask(dirty_buf);
     render_set_grass_cache(sg, bgm);
     for (int night = 0; night < 2; night++) {
         tank.night = night;
@@ -5598,13 +8242,16 @@ static bool spc_front(int pc) { return pc != SPC_NONE && (pc & 1) == 0; }
 static bool spc_shelter(int pc) { return pc >= SPC_CASTLE_BACK && pc <= SPC_VOLCANO_FRONT; }
 static int  su_states(int su) { return su == SU_CRAB ? SC_N : 4; }   /* the urchin, the snail: either lane, at the flank and at the middle (2026-10-24, the 1.8: the front volcano's lava over the urchin passing its cave - the flank alone never met the lava) */
 /* the contract: is the subject OVER the passer? (-1 = the pair cannot meet: skip) */
-static int stack_expect(int su, int pc, int sc, int sp) {
+static int stack_expect_(int su, int pc, int sc, int sp) {
     const bool piece_front = spc_front(pc), shelter = spc_shelter(pc);
     if (sp == SP_FRONDS_ODD) sp = SP_FRONDS_EVEN;                        /* no weave since 0.3.9.3: a bed BEHIND has every frond behind (the odd ones were the front half) */
     if (su != SU_CRAB) {                                                 /* the urchin / the snail: state & 1 = its front lane */
         const bool front = (sc & 1) != 0;
         switch (sp) {
-        case SP_FISH: case SP_SHRIMP: return 1;                           /* drawn after them, in either lane */
+        case SP_FISH: case SP_SHRIMP: return front ? 1 : 0;               /* THE ANIMAL PASS (0.4, deepest first): the matrix's fish and school are before
+                                                                            the grass and the pieces (L4) - over a critter in its back lane (L3: behind the
+                                                                            pieces IN FRONT), under one in its front slot (9). Until 0.4 the critters were
+                                                                            drawn after them in either lane - a loop with a piece IN FRONT between them */
         case SP_FRONDS_EVEN: return 1;                                   /* the back fronds are early passes: under anything on the sand */
         case SP_FRONDS_ODD:  return (pc == SPC_CASTLE_FRONT && sc == 2) ? 1 : 0;   /* the front fronds over everything on the sand - but in a front castle's
                                                                                         arch they are the early arch pass, under what walks through it */
@@ -5625,7 +8272,9 @@ static int stack_expect(int su, int pc, int sc, int sp) {
     if (sc == SC_CLIMB && (pc == SPC_CASTLE_BACK || pc == SPC_CASTLE_FRONT)) return -1;
     if (sc == SC_FIND) return 1;                                         /* the held sand dollar: over everything */
     switch (sp) {
-    case SP_FISH: case SP_SHRIMP:  return deep ? 0 : 1;                    /* the deepest thing in its shelter; over them on the sand */
+    case SP_FISH: case SP_SHRIMP:  return deep ? 0 : crab_front ? 1 : 0;   /* the deepest thing in its shelter; on the sand its lane (0.4, the animal pass:
+                                                                            its back lane L3 under the fish and the school before the pieces, L4; its
+                                                                            front slot over them) */
     case SP_SNAIL_FRONT: case SP_URCHIN_FRONT: return 0;                  /* the crab lowest in the front slot too */
     case SP_SNAIL_BACK: case SP_URCHIN_BACK:
         if (deep) return 0;
@@ -5656,6 +8305,9 @@ static int stack_expect(int su, int pc, int sc, int sp) {
     }
     return -1;
 }
+/* the sword plant has ONE depth since 0.4 (BEHIND, baked with the grass: Strato 11-02) - a bed IN FRONT is a cell no tank
+   can meet now, skipped like a pair that cannot meet (docs/render-stack.md row 10) */
+static int stack_expect(int su, int pc, int sc, int sp) { return sp == SP_FRONDS_FRONTBED ? -1 : stack_expect_(su, pc, sc, sp); }
 static void stack_ppm(const char *path, const uint16_t *px, int w, int h) {
     FILE *f = fopen(path, "wb"); if (!f) return;
     fprintf(f, "P6\n%d %d\n255\n", w, h);
@@ -5846,8 +8498,9 @@ static int selftest_stack(const char *prefix) {
     }
     /* THE TINT (Strato 2026-10-24, the 1.8): a bed placed IN FRONT stands before the castle, so its fronds crossing
        the arch take NO tunnel shade - pixel for pixel the same colour with the castle standing as without it (a MIDDLE
-       bed's late fronds in the arch are shaded: they are behind the castle). Day and night. */
-    for (int night = 0; night < 2; night++) {
+       bed's late fronds in the arch are shaded: they are behind the castle). Day and night.
+       Retired 0.4: the sword plant has one depth (BEHIND) - no bed IN FRONT is left to cross the arch. */
+    for (int night = 0; night < 2 && tank_decor_z_count(0) > 1; night++) {
         tank_init(&st_base, 77); tank_new_population(&st_base);
         for (int i = 0; i < st_base.n_fish; i++) { st_base.fish[i].x = TANK_FX1 - 30; st_base.fish[i].y = 40; st_base.fish[i].hunger = 0; }
         for (int i = 0; i < MAX_FOOD; i++) st_base.food[i].alive = false;
@@ -5921,7 +8574,7 @@ static int selftest_floor(const char *prefix) {
     for (int i = 0; i < 2 * 60; i++) tank_tick(&tank, 1.0f / 60.0f, advisor_rules);
     memset(tank.algae, 0, sizeof tank.algae);
     for (int i = 0; i < MAX_FOOD; i++) tank.food[i].alive = false;
-    render_set_scene_cache(scene_buf); render_set_vignette_cache(vig_buf); render_set_card_cache(card_buf); render_set_dirty_mask(dirty_buf);
+    render_set_scene_cache(scene_buf); render_set_vignette_cache(vig_buf); render_set_card_cache(card_buf); render_set_modal_cache(give_buf, gift_buf); render_set_dirty_mask(dirty_buf);
     int shots = 0;
     for (int v = 0; v < 8; v++) {
         bool night = v & 1, front = v & 2, lifted = v & 4;
@@ -5985,7 +8638,7 @@ static int selftest_restore(void) {
     tank_urchin_place(&tank); tank_shrimp_place(&tank, 6); tank_seahorse_place(&tank);
     for (int i = 0; i < 5 * 60; i++) tank_tick(&tank, 1.0f / 60.0f, advisor_rules);
     tank.sd_balance = 500;
-    render_set_scene_cache(scene_buf); render_set_vignette_cache(vig_buf); render_set_card_cache(card_buf); render_set_dirty_mask(dirty_buf);
+    render_set_scene_cache(scene_buf); render_set_vignette_cache(vig_buf); render_set_card_cache(card_buf); render_set_modal_cache(give_buf, gift_buf); render_set_dirty_mask(dirty_buf);
     int cur = 0; bool pending[2] = { false, false }; unsigned ep[2] = { 0, 0 };
     long restored_words = 0, frames = 0; int worst = 0; const char *worst_ev = "";
     for (int frame = 0; frame < 420; frame++) {
@@ -6087,7 +8740,7 @@ static int selftest_model(const char *prefix) {
     if (!notice_current()) MFAIL("the notice went away by itself (it waits for a tap)");
     if (prefix) {
         static uint16_t fb[TANK_W * TANK_H];
-        render_set_scene_cache(scene_buf); render_set_vignette_cache(vig_buf); render_set_card_cache(card_buf); render_set_dirty_mask(dirty_buf);
+        render_set_scene_cache(scene_buf); render_set_vignette_cache(vig_buf); render_set_card_cache(card_buf); render_set_modal_cache(give_buf, gift_buf); render_set_dirty_mask(dirty_buf);
         for (int i = 0; i < 120; i++) tank_tick(&tank, dt, advisor_rules);
         render_tank(&tank, fb, TANK_W); render_notice(&tank, fb, TANK_W, NOTICE_MODEL_DAMAGED, -1, 0, 0);
         char path[300]; snprintf(path, sizeof path, "%s_model_notice.ppm", prefix); write_ppm(path, fb);
@@ -6182,7 +8835,7 @@ static int selftest_board(const char *prefix) {
     if (!notice_current()) BFAIL("the card went away by itself (it waits for a tap)");
     static uint16_t fb[TANK_W * TANK_H];
     if (prefix) {
-        render_set_scene_cache(scene_buf); render_set_vignette_cache(vig_buf); render_set_card_cache(card_buf); render_set_dirty_mask(dirty_buf);
+        render_set_scene_cache(scene_buf); render_set_vignette_cache(vig_buf); render_set_card_cache(card_buf); render_set_modal_cache(give_buf, gift_buf); render_set_dirty_mask(dirty_buf);
         for (int i = 0; i < 120; i++) tank_tick(&tank, dt, advisor_rules);
         render_tank(&tank, fb, TANK_W); render_notice(&tank, fb, TANK_W, NOTICE_WRONG_BOARD, -1, 0, 0);
         char path[300]; snprintf(path, sizeof path, "%s_wrong_board.ppm", prefix); write_ppm(path, fb);
@@ -6245,7 +8898,7 @@ static int snapshot(const char *prefix, int seconds) {
     char path[512];
     render_set_scene_cache(scene);
     render_set_vignette_cache(vig_buf);
-    render_set_card_cache(card_buf);
+    render_set_card_cache(card_buf); render_set_modal_cache(give_buf, gift_buf);
     render_set_dirty_mask(dirty_buf);
     render_tank(&tank, fb, TANK_W);
     snprintf(path, sizeof path, "%s_tank.ppm", prefix); write_ppm(path, fb);
@@ -6315,10 +8968,85 @@ static int snapshot(const char *prefix, int seconds) {
         render_milestones_leave();
         tank.sd_unlocks = unl; tank.tank_ms_bits = tms; tank.tank_ms_seen = seen;
     }
-    render_settings(&tank, fb, TANK_W, 60, 2);                     /* the defaults: the double-tap, AUTO FEED on, the picture free to turn */
+    render_settings(&tank, fb, TANK_W, 60, 100);                     /* the defaults: the double-tap, AUTO FEED on, the picture free to turn */
     snprintf(path, sizeof path, "%s_settings.ppm", prefix); write_ppm(path, fb);
+    /* link mode (0.4, the tank link): its states, as views - no engine here */
+    { link_view_t lv; memset(&lv, 0, sizeof lv); lv.badge = 1;
+      struct { const char *name; void (*set)(link_view_t *); float hl, hr; } LS[] = {
+          { "link_alone", NULL, 0, 0 },
+          { "link_near",  NULL, 0, 0 },
+          { "link_asked", NULL, 0, 0 },
+          { "link_hold",  NULL, 0.6f, 0 },
+          { "link_open",  NULL, 0, 0 },
+          { "link_drift", NULL, 0, 0 },
+          { "link_drift_home", NULL, 0, 0 },
+          { "link_doors", NULL, 0, 0 },
+          { "link_linked", NULL, 0, 0 },                      /* linked, nothing pending: DONE is the next step */
+      };
+      for (size_t i = 0; i < sizeof LS / sizeof LS[0]; i++) {
+          memset(&lv, 0, sizeof lv); lv.badge = 1;
+          if (i >= 1) { lv.n_near = 2; lv.near_badge[0] = 2; lv.near_badge[1] = 3; }
+          if (i == 2) { lv.edge[LINK_RIGHT].state = LV_ASKED; lv.edge[LINK_RIGHT].badge = 2; }
+          if (i == 3) { lv.edge[LINK_LEFT].state = LV_ARMED; }
+          if (i == 4) { lv.edge[LINK_RIGHT].state = LV_OPEN; lv.edge[LINK_RIGHT].badge = 2; lv.edge[LINK_LEFT].state = LV_TWO; lv.edge[LINK_LEFT].badge = 0; lv.edge[LINK_LEFT].badge2 = 3; }
+          if (i == 5) { lv.edge[LINK_RIGHT].state = LV_OPEN; lv.edge[LINK_RIGHT].badge = 2; lv.drifting = true; lv.drift_ms_left = 18000; }
+          if (i == 6) { lv.edge[LINK_RIGHT].state = LV_OPEN; lv.edge[LINK_RIGHT].badge = 2; lv.drifting = true; lv.drift_homeward = true; lv.drift_ms_left = 12000; }
+          render_tank(&tank, fb, TANK_W);
+          if (i == 7) { lv.edge[LINK_RIGHT].state = LV_OPEN; lv.edge[LINK_RIGHT].badge = 2; lv.edge[LINK_LEFT].state = LV_OPEN; lv.edge[LINK_LEFT].badge = 0; }
+          render_link_set_holds(LS[i].hl, LS[i].hr);
+          if (i == 8) { lv.edge[LINK_RIGHT].state = LV_OPEN; lv.edge[LINK_RIGHT].badge = 2; }
+          if (i < 5 || i == 8) render_link_mode(&lv, fb, TANK_W, 1.0f);
+          if (i == 7) render_link_doors(&lv, fb, TANK_W, 1.0f);
+          if (i == 7) {                                       /* (and a visitor from the blue square, wearing its badge) */
+              tank_t vt = tank; fish_t *v = &vt.fish[N_FISH_MAX]; *v = tank.fish[0];
+              v->x = TANK_W * 0.6f; v->y = TANK_BOT * 0.45f; v->color = 0xffd166; v->accent = 0x4da3ff;
+              vt.vis_used[0] = true; vt.vis_badge[0] = 2; render_tank(&vt, fb, TANK_W); render_link_doors(&lv, fb, TANK_W, 1.0f);
+          }
+          render_link_drift(&lv, fb, TANK_W, 1.0f);
+          render_link_leave();
+          snprintf(path, sizeof path, "%s_%s.ppm", prefix, LS[i].name); write_ppm(path, fb);
+      } }
+    {   /* a visitor's card: the Pocket Tank Passport (2026-10-05) */
+        static tank_t vt; vt = tank; fish_t *v = &vt.fish[N_FISH_MAX]; *v = tank.fish[0];
+        v->x = TANK_W * 0.62f; v->y = TANK_BOT * 0.42f; v->color = 0xffd166; v->accent = 0x4da3ff; v->stage = STAGE_ADULT;
+        v->shape = SHAPE_SLENDER; v->fins = FINS_VEIL; snprintf(v->name, sizeof v->name, "kelp"); v->uid = 0x383bbe47;
+        vt.vis_used[0] = true; vt.vis_badge[0] = 2; vt.vis_home[0] = 0x113afc56; vt.vis_since[0] = vt.clock - 245; vt.link_badge = 1;
+        vt.bond[0].vis = v->uid; vt.bond[0].mate = tank.fish[1].uid; vt.bond[0].s = 250; vt.bond[0].need = 420;   /* time together, 3 of 5 */
+        render_tank(&vt, fb, TANK_W); render_stats_card(&vt, N_FISH_MAX, fb, TANK_W);
+        snprintf(path, sizeof path, "%s_passport.ppm", prefix); write_ppm(path, fb);
+        /* the VISITOR COLLECTION (2026-10-06): kelp collected, two more; its passport now stamped */
+        collection_reset();
+        collection_add(&vt, 0);
+        static const uint32_t COLS[3][3] = { { 0x6db9ff, 0xffd166, 0xffffff }, { 0xf25b65, 0x38dcc7, 0xffd166 }, { 0x78d67d, 0x9b72ff, 0xffffff } };
+        static const char *const NMS[3] = { "pip", "zolt", "nori" };
+        for (int j = 0; j < 3; j++) {
+            fish_t *w = &vt.fish[N_FISH_MAX + 1]; *w = tank.fish[j % tank.n_fish]; w->uid = 0x5000 + j; w->stage = (stage_t)(1 + j % 3);
+            w->color = COLS[j][0]; w->fin = COLS[j][1]; w->accent = COLS[j][2]; w->shape = (uint8_t)(j % SHAPE_N); w->fins = (uint8_t)((j + 1) % FINS_N);
+            snprintf(w->name, sizeof w->name, "%s", NMS[j]); vt.vis_used[1] = true; vt.vis_badge[1] = (int8_t)(j % 4); vt.vis_home[1] = 0x7000 + j;
+            snprintf(vt.vis_home_name[1], sizeof vt.vis_home_name[1], "%s", j == 2 ? "SAM'S REEF" : "");   /* (nori: its keeper renamed its home) */
+            collection_add(&vt, 1); vt.vis_used[1] = false;
+        }
+        render_tank(&vt, fb, TANK_W); render_stats_card(&vt, N_FISH_MAX, fb, TANK_W);
+        snprintf(path, sizeof path, "%s_passport_collected.ppm", prefix); write_ppm(path, fb);
+        render_milestones_leave(); render_milestones(&tank, fb, TANK_W);
+        snprintf(path, sizeof path, "%s_ms_foot_more.ppm", prefix); write_ppm(path, fb);
+        render_milestones_leave();
+        render_collection_leave(); render_collection(&vt, fb, TANK_W);
+        snprintf(path, sizeof path, "%s_collection.ppm", prefix); write_ppm(path, fb);
+        render_collection_tap(&vt, PAGE_X + 24 + 46, PAGE_Y + 60 + 40);
+        render_collection(&vt, fb, TANK_W);
+        snprintf(path, sizeof path, "%s_collection_card.ppm", prefix); write_ppm(path, fb);
+        render_collection_tap(&vt, 0, 0);                              /* (back to the grid) - nori's card: its home renamed SAM'S REEF */
+        render_collection_tap(&vt, PAGE_X + 24 + 46 + 3 * 92, PAGE_Y + 60 + 40);
+        render_collection(&vt, fb, TANK_W); snprintf(path, sizeof path, "%s_collection_card_named.ppm", prefix); write_ppm(path, fb);
+        {   static gift_book_t gb; memset(&gb, 0, sizeof gb); gift_attach(&vt, &gb);
+          vt.vis_used[1] = false; gb.ask.on = true; passport_from_fish(&gb.ask.pp, &vt.fish[N_FISH_MAX], vt.vis_home[0], 3600); gb.ask.badge = 2; gb.ask.since = vt.clock - 10;
+          render_collection_leave(); render_tank(&vt, fb, TANK_W); render_gift(&vt, fb, TANK_W);
+          snprintf(path, sizeof path, "%s_gift.ppm", prefix); write_ppm(path, fb); gift_attach(&vt, NULL); }
+        render_collection_leave(); collection_reset();
+    }
     tank_light_choice_set(&tank, 5); tank.autofeed_off = true; tank_orient_lock(&tank, true);
-    render_settings(&tank, fb, TANK_W, 5, 2);                      /* AUTO after 3 MIN, AUTO FEED off, the way up locked; the slider at its dim end */
+    render_settings(&tank, fb, TANK_W, 5, 100);                      /* AUTO after 3 MIN, AUTO FEED off, the way up locked; the slider at its dim end */
     snprintf(path, sizeof path, "%s_settings_auto.ppm", prefix); write_ppm(path, fb);
     tank_light_choice_set(&tank, 0); tank.autofeed_off = false; tank_orient_lock(&tank, false);
     {   /* the ADVANCED page (0.3.9.2, hidden: BOOT 5 s + a tap on settings): the board's own cell, a bigger one picked,
@@ -6580,11 +9308,13 @@ static int snapshot(const char *prefix, int seconds) {
     /* the first-run setup, page by page (never BEGIN: that would save this
        staged tank over the real one) */
     setup_begin(&tank);
-    static const char *const pg_name[SETUP_PG_N] = { "welcome", "bubbles", "name", "look", "name2", "look2", "care" };
+    static const char *const pg_name[SETUP_PG_N] = { "welcome", "colors", "form", "name", "colors2", "form2", "name2", "bubbles", "care" };
     for (int pg = 0; pg < SETUP_PG_N; pg++) {
         if (pg == SETUP_PG_BUBBLES) { setup_touch(&tank, 300, 200, true); setup_touch(&tank, 300, 200, false); }
         if (pg == SETUP_PG_NAME_A) { tank_set_name(&tank, 0, "BUB"); setup_activate(&tank, SETUP_HIT_SLOT0 + 1); }
-        if (pg == SETUP_PG_LOOK_A) setup_activate(&tank, SETUP_HIT_BODY0 + 6);
+        if (pg == SETUP_PG_FORM_A) { setup_activate(&tank, SETUP_HIT_SHAPE0 + SHAPE_SLENDER); setup_activate(&tank, SETUP_HIT_FINS0 + FINS_SAIL); }
+        if (pg == SETUP_PG_COLORS_A) { setup_activate(&tank, SETUP_HIT_BODY0 + 6); setup_activate(&tank, SETUP_HIT_PAT0 + PATTERN_MASK);
+                                       setup_activate(&tank, SETUP_HIT_ACC0 + 5); }
         setup_touch(&tank, 0, 0, false);                   /* the stage is set; let the fish get there */
         for (int i = 0; i < 300; i++) tank_tick(&tank, 1.0f / 60.0f, advisor_rules);
         render_tank(&tank, fb, TANK_W); render_setup(&tank, fb, TANK_W, 1.0f);
@@ -6593,7 +9323,7 @@ static int snapshot(const char *prefix, int seconds) {
             for (int kb = SETUP_KBD_GRID; kb <= SETUP_KBD_PAGES; kb++) {
                 setup_set_keyboard(kb);
                 float kx = kb == SETUP_KBD_GRID ? 32 + 17 + 3 * 50 + 23 : 60 + 3 * 72 + 33, ky = kb == SETUP_KBD_GRID ? 16 + 116 + 17 : 16 + 76 + 37;   /* the fourth key of the top row: D */
-                setup_touch(&tank, kx, ky, true); setup_touch(&tank, kx, ky, false);
+                setup_touch(&tank, PG_X(kx), PG_Y(ky), true); setup_touch(&tank, PG_X(kx), PG_Y(ky), false);   /* page -> this glass (the watch's page is shifted) */
                 if (strcmp(tank.fish[0].name, "d")) printf("WARNING: keyboard %d typed '%s', not 'd'\n", kb, tank.fish[0].name);
                 render_tank(&tank, fb, TANK_W); render_setup(&tank, fb, TANK_W, 1.0f);
                 snprintf(path, sizeof path, "%s_setup_kbd_%s.ppm", prefix, kb == SETUP_KBD_GRID ? "grid" : "pages"); write_ppm(path, fb);
@@ -6611,7 +9341,9 @@ static int snapshot(const char *prefix, int seconds) {
         tank.fish[nb].stage = STAGE_FRY; tank.fish[nb].size = tank.fish[nb].base_size * 0.55f;
         tank.fish[nb].x = tank.reef_x + 70; tank.fish[nb].y = TANK_BOT - 34;
         setup_begin_birth(&tank, nb);
-        static const char *const bpg_name[SETUP_BIRTH_PAGES] = { "born", "name_new", "family" };
+        static const char *const bpg_name[SETUP_BIRTH_PAGES] = { "born", "name_new", "family", "nature" };
+        tank.fish[nb].mutated = GENE_FINS + 1; tank.fish[nb].fins = FINS_VEIL;   /* 0.4: show a mutation's lines ... */
+        tank.fish[nb].from_carried |= 1u << GENE_SHAPE;                         /* ... and a hidden copy's star */
         for (int pg = 0; pg < SETUP_BIRTH_PAGES; pg++) {
             setup_touch(&tank, 0, 0, false);
             if (setup_page() == SETUP_PG_NAME_NEW) for (int i = 0; i < 300; i++) tank_tick(&tank, 1.0f / 60.0f, advisor_rules);   /* let the fry reach the stage */
@@ -6753,7 +9485,7 @@ static int snapshot(const char *prefix, int seconds) {
         setup_cancel(&tank);
         tank.sd_unlocks |= SD_ITEM_CASTLE; tank_castle_place(&tank);
         render_shop_leave(); render_shop(&tank, fb, TANK_W); render_shop_tap(&tank, PAGE_X + 100, PAGE_Y + 98 + 2 * 56 + 20);
-        render_shop(&tank, fb, TANK_W); render_shop_tap(&tank, PAGE_X + 48 + (352 - 216) / 2 + 116 + 50, PAGE_Y + 48 + 244 - 12 - 16);   /* SELL, armed */
+        render_shop(&tank, fb, TANK_W); SHOP_SETTLE(); render_shop_tap(&tank, PAGE_X + 48 + (352 - 216) / 2 + 116 + 50, PAGE_Y + 48 + 244 - 12 - 16);   /* SELL, armed */
         render_shop(&tank, fb, TANK_W);
         snprintf(path, sizeof path, "%s_shop_sell.ppm", prefix); write_ppm(path, fb);
         render_shop_leave();
@@ -7506,6 +10238,8 @@ static int selftest_shop(void) {
               for (int k = 0; k < 6; k++) tank_tick(&tank, 1.0f / 60, advisor_rules);
               if (tank.cr_poke <= 0) { printf("FAIL: a fish 50 px over the crab did not raise its claws\n"); return 1; }
               tank.fish[0].x = fx0; tank.fish[0].y = fy0; for (int k = 0; k < 25 * 60; k++) tank_tick(&tank, 1.0f / 60, advisor_rules); tank.cr_poke = 0; tank.cr_startle_cool = 0;
+              for (int i = 1; i < tank.n_fish; i++) { tank.fish[i].x = tank.cr_x > TANK_W / 2 ? TANK_FX0 + 40 : TANK_FX1 - 40; tank.fish[i].y = 100; }   /* (the others well away:
+                                                                                these two ask of fish 0 alone - on the watch one swam within reach, 0.4) */
               tank.fish[0].x = tank.cr_x; tank.fish[0].y = CR_FLOOR_Y - 10 - 70;
               for (int k = 0; k < 6; k++) tank_tick(&tank, 1.0f / 60, advisor_rules);
               if (tank.cr_poke > 0) { printf("FAIL: a fish 70 px over the crab raised its claws\n"); return 1; }
@@ -7605,6 +10339,8 @@ static int selftest_shop(void) {
                   /* full after three */
                   tank = base; for (int i = 0; i < MAX_FOOD; i++) tank.food[i].alive = false;
                   tank.sd_unlocks &= ~SD_ITEM_SHRIMP;
+                  for (int i = 0; i < tank.n_fish; i++) { tank.fish[i].hunger = 0; tank.fish[i].x = TANK_FX0 + 30; tank.fish[i].y = 40; }   /* (the crab's pellets only: on
+                                                                         Linux a hungry fish got to the last one first - glibc's float math, 11-03) */
                   for (int m = 0; m < CR_MEALS_FULL; m++) {
                       food_t *p = &tank.food[0]; p->alive = true; p->x = tank.cr_x + CR_REACH; p->y = FOOD_FLOOR_Y; p->floor_s = 1; p->nibbled = 0; p->age = 0;
                       tank.cr_mode = CR_EAT; tank.cr_food = 0; tank.cr_timer = 0.01f; SHOP_TICK(2);
@@ -7934,19 +10670,31 @@ static int selftest_shop(void) {
     {
         static uint16_t fb[TANK_W * TANK_H];
         render_milestones(&tank, fb, TANK_W);
-        if (ms_tap(MSP_SD_X + MSP_ICON / 2, MS_TANK_Y) != MS_TAP_SHOP) { printf("FAIL: the sand dollar did not open the shop\n"); return 1; }
-        if (ms_tap(MSP_FOOT_UPG_X + MSP_UPG_W / 2, MS_KFOOT_Y) != MS_TAP_SHOP) { printf("FAIL: UPGRADES did not open the shop\n"); return 1; }
-        if (ms_tap(MSP_FOOT_SET_X + MSP_SET_W / 2, (PAGE_BOWL ? MSP_SET_Y : MSP_FOOT_Y) + 10) != MS_TAP_SETTINGS || ms_tap(MSP_FOOT_CLOSE_X + MSP_CLOSE_W / 2, MS_KFOOT_Y) != MS_TAP_CLOSE) { printf("FAIL: SETTINGS / CLOSE moved\n"); return 1; }
-        if (ms_tap(MSP_FOOT_CLOSE_X + MSP_CLOSE_W / 2, PAGE_H - 1 + (TANK_H - PAGE_H - PAGE_Y)) != MS_TAP_CLOSE || ms_tap(MSP_FOOT_UPG_X + MSP_UPG_W / 2, MSP_FOOT_HIT_Y) != MS_TAP_SHOP) {
-            printf("FAIL: the foot's strip does not reach from half way up the gap to the glass's bottom\n"); return 1; }
-        if (MSP_FOOT_HIT_Y <= MSP_TANK_BOT || ms_tap(MSP_FOOT_UPG_X + MSP_UPG_W / 2, MSP_FOOT_HIT_Y - 1) == MS_TAP_SHOP) {   /* (0.3.9.1: half the gap, Strato's quick taps) */
-            printf("FAIL: the foot's strip reaches past half way up the gap (%d, the TANK row ends at %d)\n", MSP_FOOT_HIT_Y, MSP_TANK_BOT); return 1; }
+        {   /* THE ICON FOOT (0.4): each square answers its own tap at its middle and its top, the strip from half way up the gap
+               down to the glass's bottom goes to the nearest square, and the TANK row's left (the coin until 0.4) opens no shop */
+            static const int WANT[MSF_N] = { MS_TAP_SHOP, MS_TAP_SETTINGS, MS_TAP_TANKS, MS_TAP_VISITORS, MS_TAP_CLOSE };
+            static const char *const NAME[MSF_N] = { "UPGRADES", "SETTINGS", "MY TANKS", "VISITORS", "CLOSE" };
+            for (int b = 0; b < MSF_N; b++) {
+                int bx, by; render_ms_foot_box(b, &bx, &by);
+                const float mx = bx + MSP_FOOT_SQ / 2.0f;
+                if (ms_tap(mx, by + MSP_FOOT_SQ / 2.0f) != WANT[b] || ms_tap(mx, by + 2) != WANT[b]) { printf("FAIL: the foot's %s did not answer its tap (square %d,%d)\n", NAME[b], bx, by); return 1; }
+                if (PAGE_BOWL && b == MSF_SET) continue;                      /* (the bowl's cog is in the cap) */
+                if (ms_tap(mx, PAGE_H - 1 + (TANK_H - PAGE_H - PAGE_Y)) != WANT[b] || ms_tap(mx, MSP_FOOT_HIT_Y) != WANT[b]) {
+                    printf("FAIL: the foot's strip under %s does not reach from half way up the gap to the glass's bottom\n", NAME[b]); return 1; }
+                if (ms_tap(mx, MSP_FOOT_HIT_Y - 1) == WANT[b]) {             /* (0.3.9.1: half the gap, Strato's quick taps) */
+                    printf("FAIL: the foot's strip reaches past half way up the gap (%d, the TANK row ends at %d)\n", MSP_FOOT_HIT_Y, MSP_TANK_BOT); return 1; }
+                render_milestones_leave(); render_milestones(&tank, fb, TANK_W);   /* (that tap was the TANK row's: its modal closed again) */
+            }
+            if (MSP_FOOT_HIT_Y <= MSP_TANK_BOT || MSP_FOOT_HIT_Y > MSP_FOOT_TOP) { printf("FAIL: the foot's strip starts at %d (the TANK row ends at %d, the squares at %d)\n", MSP_FOOT_HIT_Y, MSP_TANK_BOT, MSP_FOOT_TOP); return 1; }
+            if (ms_tap(36 + MSP_ICON / 2, MS_TANK_Y) == MS_TAP_SHOP) { printf("FAIL: the TANK row's left still opens the shop\n"); return 1; }
+        }
         {   /* THE FOOT PINNED TO THE BOTTOM (0.3.9.1): each button's lower corners MSP_FOOT_IN inside the glass and the row
                MSP_FOOT_GAP off a flat bottom - and one px lower would break one of them (as low as it goes, on every board) */
-            const int xs[3][2] = { { MSP_FOOT_UPG_X, MSP_UPG_W }, { MSP_FOOT_SET_X, MSP_SET_W }, { MSP_FOOT_CLOSE_X, MSP_CLOSE_W } };
+            int xs[MSF_N][2];
+            for (int b = 0; b < MSF_N; b++) { int by; render_ms_foot_box(b, &xs[b][0], &by); xs[b][1] = MSP_FOOT_SQ; }
             const int yb = MSP_FOOT_Y + MSP_CLOSE_H - 1 + PAGE_Y;                 /* the row's last line, in the frame */
             bool ok_at[2] = { true, true };
-            for (int d = 0; d < 2; d++) for (int b = 0; b < 3; b++) {
+            for (int d = 0; d < 2; d++) for (int b = 0; b < MSF_N; b++) {
                 if (PAGE_BOWL && b == 1) continue;                                /* (the bowl's SETTINGS is in the cap) */
                 const float y = (float)(yb + d), xl = (float)(xs[b][0] + PAGE_X), xr = (float)(xs[b][0] + xs[b][1] - 1 + PAGE_X);
                 for (int side = 0; side < 2; side++) {
@@ -7970,6 +10718,8 @@ static int selftest_shop(void) {
         render_shop(&tank, fb, TANK_W);
         if (shop_tap(SHOP_ROW_X, SHOP_ROW_Y(0)) != SHOP_TAP_KEPT) { printf("FAIL: the plant's row did not open its modal\n"); return 1; }
         render_shop(&tank, fb, TANK_W);
+        if (shop_tap(SHOP_BTN_X, SHOP_BTN_Y) != SHOP_TAP_KEPT) { printf("FAIL: UNLOCK at once after the row's tap (a double tap) was not spent\n"); return 1; }
+        SHOP_SETTLE();
         int r = shop_tap(SHOP_BTN_X, SHOP_BTN_Y);
         if (r != SHOP_TAP_BUY + 0) { printf("FAIL: UNLOCK in the modal returned %d\n", r); return 1; }
         if (!progression_buy(&tank, 0)) { printf("FAIL: the page's UNLOCK did not buy\n"); return 1; }
@@ -7993,58 +10743,30 @@ static int selftest_shop(void) {
         setup_touch(&tank, TANK_W - 8, wy, true); setup_touch(&tank, TANK_W - 8, wy, false);
         if (tank_decor_x(&tank, 0) != TANK_FX1 - DECOR_MARGIN - PLANT_HALF_W) { printf("FAIL: the plant went through the right glass (x %.0f)\n", tank_decor_x(&tank, 0)); return 1; }
         setup_touch(&tank, 300, wy, true); setup_touch(&tank, 300, wy, false);
-        const int pbx = (PAGE_W - 2 * SETUP_DEPTH_SEG_W) / 2;           /* the plant's two segments since 0.3.9.3, centered as the castle's */
-        if (pg_hit(pbx + 10, SETUP_DEPTH_Y + 10) != SETUP_HIT_Z0 + DECOR_Z_BACK || pg_hit(pbx + SETUP_DEPTH_SEG_W + 100, SETUP_DEPTH_Y + SETUP_DEPTH_H + 4) != SETUP_HIT_Z0 + DECOR_Z_FRONT
-            || pg_hit(SETUP_TOP_NEXT_X + 20, SETUP_TOP_BTN_Y + 20) != SETUP_HIT_NEXT || pg_hit(SETUP_TOP_BACK_X + 20, SETUP_TOP_BTN_Y + 20) != SETUP_HIT_SELL) { printf("FAIL: the placement page's buttons moved\n"); return 1; }   /* SELL took BACK's corner (2026-09-24) */
+        const int pbx = (PAGE_W - 2 * SETUP_DEPTH_SEG_W) / 2;           /* where the plant's two segments were (0.3.9.3 .. 0.3.9.6) */
+        if (pg_hit(pbx + 10, SETUP_DEPTH_Y + 10) >= SETUP_HIT_Z0 && pg_hit(pbx + 10, SETUP_DEPTH_Y + 10) < SETUP_HIT_Z0 + DECOR_Z_N) { printf("FAIL: the plant has a DEPTH bar again (it has one depth since 0.4)\n"); return 1; }
+        if (pg_hit(pbx + SETUP_DEPTH_SEG_W + 100, SETUP_DEPTH_Y + SETUP_DEPTH_H + 4) >= SETUP_HIT_Z0 && pg_hit(pbx + SETUP_DEPTH_SEG_W + 100, SETUP_DEPTH_Y + SETUP_DEPTH_H + 4) < SETUP_HIT_Z0 + DECOR_Z_N)
+            { printf("FAIL: a tap where IN FRONT was still picks a depth\n"); return 1; }
+        if (pg_hit(SETUP_TOP_NEXT_X + 20, SETUP_TOP_BTN_Y + 20) != SETUP_HIT_NEXT || pg_hit(SETUP_TOP_BACK_X + 20, SETUP_TOP_BTN_Y + 20) != SETUP_HIT_SELL) { printf("FAIL: the placement page's buttons moved\n"); return 1; }   /* SELL took BACK's corner (2026-09-24) */
         pg_touch(pbx + SETUP_DEPTH_SEG_W + 50, SETUP_DEPTH_Y + 18, true);
         pg_touch(pbx + SETUP_DEPTH_SEG_W + 52, SETUP_DEPTH_Y + 20, false);
-        if (tank_decor_z(&tank, 0) != DECOR_Z_FRONT || fabsf(tank_decor_x(&tank, 0) - 300) > 0.01f) { printf("FAIL: FRONT did not set the layer (z %d, x %.0f)\n", tank_decor_z(&tank, 0), tank_decor_x(&tank, 0)); return 1; }
-        /* the render: a fish sitting on a leaf's spine, mid-height - leaves 0 and 1;
-           FRONT hides the fish behind both, BACK shows it over both, and an old
-           AMONG is BACK now (0.3.9.3: the weave is gone) */
-        { tank_veg_set(&tank, 3, 0.5f);
-          render_debug_page_animals(true);                              /* (the page hides every creature since 0.3.9.4: the fish drawn for this check all the same) */
-          float top; tank_veg_bed(&tank, 3, NULL, NULL, &top, NULL);
-          int sy = (int)((top + TANK_BOT - 16) * 0.5f);
-          fish_t *f = &tank.fish[0]; float fx0 = f->x, fy0 = f->y;
-          const int zs[3] = { DECOR_Z_FRONT, DECOR_Z_MIDDLE, DECOR_Z_BACK }; bool shows[3][2];
-          /* the sway pinned and the loop bypassed: the grass steps a moment per drawn
-             frame, so two renders would catch the leaf in two places (Linux did) */
-          render_grass_loop_bypass(true); render_force_veg_clock(1.0f);
-          static uint16_t nobed[TANK_W];
-          for (int k = 0; k < 3; k++) for (int leaf = 0; leaf < 2; leaf++) {
-              float lx; tank_veg_frond(&tank, 3, leaf, &lx); int sx = (int)lx;
-              tank_decor_set(&tank, 0, 300, zs[k]);
-              park_fish(f);
-              tank_veg_set(&tank, 3, 0.0f); render_tank(&tank, fb, TANK_W); memcpy(nobed, fb + sy * TANK_W, sizeof nobed);
-              tank_veg_set(&tank, 3, 0.5f); render_tank(&tank, fb, TANK_W);
-              /* the leaf as drawn: the run of pixels the bed adds nearest the spine, probed at its middle */
-              const uint16_t *row = fb + sy * TANK_W; int hx = -1;
-              for (int d = 0; d <= 8 && hx < 0; d++) {
-                  if (sx - d >= 0 && row[sx - d] != nobed[sx - d]) hx = sx - d;
-                  else if (sx + d < TANK_W && row[sx + d] != nobed[sx + d]) hx = sx + d;
-              }
-              if (hx < 0) { printf("FAIL: no leaf drawn near x %d, y %d\n", sx, sy); return 1; }
-              int r0 = hx, r1 = hx;
-              while (r0 > 0 && row[r0 - 1] != nobed[r0 - 1]) r0--;
-              while (r1 < TANK_W - 1 && row[r1 + 1] != nobed[r1 + 1]) r1++;
-              sx = (r0 + r1) / 2; uint16_t bare = row[sx];
-              f->x = (float)sx; f->y = (float)sy; render_tank(&tank, fb, TANK_W); uint16_t over = fb[sy * TANK_W + sx];
-              shows[k][leaf] = over != bare;               /* the fish shows on the leaf's pixel */
-          }
-          render_force_veg_clock(-1); render_grass_loop_bypass(false); render_debug_page_animals(false);
-          f->x = fx0; f->y = fy0;
-          printf("selftest-shop: placement: dragged to x 300 (clamped %d..%d), FRONT; a fish on leaves 0/1 shows through FRONT %d/%d, MIDDLE %d/%d, BACK %d/%d\n",
-                 TANK_FX0 + DECOR_MARGIN + PLANT_HALF_W, TANK_FX1 - DECOR_MARGIN - PLANT_HALF_W, shows[0][0], shows[0][1], shows[1][0], shows[1][1], shows[2][0], shows[2][1]);
-          if (shows[0][0] || shows[0][1] || !shows[1][0] || !shows[1][1] || !shows[2][0] || !shows[2][1]) { printf("FAIL: the layer did not order the leaves and the fish\n"); return 1; }
-          tank_decor_set(&tank, 0, 300, DECOR_Z_FRONT); }
+        if (tank_decor_z(&tank, 0) != DECOR_Z_BACK || fabsf(tank_decor_x(&tank, 0) - 300) > 0.01f) { printf("FAIL: a tap where IN FRONT was moved the plant (z %d, x %.0f)\n", tank_decor_z(&tank, 0), tank_decor_x(&tank, 0)); return 1; }
+        /* ONE DEPTH (0.4, Strato 11-02: BEHIND THE SEAGRASS never drew behind it): the back lane,
+           baked with the grass; a saved IN FRONT or an old AMONG loads BEHIND */
+        if (tank_decor_z_count(0) != 1 || tank_decor_z_at(0, 0) != DECOR_Z_BACK || tank_decor_z_at(0, 1) != DECOR_Z_BACK || tank_decor_z_index(0, DECOR_Z_FRONT) != 0) { printf("FAIL: the plant's one depth\n"); return 1; }
+        tank_decor_set(&tank, 0, 300, DECOR_Z_FRONT);
+        if (tank_decor_z(&tank, 0) != DECOR_Z_BACK || tank_bed_z(&tank, 3) != DECOR_Z_BACK) { printf("FAIL: a saved IN FRONT plant did not load BEHIND\n"); return 1; }
+        tank_decor_set(&tank, 0, 300, DECOR_Z_MIDDLE);
+        if (tank_decor_z(&tank, 0) != DECOR_Z_BACK) { printf("FAIL: an old AMONG plant did not load BEHIND\n"); return 1; }
+        printf("selftest-shop: placement: dragged to x 300 (clamped %d..%d); the plant has one depth (no bar), an old IN FRONT / AMONG loads BEHIND\n",
+               TANK_FX0 + DECOR_MARGIN + PLANT_HALF_W, TANK_FX1 - DECOR_MARGIN - PLANT_HALF_W);
         pg_touch(SETUP_TOP_NEXT_X + 20, SETUP_TOP_BTN_Y + 20, true);
         pg_touch(SETUP_TOP_NEXT_X + 22, SETUP_TOP_BTN_Y + 24, false);
         if (setup_active()) { printf("FAIL: DONE did not close the placement page\n"); return 1; }
         { int nf = tank.n_fish; tank_init(&tank, 4242); progression_boot(&tank); tank.trickle_off = true;
           if (tank.n_fish != nf) { printf("FAIL: the save did not come back after the placement\n"); return 1; }
-          if (fabsf(tank_decor_x(&tank, 0) - 300) > 0.01f || tank_decor_z(&tank, 0) != DECOR_Z_FRONT) { printf("FAIL: the placement was not saved (x %.0f, z %d)\n", tank_decor_x(&tank, 0), tank_decor_z(&tank, 0)); return 1; }
-          printf("selftest-shop: DONE saved the placement; the reload put the plant back at x 300, FRONT\n"); }
+          if (fabsf(tank_decor_x(&tank, 0) - 300) > 0.01f || tank_decor_z(&tank, 0) != DECOR_Z_BACK) { printf("FAIL: the placement was not saved (x %.0f, z %d)\n", tank_decor_x(&tank, 0), tank_decor_z(&tank, 0)); return 1; }
+          printf("selftest-shop: DONE saved the placement; the reload put the plant back at x 300, BEHIND\n"); }
         /* the castle (2026-09-16): the third item, at its price; placeable with
            TWO depths (BEHIND / IN FRONT - no AMONG: MIDDLE is taken as FRONT);
            its page's bar has two segments; IN FRONT a fish in the arch shows and
@@ -8125,12 +10847,12 @@ static int selftest_shop(void) {
         /* the shop's MOVE: the owned plant's modal re-opens the page */
         render_shop(&tank, fb, TANK_W);
         if (shop_tap(SHOP_ROW_X, SHOP_ROW_Y(0)) != SHOP_TAP_KEPT) { printf("FAIL: the owned plant's row did not open its modal\n"); return 1; }
-        render_shop(&tank, fb, TANK_W);
+        render_shop(&tank, fb, TANK_W); SHOP_SETTLE();
         if (shop_tap(SHOP_MOVE_X, SHOP_BTN_Y) != SHOP_TAP_MOVE + 0) { printf("FAIL: MOVE in the owned modal\n"); return 1; }   /* MOVE is the left of two buttons since SELL (2026-09-24) */
         tank.sd_balance = 5; want = tank.sd_balance;
         render_shop(&tank, fb, TANK_W);
         if (shop_tap(SHOP_ROW_X, SHOP_ROW_Y(1)) != SHOP_TAP_KEPT) { printf("FAIL: the snail's row did not open its modal\n"); return 1; }
-        r = shop_tap(SHOP_BTN_X, SHOP_BTN_Y);     /* short by 75: the dim button buys nothing */
+        SHOP_SETTLE(); r = shop_tap(SHOP_BTN_X, SHOP_BTN_Y);     /* short by 75: the dim button buys nothing */
         if (r != SHOP_TAP_KEPT) { printf("FAIL: a dim UNLOCK returned %d\n", r); return 1; }
         if (shop_tap(SHP_EARN_X + 28, MSP_CLOSE_Y + 8) != SHOP_TAP_KEPT) { printf("FAIL: HOW TO EARN did not open\n"); return 1; }
         if (shop_tap(SHOP_BTN_X, SHP_EARN_MODAL_Y + SHP_EARN_MODAL_H / 2) != SHOP_TAP_KEPT) { printf("FAIL: the earn modal did not close\n"); return 1; }
@@ -8157,7 +10879,7 @@ static int selftest_shop(void) {
         /* the shop page: the fourth row opens its modal, MOVE in it */
         render_shop_leave(); render_shop(&tank, fb, TANK_W);
         if (shop_tap(SHOP_ROW_X, SHOP_ROW_Y(3)) != SHOP_TAP_KEPT) { printf("FAIL: the coral's row did not open its modal\n"); return 1; }
-        render_shop(&tank, fb, TANK_W);
+        render_shop(&tank, fb, TANK_W); SHOP_SETTLE();
         if (shop_tap(SHOP_MOVE_X, SHOP_BTN_Y) != SHOP_TAP_MOVE + 3) { printf("FAIL: MOVE in the coral's modal\n"); return 1; }
         render_shop_leave();
         /* its placement page: the COLOR row above the water, a swatch sets the colour, the drag carries it, DONE saves all three */
@@ -8231,13 +10953,14 @@ static int selftest_shop(void) {
         if (shop_tap(SHOP_ROW_X, SHOP_ROW_Y(0)) != SHOP_TAP_KEPT) { printf("FAIL: page 2 row 0 did not open a modal\n"); return 1; }
         render_shop(&tank, fb, TANK_W);
         tank.sd_unlocks &= ~SD_ITEM_CLUSTER; tank.sd_balance = SD_PRICE_CLUSTER;
+        SHOP_SETTLE();
         int r = shop_tap(SHOP_BTN_X, SHOP_BTN_Y);
         if (r != SHOP_TAP_BUY + 4) { printf("FAIL: UNLOCK in the cluster's modal returned %d\n", r); return 1; }
         if (shop_tap(SHOP_ROW_X, SHOP_ROW_Y(3)) != SHOP_TAP_KEPT) { printf("FAIL: page 2 row 3 (the seahorse, 0.3.6) did not open a modal\n"); return 1; }
-        render_shop(&tank, fb, TANK_W);
+        render_shop(&tank, fb, TANK_W); SHOP_SETTLE();
         shop_tap(SHOP_ROW_X, SHOP_ROW_Y(0));                           /* (any tap closes its modal) */
         if (shop_tap(SHOP_ROW_X, SHOP_ROW_Y(2)) != SHOP_TAP_KEPT) { printf("FAIL: page 2 row 2 (the urchin) did not open a modal\n"); return 1; }
-        render_shop(&tank, fb, TANK_W);
+        render_shop(&tank, fb, TANK_W); SHOP_SETTLE();
         shop_tap(SHOP_ROW_X, SHOP_ROW_Y(0));                           /* (any tap closes its modal) */
         if (shop_tap(SHOP_PREV_X, SHOP_ARROW_Y) != SHOP_TAP_KEPT) { printf("FAIL: the left arrow\n"); return 1; }
         render_shop(&tank, fb, TANK_W);
@@ -8446,6 +11169,9 @@ static int selftest_shop(void) {
             uint32_t had_cluster = tank.sd_unlocks & SD_ITEM_CLUSTER;                /* (the reef cluster brings a badge of its own to page 2:
                                                                                         out of the tank while the school's is counted) */
             tank.sd_unlocks &= ~SD_ITEM_CLUSTER;
+            uint32_t had_bred = tank.tank_ms_bits & (TMS_TRIO | TMS_FIRST_MUTATION);   /* (and a tank that has bred shows "first
+                                                                                        mutation" there too, 0.4: set aside the same way) */
+            tank.tank_ms_bits &= ~(TMS_TRIO | TMS_FIRST_MUTATION);
             if (tank.tank_ms_bits & TMS_FULL_SCHOOL) { printf("FAIL: the full-school badge with %d shrimp\n", tank.shrimp_n); return 1; }
             uint32_t unl = tank.sd_unlocks; tank.sd_unlocks &= ~SD_ITEM_SHRIMP;      /* no shrimp: one page, no arrow */
             render_milestones_leave(); MS_HASH(h0);
@@ -8481,7 +11207,7 @@ static int selftest_shop(void) {
             progression_tick(&tank, 1.0f / 60.0f);
             if (!(tank.tank_ms_bits & TMS_FULL_SCHOOL)) { printf("FAIL: %d shrimp did not earn the full-school badge\n", SHRIMP_MAX); return 1; }
             tank.shrimp_n = n_keep;
-            tank.sd_unlocks |= had_cluster;
+            tank.sd_unlocks |= had_cluster; tank.tank_ms_bits |= had_bred;
             #undef MS_HASH
             printf("selftest-shop: the shrimp: the full-school badge - hidden without shrimp, page 2 of the tank row (arrow, swipe, modal arrows), earned at %d\n", SHRIMP_MAX);
         }
@@ -8496,6 +11222,7 @@ static int selftest_shop(void) {
             float bed0[VEG_FRONDS_MAX]; memcpy(bed0, tank.veg_h[0], sizeof bed0);
             fish_t *f = &tank.fish[0]; float rx, ry;
             tank.sd_unlocks &= ~(SD_ITEM_CLUSTER | SD_ITEM_SHRIMP); tank.tank_ms_bits &= ~(TMS_FIRST_REEF | TMS_FULL_SCHOOL);
+            tank.tank_ms_bits &= ~(TMS_TRIO | TMS_FIRST_MUTATION);   /* (a bred tank's "first mutation", 0.4: aside too) */
             render_milestones_leave();
             if (ms_tap(MSP_TPG_X + 14, MS_TANK_Y) != MS_TAP_NONE) { printf("FAIL: the tank row pages with no cluster and no shrimp\n"); return 1; }
             tank_reef_spot(&tank, &rx, &ry);
@@ -8571,7 +11298,7 @@ static int selftest_shop(void) {
         if (progression_sell(&tank, 1)) { printf("FAIL: the snail sold\n"); return 1; }
         render_shop_leave(); render_shop(&tank, fb, TANK_W);
         if (shop_tap(SHOP_ROW_X, SHOP_ROW_Y(2)) != SHOP_TAP_KEPT) { printf("FAIL: the castle's row\n"); return 1; }
-        render_shop(&tank, fb, TANK_W);
+        render_shop(&tank, fb, TANK_W); SHOP_SETTLE();
         const int by = SHOP_BTN_Y, xmove = SHOP_MOVE_X, xsell = SHOP_SELL_X;
         int r = shop_tap(xsell, by);                                      /* the right button in the tank is SHELVE: one tap, no arming */
         if (r != SHOP_TAP_SHELVE + 2) { printf("FAIL: SHELVE in the owned modal returned %d\n", r); return 1; }
@@ -8580,22 +11307,24 @@ static int selftest_shop(void) {
         render_shop(&tank, fb, TANK_W);                                   /* its row: ON THE SHELF + PUT BACK; its modal: PLACE | SELL */
         if (shop_tap(SHOP_PUTBACK_X, SHOP_ROW_Y(2)) != SHOP_TAP_PLACE + 2) { printf("FAIL: the row's PUT BACK\n"); return 1; }
         if (shop_tap(SHOP_ROW_X, SHOP_ROW_Y(2)) != SHOP_TAP_KEPT) { printf("FAIL: the shelved castle's row\n"); return 1; }
-        render_shop(&tank, fb, TANK_W);
+        render_shop(&tank, fb, TANK_W); SHOP_SETTLE();
         if (shop_tap(xsell, by) != SHOP_TAP_KEPT) { printf("FAIL: the first SELL tap did not arm\n"); return 1; }
         render_shop(&tank, fb, TANK_W);                                   /* armed: +30 OK? */
+        if (shop_tap(xsell, by) != SHOP_TAP_KEPT || !(tank.sd_unlocks & SD_ITEM_CASTLE)) { printf("FAIL: a doubled SELL tap in the shop sold the castle (0.4: it waits MSP_SELL_WAIT_S)\n"); return 1; }
+        tank.clock += 0.7f; render_shop(&tank, fb, TANK_W);              /* (still armed) */
         r = shop_tap(xsell, by);
         if (r != SHOP_TAP_SELL + 2) { printf("FAIL: the second SELL tap returned %d\n", r); return 1; }
         if (!progression_sell(&tank, 2) || tank.sd_balance != 40 || tank.sd_earned != earned || (tank.sd_unlocks & SD_ITEM_CASTLE) || (tank.sd_shelved & SD_ITEM_CASTLE)) { printf("FAIL: the castle's sale from the shelf (balance %d)\n", tank.sd_balance); return 1; }
         if (progression_sd_take_award() != 30) { printf("FAIL: the sale's toast\n"); return 1; }
-        render_shop(&tank, fb, TANK_W); shop_tap(SHOP_ROW_X, SHOP_ROW_Y(2)); render_shop(&tank, fb, TANK_W);
+        render_shop(&tank, fb, TANK_W); shop_tap(SHOP_ROW_X, SHOP_ROW_Y(2)); render_shop(&tank, fb, TANK_W); SHOP_SETTLE();
         tank.sd_balance = SD_PRICE_CASTLE;
         if (shop_tap(SHOP_BTN_X, by) != SHOP_TAP_BUY + 2) { printf("FAIL: the sold castle is not for sale again\n"); return 1; }
         if (!progression_buy(&tank, 2) || tank.sd_balance != 0) { printf("FAIL: buying the castle back at full price\n"); return 1; }
         /* MOVE on the left of a piece in the tank; PLACE on the left of a shelved one (an armed SELL stands down) */
-        render_shop(&tank, fb, TANK_W); shop_tap(SHOP_ROW_X, SHOP_ROW_Y(2)); render_shop(&tank, fb, TANK_W);
+        render_shop(&tank, fb, TANK_W); shop_tap(SHOP_ROW_X, SHOP_ROW_Y(2)); render_shop(&tank, fb, TANK_W); SHOP_SETTLE();
         if (shop_tap(xmove, by) != SHOP_TAP_MOVE + 2) { printf("FAIL: MOVE in the owned modal\n"); return 1; }
         progression_shelve(&tank, 2);
-        render_shop(&tank, fb, TANK_W); shop_tap(SHOP_ROW_X, SHOP_ROW_Y(2)); render_shop(&tank, fb, TANK_W);
+        render_shop(&tank, fb, TANK_W); shop_tap(SHOP_ROW_X, SHOP_ROW_Y(2)); render_shop(&tank, fb, TANK_W); SHOP_SETTLE();
         shop_tap(xsell, by); render_shop(&tank, fb, TANK_W);
         if (shop_tap(xmove, by) != SHOP_TAP_PLACE + 2) { printf("FAIL: PLACE beside an armed SELL\n"); return 1; }
         if (!(tank.sd_unlocks & SD_ITEM_CASTLE)) { printf("FAIL: PLACE sold the castle\n"); return 1; }
@@ -8603,7 +11332,7 @@ static int selftest_shop(void) {
         if (progression_unshelve(&tank, 2)) { printf("FAIL: unshelved twice\n"); return 1; }
         render_shop_leave();
         /* the snail's modal: no SELL */
-        render_shop(&tank, fb, TANK_W); shop_tap(SHOP_ROW_X, SHOP_ROW_Y(1)); render_shop(&tank, fb, TANK_W);
+        render_shop(&tank, fb, TANK_W); shop_tap(SHOP_ROW_X, SHOP_ROW_Y(1)); render_shop(&tank, fb, TANK_W); SHOP_SETTLE();
         if (shop_tap(xsell, by) != SHOP_TAP_KEPT || !(tank.sd_unlocks & SD_ITEM_SNAIL)) { printf("FAIL: the snail's modal sold something\n"); return 1; }
         render_shop_leave();
         /* the hit test: a press on the castle finds it, one on empty water does
@@ -8700,10 +11429,13 @@ static int selftest_shop(void) {
         setup_activate(&tank, SETUP_HIT_SELL);
         if (!setup_active() || (tank.sd_unlocks & SD_ITEM_CASTLE) == 0) { printf("FAIL: the first page SELL sold\n"); return 1; }
         render_tank(&tank, fb, TANK_W); render_setup(&tank, fb, TANK_W, 1.0f);   /* armed: +30 OK? */
+        setup_activate(&tank, SETUP_HIT_SELL);                            /* a doubled tap (0.4, the 11-02 sweep): still armed, nothing sold */
+        if (!setup_active() || !(tank.sd_unlocks & SD_ITEM_CASTLE)) { printf("FAIL: a doubled SELL tap on the page sold the castle\n"); return 1; }
+        tank.clock += 0.7f;
         setup_activate(&tank, SETUP_HIT_SELL);
         if (setup_active() || (tank.sd_unlocks & SD_ITEM_CASTLE) || tank.sd_balance != 30) { printf("FAIL: the page's second SELL (balance %d)\n", tank.sd_balance); return 1; }
         progression_sd_take_award();
-        printf("selftest-shop: selling back: the castle SHELVED from its modal, PUT BACK on its row, sold from the shelf for 30 (armed, then sold; earnings untouched), bought again at %d, MOVE | SHELVE in the tank, PLACE | SELL on the shelf, the snail unsellable, the hold's hit test, the page's SELL; the LOCK: a held finger passes a locked piece by (to the one behind it), the lock rides the shelf and goes with a sale, the page's LOCK / LOCKED toggle, DONE keeps it; a castle above the volcano stays over it with a page up\n", SD_PRICE_CASTLE);
+        printf("selftest-shop: selling back: the castle SHELVED from its modal, PUT BACK on its row, sold from the shelf for 30 (armed, then sold; earnings untouched), bought again at %d, MOVE | SHELVE in the tank, PLACE | SELL on the shelf, the snail unsellable, the hold's hit test, the page's SELL (a doubled tap on either SELL is not the yes); the LOCK: a held finger passes a locked piece by (to the one behind it), the lock rides the shelf and goes with a sale, the page's LOCK / LOCKED toggle, DONE keeps it; a castle above the volcano stays over it with a page up\n", SD_PRICE_CASTLE);
     }
     /* the pumpkin lantern (0.3.6): item 9 at 75, sold while this build says
        so (SD_PUMPKIN_IN_SHOP - no date check), placeable BEHIND / IN FRONT,
@@ -9088,7 +11820,10 @@ static int selftest_shop(void) {
         tank_t keep = tank; static uint16_t fb[TANK_W * TANK_H];
         tank.sd_unlocks &= ~(SD_ITEM_CASTLE | SD_ITEM_CORAL | SD_ITEM_CLUSTER | SD_ITEM_PUMPKIN | SD_ITEM_PLANT);
         memset(tank.decor_rank, 0, sizeof tank.decor_rank); tank.sd_balance = 1000;
-        if (!progression_buy(&tank, 3) || !progression_buy(&tank, 2) || !progression_buy(&tank, 8)) { printf("FAIL: could not buy coral, castle, pumpkin\n"); return 1; }
+        if (!progression_buy(&tank, 3) || !progression_buy(&tank, 2)) { printf("FAIL: could not buy coral, castle\n"); return 1; }
+        if (SD_PUMPKIN_IN_SHOP) { if (!progression_buy(&tank, 8)) { printf("FAIL: could not buy the pumpkin\n"); return 1; } }
+        else { tank.sd_unlocks |= SD_ITEM_PUMPKIN; tank_pumpkin_place(&tank); tank_decor_raise(&tank, 8); }   /* (out of the shop on release
+                                                                     day: an owner's, as a purchase lands - 11-03 rc) */
         tank_decor_set(&tank, 2, tank_decor_x(&tank, 2), DECOR_Z_FRONT); tank_decor_set(&tank, 3, tank_decor_x(&tank, 3), DECOR_Z_FRONT); tank_decor_set(&tank, 8, tank_decor_x(&tank, 8), DECOR_Z_FRONT);
         int items[DECOR_SLOTS], n = tank_decor_order(&tank, items);
         if (n != 3 || items[0] != 3 || items[1] != 2 || items[2] != 8) { printf("FAIL: the buy order (%d: %d %d %d), wanted coral < castle < pumpkin\n", n, items[0], items[1], items[2]); return 1; }
@@ -9108,7 +11843,7 @@ static int selftest_shop(void) {
           tank.coral_growth = 1.0f; tank.night = false; memset(tank.algae, 0, sizeof tank.algae);
           int qx = (int)tank_decor_x(&tank, 8), qy = TANK_BOT - 24;
           fish_t *f0 = &tank.fish[0]; float ox = f0->x, oy = f0->y; f0->x = TANK_FX0 + 60; f0->y = 60; tank_glass_clamp(&f0->x, &f0->y, 40);
-          const float ocx = tank.cr_x, osx = tank.snail_x, ofar = qx < TANK_W / 2 ? TANK_FX1 - 40 : TANK_FX0 + 40;   /* the floor's critters off the sampled spot (0.3.9.1: a changed
+          const float ocx = tank.cr_x, osx = tank.snail_x, osy = tank.snail_y, ofar = qx < TANK_W / 2 ? TANK_FX1 - 40 : TANK_FX0 + 40;   /* the floor's critters off the sampled spot (0.3.9.1: a changed
                                                                                                                                          RNG run left the snail on it, over both pieces) */
           if (ocx >= 0 && fabsf(ocx - qx) < 60) tank.cr_x = ofar;
           if (osx >= 0 && tank_snail_upright(&tank) && fabsf(osx - qx) < 60) tank.snail_x = ofar;
@@ -9119,7 +11854,7 @@ static int selftest_shop(void) {
           for (int k = 0; k < 3; k++) render_tank(&tank, fc, TANK_W);
           if (fc[qy * TANK_W + qx] != fa[qy * TANK_W + qx]) { printf("FAIL: after SEND BACK the coral is not over the pumpkin (%04x vs %04x)\n", fc[qy * TANK_W + qx], fa[qy * TANK_W + qx]); return 1; }
           printf("selftest-shop: on the glass: the pumpkin bought after the coral shows over it (%04x, the coral's %04x); SEND BACK and the coral shows (%04x)\n", fb[qy * TANK_W + qx], fa[qy * TANK_W + qx], fc[qy * TANK_W + qx]);
-          tank_decor_shift(&tank, 8, 1); tank_decor_set(&tank, 2, tank_decor_x(&tank, 2), DECOR_Z_FRONT); f0->x = ox; f0->y = oy; tank.cr_x = ocx; tank.snail_x = osx; }
+          tank_decor_shift(&tank, 8, 1); tank_decor_set(&tank, 2, tank_decor_x(&tank, 2), DECOR_Z_FRONT); f0->x = ox; f0->y = oy; tank.cr_x = ocx; tank.snail_x = osx; tank.snail_y = osy; }
         /* the page: the arrows hit, a tap swaps, DONE saves */
         setup_begin_place(&tank, 2);
         if (pg_hit(SETUP_ORD_X1 + 10, SETUP_ORD_Y + 12) != SETUP_HIT_FWD || pg_hit(SETUP_ORD_X0 + 10, SETUP_ORD_Y + 12) != SETUP_HIT_BCK) { printf("FAIL: the order arrows' hits\n"); return 1; }
@@ -9333,7 +12068,7 @@ static int bench(void) {
     tank.tank_ms_bits = 0x1a7;
     render_set_scene_cache(scene);
     render_set_vignette_cache(vig_buf);
-    render_set_card_cache(card_buf);
+    render_set_card_cache(card_buf); render_set_modal_cache(give_buf, gift_buf);
     render_set_dirty_mask(dirty_buf);
     render_clock_us = bench_clock_us;
     for (int b = 0; b < VEG_BEDS; b++) tank_veg_set(&tank, b, VEG_NUB);
@@ -9388,7 +12123,7 @@ static int bench_place(void) {
     const int px = TANK_W * 116 / 480, cx = TANK_W * 420 / 480, kx = TANK_W * 215 / 480, vx = TANK_W * 320 / 480;
     tank_decor_set(&tank, 0, px, DECOR_Z_FRONT); tank_decor_set(&tank, 3, cx, DECOR_Z_FRONT); tank_decor_set(&tank, 8, kx, DECOR_Z_FRONT); tank_decor_set(&tank, 9, vx, DECOR_Z_FRONT);
     tank.decor_rank[tank_decor_slot(3)] = 1; tank.decor_rank[tank_decor_slot(0)] = 2; tank.decor_rank[tank_decor_slot(8)] = 3; tank.decor_rank[tank_decor_slot(9)] = 4;
-    render_set_scene_cache(scene); render_set_vignette_cache(vig_buf); render_set_card_cache(card_buf); render_set_dirty_mask(dirty_buf);
+    render_set_scene_cache(scene); render_set_vignette_cache(vig_buf); render_set_card_cache(card_buf); render_set_modal_cache(give_buf, gift_buf); render_set_dirty_mask(dirty_buf);
     render_clock_us = bench_clock_us;
     render_set_grass_loop(bs_alloc64, free, 12u << 20); render_grass_loop_lock(64); render_grass_loop_on(true);   /* (room enough: no replan mid-measure) */
     for (int i = 0; i < 60; i++) tank_tick(&tank, 1.0f / 12.0f, advisor_rules);
@@ -9605,6 +12340,45 @@ static int selftest_card(const char *prefix) {
     if (tank.n_fish != 5 || tank.fish[4].stage != STAGE_FRY || progression_age_s(&tank, 4) != 0) CARD_FAIL("the new fry: %d fish, stage %d", tank.n_fish, tank.fish[4].stage);
     printf("selftest-card: the next fry waited for %d more meals (saved with the tank), then came as fish %d\n", SELL_FRY_MEALS, tank.n_fish);
 
+    /* SLOTS FOLLOW THEIR FISH (the 11-02 sweep): a fish leaves as a gift (progression_give_out, the slots above shift) and
+       everything that names a fish by its slot follows it - the keeper card and its armed SELL, a notice about a fish, the
+       welcome owed, the rename page and its CANCEL. It was: the wrong fish sold, renamed, or welcomed */
+    {   uint32_t u3 = tank.fish[3].uid;
+        render_milestones_show_fish(&tank, 3); render_milestones(&tank, fb, TANK_W);
+        if (!render_milestones_card(&tank, &fish, &rx, &sx, &by) || fish != 3) CARD_FAIL("slots: no card for fish 3");
+        render_milestones_tap(&tank, (float)sx, (float)by);              /* SELL armed on fish 3 */
+        if (!progression_give_out(&tank, 1)) CARD_FAIL("slots: the gift of fish 1 was refused");
+        render_milestones(&tank, fb, TANK_W);
+        if (!render_milestones_card(&tank, &fish, &rx, &sx, &by) || tank.fish[fish].uid != u3) CARD_FAIL("slots: the card did not follow its fish (on slot %d)", fish);
+        tank.clock += 1.0f;
+        r = render_milestones_tap(&tank, (float)sx, (float)by);
+        if (r != MS_TAP_SELL + fish || tank.fish[r - MS_TAP_SELL].uid != u3) CARD_FAIL("slots: the armed SELL went to slot %d, not its fish", r - MS_TAP_SELL);
+        render_milestones_leave();
+        notice_sync(&tank); while (notice_current()) notice_tick(&tank, 1.0f, false);
+        int ni = tank.n_fish - 1; uint32_t nu = tank.fish[ni].uid;
+        tank.fish[ni].ms_bits |= MS_FIRST_DART;
+        for (int q = 0; q < 60 && !notice_current(); q++) notice_tick(&tank, 0.1f, false);
+        if (!notice_current() || notice_current()->fish != ni) CARD_FAIL("slots: no notice about fish %d", ni);
+        if (!progression_give_out(&tank, 0)) CARD_FAIL("slots: the gift of fish 0 was refused");
+        if (!notice_current() || notice_current()->fish < 0 || tank.fish[notice_current()->fish].uid != nu) CARD_FAIL("slots: the notice did not follow its fish");
+        while (notice_current()) notice_tick(&tank, 1.0f, false);
+        progression_force_arrival(&tank);                                  /* a fry owed its welcome */
+        int nb = progression_newborn(); uint32_t nbu = nb >= 0 ? tank.fish[nb].uid : 0;
+        if (nb < 1) CARD_FAIL("slots: no welcome owed after an arrival (%d)", nb);
+        int ri = 1; uint32_t ru = tank.fish[ri].uid; char rold[FISH_NAME_MAX + 1]; memcpy(rold, tank.fish[ri].name, sizeof rold);
+        setup_begin_rename(&tank, ri); tank_set_name(&tank, ri, "zzz");    /* (a name half typed on its wheel) */
+        if (!progression_give_out(&tank, 0)) CARD_FAIL("slots: the gift of fish 0 (mid-rename) was refused");
+        if (progression_newborn() < 0 || tank.fish[progression_newborn()].uid != nbu) CARD_FAIL("slots: the welcome owed did not follow its fry");
+        if (setup_fish() < 0 || tank.fish[setup_fish()].uid != ru) CARD_FAIL("slots: the rename page did not follow its fish (on %d)", setup_fish());
+        setup_cancel(&tank);
+        for (int i = 0; i < tank.n_fish; i++) {
+            if (tank.fish[i].uid == ru && strcmp(tank.fish[i].name, rold)) CARD_FAIL("slots: CANCEL did not give %s its old name back (%s)", rold, tank.fish[i].name);
+            if (tank.fish[i].uid != ru && !strcmp(tank.fish[i].name, rold) && strcmp(rold, "zzz")) CARD_FAIL("slots: CANCEL named another fish %s", rold);
+        }
+        progression_newborn_done(&tank);
+        printf("selftest-card: slots follow their fish: a gift leaving under the keeper card (armed SELL), a notice, a welcome owed and a rename page - each kept its own fish\n");
+    }
+
     /* down to the pair, never past it */
     while (tank.n_fish > FISH_KEEP_MIN) if (!progression_sell_fish(&tank, tank.n_fish - 1)) CARD_FAIL("a sale above the pair was refused at %d fish", tank.n_fish);
     if (progression_sell_fish(&tank, 0) || progression_sell_fish(&tank, 1) || tank.n_fish != FISH_KEEP_MIN) CARD_FAIL("the pair was sold");
@@ -9612,6 +12386,336 @@ static int selftest_card(const char *prefix) {
     render_tank(&tank, fb, TANK_W); render_milestones(&tank, fb, TANK_W);
     printf("selftest-card: sold down to the pair, which stays; the tank runs on\nselftest-card: OK\n");
     return 0;
+}
+
+/* --selftest-clock (0.4, the 11-02 evening sweep): A TANK LEFT AWAKE FOR WEEKS. The tank clock was a float a frame's
+ * 0.04 s was added to: from ~3 days it rounded every frame (x0.78..x1.56), and past 2^20 s (~12 days awake, or ~3 days
+ * after a 7-day wake) a frame added nothing - SELL / GIVE / the gift card's holds never passed, the sway and the tail froze,
+ * the snail could rest for good, visits and ARRIVING notes never ended. Each case starts the clock at 3, 6, 12 and 30 days
+ * and lives through it a frame at a time, as the boards do (0.04 s): the clock keeps time; the fish card's SELL and the
+ * shop's SELL confirm; the GIVE modal's and the gift card's holds pass; the tail beat runs on unbroken through speed
+ * changes; the grass sways; the snail rests and walks; a door visit ends on its own; an ARRIVING note lets go. */
+int selftest_clock_doors(double day0);   /* selftest_link.c: a visit through a door, two tanks at that clock */
+#define CK_FAIL(...) do { printf("FAIL (day %d): ", days); printf(__VA_ARGS__); printf("\n"); return 1; } while (0)
+#define CK_CHECK(...) do { printf("FAIL (day %d): ", days); printf(__VA_ARGS__); printf("\n"); fails++; } while (0)   /* (a failed promise: the rest still run) */
+static void ck_live(float seconds) { for (int n = (int)(seconds / 0.04f + 0.5f); n > 0; n--) tank_tick(&tank, 0.04f, advisor_rules); }
+static int selftest_clock(void) {
+    static uint16_t fb[TANK_W * TANK_H];
+    static const int DAYS[4] = { 3, 6, 12, 30 };
+    int fails = 0;
+    setenv("POCKET_TANK_SAVE", "/tmp/pocket-tank-selftest-clock.sav", 1);
+    for (int d = 0; d < 4; d++) {
+        const int days = DAYS[d];
+        (void)system("rm -f /tmp/pocket-tank-selftest-clock.sav");
+        tank_init(&tank, 91 + d); progression_boot(&tank); progression_setup_done(&tank);
+        progression_force_arrival(&tank); progression_newborn_done(&tank);
+        progression_force_arrival(&tank); progression_newborn_done(&tank);
+        for (int i = 0; i < tank.n_fish; i++) { progression_set_age(&tank, i, STAGE_ADULT_AGE + 60); tank.fish[i].trust = 9; tank.fish[i].hunger = 2; }
+        tank.sd_unlocks |= SD_ITEM_CASTLE | SD_ITEM_SNAIL; tank_castle_place(&tank); tank.sd_balance = 10;
+        memset(tank.algae, 0, sizeof tank.algae);
+        ck_live(2);
+        tank.clock = days * 86400.0;
+        const double c0 = tank.clock;
+
+        /* the clock keeps time: 10 s of frames are 10 s */
+        ck_live(10);
+        if (fabs((double)tank.clock - c0 - 10.0) > 0.01) CK_CHECK("10 s of frames moved the clock %.3f s", (double)tank.clock - c0);
+
+        /* the fish card's SELL: armed, then confirmed once MSP_SELL_WAIT_S has passed */
+        int nx, ny, fish, rx, sx, by;
+        render_milestones(&tank, fb, TANK_W); render_milestones_row(2, &nx, &ny);
+        if (render_milestones_tap(&tank, (float)nx, (float)ny) != MS_TAP_KEPT) CK_FAIL("fish 2's name did not open its card");
+        render_milestones(&tank, fb, TANK_W);
+        if (!render_milestones_card(&tank, &fish, &rx, &sx, &by) || fish != 2) CK_FAIL("no card up for fish 2");
+        if (render_milestones_tap(&tank, (float)sx, (float)by) != MS_TAP_KEPT) CK_FAIL("the first SELL tap did not arm");
+        ck_live(0.8f); render_milestones(&tank, fb, TANK_W);
+        int r = render_milestones_tap(&tank, (float)sx, (float)by);
+        if (r != MS_TAP_SELL + 2) CK_CHECK("the fish card's SELL never confirmed (tap %d, 0.8 s after arming)", r);
+        render_milestones_leave();
+
+        /* the shop's SELL on a shelved castle */
+        if (!progression_shelve(&tank, 2)) CK_FAIL("the castle did not go on the shelf");
+        render_shop_leave(); render_shop(&tank, fb, TANK_W);
+        if (shop_tap(SHOP_ROW_X, SHOP_ROW_Y(2)) != SHOP_TAP_KEPT) CK_FAIL("the shelved castle's row");
+        render_shop(&tank, fb, TANK_W); SHOP_SETTLE();
+        if (shop_tap(SHOP_SELL_X, SHOP_BTN_Y) != SHOP_TAP_KEPT) CK_FAIL("the shop's first SELL tap did not arm");
+        ck_live(0.8f); render_shop(&tank, fb, TANK_W);
+        r = shop_tap(SHOP_SELL_X, SHOP_BTN_Y);
+        if (r != SHOP_TAP_SELL + 2) CK_CHECK("the shop's SELL never confirmed (tap %d, 0.8 s after arming)", r);
+        render_shop_leave();
+
+        /* the GIVE modal (one door: CONFIRM) - its hold passes, frame by frame on the glass */
+        static gift_book_t G; memset(&G, 0, sizeof G); gift_attach(&tank, &G);
+        tank.door_open[LINK_LEFT] = true; G.door_peer[LINK_LEFT] = 0x49439648u; G.door_badge[LINK_LEFT] = 1;
+        int f0 = -1; for (int i = 0; i < tank.n_fish && f0 < 0; i++) if (progression_fish_givable(&tank, i)) f0 = i;
+        if (f0 < 0) CK_FAIL("no fish to give");
+        render_give_tap(&tank, f0);
+        if (render_give_modal_step(&tank) != RENDER_GM_CONFIRM) CK_FAIL("GIVE did not open CONFIRM (step %d)", render_give_modal_step(&tank));
+        for (int n = 0; n < (int)((GIFT_HOLD_S + 0.3f) / 0.04f); n++) {
+            tank_tick(&tank, 0.04f, advisor_rules); render_frame_begin(); render_tank(&tank, fb, TANK_W); render_give_modal(&tank, fb, TANK_W);
+        }
+        int mx = 0, my = 0; render_give_modal_button(&tank, RENDER_GM_TAP_GIVE, &mx, &my);
+        r = render_give_modal_tap(&tank, (float)mx, (float)my);
+        if (r == RENDER_GM_TAP_HELD || G.want_uid != tank.fish[f0].uid) CK_CHECK("the GIVE modal's hold never passed (tap %d)", r);
+        render_give_modal_close(); G.want_uid = 0; G.want_door = 0; G.want_peer = 0;
+
+        /* the gift card: its hold counts from when it is first seen */
+        G.ask.on = true; G.ask.uid = 0x77u; passport_from_fish(&G.ask.pp, &tank.fish[0], 0x49439648u, 3600); G.ask.pp.uid = 0x77u;
+        G.ask.since = tank.clock; G.ask.shown = false; G.ask.answer = 0;
+        render_gift_allow(true); render_tank(&tank, fb, TANK_W); render_gift(&tank, fb, TANK_W);
+        if (!G.ask.shown) CK_FAIL("the gift card was not drawn");
+        if (gift_answer(&G, tank.clock, true)) CK_CHECK("the gift card took a tap the moment it came up");
+        ck_live(GIFT_HOLD_S + 0.3f);
+        if (!gift_answer(&G, tank.clock, true) || G.ask.answer != 1) CK_CHECK("the gift card's hold never passed");
+        G.ask.on = false; G.ask.answer = 0;
+
+        /* an ARRIVING note: its time with the giver gone runs out (no engine: no giver next door) */
+        { passport_t pp; passport_from_fish(&pp, &tank.fish[0], 0x49439648u, 3600); pp.uid = 0x99u;
+          gift_arriving_add(&G, 0x99u, 0x1234u, 0x49439648u, &pp);
+          G.arriving[G.n_arr - 1].held = GIFT_ARRIVING_TTL_S - 2; G.arr_aged_at = tank.clock;
+          for (int n = 0; n < 125 && G.n_arr; n++) { tank_tick(&tank, 0.04f, advisor_rules); tank_link_tick(&tank, NULL); }
+          if (G.n_arr) CK_CHECK("an ARRIVING note 2 s from its time still held after 5 s (held %.2f)", G.arriving[0].held); }
+        gift_attach(&tank, NULL); tank.door_open[LINK_LEFT] = false;
+
+        /* the tail beat runs on through speed changes (a fish braking and bursting): no frame jumps it */
+        { fish_t *f = &tank.fish[0]; float worst = 0, prev = render_fish_beat(&tank, 0), sp = f->speed;
+          for (int n = 0; n < 150; n++) {
+              f->target_speed = (n / 12) & 1 ? 60 : 6;
+              tank_tick(&tank, 0.04f, advisor_rules);
+              float now = render_fish_beat(&tank, 0), step = remainderf(now - prev, 6.2831853f);
+              if (fabsf(f->speed - sp) > 0.05f && fabsf(step) > worst) worst = fabsf(step);
+              prev = now; sp = f->speed;
+          }
+          if (worst > 1.0f) CK_CHECK("the tail beat jumped %.2f rad in one frame on a change of speed", worst); }
+
+        /* the grass sways a frame's worth every frame */
+        { float m0 = render_sway_moment(&tank), worst = 0;
+          for (int n = 0; n < 50; n++) {
+              tank_tick(&tank, 0.04f, advisor_rules);
+              float m1 = render_sway_moment(&tank), step = m1 - m0; if (step < -3.5f) step += 7.0f;
+              if (fabsf(step - 0.04f) > worst) worst = fabsf(step - 0.04f);
+              m0 = m1;
+          }
+          if (worst > 0.002f) CK_CHECK("the sway's moment is off a frame's 0.04 s by %.4f s", worst); }
+
+        /* the snail on clean glass: it rests and it walks (a rest a while in every 24 s) */
+        { int rested = 0, walked = 0; float x0 = tank.snail_x;
+          for (int n = 0; n < 1500; n++) { float x = tank.snail_x, y = tank.snail_y; tank_tick(&tank, 0.04f, advisor_rules); if (tank.snail_x == x && tank.snail_y == y) rested++; else walked++; }
+          if (rested < 100 || walked < 300) CK_CHECK("the snail in a minute: %d frames resting, %d walking (from x %.0f)", rested, walked, x0); }
+
+        /* a fish's wander after weeks of swimming (it was a float summed for good: stuck by ~8-12 days, the fish circled) */
+        { fish_t *f = &tank.fish[1]; f->wander = 1048576.0f + 0.3f; float w0;
+          tank_tick(&tank, 0.04f, advisor_rules); w0 = f->wander; ck_live(1);
+          if (!(w0 >= 0 && w0 < 62.84f) || fabsf(f->wander - w0) < 0.4f) CK_CHECK("the wander phase is not running on (%.4f, then %.4f a second on)", w0, f->wander); }
+
+        /* the seahorse's days with the keeper, saved: they keep counting, and come back to the second */
+        { tank.sd_unlocks |= SD_ITEM_SEAHORSE; tank_seahorse_place(&tank);
+          tank.sh_s = days * 86400.0 + 0.5; ck_live(10);
+          if (fabs((double)tank.sh_s - (days * 86400.0 + 10.5)) > 0.05) CK_CHECK("the seahorse's 10 s with the keeper counted %.3f s", (double)tank.sh_s - days * 86400.0 - 0.5);
+          double sh = tank.sh_s; progression_save(&tank);
+          static tank_t back; tank_init(&back, 5); progression_boot(&back);
+          if (!(back.sd_unlocks & SD_ITEM_SEAHORSE) || fabs((double)back.sh_s - sh) > 1.0) CK_CHECK("the seahorse's saved time came back %.1f s off", (double)back.sh_s - sh); }
+
+        /* a door visit, at this clock, ends on its own */
+        if (selftest_clock_doors(days * 86400.0)) CK_CHECK("a door visit did not end on its own");
+        if (!fails) printf("selftest-clock: day %d - the clock keeps time; SELL (card, shop), GIVE and the gift card's holds pass; ARRIVING lets go; the tail beat is unbroken; the grass sways; the snail rests and walks; wander runs; the seahorse's days count and save; a visit ends\n", days);
+    }
+    printf("selftest-clock: %s\n", fails ? "FAILED" : "OK");
+    return fails ? 1 : 0;
+}
+
+static uint32_t sim_entropy(void) {                    /* the interactive sim's IDs: two sims on one Mac never share one */
+    uint32_t v = 0; FILE *f = fopen("/dev/urandom", "rb");
+    if (f) { if (fread(&v, sizeof v, 1, f) != 1) v = 0; fclose(f); }
+    return v ? v : (uint32_t)time(NULL) ^ (uint32_t)getpid() * 2654435761u;
+}
+/* the passport (0.4, the tank link - docs/tank-link-0.4.md, common/passport.h):
+ * fish IDs, a round trip that is byte-stable, every damaged byte refused, a
+ * later version read by its prefix, hostile values clamped, and 300k fuzzed
+ * frames that never crash and never yield a fish out of range */
+static uint32_t pp_xs = 0x2545F491u;
+static uint32_t pp_rand(void) { pp_xs ^= pp_xs << 13; pp_xs ^= pp_xs >> 17; pp_xs ^= pp_xs << 5; return pp_xs; }
+static uint16_t pp_crc(const uint8_t *b, int n) {       /* CRC-16/CCITT-FALSE, written again here on purpose */
+    uint16_t c = 0xffff;
+    for (int i = 0; i < n; i++) { c ^= (uint16_t)b[i] << 8; for (int k = 0; k < 8; k++) c = (uint16_t)(c & 0x8000 ? (c << 1) ^ 0x1021 : c << 1); }
+    return c;
+}
+static void pp_seal(uint8_t *b) { int n = b[3]; uint16_t c = pp_crc(b, n - 2); b[n - 2] = (uint8_t)c; b[n - 1] = (uint8_t)(c >> 8); }
+static const int PP_NV[PASSPORT_GENES] = { SHAPE_N, FINS_N, PATTERN_N, LOOK_N, LOOK_N };   /* each gene's value count */
+static bool pp_sane(const passport_t *p) {
+    if (!p->uid || !p->home_tank || p->stage > STAGE_ELDER || p->preset >= tank_roster_count()) return false;
+    if (!p->name[0] || strlen(p->name) > FISH_NAME_MAX) return false;
+    for (const char *c = p->name; *c; c++) if (!((*c >= 'a' && *c <= 'z') || (*c >= '0' && *c <= '9') || *c == '?')) return false;
+    float d[] = { p->hunger, p->energy, p->stress, p->curiosity, p->bored, p->trust };
+    for (int i = 0; i < 6; i++) if (!(d[i] >= 0 && d[i] <= 10)) return false;
+    float q[] = { p->sociable, p->bold, p->lazy, p->bold0, p->sociable0 };
+    for (int i = 0; i < 5; i++) if (!(q[i] >= 0 && q[i] <= 1)) return false;
+    if (!(p->size >= 0.2f && p->size <= 4) || !(p->drift_acc >= 0 && p->drift_acc <= 655) || !(p->age_s >= 0)) return false;
+    if (p->shape >= PP_NV[0] || p->fins >= PP_NV[1] || p->pattern >= PP_NV[2] || p->mutated > PASSPORT_GENES) return false;
+    for (int g = 0; g < PASSPORT_GENES; g++) if (p->carried[g] >= PP_NV[g]) return false;
+    if ((p->color | p->fin | p->accent) > 0xffffff || p->eaten < 0 || p->eaten_player < 0 || p->eaten_player > p->eaten) return false;
+    if ((p->ms_bits & MS_RETIRED_MASK) || ((p->ms_bits & ~MS_CROSSBRED) >> MS_FISH_COUNT) || (p->ms_seen & ~p->ms_bits)) return false;   /* (MS_CROSSBRED: the one bit past the badges that travels) */
+    return true;
+}
+static int selftest_passport(void) {
+    int fails = 0;
+#define PCHECK(cond, ...) do { if (!(cond)) { printf("FAIL: "); printf(__VA_ARGS__); printf("\n"); fails++; } } while (0)
+    static tank_t a, b;
+    tank_init(&a, 77); tank_new_population(&a);
+    for (int i = 0; i < 4; i++) tank_add_fish(&a, i % 2, 1 - i % 2);
+    tank_ensure_ids(&a);
+    tank_init(&b, 78); tank_new_population(&b); tank_ensure_ids(&b);
+
+    /* 1. IDs */
+    PCHECK(a.n_fish == 6, "%d fish, want 6", a.n_fish);
+    PCHECK(a.uid && b.uid && a.uid != b.uid, "tank IDs %08x %08x", (unsigned)a.uid, (unsigned)b.uid);
+    for (int i = 0; i < a.n_fish; i++) {
+        PCHECK(a.fish[i].uid != 0 && a.fish[i].uid != a.uid, "fish %d has no ID of its own", i);
+        for (int j = 0; j < i; j++) PCHECK(a.fish[i].uid != a.fish[j].uid, "fish %d and %d share an ID", i, j);
+        for (int j = 0; j < b.n_fish; j++) PCHECK(a.fish[i].uid != b.fish[j].uid, "two tanks share a fish ID");
+        const fish_t *f = &a.fish[i];
+        if (f->parent_a >= 0) PCHECK(f->parent_uid[0] == a.fish[f->parent_a].uid && f->parent_uid[1] == a.fish[f->parent_b].uid, "fish %d's parent IDs are not its parents'", i);
+        else PCHECK(!f->parent_uid[0] && !f->parent_uid[1], "a founder %d has parent IDs", i);
+    }
+    { uint32_t r = a.rng; tank_new_uid(&a); PCHECK(a.rng == r, "an ID drew from the tank's RNG (a seeded run would change)"); }
+    { static tank_t c; tank_init(&c, 77); tank_new_population(&c);
+      PCHECK(c.fish[0].bold == a.fish[0].bold && c.fish[1].x == a.fish[1].x, "the same seed made another tank"); }
+    { uint32_t moved = a.fish[3].uid, parent = a.fish[1].uid; int child = -1;
+      for (int i = 2; i < a.n_fish; i++) if (a.fish[i].parent_uid[0] == parent || a.fish[i].parent_uid[1] == parent) child = i;
+      uint32_t child_uid = child >= 0 ? a.fish[child].uid : 0;
+      static tank_t c; c = a; tank_remove_fish(&c, 1);
+      PCHECK(c.fish[2].uid == moved, "a sale moved fish 3 down without its ID");
+      for (int i = 0; i < c.n_fish; i++) if (c.fish[i].uid == child_uid)
+          PCHECK(c.fish[i].parent_uid[0] == parent || c.fish[i].parent_uid[1] == parent, "a sold parent's ID left its child");
+    }
+
+    /* 2. a byte-stable round trip, and back onto a fish */
+    uint8_t b1[PASSPORT_MAX_BYTES], b2[PASSPORT_MAX_BYTES], b3[PASSPORT_MAX_BYTES];
+    for (int i = 0; i < a.n_fish; i++) {
+        fish_t *f = &a.fish[i];
+        f->shape = (uint8_t)(i % SHAPE_N); f->fins = (uint8_t)((i + 1) % FINS_N); f->pattern = (uint8_t)((i + 2) % PATTERN_N);
+        for (int g = 0; g < GENE_N; g++) f->carried[g] = (uint8_t)((i + g + 1) % PP_NV[g]);
+        f->mutated = (uint8_t)(i % (GENE_N + 1)); f->from_b = (uint8_t)(0x15 >> (i % 2)); f->from_carried = (uint8_t)(i * 5 & 0x1f);
+        f->bored = 3.3f + i; f->ms_bits = MS_ARRIVED | MS_FIRST_DART | MS_RETIRED_6; f->ms_seen = MS_ARRIVED; f->eaten = 40 + i; f->eaten_player = 12;
+        passport_t p, q; fish_t g; memset(&g, 0, sizeof g);
+        passport_from_fish(&p, f, a.uid, 1000.5f + i * 3600);
+        int n1 = passport_write(&p, b1, sizeof b1);
+        PCHECK(n1 == PASSPORT_V2_BYTES, "wrote %d bytes, want %d", n1, PASSPORT_V2_BYTES);
+        PCHECK(passport_read(&q, b1, n1), "fish %d's own passport was refused", i);
+        PCHECK(passport_write(&q, b2, sizeof b2) == n1 && !memcmp(b1, b2, n1), "fish %d: read and written again, the bytes changed", i);
+        PCHECK(q.uid == f->uid && q.home_tank == a.uid && q.parent_uid[0] == f->parent_uid[0] && !strcmp(q.name, f->name) && q.stage == f->stage
+               && q.color == (f->color & 0xffffff) && q.accent == (f->accent & 0xffffff) && q.preset == f->preset, "fish %d: who it is did not survive", i);
+        PCHECK(fabsf(q.hunger - f->hunger) < 0.001f && fabsf(q.bold - f->bold) < 0.0001f && fabsf(q.size - f->size) < 0.0001f
+               && fabsf(q.bored - f->bored) < 0.001f && q.age_s == roundf(1000.5f + i * 3600) && q.eaten == f->eaten, "fish %d: how it is did not survive", i);
+        PCHECK(q.ms_bits == (MS_ARRIVED | MS_FIRST_DART), "fish %d: a retired badge travelled", i);
+        PCHECK(q.shape == f->shape && q.fins == f->fins && q.pattern == f->pattern && !memcmp(q.carried, f->carried, GENE_N)
+               && q.mutated == f->mutated && q.from_b == f->from_b && q.from_carried == f->from_carried, "fish %d: its genes did not survive", i);
+        passport_to_fish(&q, &g);
+        PCHECK(g.uid == f->uid && g.parent_a == -1 && g.model_name && g.base_size > 0 && g.turn_rate > 0, "fish %d: the passport made a broken fish", i);
+        PCHECK(g.shape == f->shape && g.pattern == f->pattern && !memcmp(g.carried, f->carried, GENE_N), "fish %d: the fish made from its passport lost its genes", i);
+        passport_t r; passport_from_fish(&r, &g, a.uid, q.age_s);
+        PCHECK(passport_write(&r, b3, sizeof b3) == n1 && !memcmp(b1, b3, n1), "fish %d: there and back again changed the passport", i);
+    }
+    printf("selftest-passport: %d fish with their own IDs (parents' too) and every form, %d-byte passports, byte-stable there and back, genes and all\n", a.n_fish, PASSPORT_V2_BYTES);
+
+    /* 3. damage: every flipped bit, every short read, a wrong length */
+    passport_t p, q; passport_from_fish(&p, &a.fish[2], a.uid, 5000);
+    int n = passport_write(&p, b1, sizeof b1), flips = 0;
+    for (int bit = 0; bit < n * 8; bit++) {
+        memcpy(b2, b1, n); b2[bit / 8] ^= (uint8_t)(1u << (bit % 8));
+        if (passport_read(&q, b2, n)) { flips++; if (flips < 4) printf("FAIL: a flipped bit %d was accepted\n", bit); }
+    }
+    PCHECK(!flips, "%d of %d flipped bits accepted", flips, n * 8);
+    for (int k = 0; k < n; k++) PCHECK(!passport_read(&q, b1, k), "a passport cut to %d bytes was accepted", k);
+    PCHECK(!passport_read(&q, b1, PASSPORT_MAX_BYTES + 1) && !passport_read(&q, NULL, n), "an oversized / missing buffer was accepted");
+    printf("selftest-passport: all %d flipped bits and all %d short reads refused\n", n * 8, n);
+
+    /* 4. a later version: a longer passport, read by the prefix we know */
+    memset(b2, 0xA5, sizeof b2); memcpy(b2, b1, n - 2); b2[2] = 3; b2[3] = 130; pp_seal(b2);
+    PCHECK(passport_read(&q, b2, 130) && q.uid == p.uid && !strcmp(q.name, p.name) && fabsf(q.hunger - p.hunger) < 0.001f, "a version-3 passport was not read by its prefix");
+    b2[3] = 131; PCHECK(!passport_read(&q, b2, 130), "a length past the buffer was accepted");
+
+    /* 5. hostile values: refused where they cannot be trusted, clamped where they can */
+    #define PP_MUT(stmt) do { memcpy(b2, b1, n); stmt; pp_seal(b2); } while (0)
+    PP_MUT(memcpy(b2 + 20, "Ab-c!\0\0\0", 8));      PCHECK(passport_read(&q, b2, n) && !strcmp(q.name, "ab?c?"), "a strange name became '%s'", q.name);
+    PP_MUT(memset(b2 + 20, 0, 8));                  PCHECK(passport_read(&q, b2, n) && !strcmp(q.name, tank_roster_name(q.preset)), "an empty name became '%s'", q.name);
+    PP_MUT(b2[40] = 200);                           PCHECK(passport_read(&q, b2, n) && q.preset < tank_roster_count(), "an unknown preset %d", q.preset);
+    PP_MUT(b2[41] = 7);                             PCHECK(!passport_read(&q, b2, n), "a stage that does not exist was accepted");
+    PP_MUT(memset(b2 + 4, 0, 4));                   PCHECK(!passport_read(&q, b2, n), "a fish with no ID was accepted");
+    PP_MUT(memset(b2 + 8, 0, 4));                   PCHECK(!passport_read(&q, b2, n), "a fish with no home was accepted");
+    PP_MUT(b2[42] = 9; b2[45] = 9; b2[49] = 99; b2[50] = 40);  PCHECK(passport_read(&q, b2, n) && pp_sane(&q), "genes out of range got through");
+    PP_MUT(b2[44] = 3; b2[47] = 3);                 PCHECK(passport_read(&q, b2, n) && q.pattern == 3 && q.carried[2] == 3, "a SOLID fish (pattern 3) lost its pattern: %d / %d", q.pattern, q.carried[2]);
+    PP_MUT(b2[48] = 8; b2[49] = 8);                 PCHECK(passport_read(&q, b2, n) && q.carried[3] == 8 && q.carried[4] == 8, "the ninth colour (8) was not carried: %d / %d", q.carried[3], q.carried[4]);
+    PP_MUT(b2[48] = 9);                             PCHECK(passport_read(&q, b2, n) && q.carried[3] == 0, "an unknown colour was not made classic");
+    PP_MUT(b2[44] = 4);                             PCHECK(passport_read(&q, b2, n) && q.pattern == 0, "an unknown pattern was not made classic");
+    PP_MUT(b2[78] = 0; b2[79] = 0);                 PCHECK(passport_read(&q, b2, n) && q.size >= 0.2f, "an invisible fish (size %.3f)", q.size);
+    PP_MUT(b2[84] = 1; b2[85] = 0; b2[86] = 9; b2[87] = 0);   PCHECK(passport_read(&q, b2, n) && q.eaten_player <= q.eaten, "more meals from the hand than meals");
+    PP_MUT(b2[88] = 0xff; b2[89] = 0xff; b2[90] = 0xff; b2[91] = 0xff);  PCHECK(passport_read(&q, b2, n) && pp_sane(&q), "badges that do not exist got through");
+    PP_MUT(b2[28] = 1; b2[29] = 2; b2[30] = 3; b2[31] = 0xff);           PCHECK(passport_read(&q, b2, n) && q.color == 0x030201, "a colour wider than 24 bits");
+
+    /* 6. fuzz: pure noise, then noise that wears a valid header and CRC */
+    int accepted = 0, sealed_ok = 0;
+    for (int k = 0; k < 150000; k++) {
+        int len = (int)(pp_rand() % (PASSPORT_MAX_BYTES + 1));
+        for (int i = 0; i < len; i++) b2[i] = (uint8_t)pp_rand();
+        if (passport_read(&q, b2, len)) { accepted++; PCHECK(pp_sane(&q), "noise made a fish out of range"); }
+    }
+    for (int k = 0; k < 150000; k++) {
+        int len = PASSPORT_V1_BYTES + (int)(pp_rand() % (PASSPORT_MAX_BYTES - PASSPORT_V1_BYTES + 1));
+        for (int i = 0; i < len; i++) b2[i] = (uint8_t)pp_rand();
+        b2[0] = 0x46; b2[1] = 0x50; b2[2] = (uint8_t)(1 + pp_rand() % 3); b2[3] = (uint8_t)len;
+        b2[41] = (uint8_t)(pp_rand() % 5);            /* a real stage 4 times in 5 (a bad one is refused): the clamps get the rest */
+        pp_seal(b2);
+        if (!passport_read(&q, b2, len)) continue;
+        sealed_ok++;
+        if (!pp_sane(&q)) { PCHECK(0, "sealed noise made a fish out of range"); break; }
+        passport_t r; int m = passport_write(&q, b3, sizeof b3);
+        PCHECK(m == PASSPORT_V2_BYTES && strlen(q.home_name) < PASSPORT_TANK_NAME && passport_read(&r, b3, m) && passport_write(&r, b1, sizeof b1) == m && !memcmp(b1, b3, m), "a clamped passport is not stable");
+        fish_t g; memset(&g, 0, sizeof g); passport_to_fish(&q, &g);
+        PCHECK(g.size >= 0.2f && g.stage <= STAGE_ELDER && g.name[FISH_NAME_MAX] == 0, "sealed noise made a broken fish");
+    }
+    printf("selftest-passport: 300000 fuzzed frames: %d of 150000 noise accepted, %d of 150000 sealed noise accepted - every one in range and stable\n", accepted, sealed_ok);
+    PCHECK(sealed_ok > 100000, "too few sealed frames got through (%d) - the checks are refusing what they should clamp", sealed_ok);
+    /* 6. HOME WATERS and the home tank's name (v2, 2026-11-01) */
+    {   passport_t h = p; snprintf(h.home_name, sizeof h.home_name, "SAM'S REEF");
+        uint8_t hb[PASSPORT_MAX_BYTES]; int hn = passport_write(&h, hb, sizeof hb);
+        PCHECK(hn == PASSPORT_V2_BYTES && passport_read(&q, hb, hn) && !strcmp(q.home_name, "SAM'S REEF"), "the home tank's name did not travel ('%s')", q.home_name);
+        memcpy(b2, hb, PASSPORT_V1_BYTES - 2); b2[2] = 1; b2[3] = PASSPORT_V1_BYTES; pp_seal(b2);   /* an older tank's v1: no name */
+        PCHECK(passport_read(&q, b2, PASSPORT_V1_BYTES) && q.uid == p.uid && !q.home_name[0], "a v1 passport read a home name '%s'", q.home_name);
+        memcpy(b2, hb, hn); memcpy(b2 + 92, "sam\n\x01<reef>\xff!!!!!!", 16); pp_seal(b2);
+        PCHECK(passport_read(&q, b2, hn) && strlen(q.home_name) <= 15 && !strcmp(q.home_name, "SAM ?\?REEF?\?!!!"), "a strange home name became '%s'", q.home_name);
+        char w[PASSPORT_WATERS_MAX], w2[PASSPORT_WATERS_MAX]; int longest = 0, seen_a = 0; uint64_t pl[2] = { 0, 0 };
+        for (uint32_t u = 1; u < 400000; u += 7) {
+            passport_home_waters(u * 2654435761u, w, sizeof w); passport_home_waters(u * 2654435761u, w2, sizeof w2);
+            if (strcmp(w, w2) || !strchr(w, ' ')) { PCHECK(0, "home waters for %08x: '%s' then '%s'", u * 2654435761u, w, w2); break; }
+            if ((int)strlen(w) > longest) longest = (int)strlen(w);
+            for (int c = 0; w[c]; c++) if (w[c] < 'A' || w[c] > 'Z') { if (w[c] != ' ') PCHECK(0, "home waters '%s'", w); }
+        }
+        (void)seen_a; (void)pl;
+        passport_home_waters(0, w, sizeof w);
+        PCHECK(longest <= 15 && !strcmp(w, "FAR WATERS"), "home waters: the longest %d characters (15 fit beside the badge), none '%s'", longest, w);
+        printf("selftest-passport: v2 carries its home tank's name (a v1 has none, a strange one is cleaned); home waters steady, at most %d characters\n", longest); }
+    {   /* 7. the collection's record grew (64 -> 76 bytes, the home's name): a keeper's collection saved before still loads */
+        setenv("POCKET_TANK_SAVE", "/tmp/pocket-tank-selftest-passport.sav", 1);
+        uint8_t blob[6 + 2 * 64]; memset(blob, 0, sizeof blob);
+        blob[0] = 0x56; blob[1] = 0x43; blob[2] = 1; blob[3] = 2; blob[4] = 64; blob[5] = 0;   /* "VC", v1, two 64-byte records */
+        for (int r = 0; r < 2; r++) { uint8_t *e = blob + 6 + r * 64; e[0] = (uint8_t)(0x11 + r); e[4] = 0x22; memcpy(e + 16, r ? "roly" : "kelp", 4); e[37] = 2; e[41] = 1; e[54] = 3; }
+        persist_port_blob_save(COLL_NVS_KEY, blob, sizeof blob);
+        collection_load();
+        const coll_entry_t *e0 = collection_get(0), *e1 = collection_get(1);
+        PCHECK(collection_count() == 2 && e0 && e1 && !strcmp(e0->name, "kelp") && !strcmp(e1->name, "roly") && e1->visits == 3 && !e0->home_name[0],
+               "a 64-byte-record collection did not load (%d entries)", collection_count());
+        static tank_t ct; ct = a; ct.vis_used[0] = true; ct.fish[N_FISH_MAX] = a.fish[0]; ct.fish[N_FISH_MAX].uid = 0x5151; ct.vis_home[0] = 0x7777;
+        snprintf(ct.vis_home_name[0], sizeof ct.vis_home_name[0], "SAM'S REEF");
+        PCHECK(collection_add(&ct, 0), "COLLECT refused");
+        collection_load();
+        int ci = collection_find(0x5151);
+        PCHECK(collection_count() == 3 && ci >= 0 && !strcmp(collection_get(ci)->home_name, "SAM'S REEF") && !strcmp(collection_get(0)->name, "kelp"),
+               "the collection after a save and a load: %d entries, its home '%s'", collection_count(), ci >= 0 ? collection_get(ci)->home_name : "-");
+        collection_reset(); remove("/tmp/pocket-tank-selftest-passport.sav.visitors");
+        printf("selftest-passport: a collection of 64-byte records loads (kelp, roly); a collected fish keeps its home's name over a reload\n"); }
+    printf("selftest-passport: %s\n", fails ? "FAILED" : "OK");
+    return fails ? 1 : 0;
 }
 
 /* --selftest-fry [prefix] (0.3.5): FRY FOR SALE. Nothing before a sale;
@@ -9638,7 +12742,7 @@ static int selftest_fry(const char *prefix) {
     if (progression_fry_for_sale(&tank) || progression_buy_fry(&tank, 0)) FRY_FAIL("fry for sale before a fish was sold");
     render_shop_leave();
     if (shop_tap(SHOP_ROW_X, SHOP_ROW_Y(0)) != SHOP_TAP_KEPT) FRY_FAIL("the first row did not open a modal");
-    tank.sd_balance = 1000;
+    tank.sd_balance = 1000; SHOP_SETTLE();
     if (shop_tap(SHOP_BTN_X, SHOP_BTN_Y) != SHOP_TAP_BUY + 0) FRY_FAIL("the first row is not the plant before a sale");
     tank.sd_balance = 0; render_shop_leave();
 
@@ -9656,6 +12760,8 @@ static int selftest_fry(const char *prefix) {
         bool on = false; for (int i = 0; i < LOOK_N; i++) on |= LOOK_BODY[i] == of[k].body;
         if (!on || of[k].accent == of[k].body || of[k].sold) FRY_FAIL("fry %d: body %06x accent %06x sold %d", k, of[k].body, of[k].accent, of[k].sold);
         for (int j = 0; j < k; j++) if (of[j].body == of[k].body) FRY_FAIL("fry %d and %d share a body", j, k);
+        if (of[k].shape >= SHAPE_N || of[k].fins >= FINS_N || of[k].pattern >= PATTERN_N) FRY_FAIL("fry %d: form %d/%d/%d", k, of[k].shape, of[k].fins, of[k].pattern);
+        for (int j = 0; j < k; j++) if (of[j].shape == of[k].shape) FRY_FAIL("fry %d and %d share a body shape (%s)", j, k, SHAPE_NAMES[of[k].shape]);   /* (0.4: the three bodies) */
     }
     printf("selftest-fry: the first sale earned its badge (and notice); three fry: %06x/%06x %06x/%06x %06x/%06x\n",
            of[0].body, of[0].accent, of[1].body, of[1].accent, of[2].body, of[2].accent);
@@ -9665,9 +12771,10 @@ static int selftest_fry(const char *prefix) {
     if (prefix) { snprintf(path, sizeof path, "%s_fry_row.ppm", prefix); write_ppm(path, fb); }
     const float boxy = SHP_FRY_BOX_Y + SHP_FRY_BOX_H / 2;
     if (shop_tap(SHOP_ROW_X, SHOP_ROW_Y(0)) != SHOP_TAP_KEPT) FRY_FAIL("the FRY row did not open its modal");
+    SHOP_SETTLE();
     if (shop_tap(SHOP_BTN_X, SHOP_BTN_Y) != SHOP_TAP_KEPT) FRY_FAIL("BUY with no dollars did something");
     tank.sd_balance = 2 * SD_PRICE_FRY + 50;
-    shop_tap(SHOP_ROW_X, SHOP_ROW_Y(0));
+    shop_tap(SHOP_ROW_X, SHOP_ROW_Y(0)); SHOP_SETTLE();
     if (shop_tap(SHP_FRY_BOX_X(1) + SHP_FRY_BOX_W / 2, boxy) != SHOP_TAP_KEPT) FRY_FAIL("the second box's tap");
     render_shop(&tank, fb, TANK_W);
     if (prefix) { snprintf(path, sizeof path, "%s_fry_modal.ppm", prefix); write_ppm(path, fb); }
@@ -9680,6 +12787,12 @@ static int selftest_fry(const char *prefix) {
         progression_newborn() != slot || tank.sd_balance != SD_PRICE_FRY + 50 || progression_fry_left() != 2 || progression_age_s(&tank, slot) != 0)
         FRY_FAIL("the bought fry: %d fish, stage %d, parents %d/%d, %06x/%06x, owed %d, balance %d, %d left",
                  tank.n_fish, nf->stage, nf->parent_a, nf->parent_b, nf->color, nf->accent, progression_newborn(), tank.sd_balance, progression_fry_left());
+    if (nf->shape != of[1].shape || nf->fins != of[1].fins || nf->pattern != of[1].pattern)
+        FRY_FAIL("the bought fry is %s/%s/%s, it was sold as %s/%s/%s", SHAPE_NAMES[nf->shape], FINS_NAMES[nf->fins], PATTERN_NAMES[nf->pattern],
+                 SHAPE_NAMES[of[1].shape], FINS_NAMES[of[1].fins], PATTERN_NAMES[of[1].pattern]);
+    for (int g = 0; g < GENE_N; g++) if (nf->carried[g] >= tank_gene_values(g)) FRY_FAIL("the bought fry carries gene %d = %d", g, nf->carried[g]);
+    printf("selftest-fry: genetics in the shop - three bodies (%s, %s, %s), the bought one %s %s %s as sold, its hidden copies rolled\n",
+           SHAPE_NAMES[of[0].shape], SHAPE_NAMES[of[1].shape], SHAPE_NAMES[of[2].shape], SHAPE_NAMES[nf->shape], FINS_NAMES[nf->fins], PATTERN_NAMES[nf->pattern]);
     if (progression_buy_fry(&tank, 0)) FRY_FAIL("a second fry sold while the first was owed its welcome");
     if (progression_buy_fry(&tank, 1)) FRY_FAIL("a bought fry was sold again");
     /* its welcome: from the shop */
@@ -9691,6 +12804,10 @@ static int selftest_fry(const char *prefix) {
     if (setup_page() != SETUP_PG_FAMILY) FRY_FAIL("the welcome did not reach the family page");
     render_tank(&tank, fb, TANK_W); render_setup(&tank, fb, TANK_W, 1.0f);
     if (prefix) { snprintf(path, sizeof path, "%s_fry_family.ppm", prefix); write_ppm(path, fb); }
+    setup_activate(&tank, SETUP_HIT_NEXT);                   /* 0.4: the nature page too (its parents read THE SHOP) */
+    if (setup_page() != SETUP_PG_NATURE) FRY_FAIL("the welcome did not reach the nature page");
+    render_tank(&tank, fb, TANK_W); render_setup(&tank, fb, TANK_W, 1.0f);
+    if (prefix) { snprintf(path, sizeof path, "%s_fry_nature.ppm", prefix); write_ppm(path, fb); }
     setup_activate(&tank, SETUP_HIT_NEXT);
     if (setup_active() || progression_newborn() >= 0) FRY_FAIL("DONE did not close the welcome");
     /* the second of the day; then the dollars run out */
@@ -9727,7 +12844,7 @@ static int selftest_fry(const char *prefix) {
     if (!progression_buy_fry(&tank, 0)) FRY_FAIL("the last slot was refused");
     progression_newborn_done(&tank);
     if (tank.n_fish != POP_CAP || progression_arrival_pending()) FRY_FAIL("the last slot: %d fish, staged %d", tank.n_fish, progression_arrival_pending());
-    if (progression_fry_room(&tank) || progression_buy_fry(&tank, 1)) FRY_FAIL("a fry sold into a full tank");
+    if (progression_fry_room_to_buy(&tank) || progression_buy_fry(&tank, 1)) FRY_FAIL("a fry sold into a full tank");
     render_shop_leave(); render_shop(&tank, fb, TANK_W);
     if (prefix) { snprintf(path, sizeof path, "%s_fry_row_full.ppm", prefix); write_ppm(path, fb); }
     printf("selftest-fry: the last slot called off a staged fry; a full tank sells none\n");
@@ -9854,7 +12971,7 @@ static int crab_shot(const char *prefix) {
     static uint16_t fb[TANK_W * TANK_H];
     render_set_scene_cache(scene_buf);
     render_set_vignette_cache(vig_buf);
-    render_set_card_cache(card_buf);
+    render_set_card_cache(card_buf); render_set_modal_cache(give_buf, gift_buf);
     render_set_dirty_mask(dirty_buf);
     char path[512];
     double us[2];
@@ -9938,8 +13055,22 @@ shop:
     return 0;
 }
 
+/* THE CAP's guard (progression.h): a tank past POP_CAP fails the running selftest at once, loudly, with the path that
+   did it; the interactive sim says it once and runs on, as the device does */
+static bool g_cap_fatal;
+static void cap_breach(const tank_t *t, int held, const char *file, int line, const char *path) {
+    static bool said;
+    if (!g_cap_fatal && said) return;
+    said = true;
+    printf("FAIL: THE FISH CAP: %d fish held (%d here) > POP_CAP %d at %s:%d (%s)\n", held, t->n_fish, POP_CAP, file, line, path);
+    fflush(stdout);
+    if (g_cap_fatal) exit(3);
+}
 int main(int argc, char **argv) {
     render_set_depth_buf(malloc(render_depth_buf_bytes()));   /* SWIM DEPTH (0.3.9.4): as the boards do */
+    progression_cap_hook = cap_breach;
+    for (int a = 1; a < argc; a++) if (!strncmp(argv[a], "--selftest", 10) || !strcmp(argv[a], "--square-boot")) g_cap_fatal = true;
+    collection_set_more(calloc(1, collection_more_size()));   /* the visitor pages 2..10 (0.4): the boards' PSRAM block */
     for (int a = 1; a + 1 < argc; a++) if (strcmp(argv[a], "--hw") == 0) g_sim_hw = argv[a + 1];   /* the board it pretends to be (0.3.9.3) */
     if (getenv("PT_VEG_STEP")) render_set_veg_step(atoi(getenv("PT_VEG_STEP")));   /* the grass in row pairs (2026-10-24) */
     if (getenv("PT_GRASS_CACHE")) { static uint16_t sg[TANK_W * TANK_H]; static uint32_t bgm[RENDER_DIRTY_WORDS];   /* the grass cache (2026-10-24): its period in ms */
@@ -9948,8 +13079,15 @@ int main(int argc, char **argv) {
         if (strcmp(argv[a], "--greedy") == 0) advisor_core_sample = false;
     for (int a = 1; a < argc; a++) {                 /* mode flags may sit anywhere */
         if (strcmp(argv[a], "--hero") == 0 && a + 1 < argc) return hero_shot(argv[a + 1]);
+        if (strcmp(argv[a], "--fresh-shot") == 0 && a + 1 < argc) return fresh_shot(argv[a + 1]);
+        if (strcmp(argv[a], "--page-shot") == 0 && a + 1 < argc) return page_shot(argv[a + 1]);
+        if (strcmp(argv[a], "--coll-shot") == 0 && a + 1 < argc) return coll_shot(argv[a + 1]);
+        if (strcmp(argv[a], "--selftest-coll-pages") == 0) return selftest_coll_pages();
+        if (strcmp(argv[a], "--genes") == 0 && a + 1 < argc) return genes_shot(argv[a + 1]);
         if (strcmp(argv[a], "--plant-order") == 0) return plant_order();
         if (strcmp(argv[a], "--place-shot") == 0 && a + 1 < argc) return place_shot(argv[a + 1]);
+        if (strcmp(argv[a], "--order-shot") == 0 && a + 1 < argc) return order_shot(argv[a + 1]);
+        if (strcmp(argv[a], "--selftest-order-squares") == 0) return selftest_order_squares();
         if (strcmp(argv[a], "--pumpkin-grass") == 0) return pumpkin_grass();
         if (strcmp(argv[a], "--pumpkin-show") == 0) { int bad = 0; for (int x = 70; x <= 230; x += 40) { bad += pumpkin_show(false, x * TANK_W / 480); bad += pumpkin_show(true, x * TANK_W / 480); } return bad ? 1 : 0; }
         if (strcmp(argv[a], "--crab-card-shot") == 0 && a + 1 < argc) return crab_card_shot(argv[a + 1]);
@@ -9961,30 +13099,45 @@ int main(int argc, char **argv) {
         if (strcmp(argv[a], "--pumpkin") == 0 && a + 1 < argc) return pumpkin_shot(argv[a + 1]);
         if (strcmp(argv[a], "--pumpkin-fish-shot") == 0 && a + 1 < argc) return pumpkin_fish_shot(argv[a + 1]);
         if (strcmp(argv[a], "--pumpkin-fish-hunt") == 0 && a + 1 < argc) return pumpkin_fish_hunt(argv[a + 1]);
+        if (strcmp(argv[a], "--depth-pop-hunt") == 0 && a + 1 < argc) return depth_pop_hunt(argv[a + 1]);
+        if (strcmp(argv[a], "--castle-shot") == 0 && a + 1 < argc) return castle_shot(argv[a + 1]);
+        if (strcmp(argv[a], "--castle-keep-hunt") == 0 && a + 1 < argc) return castle_keep_hunt(argv[a + 1]);
+        if (strcmp(argv[a], "--selftest-castle-keep") == 0) return selftest_castle_keep(a + 1 < argc ? argv[a + 1] : NULL);
+        if (strcmp(argv[a], "--selftest-hold-emerge") == 0) return selftest_hold_emerge(a + 1 < argc ? argv[a + 1] : NULL);
+        if (strcmp(argv[a], "--selftest-seahorse-post") == 0) return selftest_seahorse_post(a + 1 < argc ? argv[a + 1] : NULL);
+        if (strcmp(argv[a], "--selftest-depth-pop") == 0) return selftest_depth_pop(a + 1 < argc ? argv[a + 1] : NULL);
         if (strcmp(argv[a], "--pumpkin-light") == 0 && a + 1 < argc) return pumpkin_light(argv[a + 1]);
         if (strcmp(argv[a], "--selftest-pumpkin-light") == 0) return selftest_pumpkin_light();
         if (strcmp(argv[a], "--breather-trace") == 0 || strcmp(argv[a], "--selftest-breather") == 0) return breather_trace();
         if (strcmp(argv[a], "--selftest-hold") == 0) return selftest_hold();
+        if (strcmp(argv[a], "--selftest-under-card") == 0) return selftest_under_card();
         if (strcmp(argv[a], "--save-shot") == 0 && a + 1 < argc) return save_shot(argv[a + 1]);
         if (strcmp(argv[a], "--selftest-grassloop") == 0) return selftest_grassloop();
         if (strcmp(argv[a], "--selftest-grasspatch") == 0) return selftest_grasspatch();
         if (strcmp(argv[a], "--selftest-touch-lock") == 0) return selftest_touch_lock();
+        if (strcmp(argv[a], "--selftest-double-tap") == 0) return selftest_double_tap();
         if (strcmp(argv[a], "--selftest-depth") == 0) return selftest_depth();
+        if (strcmp(argv[a], "--selftest-fish-pair") == 0) return selftest_fish_pair(a + 1 < argc && argv[a + 1][0] != '-' ? argv[a + 1] : NULL);
         if (strcmp(argv[a], "--urchin-frond-shot") == 0) return urchin_frond_shot(a + 1 < argc ? argv[a + 1] : NULL);
+        if (strcmp(argv[a], "--selftest-bake-order") == 0) return selftest_bake_order(a + 1 < argc && argv[a + 1][0] != '-' ? argv[a + 1] : NULL);
         if (strcmp(argv[a], "--selftest-footprint") == 0) return selftest_footprint(a + 1 < argc ? argv[a + 1] : NULL);
         if (strcmp(argv[a], "--selftest-place") == 0) return selftest_place(a + 1 < argc ? argv[a + 1] : NULL);
         if (strcmp(argv[a], "--square-boot") == 0) return square_boot(a + 1 < argc ? argv[a + 1] : NULL);
         if (strcmp(argv[a], "--selftest-cave") == 0) return selftest_cave(a + 1 < argc ? argv[a + 1] : NULL);
+        if (strcmp(argv[a], "--selftest-roost") == 0) return selftest_roost(a + 1 < argc ? argv[a + 1] : NULL);
         if (strcmp(argv[a], "--selftest-front-keep") == 0) return selftest_front_keep(a + 1 < argc ? argv[a + 1] : NULL);
+        if (strcmp(argv[a], "--selftest-seahorse-stack") == 0) return selftest_seahorse_stack(a + 1 < argc ? argv[a + 1] : NULL);
         if (strcmp(argv[a], "--selftest-shelf-rename") == 0) return selftest_shelf_rename();
         if (strcmp(argv[a], "--volcano") == 0 && a + 1 < argc) return volcano_shot(argv[a + 1]);
         if (strcmp(argv[a], "--crab") == 0 && a + 1 < argc) return crab_shot(argv[a + 1]);
         if (strcmp(argv[a], "--critter-cards") == 0 && a + 1 < argc) return critter_cards(argv[a + 1]);
         if (strcmp(argv[a], "--selftest-critter-nav") == 0) return selftest_critter_nav();
+        if (strcmp(argv[a], "--fluid") == 0 && a + 1 < argc) return fluid(argv[a + 1]);
         if (strcmp(argv[a], "--clip") == 0 && a + 1 < argc)
             return clip(argv[a + 1], a + 2 < argc ? atoi(argv[a + 2]) : 6);
-        if (strcmp(argv[a], "--snapshot") == 0 && a + 1 < argc)
-            return snapshot(argv[a + 1], a + 2 < argc ? atoi(argv[a + 2]) : 20);
+        if (strcmp(argv[a], "--snapshot") == 0 && a + 1 < argc) {
+            if (!getenv("POCKET_TANK_SAVE")) setenv("POCKET_TANK_SAVE", "/tmp/pocket-tank-snapshot.sav", 1);   /* the pictures never write the sim's own tank (2026-10-06) */
+            return snapshot(argv[a + 1], a + 2 < argc ? atoi(argv[a + 2]) : 20); }
         if (strcmp(argv[a], "--selftest") == 0) return selftest();
         if (strcmp(argv[a], "--bench") == 0) return bench();
         if (strcmp(argv[a], "--bench-place") == 0) return bench_place();
@@ -9996,31 +13149,42 @@ int main(int argc, char **argv) {
         if (strcmp(argv[a], "--selftest-stack") == 0) return selftest_stack(a + 1 < argc ? argv[a + 1] : NULL);
         if (strcmp(argv[a], "--selftest-grasscache") == 0) return selftest_grasscache();
         if (strcmp(argv[a], "--selftest-saves") == 0) return selftest_saves();
+        if (strcmp(argv[a], "--selftest-genes") == 0) return selftest_genes();
         if (strcmp(argv[a], "--selftest-pop") == 0) return selftest_pop();
         if (strcmp(argv[a], "--selftest-card") == 0) return selftest_card(a + 1 < argc ? argv[a + 1] : NULL);
+        if (strcmp(argv[a], "--selftest-clock") == 0) return selftest_clock();
+        if (strcmp(argv[a], "--selftest-keeper") == 0) return selftest_keeper();
         if (strcmp(argv[a], "--selftest-fry") == 0) return selftest_fry(a + 1 < argc ? argv[a + 1] : NULL);
         if (strcmp(argv[a], "--selftest-sleep") == 0) return selftest_sleep();
         if (strcmp(argv[a], "--selftest-shelf") == 0) return selftest_shelf();
+        if (strcmp(argv[a], "--selftest-shelf-safe") == 0) return selftest_shelf_safe();
         if (strcmp(argv[a], "--selftest-shelf-away") == 0) return selftest_shelf_away();
         if (strcmp(argv[a], "--selftest-tend") == 0) return selftest_tend();
         if (strcmp(argv[a], "--selftest-update") == 0) return selftest_update();
+        if (strcmp(argv[a], "--selftest-passport") == 0) return selftest_passport();
+        if (strcmp(argv[a], "--selftest-link") == 0) return selftest_link();
+        if (strcmp(argv[a], "--selftest-doors") == 0) return selftest_doors();
+        if (strcmp(argv[a], "--selftest-fry-cap") == 0) return selftest_fry_cap();
         if (strcmp(argv[a], "--selftest-advanced") == 0) return selftest_advanced();
         if (strcmp(argv[a], "--selftest-model") == 0)
             return selftest_model(a + 1 < argc && argv[a + 1][0] != '-' ? argv[a + 1] : NULL);
         if (strcmp(argv[a], "--selftest-board") == 0)
             return selftest_board(a + 1 < argc && argv[a + 1][0] != '-' ? argv[a + 1] : NULL);
+        if (strcmp(argv[a], "--selftest-give") == 0) return selftest_give();
         if (strcmp(argv[a], "--selftest-llm") == 0)
             return selftest_llm(a + 1 < argc ? atoi(argv[a + 1]) : 0);
         if (strcmp(argv[a], "--selftest-drift") == 0) return selftest_drift();
         if (strcmp(argv[a], "--selftest-temper") == 0) return selftest_temper();
     }
 
+    tank_entropy = sim_entropy;                       /* fish and tank IDs: the OS (the selftests keep the seeded mix) */
     tank_init(&tank, (uint32_t)SDL_GetTicks() + 7);
     battery_init(&sim_bat, NULL);
-    bool fresh = false, fullscreen = false;
+    bool fresh = false, forms = false, fullscreen = false;
     int zoom = 1;                                /* the window at N x the glass (whole pixels only; taps divide back) */
     for (int a = 1; a < argc; a++) {
         if (strcmp(argv[a], "--fresh") == 0) fresh = true;
+        if (strcmp(argv[a], "--forms") == 0) forms = true;
         if (strcmp(argv[a], "--battery") == 0 && a + 1 < argc) sim_bat_pct = fminf(100, fmaxf(0, (float)atof(argv[++a])));
         if (strcmp(argv[a], "--fast") == 0 && a + 1 < argc) progression_time_scale = (float)atof(argv[++a]);
         if (strcmp(argv[a], "--zoom") == 0 && a + 1 < argc) zoom = atoi(argv[++a]);
@@ -10031,10 +13195,18 @@ int main(int argc, char **argv) {
         char cmd[600]; snprintf(cmd, sizeof cmd, "rm -f '%s/.cache/pocket-tank/tank.sav'", getenv("HOME") ? getenv("HOME") : ".");
         (void)system(cmd);
     }
+    if (forms) {                           /* a save of its own, started over each time: the keeper's sim tank is left alone */
+        char p[512]; snprintf(p, sizeof p, "%s/.cache/pocket-tank/forms.sav", getenv("HOME") ? getenv("HOME") : ".");
+        remove(p); setenv("POCKET_TANK_SAVE", p, 1);
+    }
     progression_boot(&tank);               /* restore, or a new random pair */
+    if (forms) {
+        forms_cast(4); progression_setup_done(&tank); print_roster(&tank);
+        printf("forms (0.4): four grown fish, every body / fin set / pattern, each carrying secrets; R = an arrival (its genes print), 1 / 2 / 3 step, 5 rolls\n");
+    }
     { uint32_t r = progression_loaded_release();
       printf("pocket-tank v%s %s (build %s); the save was written by %s", PT_RELEASE, PT_RELEASE_STAGE, version_port_string(), r ? "" : "a build before release numbers (or there was none)\n");
-      if (r) printf("v%d.%d.%d\n", (int)(r >> 16), (int)(r >> 8 & 255), (int)(r & 255)); }
+      if (r) printf("v%d.%d.%d.%d\n", (int)(r >> 24), (int)(r >> 16 & 255), (int)(r >> 8 & 255), (int)(r & 255)); }
     print_roster(&tank);
     notice_sync(&tank);                    /* nothing old gets announced */
     if (strcmp(board_port_hw(), PT_BOARD)) notice_wrong_board();   /* --hw another board: the WRONG VERSION card (0.3.9.3) */
@@ -10090,7 +13262,7 @@ int main(int argc, char **argv) {
     lv_obj_center(canvas);
     render_set_scene_cache(scene_buf);
     render_set_vignette_cache(vig_buf);
-    render_set_card_cache(card_buf);
+    render_set_card_cache(card_buf); render_set_modal_cache(give_buf, gift_buf);
     render_set_dirty_mask(dirty_buf);
 
     last_ms = SDL_GetTicks();
@@ -10180,8 +13352,10 @@ int main(int argc, char **argv) {
             if (r == SET_TAP_CLOSE) { settings_view = false; milestones_view = true; ms_back = true; }   /* back to the milestones page */
             else if (r == SET_TAP_UPDATES) { settings_view = false; updates_view = true; ms_back = true; printf("updates page\n"); }
             else if (r == SET_TAP_BRIGHT || r == SET_TAP_BRIGHT_LIVE) sim_bright = v;
-            else if (r == SET_TAP_VOLUME) { if (s_adev) { SDL_LockAudioDevice(s_adev); audio_set_volume(v); SDL_UnlockAudioDevice(s_adev); } if (v) snd(SND_CONFIRM, AUDIO_PITCH_ONE);
-                                            printf("volume: %s\n", v == 0 ? "off" : v == 1 ? "quiet" : "normal"); }
+            else if (r == SET_TAP_VOLUME || r == SET_TAP_VOLUME_LIVE) {   /* the slider: heard as it moves (a tick a step), the lift keeps it */
+                if (s_adev) { SDL_LockAudioDevice(s_adev); audio_set_volume(v); SDL_UnlockAudioDevice(s_adev); } else audio_set_volume(v);
+                if (v) snd(r == SET_TAP_VOLUME ? SND_CONFIRM : SND_WHEEL_TICK, AUDIO_PITCH_ONE);
+                if (r == SET_TAP_VOLUME) { if (v) printf("volume: %d%%\n", v); else printf("volume: off\n"); } }
             else if (r == SET_TAP_LIGHT) printf("lights out: %s\n", v ? "AUTO (the idle rule)" : "MANUAL (double-tap the glass, the default)");
             else if (r == SET_TAP_SCREEN) printf("screen: %s\n", v ? "TURNED" : "NORMAL");
             else if (r == SET_TAP_IDLE) printf("lights out after %d s still\n", v);
@@ -10198,13 +13372,7 @@ int main(int argc, char **argv) {
             }
         }
         bool modal = confirm_view || setup_up || settings_view || shop_view || battery_view || updates_view || adv_up();
-        if (mpress && !modal) tank_touch_drag(&tank, (float)mx, (float)my);   /* stroke -> wipe/slash */
-        if (mpress && !modal && !held_page && tank.tool == TOOL_HAND && now_ms - press_ms > 700 && abs(mx - press_x) < 24 && abs(my - press_y) < 24) {   /* tap-and-hold on a piece: its page (2026-09-24); not with a tool in hand */
-            int it = tank_decor_hit(&tank, (float)press_x, (float)press_y);
-            if (it >= 0) { setup_begin_place(&tank, it); held_page = true; selected_fish = -1; printf("held on the %s: placement page up (MOVE / DEPTH / SELL)\n", SD_ITEMS[it].name); }
-        }
-        if (!mpress) held_page = false;
-        if (mpress && !modal && !held_page && now_ms - press_ms > 300 && abs(my - press_y) < 30) tank_touch_hold(&tank, (float)mx, (float)my);
+        sim_tank_gestures(mpress, mx, my, press_x, press_y, now_ms - press_ms, modal, &held_page);
         if (!mpress && mdown) {
             int dx = mx - press_x, dy = my - press_y;
             if (confirm_view) {                    /* the prompt owns the glass: press AND release on one button */
@@ -10299,6 +13467,14 @@ int main(int argc, char **argv) {
                     battery_view = true; battery_view_ms = now_ms; selected_fish = -1;
                     printf("battery page: %d%%, %s\n", sim_bat_gauge(), sim_bat_state == BAT_CHARGING ? "charging" : sim_bat_state == BAT_FULL ? "full" : "on battery");
                 }
+                else if (render_give_modal_step(&tank) != RENDER_GM_OFF) {   /* the GIVE modal takes every click while it is up */
+                    int r = render_give_modal_tap(&tank, (float)press_x, (float)press_y);
+                    printf("give modal: tap -> %d (RENDER_GM_TAP_*)\n", r);
+                }
+                else if (selected_fish >= 0 && selected_fish < tank.n_fish && render_give_hit(&tank, selected_fish, (float)press_x, (float)press_y)) {
+                    render_give_tap(&tank, selected_fish);       /* GIVE on the stat card while linked (0.4) */
+                    printf("give box: tapped (%s)\n", tank.fish[selected_fish].name);
+                }
                 else if (selected_fish >= 0 && selected_fish < tank.n_fish && render_tools_hit((float)press_x, (float)press_y) >= 0) {
                     /* the toolbox under the card (2026-10-01): pick a tool up (or put the one in hand back), the card goes */
                     int tl = render_tools_hit((float)press_x, (float)press_y);
@@ -10386,8 +13562,8 @@ int main(int argc, char **argv) {
             else { setup_begin(&tank); selected_fish = -1; milestones_view = false; printf("setup: welcome page (click through; BEGIN saves)\n"); }
         }
         sdown = k[SDL_SCANCODE_S];
-        if (k[SDL_SCANCODE_V] && !vdown) { int v = (audio_volume() + 1) % 3; if (s_adev) { SDL_LockAudioDevice(s_adev); audio_set_volume(v); SDL_UnlockAudioDevice(s_adev); }
-                                           printf("volume: %s\n", v == 0 ? "off" : v == 1 ? "quiet" : "normal"); }
+        if (k[SDL_SCANCODE_V] && !vdown) { int v = audio_volume() >= 100 ? 0 : audio_volume() >= 50 ? 100 : 50; if (s_adev) { SDL_LockAudioDevice(s_adev); audio_set_volume(v); SDL_UnlockAudioDevice(s_adev); }
+                                           if (v) printf("volume: %d%%\n", v); else printf("volume: off\n"); }
         vdown = k[SDL_SCANCODE_V];
         if (k[SDL_SCANCODE_B] && !bdown) { notice_low_battery(); printf("low battery notice queued\n"); }
         bdown = k[SDL_SCANCODE_B];
@@ -10450,6 +13626,27 @@ int main(int argc, char **argv) {
                    (tank.sd_unlocks & SD_ITEM_URCHIN) ? "in the tank" : "gone", SD_PRICE_URCHIN);
         }
         ydown = k[SDL_SCANCODE_Y];
+        {   /* the genes (0.4): 1 / 2 / 3 step the body shape / fin set / pattern of the
+               fish whose card is up, or of every fish (each one step on); 5 rolls every fish */
+            static bool gdown[4];
+            const SDL_Scancode GK[4] = { SDL_SCANCODE_1, SDL_SCANCODE_2, SDL_SCANCODE_3, SDL_SCANCODE_5 };
+            for (int g = 0; g < 4; g++) {
+                if (k[GK[g]] && !gdown[g]) {
+                    for (int i = 0; i < tank.n_fish; i++) {
+                        if (selected_fish >= 0 && selected_fish < tank.n_fish && i != selected_fish) continue;
+                        fish_t *f = &tank.fish[i];
+                        if (g == 0) f->shape = (uint8_t)((f->shape + 1) % SHAPE_N);
+                        if (g == 1) f->fins = (uint8_t)((f->fins + 1) % FINS_N);
+                        if (g == 2) f->pattern = (uint8_t)((f->pattern + 1) % PATTERN_N);
+                        if (g == 3) { f->shape = (uint8_t)(rand() % SHAPE_N); f->fins = (uint8_t)(rand() % FINS_N);
+                                      f->pattern = (uint8_t)(rand() % PATTERN_N); tank_roll_carried(&tank, i); }
+                        printf("  %-8s %s / %s / %s (%s)\n", f->name, SHAPE_NAMES[f->shape], FINS_NAMES[f->fins], PATTERN_NAMES[f->pattern],
+                               f->stage == STAGE_FRY ? "a fry: shape only" : f->stage == STAGE_JUV ? "a juvenile: no fin set yet" : "grown");
+                    }
+                }
+                gdown[g] = k[GK[g]];
+            }
+        }
         if (k[SDL_SCANCODE_F] && !hdown && (tank.sd_unlocks & SD_ITEM_CRAB)) {   /* F: the crab digs up a sand dollar within seconds (0.3.9) */
             tank.cr_find_cool = 0; tank.cr_y = 0; tank.cr_tilt = 0; tank.cr_cave = -1; tank.cr_mode = CR_DIG; tank.cr_mode_s = 0; tank.cr_timer = 60; tank.cr_find = 0;
             tank_handled(&tank);                                                 /* (the keeper is here: a due find needs that, and the light on) */

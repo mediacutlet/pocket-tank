@@ -6,6 +6,11 @@
 
 typedef struct { uint8_t w, h; const uint16_t *rgb; const uint8_t *a; } icon_t;
 
+extern const icon_t icon_foot_close;
+extern const icon_t icon_foot_my_tanks;
+extern const icon_t icon_foot_passport;
+extern const icon_t icon_foot_sand_dollar;
+extern const icon_t icon_foot_settings;
 extern const icon_t icon_bold;
 extern const icon_t icon_cautious;
 extern const icon_t icon_curiosity;
@@ -27,6 +32,7 @@ extern const icon_t icon_ms_first_follow;
 extern const icon_t icon_ms_first_glass_cleaning;
 extern const icon_t icon_ms_first_hold_approach;
 extern const icon_t icon_ms_first_meal;
+extern const icon_t icon_ms_first_mutation;
 extern const icon_t icon_ms_first_play_session;
 extern const icon_t icon_ms_first_quiet_night;
 extern const icon_t icon_ms_first_reef;

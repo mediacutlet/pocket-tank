@@ -67,6 +67,7 @@ typedef struct { int kind; int fish; uint32_t bit; float age; } notice_t;
 void notice_sync(const tank_t *t);
 void notice_tick(const tank_t *t, float dt, bool blocked);
 const notice_t *notice_current(void);      /* NULL = none up */
+void notice_fish_removed(int idx);         /* a fish left, the slots shifted: notices follow their fish (or go) */
 bool notice_dismiss(void);                 /* a tap: true = the notice took it (closed, or held: still up), false = it goes on to the tank */
 void notice_low_battery(void);             /* platform: the gauge fell to the threshold */
 void notice_updated(void);                 /* platform: the first boot of a new release (after notice_sync) */

@@ -5,8 +5,8 @@
  * World geometry (bubble column, reef, zones) matches model/gen_traces.py so
  * the advisor model sees the world it was trained on.
  *
- * Population (docs/progression-next.md): the tank holds up to N_FISH_MAX fish
- * but only fish[0..n_fish-1] are alive/active. A new tank starts with two
+ * Population (docs/progression-next.md): the tank holds up to POP_CAP fish (5,
+ * N_FISH_MAX the array bound) and only fish[0..n_fish-1] are alive/active. A new tank starts with two
  * adults of contrasting personality; the rest arrive later as fry (the
  * progression layer decides when). Every loop in this file, the renderer and
  * the advisors iterates n_fish, never N_FISH_MAX.
@@ -19,6 +19,7 @@
 
 #include <stdbool.h>
 #include <stdint.h>
+#include <math.h>
 
 #ifdef TANK_ROUND               /* the round 466 px glass (Waveshare 1.75C, 2026-10-01): the frame is the square around a bowl */
 #define TANK_W 466
@@ -90,10 +91,61 @@ float tank_glass_top(float x);                         /* the glass above x (0 i
 void  tank_glass_clamp(float *x, float *y, float m);   /* (x,y) brought to at least m px inside the glass and above the bottom */
 
 #define N_FISH_MAX 6            /* array bound; the live count is tank_t.n_fish */
+/* THE CAP (Strato 2026-11-03): a keeper's tank holds at most POP_CAP fish, never more, on every path - the sim and
+ * every board alike (the device shipped 5 while the sim ran 6, the array bound, and the cap's leaks hid behind it).
+ * N_FISH_MAX stays the array bound: a fry is born into the slot past the fish before it waits for its home, visitors
+ * have their own slots after. Every count against the cap is the fish here AND the places held for gifts and fry we
+ * said yes to (progression.c fish_held; progression_cap_check guards it). Defined here only: */
+#ifdef POP_CAP
+#error "POP_CAP is the keeper's cap, 5 on every build: tank.h defines it, nothing else"
+#endif
+#define POP_CAP 5
+#if POP_CAP >= N_FISH_MAX
+#error "a fry is born into the slot past the cap before it goes to its home: N_FISH_MAX must stay above POP_CAP"
+#endif
+#define N_VISIT_MAX 4           /* the tank link (0.4): visitors from a neighbor tank, in their own slots after
+                                 * the home fish - fish[N_FISH_MAX + k] - so every loop over n_fish (the save,
+                                 * progression, selling, the cards) leaves them out unless it asks for them */
+#define N_FISH_SLOTS (N_FISH_MAX + N_VISIT_MAX)
+#define TANK_FRY_HOLDS 2        /* places held at home for fry courting next door: one per neighbor (tank_t.fry_hold) */
 #define N_FISH_START 2          /* a new tank: two contrasting adults */
 #define N_TRAINED_NAMES 4       /* name tokens the v2 model was trained on */
 #define FISH_NAME_MAX 7         /* the keeper's name for a fish (first-run setup) */
-#define LOOK_N 8                /* body / accent swatches the keeper can pick from */
+#define LOOK_N 9                /* the colors the keeper picks a body and markings from (one palette, 0.4) */
+/* the genes of form (0.4, docs/genetics-0.4.md): a body shape, a fin
+ * arrangement, a pattern of the accent color. 0 is the only form before 0.4
+ * (CLASSIC / CLASSIC / BARS), so a fish nothing has touched draws exactly as
+ * it always has. Render-only: the model never sees a look. */
+enum { SHAPE_CLASSIC, SHAPE_SLENDER, SHAPE_BULBOUS, SHAPE_N };
+enum { FINS_CLASSIC, FINS_VEIL, FINS_SAIL, FINS_N };
+/* PATTERN_SOLID (Strato 10-04): no markings - a solid fish; a gene like the
+ * others (inherited, carried, a mutation's possible pick). The editor shows
+ * the three markings as tiles and reaches SOLID by deselecting the picked one */
+enum { PATTERN_BARS, PATTERN_MASK, PATTERN_EYEBAND, PATTERN_SOLID, PATTERN_N };
+#define PATTERN_TILES 3
+extern const char *const SHAPE_NAMES[SHAPE_N], *const FINS_NAMES[FINS_N], *const PATTERN_NAMES[PATTERN_N];
+/* heredity (0.4): five genes. Every fish SHOWS one copy of each and CARRIES a
+ * second it does not show. A fry takes one copy from each parent - the one
+ * that parent shows, or GENE_PASS_CARRIED of the time the one it carries -
+ * shows one of the two (a coin) and carries the other, so a trait can skip a
+ * generation. GENE_MUTATION of fry show, in one gene, a value neither parent
+ * shows. The colour genes are LOOK_BODY / LOOK_ACCENT indexes (the fish keeps
+ * the RGB it shows in color / accent, as before 0.4). */
+enum { GENE_SHAPE, GENE_FINS, GENE_PATTERN, GENE_BODY, GENE_ACCENT, GENE_N };
+#define GENE_PASS_CARRIED 0.25f
+#define GENE_MUTATION     0.05f
+extern const char *const GENE_NAMES[GENE_N];
+int   tank_gene_values(int g);                       /* how many values gene g has */
+/* motion feel (0.4, Strato's pick: looks + motion, no effect on the economy
+ * or the model): the form scales the fish's turn rate - the heading's swing
+ * and the yaw turn alike, and the tail beat's pace (tank_fish_beat_rate).
+ * CLASSIC x CLASSIC is exactly 1: today's fish steer as they always have. */
+#define TURN_SLENDER 1.10f      /* a long low body: quick */
+#define TURN_BULBOUS 1.05f      /* a short body pivots */
+#define TURN_VEIL    0.95f      /* the long fins drag a little */
+#define BEAT_SLENDER 1.15f      /* the tail beat: a slender's quicker */
+#define BEAT_BULBOUS 0.90f      /* ... a bulbous one's slower */
+#define BEAT_VEIL    0.92f      /* ... the long fins drag it a little */
 #define MAX_FOOD   8
 #define MAX_BUBBLE 24
 
@@ -240,7 +292,11 @@ enum {
     MS_RETIRED_6 = 1u << 6, MS_RETIRED_7 = 1u << 7, MS_FIRST_FOLLOW = 1u << 8,
     MS_REACHED_JUV = 1u << 9, MS_REACHED_ADULT = 1u << 10, MS_REACHED_ELDER = 1u << 11,
     MS_FIRST_GRASS = 1u << 12,                               /* rested (or hid) inside a seagrass canopy (2026-10-02) */
-    MS_FISH_COUNT = 13
+    MS_FISH_COUNT = 13,                                      /* (the badges; the bits past it are no badge) */
+    /* born of a visitor and one of the tank it was born in (cross-tank fry,
+       2026-10-05): no badge, never a notice - Strato: "worth double" (its
+       SELL). It travels in the passport and is saved like the badges */
+    MS_CROSSBRED = 1u << 13
 };
 #define MS_RETIRED_MASK (MS_RETIRED_6 | MS_RETIRED_7)
 /* tank-level milestone bits */
@@ -252,7 +308,7 @@ enum {
     TMS_FIRST_TRIM = 1u << 9, TMS_FIRST_CLEANING = 1u << 10,
     TMS_FULL_SCHOOL = 1u << 11,                              /* the shrimp school reached SHRIMP_MAX (2026-09-30) */
     TMS_FIRST_REEF = 1u << 12,                               /* a fish went to look at the reef cluster (2026-10-02) */
-    /* 1u << 13 is 0.4's TMS_FIRST_MUTATION (main): never set on 0.3.x */
+    TMS_FIRST_MUTATION = 1u << 13,                           /* a fry was born with a mutation (0.4, heredity) */
     TMS_FIRST_SALE = 1u << 14,                               /* a fish sold: fry for sale in the shop (0.3.5) */
     TMS_SEAHORSE_FED = 1u << 15,                             /* the seahorse's first snack (0.3.6); its badge shows once it is bought */
     TMS_CRAB_FIND = 1u << 16,                                /* the crab's first sand dollar, taken (0.3.9); its badge shows once it is bought */
@@ -271,6 +327,18 @@ typedef struct {
                              * fish head-on) and the swim follows it. Not saved. */
     float yaw_tail;         /* the tail's yaw, a beat behind the head's: mid-turn
                              * the body bends (render.c draws both) */
+    /* the trail (0.4, Strato 11-02: a long fish "moves with it on the pivot
+     * point faster than would be possible in water"): the body's pitch as
+     * drawn, the tail's - a spring behind it, so a long tail keeps its way
+     * through a turn and catches up, a touch past - their swing rates, the
+     * tail yaw's, and the speed the fins have felt (a burst streams them
+     * back, a stop lets them billow). tank_fish_trail; render.c bends the
+     * rear body by the gap. Not saved */
+    float pitch_b, pitch_bv, pitch_t, pitch_tv, yaw_tv, speed_t;
+    float beat;             /* the tail beat's phase, radians under 2 pi: its rate x each frame's dt (tank_fish_beat_rate),
+                             * so a change of speed changes its pace and never jumps it (0.4: it was the clock x the
+                             * rate - a jump that grew with the clock, a thrash after an overnight wake). Not saved */
+    float beg;              /* begging under the feed spot: its darts' phase, at a rate its boldness sets. Not saved */
     int8_t facing;          /* the side it swims on, +1 right / -1 left: changes only
                              * by a committed turn (or the glass). Not saved. */
     float behind;           /* seconds its way has lain behind it (a turn commits
@@ -316,7 +384,12 @@ typedef struct {
                              * every piece. Never BEHIND at rest (D2: a resting fish stays in sight) */
     bool   hold_far;        /* was HOLD_APPROACH_FROM+ px from the finger when this hold's draw
                              * began (transient): only such a fish can earn a hold-approach */
-    float  zone_seen[6];    /* tank clock when the fish was last in each zone */
+    bool   hold_call;       /* answering a held finger (the last frame's steering, transient): it wants to be in
+                             * sight - in front of the grass and the pieces - and a piece hiding it is swum out
+                             * from round its nearest side first (Strato 11-01: "the fish would not be able to see
+                             * my finger through the volcano"); its jump to the front may cross the seagrass, never
+                             * a piece (tank.c piece_exit) */
+    double zone_seen[6];    /* tank clock when the fish was last in each zone */
     float  explore_x, explore_y; /* explore's destination - a point in a stale zone */
     bool   explore_set;     /* ... valid; cleared when explore is (re)chosen or reached */
     int    eaten;
@@ -340,7 +413,42 @@ typedef struct {
      * parent_b's, bold / sociable the pair's average with a nudge. -1 = one
      * of the founding pair (or an older save). Saved per fish. */
     int8_t parent_a, parent_b;
+    /* its form (SHAPE_* / FINS_* / PATTERN_*; 0.4). The body shape shows from
+     * birth, the pattern comes in at JUVENILE (as the bars always have), the
+     * fin arrangement at ADULT (a fry and a juvenile have the plain tail).
+     * Saved in the genes tail (progression.c). */
+    uint8_t shape, fins, pattern;
+    /* heredity (GENE_*): the copy of each gene it carries and does not show;
+     * the gene that mutated at its birth (+ 1; 0 = none); and where each shown
+     * copy came from - bit g of from_b: parent_b (else parent_a), of
+     * from_carried: that parent's CARRIED copy (a family secret surfacing) */
+    uint8_t carried[GENE_N], mutated, from_b, from_carried;
+    /* identity (0.4, the tank link - docs/tank-link-0.4.md on its branch; the
+     * names are the link's, lifted from its 5d1230a so it rebases clean): a
+     * random 32-bit ID made when the fish is made, never reused, never 0, and
+     * the IDs of the two fish it came from (0 = a founder, or not known). A
+     * slot is where a fish lives in THIS tank; the ID is who it is anywhere -
+     * kept for life (a sale, a rename, a move to another tank). Saved in the
+     * identity tail (progression.c); a pre-0.4 save's fish get fresh IDs at
+     * load (tank_ensure_ids), their parents' from the parent slots. */
+    uint32_t uid, parent_uid[2];
+    /* the tank link's doors (0.4, docs/tank-link-0.4.md). away: one of ours
+     * visiting next door - not simulated, not drawn, not aged here (saved, so a
+     * crash brings it home). door: where it is with a door - DOOR_NONE, HEADING
+     * (exploring toward it), ASKED (at the glass, the neighbor asked), PASSING
+     * (through the glass - no walls), ENTERING (coming in from a door). Not
+     * saved. homeward: a visitor told to go home (the drift rule). bolt_home:
+     * a visitor the keeper spooked (the triple tap) - home through its door
+     * at a flight's speed (Strato 2026-10-05: "it should high tail it home") */
+    bool     away, homeward, door_sent, bolt_home;
+    bool     born_away;         /* home: a fry born next door, swimming home - its birth flow waits for it (phase 5) */
+    uint32_t follow_uid;        /* host: a visiting parent trails its fry home - this one, while it is still here (phase 5) */
+    bool     deported;          /* host: the keeper sent it home (DEPORT) - briskly, no fright; home: a fish GIVEN away, off to the door the same way */   /* door_sent: the OFFER for this trip is out (tank_link.c) */
+    int8_t   door, door_edge;
+    double   door_seen;         /* tank clock of its last visit next door (the neighbor ages like a zone) */
+    double   door_refused;      /* tank clock until which a door refused it is glass for it */
 } fish_t;
+enum { DOOR_NONE, DOOR_HEADING, DOOR_ASKED, DOOR_PASSING, DOOR_ENTERING };
 
 /* a pellet: it sinks FOOD_SINK_PX_S from the surface to the floor (~43 s on
  * the 1.8, ~60 on the watch), then RESTS there FOOD_FLOOR_S before it
@@ -394,13 +502,15 @@ typedef struct {
 typedef struct { float x, y, vy, wobble; bool column; } bubble_t;
 
 typedef struct tank {
-    fish_t   fish[N_FISH_MAX];
+    fish_t   fish[N_FISH_SLOTS];       /* home fish 0..n_fish-1, visitors at N_FISH_MAX + k (vis_used) */
     int      n_fish;               /* live fish = fish[0..n_fish-1] */
     food_t   food[MAX_FOOD];
     bubble_t bubble[MAX_BUBBLE];
     float    bubble_x, bubble_y;   /* bubble column anchor */
     float    reef_x, reef_y;
-    float    clock;                /* seconds since start */
+    double   clock;                /* seconds since start - a double (0.4): a float stopped at 2^20 s (~12 days awake;
+                                    * rounding every frame from ~3 days), and every hold, wait and sway with it. Every
+                                    * stamp it is compared with is a double too; a drawing takes tank_anim's float */
     bool     night;                /* the tank light is off: fish rest, the palette dims */
     float    idle_s;               /* seconds since the device was last HANDLED - moved
                                     * (IMU) or touched. The light goes off once this
@@ -573,7 +683,7 @@ typedef struct tank {
     float    cr_shuffle_to;        /* a shuffle's x (CR_FID_SHUFFLE) */
     uint8_t  cr_taps;              /* quick taps so far (tank_crab_tap): the third sends it running */
     bool     cr_scurry;            /* running for a shelter: CR_SCURRY_PX_S, food ignored, until the next mode */
-    float    cr_tap_t;             /* the clock at the last tap */
+    double   cr_tap_t;             /* the clock at the last tap */
     float    cr_hide;              /* seconds left backed into its shelter's dark (scared) */
     float    cr_back;              /* how far back into the dark it is, 0 (at the mouth) .. 1: eases in over CR_BACK_IN_S while cr_hide runs,
                                     * out over CR_BACK_OUT_S after (render: smaller, higher, darker with it - it BACKS UP, never a switch; Strato 10-24) */
@@ -613,9 +723,24 @@ typedef struct tank {
                                     * front, like the snail's front lane (a hold on an odd frond or a piece IN
                                     * FRONT). Chosen with each hold (Strato 10-15: a seahorse can swim to a
                                     * different z-layer and anchor) */
+    bool     sh_front_want;        /* ... the lane its hold asks for (sh_take): taken up clear of every piece, or as it settles
+                                    * on the hold - never a pop through a piece (0.4); a held finger's call asks for the front
+                                    * (Strato 11-01). Not saved */
     uint8_t  sh_gdepth, sh_gdepth_want, sh_drift_rolled;   /* SWIM DEPTH phase 3 (0.3.9.4): against the back grass - THROUGH coiled on a blade, in front
                                     * holding a piece or the sand, its own roll drifting; taken up clear of every bed (its lane
                                     * stays its choice against the pieces). Not saved */
+    int8_t   sh_obed;              /* THE BED'S STACK (0.3.9.7, a keeper's square on #help 11-01 "Seahorse hold": holding a
+                                    * seagrass blade behind the castle, a sword plant's leaf behind the volcano, it was drawn
+                                    * over the piece): the bed whose frond it is coiled on - every piece that stands before that
+                                    * bed (render.c veg_skip_for) stands before it too, whatever its lane. -1 = its lane alone.
+                                    * Taken up when it heads for a frond and dropped once it heads elsewhere, either way only
+                                    * clear of every piece (nothing pops through one) - or as it settles on the frond. Not saved */
+    int8_t   sh_opost;             /* THE PIECE'S STACK (0.4, a keeper's pendant 11-01: holding the castle's rear tower, the
+                                    * seahorse was drawn under a volcano the castle stands before): the piece whose post it holds
+                                    * (item, -1 none) - it is drawn right before that piece, under every piece that stands before
+                                    * it; sh_orow: the castle's rear tower, behind the castle's own front row too. Taken up as
+                                    * sh_obed is. Not saved */
+    bool     sh_orow;
     uint8_t  sh_mode;              /* SH_PERCH / SH_DRIFT / SH_HITCH (tank.h, below) */
     int8_t   sh_facing;            /* +1 = its snout points right */
     bool     sh_hitched;           /* at the finger's edge now: the trust boost is on */
@@ -631,7 +756,8 @@ typedef struct tank {
     float    sh_stay;              /* seconds left on this blade, or of the linger after a hold */
     float    sh_look;              /* on the sand: seconds to its next look for something better (a new
                                     * plant or piece takes it off the bottom at once, not at the rest's end) */
-    float    sh_s;                 /* seconds with the keeper, awake and asleep (its card: days). Saved */
+    double   sh_s;                 /* seconds with the keeper, awake and asleep (its card: days). Saved (a float at 1864 for
+                                    * older builds, its whole seconds at 1952: a float stops adding a frame at ~12 days) */
     int32_t  sh_hitches;           /* times it has curled on the finger, lifetime. Saved */
     float    sh_trust_passed;      /* trust the fish earned over the base rate while it hung there, lifetime. Saved */
     /* its SNACKS (Strato 10-15): it never chases food like the fish or the
@@ -757,6 +883,8 @@ typedef struct tank {
     uint8_t  roster_gen;           /* ticks when a fish leaves and the slots shift (tank_remove_fish):
                                     * the advisors drop what they were asked about the old slots.
                                     * Not saved. */
+    int8_t   removed_slot;         /* the slot the fish left from at the last roster_gen tick (-1: that tick was an
+                                    * arrival): a platform's own slot (the stat card's fish) follows its fish. Not saved. */
     int8_t   stage_fish;          /* setup: this fish is being named / coloured - it swims
                                     * a slow loop at (stage_x, stage_y), the clear spot the
                                     * page leaves for it, so it is never behind the UI
@@ -776,6 +904,53 @@ typedef struct tank {
     int      ask_rr;               /* rotating start index for fairness */
     uint32_t advisor_asks;         /* diagnostic: requests issued */
     uint32_t rng;                  /* xorshift state, deterministic */
+    uint32_t gene_rng;             /* heredity's own stream (0.4): genes never move what rng draws */
+    bool     mutate_next;          /* the next fry is a mutation, whatever the odds (the director's `arrive mutant`;
+                                    * not saved, cleared by that birth) */
+    uint32_t uid;                  /* this tank's ID (0.4, the tank link): random, never 0; see fish_t.uid */
+    /* the tank link's side of the tank (tank_link.c): which side doors are open
+     * (and not paused), the visitors, a boot's restore of fish that were away */
+    bool     door_open[2];         /* [0] left, [1] right (link.h LINK_LEFT / LINK_RIGHT) */
+    bool     vis_used[N_VISIT_MAX];
+    uint32_t vis_home[N_VISIT_MAX];  /* the visitor's home tank */
+    char     vis_home_name[N_VISIT_MAX][16];   /* ... what its keeper named it ("" = a default name; passport v2's home_name) */
+    float    vis_age[N_VISIT_MAX];   /* its tended age (its passport's, growing here) */
+    double   vis_since[N_VISIT_MAX]; /* tank clock it arrived */
+    int8_t   vis_badge[N_VISIT_MAX]; /* its home tank's badge (link.h LINK_BADGES), drawn small above it; -1 = not known */
+    /* cross-tank fry (phase 5, docs/tank-link-0.4.md). Host side: the visitor
+       picked to court one of ours (0 = none), whether its home has room
+       (-1 unknown), the visitors already given their coin since the last
+       birth; a fry born here for the visitor's home waits in visitor slot
+       fry_give_k (vis_pending: not swimming, not drawn) until its home says */
+    uint32_t deport_uid;         /* a DEPORT for tank_link to tell the engine (refused at our door a while) */
+    int8_t   link_badge;         /* this tank's badge while the link is up (-1: none) - the passport card's stamp */
+    uint32_t fry_partner;
+    uint32_t fry_mate;           /* the host fish the partner grew close to (time together), 0 = our best */
+    double   fry_ask_at;         /* tank clock of the last room ask (asked again every TANK_LINK_FRY_ASK_S, yes or no) */
+    double   fry_room_at;        /* ... of its home's last answer: a yes older than TANK_LINK_FRY_FRESH_S is not known any more */
+    uint32_t fry_ask_uid;        /* the visitor last asked about: when the pair is off, its home lets go of the place */
+    /* time together (Strato 2026-10-06): a visitor and the fish of ours it
+       swims beside build up time, across visits; at a goal of its own (5-10
+       min, random) the pair may court - the cross-tank fry's own path, the
+       host's care gates not needed. Not saved */
+    struct { uint32_t vis, mate; float s, need; } bond[6];
+    int8_t   fry_home_room, fry_give_k;
+    int8_t   fry_force;          /* the director / selftests: the next cross-tank fry's coin (1 = its home's, 0 = ours, -1 = the coin) */
+    bool     fry_asked, fry_give_sent;
+    uint32_t fry_give_parent;
+    uint32_t fry_rolled[N_VISIT_MAX];
+    bool     vis_pending[N_VISIT_MAX];
+    /* home side (2026-11-03, the cap): a place HELD for a fry of ours courting next door - the host asked for room and
+       we said yes. fish_held counts it, so nothing else takes it (a birth here, a gift, another fry, a shop fry). It
+       ends when the fry comes (LEV_FRY_IN), when the host says the pair is off, when that fish of ours is no longer
+       next door at that tank, or TANK_LINK_FRY_HOLD_S after the host's last ask. One a neighbor (a host courts one
+       visitor at a time); not saved (a boot opens no doors) */
+    struct { uint32_t peer, parent; double until; } fry_hold[TANK_FRY_HOLDS];
+    int8_t   cap_over;           /* a save that came back with more than POP_CAP fish (an older build's leak - the sim ran 6,
+                                    a cross-tank fry made a sixth): its count, which THE CAP's guard allows until it falls
+                                    to the cap (fish leave on their own: a sale, a gift); 0 = none. Nobody is taken away */
+    double   link_restore_at;      /* > 0: at this clock, fish still away come home from bubbles (a boot found them away) */
+    uint32_t uid_n;                /* IDs this tank has handed out (mixed into the next when no entropy hook is set) */
 } tank_t;
 
 /* Advisor interface (Track 1 model, rule stub, or firmware LLM core).
@@ -804,6 +979,40 @@ typedef goal_t (*advisor_fn)(const tank_t *t, int fish_idx, bool request);
 #define BORED_RELIEF_PER_S 0.3f   /* while eating, or resting at night */
 
 void  tank_init(tank_t *t, uint32_t seed);
+/* identity (0.4): IDs come from tank_entropy when the platform sets it (the
+ * firmware: the chip's hardware RNG; the sim: the OS), else from a mix of the
+ * tank's seed, clock and count that never draws from t->rng - a seeded run
+ * (the selftests) draws the same numbers it always has. Never returns 0,
+ * never an ID already in this tank. */
+extern uint32_t (*tank_entropy)(void);
+uint32_t tank_new_uid(tank_t *t);
+/* every fish (and the tank) without an ID gets one, and a fish whose parents
+ * live here learns their IDs from its parent slots: after a load (a pre-0.4
+ * save has none) and after a fresh tank */
+void  tank_ensure_ids(tank_t *t);
+/* is fish slot i swimming in this tank now: a home fish not away, or a visitor */
+static inline bool tank_swims(const tank_t *t, int i) {
+    return i < t->n_fish ? !t->fish[i].away : (i >= N_FISH_MAX && i < N_FISH_SLOTS && t->vis_used[i - N_FISH_MAX]);
+}
+static inline bool tank_is_visitor(int i) { return i >= N_FISH_MAX && i < N_FISH_SLOTS; }
+/* THE CLOCK'S DRAWING FACE (0.4): t->clock is a double, and every hold, wait and stamp reads it as one. A drawing
+ * takes it as a float that laps every TANK_ANIM_WRAP = 200 pi s (~10.5 min), where a float still splits a second
+ * 16000 ways and sinf's argument stays small. The rates it drives - a sway's 1.3, a flicker's 11.3, a wobble's 0.37 -
+ * are tenths and hundredths of a radian a second: a lap of 200 pi s is a whole number of their turns, so it is
+ * seamless. A rate that is not (a beat with the speed in it, a period of 2.9 s) takes its phase from the double:
+ * tank_phase, or keeps its own (fish_t.beat). */
+#define TANK_ANIM_WRAP 628.31853071795864769
+static inline float tank_anim(double clock) { return (float)fmod(clock, TANK_ANIM_WRAP); }
+static inline float tank_phase(double clock, double rate) { return (float)fmod(clock * rate, 6.28318530717958648); }   /* radians, 0..2 pi */
+/* the door band: the middle of the water at the side glass, where a fish may
+ * pass when the door is open; and the poof (a burst of bubbles) */
+#define LINK_BOOT_RESTORE_S 10.0f /* a boot that finds fish away: home from bubbles this long after (link.h LINK_RESTORE_MS) */
+#define DOOR_BAND_H   (TANK_BOT * 2 / 5)
+#define DOOR_Y        (TANK_BOT * 0.5f)
+/* the roster's per-preset body (a fish arriving in a passport is rebuilt
+ * from its preset like any other fish) */
+float tank_roster_size(int preset);
+float tank_roster_turn(int preset);
 /* Population. tank_init leaves the tank empty (n_fish = 0); the progression
  * layer either restores a save or calls tank_new_population for a fresh tank:
  * two random roster presets, personalities rolled with a guaranteed contrast,
@@ -1002,11 +1211,32 @@ const char *tank_roster_name(int preset);
  * birth flow names an arrival, 2026-09-14). tank_set_name copies up to FISH_NAME_MAX
  * chars (empty = back to the preset's name); tank_set_look sets the body and
  * accent colours - the fin follows the body (the preset's own fin when the
- * body is a roster colour, a darkened body otherwise). The swatch palettes
- * hold every roster colour, so an untouched fish always sits on a swatch. */
-extern const uint32_t LOOK_BODY[LOOK_N];
-extern const uint32_t LOOK_ACCENT[LOOK_N];
+ * body is a roster colour, a darkened body otherwise - a LIGHTENED one for
+ * a dark body, whose darkened fins would vanish in the water). ONE palette
+ * for the body and the markings (0.4, Strato: so SWAP can trade them
+ * exactly, and a fry inherits exactly what it shows): the six roster bodies,
+ * blue, silver and charcoal; the roster's markings are on it too, so an
+ * untouched fish always sits on a swatch. LOOK_BODY / LOOK_ACCENT name it
+ * for the row it fills. */
+extern const uint32_t LOOK_COLORS[LOOK_N];
+#define LOOK_BODY   LOOK_COLORS
+#define LOOK_ACCENT LOOK_COLORS
 void  tank_set_name(tank_t *t, int slot, const char *name);
+/* a gene's shown value (GENE_*: the colours as their palette index) and
+ * setting it (the colours through tank_set_look: the fin follows the body,
+ * the markings never match it) */
+int   tank_gene(const fish_t *f, int g);
+void  tank_set_gene(tank_t *t, int slot, int g, int v);
+/* roll the copies a fish carries at random (a founding fish: the keeper
+ * designs what it shows, the tank keeps a secret; a fish from before 0.4,
+ * once, at its first 0.4 load) */
+void  tank_roll_carried(tank_t *t, int slot);
+/* the form's turn factor (TURN_*; 1 for a classic) */
+float tank_form_turn(const fish_t *f);
+float tank_form_trail(const fish_t *f);              /* 0 (CLASSIC x CLASSIC) .. 1: how far its tail and fins trail the body */
+void  tank_fish_trail(fish_t *f, float dt);          /* the trail's springs, a step (the swim's last word) */
+float tank_fish_beat_rate(const fish_t *f);          /* the tail beat's radians a second: faster the faster it swims, by its form */
+extern bool tank_trail_off;                          /* the sim's A/B (--fluid): the rigid fish of 0.3, tail yaw and all */
 void  tank_set_look(tank_t *t, int slot, uint32_t body, uint32_t accent);
 uint32_t tank_fin_for(uint32_t body);   /* the fin tank_set_look gives that body (the shop's fry previews) */
 /* the bubble column is the keeper's to place (first-run setup, 2026-09-13):
@@ -1067,6 +1297,16 @@ void  tank_volcano_place(tank_t *t);
  * one placeable item so far; the snail goes where it likes. setup.c's
  * placement page and the shop's MOVE button drive these; the save keeps them. */
 enum { DECOR_Z_BACK = 0, DECOR_Z_MIDDLE = 1, DECOR_Z_FRONT = 2, DECOR_Z_N = 3 };
+/* ONE STACK (render.c dep_draw): how much of a piece at depth z stands over an animal at grass depth g and piece depth p - 0
+   none, 1 the castle's front row (it swims between the keep and the wall), 2 all of it. A piece IN FRONT stands before the
+   grass, so behind or through the grass is behind it too - the castle's keep included (0.3.9.7, #help "Castle Tower
+   Oddness": a fish behind the grass drawn over the rear tower, the fronds that tower hides drawn over the fish); a piece
+   BEHIND stands behind the grass, so only behind both. A change of either depth that changes this over a piece is a pop
+   (tank.c pieces_keep, 0.3.9.7) */
+static inline int depth_piece_cover(int z, bool castle, int g, int p) {
+    const bool behind = z == DECOR_Z_FRONT ? (g != FISH_DEPTH_FRONT || p == FISH_DEPTH_BEHIND) : (g == FISH_DEPTH_BEHIND && p == FISH_DEPTH_BEHIND);
+    return !behind ? 0 : castle && !(z == DECOR_Z_FRONT && g != FISH_DEPTH_FRONT) ? 1 : 2;
+}
 #if defined(TANK_ROUND) || defined(TANK_WATCH)
 #define DECOR_MARGIN    8                  /* the bowl's floor is short and its glass hides nothing (the watch's floor ends where its corners begin) */
 #elif defined(TANK_SQUARE)
@@ -1182,6 +1422,8 @@ int   tank_bed_z(const tank_t *t, int b);   /* a bed's depth: the seagrass alway
 void  tank_decor_set(tank_t *t, int item, float x, int z);
 float tank_decor_x(const tank_t *t, int item);   /* the centre, default when unplaced */
 int   tank_decor_z(const tank_t *t, int item);
+void  tank_debug_depth_pop_old(bool on);   /* (tests: the 0.3.9.6 depth rule, the pops back - tank.c pieces_keep) */
+void  tank_debug_hold_emerge_off(bool on);   /* (tests: a held finger's call off - no way out round a piece, the goal's depth) */
 float tank_decor_half_w(int item);         /* half the footprint, for the page's clamp / highlight */
 float tank_decor_fy(const tank_t *t, int item);   /* the floor line it stands on, by its depth (DECOR_FY) */
 float tank_decor_height(int item);         /* its highest pixel over that line (the plant: tank_veg_bed) */
@@ -1258,14 +1500,17 @@ bool  tank_urchin_chewing(const tank_t *t);   /* at a frond's foot, eating (rend
  * the glass for a long while (CR_SHELTER, then CR_ROOST), comes out to any
  * pellet resting on the floor and eats it (CR_FEED, CR_EAT), raises its claws
  * for a moment when tapped (cr_poke; a walk stops) - three quick taps send it
- * running into the nearer shelter (Strato 10-23) - and once in a long while
+ * running into its shelter (Strato 10-23) - and once in a long while
  * climbs the volcano's flank to the crater and back (CR_CLIMB;
  * tank_volcano_half is the rock it follows). Its small life (Strato 10-24): a
  * fish passing over it gets its claws up (cr_startle_cool), the snail coming
  * at it a standoff before the step aside (CR_FID_STANDOFF), and it is a
  * NIGHT crab - roosts by day, out most of the night, comes out when the light
  * goes off and heads in when it comes on. Its purpose: the SAND DOLLAR FIND
- * (CR_FIND_*). */
+ * (CR_FIND_*). Its shelter is always the FRONTMOST of the castle and the volcano
+ * in the water by the depth scheme (Strato 11-02: "always choose the uppermost
+ * roosting spot"), not the nearer; a change of that order while it roosts or
+ * walks in sends it over (tank.c crab_cave). */
 enum { CR_REST = 0, CR_WALK, CR_DIG, CR_SHELTER, CR_ROOST, CR_FEED, CR_EAT, CR_CLIMB };
 /* its idle life (Strato 10-23 on the first flash: "it stays completely motionless ... for too long"):
  * every few seconds while it rests or digs it grooms (a claw past its mouth), shuffles a few px,
@@ -1338,10 +1583,11 @@ bool  tank_crab_pellet_race(tank_t *t, float gap, int n);   /* the director's / 
                                                               the crab, the school huddled on the first, the crab going for it - near enough it shoos them */
 void  tank_crab_scare(tank_t *t, float fx); /* run for cover now (the tank's triple-tap startle calls it: a knock anywhere on the glass) */
 int   tank_crab_tap(tank_t *t, float fx);  /* a tap on it (fx: the finger's x): claws up; the third quick tap sends it running
-                                             * into the nearer of the castle and the volcano (away from the finger with neither). Returns the taps so far;
+                                             * into its shelter, the frontmost of the castle and the volcano (away from the finger with neither). Returns the taps so far;
                                              * 0 = the tap TOOK the sand dollar it was holding up (no card) */
 bool  tank_crab_walking(const tank_t *t);   /* its legs are striding (render; a shuffle too) */
-bool  tank_crab_roost(tank_t *t, int cave);  /* go roost now: 2 the castle, 9 the volcano, -1 the nearer (director, sim) */
+bool  tank_crab_roost(tank_t *t, int cave);  /* go roost now: 2 the castle, 9 the volcano, -1 the frontmost (director, sim; it always ends in the frontmost) */
+void  tank_debug_roost_nearer(bool on);      /* (tests: the 0.3.9 pick - the nearer shelter, blind to the depth) */
 /* the volcano's cone, half its width in sprite cells (2 px) at height y
  * (cells up from the sprite's bottom row, which sits on tank_decor_fy) on
  * side s (-1 left, 1 right): the same rock render.c vo_half draws; the crab
@@ -1388,6 +1634,8 @@ enum { SH_POSE_BLADE = 1, SH_POSE_GRIP = 2 };
 float tank_seahorse_jut(const tank_t *t);          /* the head's jut right now, px (the renderer) */
 #define SH_SNACK_COOL_S (10.0f * 60.0f)   /* one PAID snack per this long (Strato: "10 minute cooldown so it can't be abused") */
 void  tank_seahorse_place(tank_t *t);              /* fresh in the tank: on a blade, or adrift by the grass */
+bool  tank_seahorse_hold(tank_t *t, int b, int i);
+bool  tank_seahorse_post(tank_t *t, int item, int n);   /* (staging) coiled on post n of that piece, settled */ /* coiled on frond i of bed b, settled, in that bed's stack (the director, the tests) */
 const char *tank_seahorse_holding(const tank_t *t); /* its card: A BLADE / A LEAF / THE CASTLE / THE CORAL / THE REEF / THE VOLCANO / THE SAND */
 bool  tank_seahorse_hit(const tank_t *t, float x, float y);
 float tank_seahorse_days(const tank_t *t);        /* its card: whole days with the keeper */

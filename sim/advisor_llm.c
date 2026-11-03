@@ -32,7 +32,7 @@ static int    g_req_fish = -1;        /* -1: box empty */
 static goal_t g_resp_goal;
 static int    g_resp_fish = -1;
 static bool   g_busy = false;
-static bool   g_pending[N_FISH_MAX];
+static bool   g_pending[N_FISH_SLOTS];
 static int    g_next = 0;             /* rotation pointer over pending fish */
 /* the roster a request was made against (tank_t.roster_gen): a fish sold
  * shifts the slots, and a decision asked for the old ones is dropped */
@@ -106,15 +106,16 @@ void advisor_llm_debug(const tank_t *t, int fish_idx) {
 /* who goes next: an urgent pending fish (starving) first,
  * otherwise rotation from g_next */
 static int pick_next(const tank_t *t) {
-    for (int k = 0; k < t->n_fish; k++) {
-        int i = (g_next + k) % t->n_fish;
+    for (int k = 0; k < N_FISH_SLOTS; k++) {               /* (every swimmer: visitors too; a fish next door is not asked) */
+        int i = (g_next + k) % N_FISH_SLOTS;
+        if (g_pending[i] && !tank_swims(t, i)) g_pending[i] = false;
         if (!g_pending[i]) continue;
         const fish_t *f = &t->fish[i];
         bool urgent = f->hunger > 8.0f && f->goal.id != GOAL_SEEK_FOOD;
         if (urgent) return i;
     }
-    for (int k = 0; k < t->n_fish; k++) {
-        int i = (g_next + k) % t->n_fish;
+    for (int k = 0; k < N_FISH_SLOTS; k++) {
+        int i = (g_next + k) % N_FISH_SLOTS;
         if (g_pending[i]) return i;
     }
     return -1;
@@ -141,7 +142,7 @@ goal_t advisor_llm(const tank_t *t, int fish_idx, bool request) {
     if (request) g_pending[fish_idx] = true;
     if (!g_busy && g_req_fish < 0 && g_pending[fish_idx] && pick_next(t) == fish_idx) {
         g_pending[fish_idx] = false;
-        g_next = (fish_idx + 1) % (t->n_fish > 0 ? t->n_fish : 1);
+        g_next = (fish_idx + 1) % N_FISH_SLOTS;
         advisor_core_encode(t, fish_idx, g_req_state, sizeof g_req_state);   /* fresh state */
         if (advisor_llm_narrate)
             printf("\033[0;36m%s sees:\033[0m %s\n", t->fish[fish_idx].name, g_req_state);

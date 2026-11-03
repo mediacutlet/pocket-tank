@@ -3,7 +3,7 @@ model/out/*
 !model/out/.gitkeep
 __pycache__/
 .DS_Store
-sim/lvgl/
+sim/lvgl
 sim/build/
 sim/fishsim
 model/runw

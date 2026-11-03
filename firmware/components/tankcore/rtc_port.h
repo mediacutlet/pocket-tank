@@ -9,6 +9,7 @@
  * the save, after which rtc_port_store() writes it back into the chip. */
 bool rtc_port_init(i2c_master_bus_handle_t bus);
 bool rtc_port_stopped(void);                  /* the chip had lost its time at this boot */
+bool rtc_port_unread(void);                   /* the chip did not answer at this boot (its time unknown: never seed the save's into it) */
 void rtc_port_store(void);                    /* the system clock -> the chip (no chip, or a clock before 2024: nothing) */
 /* A board with NO RTC chip (the round 1.75C), or one whose chip STOPPED: the
  * system clock is the ESP32's own RTC timer - it counts through deep sleep

@@ -31,7 +31,7 @@ no toolchain needed. Come hang out with other keepers on the
 **[Pocket Tank Discord](https://pocketank.com/discord)**: show off your tank,
 get help, and share ideas for what comes next.
 
-The current release is **v0.3.8.1** (alpha); the settings page shows the one
+The current release is **v0.4.0** (alpha); the settings page shows the one
 on your tank. What changed in each release:
 **[pocketank.com/updates](https://pocketank.com/updates/)**.
 
@@ -208,8 +208,9 @@ ring. Tap a badge to read it: a small panel with arrows at its top corners
 that step through the rest of the group without going back to the page (a
 fish's six badges, the tank's six, the fry's gates, or the fish themselves
 from a fish's name); tap anywhere else to dismiss. At the foot of the
-page: SETTINGS, UPGRADES (the shop) and CLOSE. The shop's and the settings
-page's own CLOSE bring you back here, not out to the tank.
+page, since 0.4, five squares: the sand dollar (the shop), the cog
+(settings), MY TANKS, the passport (your visitors) and CLOSE. The shop's and
+the settings page's own CLOSE bring you back here, not out to the tank.
 
 **The next fry.** While the tank can still grow, a NEW FRY row sits under
 the last fish: what the next arrival needs, as badges that light up when
@@ -228,6 +229,8 @@ open its card. RENAME brings back the letter wheel. SELL, tapped twice,
 trades the fish for sand dollars, and older fish are worth more: 5 for a
 fry, 15 for a juvenile, 30 for an adult, 60 for an elder. A tank keeps at
 least two fish, and after a sale the next fry waits for 12 more meals.
+While your tank is linked to a friend's, the card also shows GIVE (see
+*Tanks side by side* below).
 
 **More badges, and the school at a glance.** Each fish can earn *first rest
 in the seagrass*. The tank can earn *a school of ten shrimp*, and the reef
@@ -251,9 +254,9 @@ fish growing up pays 5, 10 and 25 for juvenile, adult and elder; a fry
 born 20; a fish that comes to trust you completely 15; every hundred algae
 colonies you wipe away pay 25, and so does every 250 cm of grass you
 cut, again and again. Nothing is ever needed and nothing is lost: a tank with no
-sand dollars is exactly the tank there was before. The coin on the
-milestones page's TANK row shows your balance, and it (or the UPGRADES
-button) opens the shop: a row per item with its price, UNLOCK when you can
+sand dollars is exactly the tank there was before. The sand dollar at
+the foot of the milestones page opens the shop, which shows your balance:
+a row per item with its price, UNLOCK when you can
 afford it, IN TANK once you own it, and HOW TO EARN for the list. Three
 things to buy so far. The **sword plant** (40) is a fourth bed of broad
 leaves on the open floor, trimmed and grown and counted as cover like the
@@ -302,7 +305,7 @@ it.
 **The coral.** The fourth thing in the shop (100) is a branching coral,
 drawn from a little skeleton of rounded branches on a chunky pixel grid:
 a dark rim on the shaded side, a lit edge toward the light, pale tips,
-and a speckled body in whatever colour you give it. Its placement page
+and a speckled body in whatever color you give it. Its placement page
 has the drag, a DEPTH bar of two choices (BEHIND or IN FRONT, like the
 castle's), and a COLOR row of eight swatches; the coral on the floor wears
 the pick as you tap, and the
@@ -328,7 +331,7 @@ day one; over two weeks it fills out to full size, and over the two weeks
 after that it blooms, up to forty-eight thin tentacles appearing one at a
 time round the tube mouths, the coral's tips and the brain's top, every
 one swaying. Its placement page has the drag, the two depths, and a LOOK
-row of three tiles instead of a colour: REEF is the art's orange, purple
+row of three tiles instead of a color: REEF is the art's orange, purple
 and cyan; LAGOON is pink, blue and lime; DUSK is magenta, teal and gold.
 It sits in a hump of stones like the coral.
 
@@ -475,6 +478,29 @@ long ago it was unplugged, the screen-on time since, and how long a full
 charge lasts. The tank learns those times from its own battery as you use
 it.
 
+**Tanks side by side.** New in 0.4: put two tanks next to each other and
+tap LINK on each one's settings page. The tanks find each other, you hold
+the arrows on the sides that touch, and the glass between them opens. The
+fish swim over to visit, look around, and come home on their own. If the
+tanks move apart, every fish finds its way home. The tanks talk to each
+other directly by radio, with no Wi-Fi network and no internet. A tank
+holds five fish, visitors included.
+
+**Visitors.** A visitor wears its home tank's badge, small, above it. Tap
+it to see its passport: its name, its look, its home, and which of your
+fish it is interested in, as a row of hearts. Its home is two words made
+from its tank's ID, like AMBER COVE, or the name its keeper gave the tank
+on MY TANKS. COLLECT keeps it in your visitor collection (the passport at
+the foot of the milestones page), ten pages of twelve; DEPORT sends it home.
+
+**Fry from two tanks, and gifts.** A visitor that spends time with one of
+your grown fish can court it and have a fry, if one of the two tanks has
+room for one more fish. A fry like that sells for double. While the tanks
+are linked, a fish's card shows GIVE between RENAME and SELL: tap it twice
+and the other tank asks its keeper, who says yes or no on their own glass.
+A given fish lives there for good, with its name, its look and its badges.
+Every tank keeps at least two fish.
+
 **Updates over Wi-Fi.** The settings page has an UPDATES button. Tap CHECK
 FOR UPDATES and the tank pauses, turns its radio on and looks for a newer
 release. The first time, it lists the networks it can see; pick yours and
@@ -511,27 +537,36 @@ reset the tank. Flip
 the device and the screen follows.
 
 **First run.** A new tank, whether a fresh install or a reset, opens with a
-short setup over the live water. A welcome page; then you place the bubble
-column, dragging it left or right across the tank while the bubbles and
-the airstone follow your finger; then each of the two fry in
-turn: the fish being introduced swims a slow loop front and center with a
-ring around it while you name it on an arcade-style letter wheel (touch a
-slot, drag up or down to spin its letter, or tap the chevrons above and
-below it), then you pick its body color from eight swatches and watch the
-fry wear it. Its accent stays a question mark: a fry has no markings yet,
-and they come in as it grows. A page of care tips finishes the tour. The
-light stays on throughout, and the column, the names and the colors you
-chose are saved with the tank.
+short setup over the live water. A welcome page; then each of the two fry
+in turn, and since 0.4 you design it before you name it. COLORS picks its
+body color, its markings (BARS, a MASK, an EYE BAND, or none) and their
+color, from one palette of nine; FORM picks its body (CLASSIC, SLENDER or
+BULBOUS) and its fins (CLASSIC, VEIL or SAIL). ROLL picks for you. Both
+pages show the fry as it is NOW beside the fish it will be GROWN UP, since
+a fry's markings come in as it grows and its fins when it is an adult.
+Then the fish swims a slow loop front and center with a ring around it
+while you name it on an arcade-style letter wheel (touch a slot, drag up
+or down to spin its letter, or tap the chevrons above and below it). After
+the two fish you place the bubble column, dragging it left or right across
+the tank while the bubbles and the airstone follow your finger, and a page
+of care tips finishes the tour. The light stays on throughout, and the
+column, the names and the looks you chose are saved with the tank.
 
 ![Naming a fish on the letter wheel](docs/media/sim-setup-name.png)
 
 **A birth.** Every arrival is an event. The fry hatches low in the nursery
-grass wearing its family's colors, the body of one parent and the markings
-of the other, and the tank stops to introduce it. *A new fry!* rings the
-newcomer wherever it is and names its parents; the next page is the same
-letter wheel, so you name it; the last page shows the fry on its own, as it
-is now, with what it inherited: whose body, whose markings, and how bold
-and sociable it is on bars marked with each parent's own value. Its
+grass and the tank stops to introduce it. *A new fry!* rings the newcomer
+wherever it is and names its parents; the next page is the same letter
+wheel, so you name it; then its family page shows the fry as it is now and
+the fish it will become, and where each part came from: its body, fins,
+markings and both colors, each from one parent or the other; the last page
+shows how bold and sociable it is on bars marked with each parent's own
+value. Every fish also carries a hidden look it can pass on, so a family
+trait can skip a generation (the family page marks a part that came from a
+parent's hidden copy). Now and then a fry has something new that neither
+parent has: its welcome says SOMETHING NEW and its ring turns gold, and the
+tank earns a badge for its first. Fish from before 0.4 keep their classic
+look, and they carry hidden looks too, so their fry may surprise you. Its
 markings, like any fry's, come in as it grows. The welcome is saved with
 the tank until you finish it, so a fry born while you were away is waiting
 for you when you come back.
@@ -743,12 +778,14 @@ seven-minute prompt check before an overnight run is always worth it.
   `progression.c` (the long game, the sand dollars and persistence),
   `icons.c` (baked pixel art), `audio.c` (the sound mixer), `notice.c` (the
   milestone and low-battery announcements), `update.c` (the update pages
-  and their flow), `llm/` (4-bit engine, word
-  tokenizer, the shared encoder)
+  and their flow), `link.c` and `tank_link.c` (tanks side by side),
+  `passport.c`, `collection.c` and `gift.c` (visitors, the collection and
+  gifts), `llm/` (4-bit engine, word tokenizer, the shared encoder)
 - `sim/` — the LVGL + SDL2 simulator, its persistence port, and the self-tests
 - `firmware/` — ESP-IDF app: display, touch, battery, IMU, RTC and audio
   ports for the four Waveshare boards, the on-device advisor scheduler,
-  update mode and its Wi-Fi port, the QEMU harness, and the partition table
+  update mode and its Wi-Fi port, the tank link's radio (ESP-NOW), the QEMU
+  harness, and the partition table
 - `model/` — the frozen [state/goal schema](model/schema.md), trace
   generation, training, evaluation, probes, and the 4-bit export
 - `installer/` — the browser installer page and the vendored ESP Web Tools
@@ -778,6 +815,8 @@ seven-minute prompt check before an overnight run is always worth it.
 - [docs/board-amoled-2.16.md](docs/board-amoled-2.16.md) — the square's bring-up notes
 - [docs/OTA.md](docs/OTA.md) — updates over Wi-Fi: the partition table, update mode, signing, the manifest
 - [docs/AUDIO.md](docs/AUDIO.md) — the sound design: the cues, the asset pipeline, the power rules
+- [docs/genetics-0.4.md](docs/genetics-0.4.md) — fish of every shape: the genes, heredity and the setup's FORM and COLORS pages
+- [docs/tank-link-0.4.md](docs/tank-link-0.4.md) — tanks side by side: the radio, visits, the passport, fry from two tanks and gifts
 - [docs/memory_budget.md](docs/memory_budget.md) — flash, PSRAM, and SRAM plan
 - [docs/bringup.md](docs/bringup.md) — hardware bring-up checklist
 
@@ -819,6 +858,10 @@ seven-minute prompt check before an overnight run is always worth it.
   updates over Wi-Fi with signed, per-board images, a sea urchin that keeps
   the grass down, a snail that cleans overnight, a sponge and scissors, and
   fish you can rename or sell
+- ✅ v0.4 (alpha): fish of every shape (three bodies, three sets of fins,
+  three kinds of markings or none, nine colors) that pass their looks on to
+  their fry, and tanks side by side: visits, a visitor collection, fry from
+  two tanks, and fish given to a friend
 - 🚧 Next: more to unlock: new fish species, more plants, corals, and more
   tank maintenance critters
 - 🚧 Next: more achievements and milestones

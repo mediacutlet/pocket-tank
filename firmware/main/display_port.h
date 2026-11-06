@@ -63,6 +63,7 @@ void board_sd_select(bool on);                  /* the 1.8's TF card select (EXI
 /* the 1.75 / 1.75-B (BETA, 2026-10-17): the round board with an expander, an
  * RTC and its resets on 39 / 40. board_is_round() is true on it too. */
 bool board_is_175(void);
+uint8_t board_es7210_addr(void);                 /* detected ES7210 address (0x40-0x43), 0 if none answered */
 /* the WATCH (Waveshare 2.06, 410 x 502 portrait), with GPIO resets like the
  * round board's. Its own build (TANK_WATCH) is a portrait tank that IS the
  * panel, sent unturned; the rectangle image still runs on it the 1.8's way -

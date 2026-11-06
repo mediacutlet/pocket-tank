@@ -131,6 +131,7 @@ static bool s_round;                            /* the 1.75C: no expander, a rou
 static bool s_175;                              /* the 1.75 / 1.75-B: the round panel, an expander + an ES7210, resets on 39 / 40, an RTC */
 static bool s_watch;                            /* the 2.06 watch: no expander, a 410 x 502 CO5300, an RTC chip */
 static bool s_square;                           /* the 2.16 square: the watch's I2C signature, a CST92xx touch chip, a 480 x 480 CO5300 */
+static uint8_t s_es7210;                        /* the ES7210's detected address; 0 if none answered */
 #define S_MADCTL 0xA0                           /* the panel's orientation: the USB at the FOOT, the picture upright - Waveshare's own
                                                  * "rotation 0" (2026-10-12: an afternoon at 0x60, which is upright USB-UP - the way
                                                  * Strato first held it; his normal grip is USB-down, and update mode, which never
@@ -210,6 +211,7 @@ void display_port_side_info(int *madctl, int *gx, int *gy, bool *on) {
 }
 bool board_is_round(void) { return s_round; }
 bool board_is_175(void) { return s_175; }
+uint8_t board_es7210_addr(void) { return s_es7210; }
 bool board_is_watch(void) { return s_watch; }
 bool board_is_square(void) { return s_square; }
 /* the board this IS, by the chips that answered (the probe below), as a release
@@ -433,6 +435,14 @@ static bool probe(uint8_t addr) {                /* three tries: a board is not 
     for (int i = 0; i < 3; i++) if (i2c_master_probe(s_i2c, addr, 50) == ESP_OK) return true;
     return false;
 }
+/* the ES7210's AD1/AD0 straps select one of four addresses */
+static bool probe_es7210(void) {
+    s_es7210 = 0;                                /* a fresh scan must not retain an earlier address */
+    for (uint8_t addr = I2C_ADDR_ES7210_BASE; addr <= I2C_ADDR_ES7210_BASE + 3; addr++) {
+        if (probe(addr)) { s_es7210 = addr; return true; }
+    }
+    return false;
+}
 bool display_port_init(void) {
     i2c_master_bus_config_t bus = { .i2c_port = I2C_NUM_0, .sda_io_num = PIN_I2C_SDA, .scl_io_num = PIN_I2C_SCL,
         .clk_source = I2C_CLK_SRC_DEFAULT, .glitch_ignore_cnt = 7, .flags.enable_internal_pullup = true };
@@ -443,8 +453,8 @@ bool display_port_init(void) {
        is exactly that - battery_port.h): no panel is driven on a guess, the
        pins differ between the boards. */
     s_expander = probe(I2C_ADDR_EXPANDER);
-    s_175 = s_expander && probe(I2C_ADDR_ES7210);    /* the 1.75 / 1.75-B: an expander like the 1.8's AND the 1.75C's ES7210 (the 1.8 has none) */
-    bool mic = !s_expander && probe(I2C_ADDR_ES7210);
+    s_175 = s_expander && probe_es7210();         /* the 1.75 / 1.75-B: an expander like the 1.8's AND the 1.75C's ES7210 (the 1.8 has none) */
+    bool mic = !s_expander && probe_es7210();
     s_watch = mic && probe(I2C_ADDR_RTC);            /* the watch has the 1.75C's ES7210 AND an RTC chip (on the always-on RTC rail) */
     s_round = s_175 || (mic && !s_watch);
     if (s_watch) {                                   /* ... and so has the 2.16 square: told apart by the touch chip. Its reset let go
@@ -481,19 +491,19 @@ bool display_port_init(void) {
     }
 #endif
     if (s_square) {
-        ESP_LOGI(TAG, "board: the SQUARE, 2.16 (CO5300 480x480 / CST92xx at 0x%02x) - no expander, an ES7210 at 0x%02x, an RTC at 0x%02x", I2C_ADDR_CST9217, I2C_ADDR_ES7210, I2C_ADDR_RTC);
+        ESP_LOGI(TAG, "board: the SQUARE, 2.16 (CO5300 480x480 / CST92xx at 0x%02x) - no expander, an ES7210 at 0x%02x, an RTC at 0x%02x", I2C_ADDR_CST9217, s_es7210, I2C_ADDR_RTC);
         for (size_t i = 0; i < HELD_N; i++) gpio_hold_dis(SQUARE_HELD[i].pin);   /* a deep sleep's holds end here */
         for (size_t i = 0; i < sizeof ROUND_BUS / sizeof ROUND_BUS[0]; i++) gpio_hold_dis(ROUND_BUS[i]);   /* ... and the QSPI lines' */
         s_pw = S_PANEL; s_ph = S_PANEL;
     } else if (s_watch) {
-        ESP_LOGI(TAG, "board: the WATCH, 2.06 (CO5300 410x502 / FT3168) - no expander, an ES7210 at 0x%02x, an RTC at 0x%02x", I2C_ADDR_ES7210, I2C_ADDR_RTC);
+        ESP_LOGI(TAG, "board: the WATCH, 2.06 (CO5300 410x502 / FT3168) - no expander, an ES7210 at 0x%02x, an RTC at 0x%02x", s_es7210, I2C_ADDR_RTC);
         for (size_t i = 0; i < HELD_N; i++) gpio_hold_dis(WATCH_HELD[i].pin);   /* a deep sleep's holds end here */
         watch_rails_on();
         s_pw = W_PANEL_W; s_ph = W_PANEL_H;
     } else if (s_round) {
         if (s_175) ESP_LOGI(TAG, "board: the ROUND 1.75 / 1.75-B (CO5300 466x466 / CST9217) - an expander at 0x%02x AND an ES7210 at 0x%02x; resets on %d / %d (BETA)",
-                            I2C_ADDR_EXPANDER, I2C_ADDR_ES7210, B_PIN_LCD_RST, B_PIN_TP_RST);
-        else ESP_LOGI(TAG, "board: the ROUND 1.75C (CO5300 466x466 / CST9217) - no expander, an ES7210 at 0x%02x", I2C_ADDR_ES7210);
+                            I2C_ADDR_EXPANDER, s_es7210, B_PIN_LCD_RST, B_PIN_TP_RST);
+        else ESP_LOGI(TAG, "board: the ROUND 1.75C (CO5300 466x466 / CST9217) - no expander, an ES7210 at 0x%02x", s_es7210);
         for (size_t i = 0; i < HELD_N; i++) gpio_hold_dis(held_pins()[i].pin);   /* a deep sleep's holds end here */
         for (size_t i = 0; i < sizeof ROUND_BUS / sizeof ROUND_BUS[0]; i++) gpio_hold_dis(ROUND_BUS[i]);   /* ... and the QSPI lines' (sleepcfg 8) */
         for (int ky = 0; ky < 4; ky++) for (int kx = 0; kx < 4; kx++) {       /* FIT's area weights: 25ths, as 32nds that sum to 32 */

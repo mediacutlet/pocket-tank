@@ -1872,7 +1872,8 @@ void app_main(void) {
     if (!board_has_expander()) {      /* not positively the 1.8: on the round board A3V3 feeds the ES7210 whole,
                                          and off, it clamps the I2C bus (battery_port.h) - never cut it on a guess */
         battery_port_pin_rail("aldo1");
-        codec_port_mic_adc_down(board_i2c_bus());
+        uint8_t mic_addr = board_es7210_addr();
+        if (mic_addr) codec_port_mic_adc_down(board_i2c_bus(), mic_addr);
     }
     if (board_is_watch()) battery_port_pin_rail("aldo2");   /* the watch's panel power enable is pulled up to ALDO2 */
     battery_port_trim_rails();        /* the schematic's unused outputs off (docs/HANDOFF.md, the battery pass) */

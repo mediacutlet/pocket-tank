@@ -23,6 +23,7 @@ uint8_t display_port_brightness(void) { return s_brightness; }
 
 bool board_is_round(void) { return false; }
 bool board_is_175(void) { return false; }
+uint8_t board_es7210_addr(void) { return 0; }
 void display_port_deep_sleep_pins(bool tp_awake_high) { (void)tp_awake_high; }
 void display_port_deep_standby(void) { }
 void display_port_deep_sleep_bus(void) { }

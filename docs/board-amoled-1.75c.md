@@ -47,7 +47,7 @@ board by USB serial. The sim: `make ROUND=1` -> `./fishsim-round`
 `make ROUND=1 check`, docs/BOARDS.md).
 
 Two images now, one per board. Each recognizes the board at boot over I2C
-(the 1.8 has a TCA9554 at 0x20; the 1.75C has none and an ES7210 at 0x40):
+(the 1.8 has a TCA9554 at 0x20; the 1.75C has none and an ES7210 at 0x40-0x43):
 
 - the rectangle image on a 1.75C still runs - the 448x368 frame inside the
   circle (director `view fit|full`);
@@ -62,12 +62,20 @@ Two images now, one per board. Each recognizes the board at boot over I2C
 | Resets | TCA9554 expander | GPIOs: LCD_RST 1, TP_RST 2 |
 | Touch | FT3168 / CST816 | CST9217, I2C 0x5A, INT 11 |
 | PMIC, IMU, codec, amp | AXP2101, QMI8658, ES8311, NS4150B on 46 | the same, same pins |
-| Mic ADC | - | ES7210, I2C 0x40 |
+| Mic ADC | - | ES7210, I2C 0x40-0x43 (AD1/AD0 straps; rev1.1: 0x42) |
 | RTC | PCF85063 | **none** |
 | PWR key | PMIC only | PMIC, and a sense line on GPIO 3 (unused) |
 | Flash | 16 MB | 32 MB (used as 16: the same table) |
 
 ## Found on the bench
+
+- **Rev1.1 ES7210 address (2026-11-05, prior fork hardware test).** A
+  1.75C rev1.1 answered at `0x18 0x34 0x42 0x5a 0x6b`: its ES7210 is at
+  0x42, not 0x40. Probe all four strap addresses and use the detected address
+  for the boot-time mic suspend. The prior pocket-terrarium fork build
+  detected the board, lit the panel, reported CST9217 touch ready and
+  suspended the ES7210 at 0x42; this upstream port has not had a fresh
+  hardware test.
 
 - **ALDO1 must stay on.** The ES7210 has every supply on A3V3 (ALDO1), its
   digital and I/O pins too. The 1.8's boot trim switched ALDO1 off and the

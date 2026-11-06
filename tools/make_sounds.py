@@ -14,8 +14,10 @@ Two steps, both repo-relative to this file:
                  seeded with the export's own speaker-band level, so the
                  first bank plays at the relative loudness Strato exported.
   build          assets/sounds/*.wav + gains.csv -> assets/sounds/sounds.bin
-                 (the bank: every clip's s16 samples back to back) and
-                 common/sounds.h + sounds.c (ids, clip table, cue table).
+                 (the bank: every clip back to back, IMA ADPCM in 256-sample
+                 blocks, or s16 PCM for a cue in PCM_CUES) and
+                 common/sounds.h + sounds.c (ids, clip table, cue table,
+                 each clip's decoded checksum for the host test).
                  The firmware embeds the .bin (EMBED_FILES); the sim reads
                  it from disk.
 
@@ -74,6 +76,104 @@ ALIASES = {"bubble_cluster": "bubbles", "fry_arrival": "arrival",
            "plant_snip": "snip", "spook_dash": "spook"}
 IGNORE = {"confusion"}
 DEFERRED = {"beg", "bubbles"}   # cues kept in the enum, files present but not shipped (Strato 2026-09-15: beg on the fence; bubbles too frequent to be worth hearing)
+
+# 2026-11-04 (0.4.1): the bank is IMA ADPCM, 4 bits a sample, to give the app
+# slot back ~400 KB (rc-0.4 sat at 95% of it). A clip is 256-sample blocks of
+# ADPCM_BLOCK_BYTES: the block's first sample exact (s16) + its step index +
+# a pad byte, then the other 255 samples as nibbles, low nibble first; every
+# block restarts exactly, so a loop seam or a pitch-shifted read never drifts.
+# The decoder is the standard IMA one (common/audio.c); the encoder searches
+# a little harder (the best starting step per block, a one-sample lookahead
+# over all 16 codes), which costs build time only.
+# PCM_CUES stay s16: Strato by ear 2026-11-04, `investigate` (a soft two-note
+# tone, long quiet fade) "sounded considerably worse"; the rest held up.
+PCM_CUES = {"investigate"}
+ADPCM_BLOCK = 256
+ADPCM_BLOCK_BYTES = 4 + 128
+IMA_STEP = [7, 8, 9, 10, 11, 12, 13, 14, 16, 17, 19, 21, 23, 25, 28, 31, 34, 37, 41, 45, 50, 55, 60, 66, 73, 80,
+            88, 97, 107, 118, 130, 143, 157, 173, 190, 209, 230, 253, 279, 307, 337, 371, 408, 449, 494, 544, 598,
+            658, 724, 796, 876, 963, 1060, 1166, 1282, 1411, 1552, 1707, 1878, 2066, 2272, 2499, 2749, 3024, 3327,
+            3660, 4026, 4428, 4871, 5358, 5894, 6484, 7132, 7845, 8630, 9493, 10442, 11487, 12635, 13899, 15289,
+            16818, 18500, 20350, 22385, 24623, 27086, 29794, 32767]
+IMA_IDX = [-1, -1, -1, -1, 2, 4, 6, 8, -1, -1, -1, -1, 2, 4, 6, 8]
+
+
+def ima_step(pred, idx, code):
+    """the standard IMA decode step (common/audio.c does exactly this)"""
+    st = IMA_STEP[idx]
+    d = st >> 3
+    if code & 4: d += st
+    if code & 2: d += st >> 1
+    if code & 1: d += st >> 2
+    pred = max(-32768, min(32767, pred - d if code & 8 else pred + d))
+    return pred, max(0, min(88, idx + IMA_IDX[code]))
+
+
+def ima_greedy(pred, idx, x):
+    st, diff, code = IMA_STEP[idx], x - pred, 0
+    if diff < 0: code, diff = 8, -diff
+    if diff >= st: code |= 4; diff -= st
+    if diff >= st >> 1: code |= 2; diff -= st >> 1
+    if diff >= st >> 2: code |= 1
+    return code
+
+
+def adpcm_encode(x):
+    """s16 samples -> the clip's bytes (blocks as above)"""
+    out, idx, n = bytearray(), 0, len(x)
+    for b in range(0, n, ADPCM_BLOCK):
+        end = min(b + ADPCM_BLOCK, n)
+        pred, seg = int(x[b]), [int(v) for v in x[b + 1:end]]
+        best_i, best_e = idx, None                    # the starting step that suits this block
+        for cand in range(89):
+            p, ii, e = pred, cand, 0
+            for xi in seg:
+                p, ii = ima_step(p, ii, ima_greedy(p, ii, xi)); e += (p - xi) ** 2
+                if best_e is not None and e >= best_e: break
+            if best_e is None or e < best_e: best_i, best_e = cand, e
+        idx = best_i
+        out += struct.pack("<hBB", pred, idx, 0)
+        codes = []
+        for k, xi in enumerate(seg):
+            if k + 1 < len(seg):                      # one sample ahead, every code
+                xn, best, berr = seg[k + 1], 0, None
+                for c in range(16):
+                    p1, i1 = ima_step(pred, idx, c)
+                    p2, _ = ima_step(p1, i1, ima_greedy(p1, i1, xn))
+                    e = (p1 - xi) ** 2 + (p2 - xn) ** 2
+                    if berr is None or e < berr: best, berr = c, e
+            else:
+                best = ima_greedy(pred, idx, xi)
+            codes.append(best)
+            pred, idx = ima_step(pred, idx, best)
+        codes += [0] * (len(codes) & 1)
+        out += bytes(codes[i] | (codes[i + 1] << 4) for i in range(0, len(codes), 2))
+        if end - b == ADPCM_BLOCK:
+            assert len(out) % ADPCM_BLOCK_BYTES == 0
+    return bytes(out)
+
+
+def adpcm_decode(data, n):
+    """the clip's bytes -> s16 samples, the firmware's way"""
+    y = []
+    for b in range(0, n, ADPCM_BLOCK):
+        o = (b // ADPCM_BLOCK) * ADPCM_BLOCK_BYTES
+        pred, idx, _ = struct.unpack_from("<hBB", data, o)
+        y.append(pred)
+        for k in range(min(ADPCM_BLOCK, n - b) - 1):
+            byte = data[o + 4 + (k >> 1)]
+            pred, idx = ima_step(pred, idx, (byte >> 4) if k & 1 else (byte & 15))
+            y.append(pred)
+    return y
+
+
+def fnv1a(samples):
+    """the decoded clip's checksum: FNV-1a 32 over its s16 samples, little-endian"""
+    h = 0x811C9DC5
+    for v in samples:
+        for byte in struct.pack("<h", v):
+            h = ((h ^ byte) * 0x01000193) & 0xFFFFFFFF
+    return h
 
 
 def db(x):
@@ -275,8 +375,15 @@ def do_build():
         mine = [c for c in clips if c[0] == cue]
         first = len(table)
         for _, var, data in mine:
-            table.append((len(bank) // 2, len(data) // 2))
-            bank += data
+            x = np.frombuffer(data, dtype="<i2")
+            if cue in PCM_CUES:
+                blob, codec, dec = data, 0, [int(v) for v in x]
+            else:
+                blob, codec = adpcm_encode(x), 1
+                dec = adpcm_decode(blob, len(x))
+            table.append((len(bank), len(x), codec, fnv1a(dec)))
+            bank += blob
+            bank += b"\0" * (len(bank) & 1)            # PCM stays 2-byte aligned
         g = gains.get(cue, 0.0)
         q8 = int(round(256 * 10 ** (g / 20))) if mine else 0
         cue_rows.append((cue, first, len(mine), min(q8, 65535), 1 if cue in LOOPS else 0))
@@ -285,17 +392,25 @@ def do_build():
     with open(OUT_H, "w") as f:
         f.write("/* sounds.h - GENERATED by tools/make_sounds.py; do not edit.\n"
                 " * Cue ids + the clip/cue tables over the sound bank\n"
-                " * (assets/sounds/sounds.bin: 16 kHz mono s16, clips back to back).\n"
+                " * (assets/sounds/sounds.bin: 16 kHz mono, clips back to back, each\n"
+                " * IMA ADPCM in SND_ADPCM_BLOCK-sample blocks or s16 PCM; codec per clip).\n"
                 " * A cue with n_var == 0 is deferred: valid id, plays nothing. */\n"
                 "#ifndef SOUNDS_H\n#define SOUNDS_H\n#include <stdint.h>\n\n"
                 f"#define SND_RATE {RATE}\n"
-                f"#define SND_BANK_SAMPLES {len(bank) // 2}u\n"
-                f"#define SND_BANK_BYTES {len(bank)}u\n\n"
+                f"#define SND_BANK_BYTES {len(bank)}u\n"
+                f"#define SND_ADPCM_BLOCK {ADPCM_BLOCK}           /* samples a block */\n"
+                f"#define SND_ADPCM_BLOCK_BYTES {ADPCM_BLOCK_BYTES}     /* s16 first sample, step index, pad, 128 nibble bytes */\n"
+                "enum { SND_PCM = 0, SND_ADPCM = 1 };\n\n"
                 "enum {\n")
         for c in CUE_IDS:
             f.write(f"    SND_{c.upper()},\n")
         f.write("    SND_COUNT\n};\n\n"
-                "typedef struct { uint32_t off, len; } snd_clip_t;   /* samples into the bank */\n"
+                "typedef struct {\n"
+                "    uint32_t off;             /* bytes into the bank */\n"
+                "    uint32_t len;             /* samples */\n"
+                "    uint8_t  codec;           /* SND_PCM | SND_ADPCM */\n"
+                "    uint32_t check;           /* FNV-1a 32 of the decoded s16 samples (firmware/host_test/audio_host.c) */\n"
+                "} snd_clip_t;\n"
                 "typedef struct {\n"
                 "    const char *name;\n"
                 "    uint8_t  first, n_var;    /* SND_CLIPS[first .. first + n_var) */\n"
@@ -309,16 +424,19 @@ def do_build():
         f.write("/* sounds.c - GENERATED by tools/make_sounds.py; do not edit. */\n"
                 "#include \"sounds.h\"\n\n"
                 f"const snd_clip_t SND_CLIPS[SND_N_CLIPS] = {{\n")
-        for off, n in table:
-            f.write(f"    {{ {off}u, {n}u }},\n")
+        for off, n, codec, check in table:
+            f.write(f"    {{ {off}u, {n}u, {'SND_ADPCM' if codec else 'SND_PCM'}, 0x{check:08X}u }},\n")
         f.write("};\n\nconst snd_cue_t SND_CUES[SND_COUNT] = {\n")
         for cue, first, n, q8, loop in cue_rows:
             f.write(f"    {{ \"{cue}\", {first}, {n}, {loop}, {q8} }},\n")
         f.write("};\n")
-    print(f"bank {len(bank) / 1024:.0f} KB, {len(table)} clips, {sum(1 for r in cue_rows if r[2])} of {len(CUE_IDS)} cues present")
+    raw = sum(t[1] * 2 for t in table)
+    print(f"bank {len(bank) / 1024:.0f} KB ({raw / 1024:.0f} KB as s16), {len(table)} clips, {sum(1 for r in cue_rows if r[2])} of {len(CUE_IDS)} cues present")
     for cue, first, n, q8, loop in cue_rows:
         secs = sum(table[i][1] for i in range(first, first + n)) / RATE
-        print(f"  {cue:14s} {'x' + str(n) if n else '-':4s} {secs:5.2f} s  gain {db(q8 / 256) if q8 else 0:6.1f} dB{'  loop' if loop else ''}")
+        pcm = n and all(table[i][2] == 0 for i in range(first, first + n))
+        print(f"  {cue:14s} {'x' + str(n) if n else '-':4s} {secs:5.2f} s  gain {db(q8 / 256) if q8 else 0:6.1f} dB"
+              f"{'  loop' if loop else ''}{'  PCM' if pcm else ''}")
 
 
 if __name__ == "__main__":

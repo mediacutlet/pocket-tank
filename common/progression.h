@@ -91,6 +91,8 @@ typedef struct {
     int32_t  sd_balance;
     uint16_t light_idle_s;
     uint8_t  light_auto, light_tip_seen, screen_turned, orient_lock, orient_q, pad;
+    uint32_t mark;                 /* the swap's: a fresh marker; the save that applies the carry carries it, and a carry whose
+                                    * marker the loaded save already has is not given again (0.4.1 audit round 2, "Marker now") */
 } progression_carry_t;
 void progression_carry_take(const tank_t *t, progression_carry_t *c);
 void progression_carry_give(tank_t *t, const progression_carry_t *c);
@@ -119,6 +121,18 @@ bool progression_finger_company(const tank_t *t, int i);
 /* Save the current tank. False means the port rejected the write; the state
  * remains dirty so the periodic saver will retry. */
 bool progression_save(tank_t *t);
+/* NEW TANK in MY TANKS' library (0.4.1): bought whole or not at all across a power cut at any write (shelf.h shelf_buy).
+   The shelf index of the new tank, or -1 (too poor, the shelves full, or the flash refused: nothing bought, nothing paid).
+   REMOVE (0.4.1): shelved tank i's pieces paid and saved, then the tank erased (shelf.h shelf_remove_paid) - the refund,
+   or -1 (nothing removed, nothing paid). _shelf_settle: at every boot, after progression_boot / _wake and before a swap's
+   carry - a buy or a remove a power cut stopped half way */
+int  progression_buy_tank(tank_t *t, int price, int64_t now_unix);
+int  progression_remove_tank(tank_t *t, int i);
+void progression_shelf_settle(tank_t *t);
+int  progression_youngest(const tank_t *t);   /* the youngest fish here by its age (GROW, CHANGE), or -1 */
+int  progression_newest(const tank_t *t);     /* the fish whose arrival made the tank's latest count, or the last slot */
+void progression_came_in(fish_t *f);      /* a fish from another tank: its drift there is no THE TANK CHANGED SOMEONE here */
+bool progression_swap_carry(tank_t *t);   /* the boot after a SWAP IN: the carry given, saved, then let go (false: none) */
 
 /* sim/debug: multiply time (aging, drift) - `./fishsim --fast 60` */
 extern float progression_time_scale;
@@ -250,6 +264,13 @@ const char *const *progression_fry_tip(int kind);
  * before). A night's sleep runs each wait down like awake time; a boot
  * starts them clear. */
 #define SD_MEAL_GAP_S  300.0f
+/* THE RESET FARM (0.4.1, Discord #help "Sand-dollar farm"): a reset kept the wallet and the new tank paid again for what
+ * every fresh tank starts with - its grass cut (+25 on three boards, a minute a cycle), its pair's full trust (+30), a
+ * first meal (+1 a fish). tank_t.sd_receipts: what this tank's starting set has paid, carried to the tank a reset makes
+ * (Strato 11-05, option 1). Everything grown or earned after pays as before. A NEW TANK starts with none: it pays once */
+#define SD_RCPT_GRASS    0x01u
+#define SD_RCPT_TRUST_SH 1
+#define SD_RCPT_TRUST(r) (((r) >> SD_RCPT_TRUST_SH) & 3u)
 #define SD_STAGE_JUV   5
 #define SD_STAGE_ADULT 10
 #define SD_STAGE_ELDER 25
@@ -277,6 +298,11 @@ const char *const *progression_fry_tip(int kind);
 #define SD_PRICE_PUMPKIN 75       /* 0.3.6, Strato 2026-10-17: the seasonal lantern, "affordable" */
 #define SD_PRICE_VOLCANO 190      /* 0.3.9: Strato 2026-10-24 (it was the castle's 150 until he named one) */
 #define SD_PRICE_CRAB 140         /* 0.3.9: the strawberry crab - Strato 2026-10-24 */
+#define SD_PRICE_BG 100           /* 0.4.1: a background, each (Strato 2026-11-04: the community voted 100; first set at 25) */
+/* THE BACKGROUNDS (0.4.1): UNLOCK - SD_PRICE_BG from the wallet, owned by this tank, in use at once, saved (false: owned
+   already, or short); USE - an owned one (or Open Water) in use, saved (false: not owned) */
+bool progression_bg_buy(tank_t *t, int bg);
+bool progression_bg_use(tank_t *t, int bg);
 typedef struct {
     uint32_t    bit;               /* SD_ITEM_* */
     const char *name;              /* <= 15 chars: the row draws it at scale 2 from x 76, 178 px, short of the button at 300;

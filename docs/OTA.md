@@ -99,6 +99,7 @@ What changed against the plan while building:
   the public repo's Release assets are the keeper's channel.
 - **The console works in update mode** (`wifi set`, `ota tap <x> <y>`,
   `ota page`), so the flow can be driven over serial without hands.
+- **Since 0.4.1 `ota tap` cannot start an install:** the OFFER's UPDATE is HOLD TO UPDATE, a 1 s hold the keeper does by hand.
 
 Still to do: the live test above; the public resync (with the
 `OTA_SIGNING_KEY` secret set on the public repo BEFORE the first tagged

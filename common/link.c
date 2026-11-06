@@ -163,6 +163,20 @@ static int visitors_held(const link_t *L) {
     return n;
 }
 
+/* places given that the host cannot see yet: an OFFER accepted (PENDING, its GO still to come) or a GO taken whose
+   LEV_VISITOR_IN the tank has not polled. host.room counts only the visitors it draws, so two offers at once each found
+   the one place free and both came in (0.4.1 audit, link F2a: 4 at home + 2 visitors = 6 under a 5-fish rule) */
+int link_visitors_coming(const link_t *L) {
+    int n = 0;
+    for (int i = 0; i <= LINK_VISIT_MAX; i++) n += L->visit[i].st == VS_PENDING;
+    for (int q = 0; q < L->ev_n; q++) n += L->evq[(L->ev_head + q) % LINK_EVQ].type == LEV_VISITOR_IN;
+    return n;
+}
+static int room_left(const link_t *L) {       /* visitor places free: the host's word, less what it cannot see yet */
+    int room = L->host.room ? L->host.room(L->host.ctx) - link_visitors_coming(L) : LINK_VISIT_MAX - visitors_held(L);
+    return room < 0 ? 0 : room;
+}
+
 /* ---- small senders ---- */
 static void send_fish(link_t *L, int type, uint32_t to, uint32_t uid, uint16_t trip) {
     wr_t w; hdr(L, &w, type, to); w32(&w, uid); w16(&w, trip); tx(L, &w, to);
@@ -174,8 +188,8 @@ static void send_beacon(link_t *L) {
     wr_t w; hdr(L, &w, FR_BEACON, 0);
     uint8_t armed = 0;
     for (int e = 0; e < LINK_EDGES; e++) if (L->armed_until[e] && !after(L->now, L->armed_until[e]) && !L->edge_peer[e]) armed |= (uint8_t)(1u << e);
-    int room = L->host.room ? L->host.room(L->host.ctx) : 0;
-    room = room < 0 ? 0 : room > 255 ? 255 : room;
+    int room = L->host.room ? room_left(L) : 0;
+    room = room > 255 ? 255 : room;
     uint32_t ds = L->drifting ? (L->now - L->drift_since) / 1000 : 0;
     w8(&w, L->badge); w8(&w, (L->mode ? BF_MODE : 0) | (L->drifting ? BF_DRIFT : 0)); w8(&w, armed);
     w8(&w, (uint32_t)room); w8(&w, ds > 255 ? 255 : ds);
@@ -342,17 +356,27 @@ static void send_fry(link_t *L) {
 }
 /* FRY_ASK: uid + trip, then a flag byte (appended 2026-11-03: 1 = the pair is off, let go of the place - no answer).
    An older reader stops before it: it answers ROOM, which the host no longer asks for, and holds nothing anyway */
-static void send_fry_ask(link_t *L, const visit_t *v, bool off) {
-    wr_t w; hdr(L, &w, FR_FRY_ASK, v->home); w32(&w, v->uid); w16(&w, v->trip); w8(&w, off); tx(L, &w, v->home);
+#define FRY_ASK_HOLD 0                        /* FR_FRY_ASK's flag: an ask (a yes holds the place) */
+#define FRY_ASK_OFF  1                        /* ... the pair is off: let go */
+#define FRY_ASK_PEEK 2                        /* ... (0.4.1 round 2) room or not, nothing held - a home before it reads an ask */
+static void send_fry_ask(link_t *L, const visit_t *v, int flag) {
+    wr_t w; hdr(L, &w, FR_FRY_ASK, v->home); w32(&w, v->uid); w16(&w, v->trip); w8(&w, (uint32_t)flag); tx(L, &w, v->home);
 }
 void link_fry_ask(link_t *L, uint32_t parent_uid) {
     visit_t *v = visit_find(L, parent_uid);
     if (!v || v->st != VS_ACTIVE) { link_ev_t *ev = ev_push(L, LEV_FRY_ROOM); if (ev) { ev->uid = parent_uid; ev->reason = 0; } return; }
-    send_fry_ask(L, v, false);
+    send_fry_ask(L, v, FRY_ASK_HOLD);
 }
 void link_fry_off(link_t *L, uint32_t parent_uid) {
     visit_t *v = visit_find(L, parent_uid);
-    if (v && v->st == VS_ACTIVE) send_fry_ask(L, v, true);   /* (gone home: its home lets go by itself) */
+    if (v && v->st == VS_ACTIVE) send_fry_ask(L, v, FRY_ASK_OFF);   /* (gone home: its home lets go by itself) */
+}
+void link_fry_peek(link_t *L, uint32_t parent_uid) {
+    visit_t *v = visit_find(L, parent_uid);
+    if (!v || v->st != VS_ACTIVE) { link_ev_t *ev = ev_push(L, LEV_FRY_ROOM); if (ev) { ev->uid = parent_uid; ev->reason = 0; } return; }
+    send_fry_ask(L, v, FRY_ASK_PEEK);
+    send_fry_ask(L, v, FRY_ASK_OFF);          /* (a home older than the peek took it for an ask and held: let go at once - for a home
+                                                 that only peeked a no-op, fry_hold(off) drops a hold of this tank and parent only) */
 }
 void link_deny(link_t *L, uint32_t uid, uint32_t ms) {
     int w = 0;
@@ -486,11 +510,11 @@ static void rx_offer(link_t *L, uint32_t from, rd_t *r) {
     if (v && v->trip == trip) { if (v->st == VS_PENDING) send_fish(L, FR_ACCEPT, from, uid, trip); return; }
     bool yes = ok && pp.uid == uid && pp.home_tank == from && L->edge_peer[e] == from && !tank_paused(L, from) && !denied(L, uid)
             && (!v || v->st == VS_RETURNING) && visitors_held(L) < LINK_VISIT_MAX
-            && (!L->host.room || L->host.room(L->host.ctx) > 0);
+            && room_left(L) > 0;                 /* (counting the places given and not yet drawn: two offers at once) */
     visit_t *slot = NULL;
     if (yes) for (int i = 0; i <= LINK_VISIT_MAX && !slot; i++) if (L->visit[i].st == VS_FREE) slot = &L->visit[i];
     if (!slot) {                             /* no - and why: a full tank is worth waiting out longer than a pause */
-        int why = denied(L, uid) ? LINK_NO_DEPORTED : tank_paused(L, from) ? LINK_NO_PAUSED : (visitors_held(L) >= LINK_VISIT_MAX || (L->host.room && L->host.room(L->host.ctx) <= 0)) ? LINK_NO_FULL : LINK_NO_OTHER;
+        int why = denied(L, uid) ? LINK_NO_DEPORTED : tank_paused(L, from) ? LINK_NO_PAUSED : (visitors_held(L) >= LINK_VISIT_MAX || room_left(L) <= 0) ? LINK_NO_FULL : LINK_NO_OTHER;
         wr_t w; hdr(L, &w, FR_REFUSE, from); w32(&w, uid); w16(&w, trip); w8(&w, (uint32_t)why); tx(L, &w, from);
         return;
     }
@@ -566,11 +590,12 @@ static void rx_recall(link_t *L, uint32_t from, uint32_t uid, uint16_t trip) {
    A yes HOLDS the place (host.fry_hold) while the host keeps asking: nothing else here may take it before the fry
    comes (2026-11-03: a yes held nothing - by the birth, 5-10 min on, the place was gone, the FRY was refused, and the
    host kept the fry as a sixth fish). off: the host's pair is off - let go, no answer */
-static void rx_fry_ask(link_t *L, uint32_t from, uint32_t uid, uint16_t trip, bool off) {
+static void rx_fry_ask(link_t *L, uint32_t from, uint32_t uid, uint16_t trip, int flag) {
     away_t *a = away_find(L, uid);
     bool ours = a && a->st == AW_AWAY && a->peer == from && a->trip == trip;
-    if (off) { if (L->host.fry_hold) L->host.fry_hold(L->host.ctx, from, uid, false); return; }
-    int room = !ours ? 0 : L->host.fry_hold ? L->host.fry_hold(L->host.ctx, from, uid, true)
+    if (flag == FRY_ASK_OFF) { if (L->host.fry_hold) L->host.fry_hold(L->host.ctx, from, uid, false); return; }
+    int room = !ours ? 0 : flag == FRY_ASK_PEEK ? (L->host.fry_room ? L->host.fry_room(L->host.ctx) : 0)   /* (a peek: nothing held) */
+             : L->host.fry_hold ? L->host.fry_hold(L->host.ctx, from, uid, true)
              : L->host.fry_room ? L->host.fry_room(L->host.ctx) : 0;
     wr_t w; hdr(L, &w, FR_FRY_ROOM, from); w32(&w, uid); w16(&w, trip); w8(&w, room > 0); tx(L, &w, from);
 }
@@ -696,13 +721,16 @@ bool link_peer_heard(const link_t *L, uint32_t tank, uint32_t within_ms) {
         if (L->peer[i].used && L->peer[i].tank == tank) return !after(L->now, L->peer[i].heard + within_ms);
     return false;
 }
-void link_give_done(link_t *L, uint32_t uid, uint32_t nonce) {
+void link_give_done(link_t *L, uint32_t uid, uint32_t nonce, const passport_t *pp) {
     give_out_t *g = gout_find(L, uid);
     if (!g || g->st != GO_TAKEN || g->nonce != nonce) return;
     away_t *a = away_find(L, uid);                       /* given where it is: no lease from now on - it is theirs (its VISITs are not DROPped) */
     if (a && a->peer == g->peer) a->st = AW_FREE;
+    if (pp && pp->uid == uid) g->pp = *pp;               /* the fish as it LEFT (its GIVEN note's), not as it was when the keeper asked: GIVEN
+                                                            carries it, and a GIVEN_LOST brings this one back (0.4.1 audit round 1,
+                                                            R-seam-link-progression F3 - a stage reached in the window was paid twice) */
     g->st = GO_GIVEN; g->sent = L->now;
-    if (linked_to(L, g->peer)) send_give(L, FR_GIVEN, g->peer, g->uid, g->nonce, -1, NULL);
+    if (linked_to(L, g->peer)) send_give(L, FR_GIVEN, g->peer, g->uid, g->nonce, -1, &g->pp);
 }
 void link_give_resume_out(link_t *L, uint32_t peer, uint32_t uid, uint32_t nonce, const passport_t *pp) {
     give_out_t *g = gout_find(L, uid);
@@ -711,7 +739,7 @@ void link_give_resume_out(link_t *L, uint32_t peer, uint32_t uid, uint32_t nonce
     if (!g) return;                          /* (the next LINKED tries again) */
     memset(g, 0, sizeof *g);
     g->st = GO_GIVEN; g->uid = uid; g->nonce = nonce; g->peer = peer; g->t0 = g->sent = L->now; if (pp) g->pp = *pp;
-    if (linked_to(L, peer)) send_give(L, FR_GIVEN, peer, uid, nonce, -1, NULL);
+    if (linked_to(L, peer)) send_give(L, FR_GIVEN, peer, uid, nonce, -1, pp ? &g->pp : NULL);
 }
 bool link_give_refuse(link_t *L, uint32_t uid, uint32_t nonce, int reason) {
     give_in_t *g = gin_find(L, uid);
@@ -770,10 +798,12 @@ static void visit_settle(link_t *L, uint32_t uid, uint32_t from) {   /* a gift o
     visit_t *v = visit_find(L, uid);
     if (v && v->home == from && v->st == VS_ACTIVE) v->st = VS_FREE;
 }
-static void rx_given(link_t *L, uint32_t from, uint32_t uid, uint32_t nonce) {
+static void rx_given(link_t *L, uint32_t from, uint32_t uid, uint32_t nonce, rd_t *r) {
+    passport_t left; bool has = false;                   /* (0.4.1: the fish as it left the giver - a 0.4.0 tank sends none: the ask's) */
+    if (r->p < r->n) { has = rpp(r, &left) && !r->bad && left.uid == uid; }
     give_in_t *g = gin_find(L, uid);
     if (g && g->nonce == nonce && g->from == from) {
-        if (g->st == GI_TAKE) { g->st = GI_ALIVE; visit_settle(L, uid, from); give_ev(L, LEV_GIVE_ALIVE, uid, from, nonce, &g->pp, -1); }
+        if (g->st == GI_TAKE) { if (has) g->pp = left; g->st = GI_ALIVE; visit_settle(L, uid, from); give_ev(L, LEV_GIVE_ALIVE, uid, from, nonce, &g->pp, -1); }
         return;                              /* (GI_ALIVE: the tank is saving - its GIVEN_OK follows) */
     }
     passport_t held;
@@ -782,7 +812,7 @@ static void rx_given(link_t *L, uint32_t from, uint32_t uid, uint32_t nonce) {
     else if (gs == LINK_GS_ARRIVING) {       /* (a boot forgot it, the note did not) */
         link_give_resume_in(L, from, uid, nonce, &held);
         g = gin_find(L, uid);
-        if (g && g->nonce == nonce) { g->st = GI_ALIVE; visit_settle(L, uid, from); give_ev(L, LEV_GIVE_ALIVE, uid, from, nonce, &held, -1); }
+        if (g && g->nonce == nonce) { if (has) g->pp = left; g->st = GI_ALIVE; visit_settle(L, uid, from); give_ev(L, LEV_GIVE_ALIVE, uid, from, nonce, &g->pp, -1); }
     } else send_give(L, FR_GIVEN_LOST, from, uid, nonce, -1, NULL);   /* we never held it: the giver's note brings it back */
 }
 /* the receiver lets go of a gift it said yes to, the giver gone for good (tank_link: an ARRIVING note past its time):
@@ -808,7 +838,7 @@ static void rx_give_take(link_t *L, uint32_t from, uint32_t uid, uint32_t nonce)
     give_out_t *g = gout_find(L, uid);
     if (g && g->nonce == nonce && g->peer == from) {
         if (g->st == GO_ASKING) { g->st = GO_TAKEN; give_ev(L, LEV_GIVE_TAKEN, uid, from, nonce, &g->pp, -1); }
-        else if (g->st == GO_GIVEN) send_give(L, FR_GIVEN, from, uid, nonce, -1, NULL);
+        else if (g->st == GO_GIVEN) send_give(L, FR_GIVEN, from, uid, nonce, -1, g->pp.uid ? &g->pp : NULL);
         return;
     }
     passport_t held;
@@ -839,8 +869,10 @@ static void give_tick(link_t *L, uint32_t now) {
                 g->st = GO_FREE;
             } else if (after(now, g->sent + LINK_GIVE_RESEND_MS)) { send_give(L, FR_GIVE, g->peer, g->uid, g->nonce, -1, &g->pp); g->sent = now; }
         } else if (g->st == GO_GIVEN && linked_to(L, g->peer) && after(now, g->sent + LINK_GIVE_RESEND_MS)) {
-            send_give(L, FR_GIVEN, g->peer, g->uid, g->nonce, -1, NULL); g->sent = now;
-        }
+            send_give(L, FR_GIVEN, g->peer, g->uid, g->nonce, -1, g->pp.uid ? &g->pp : NULL); g->sent = now;
+        } else if (g->st == GO_GIVEN && !linked_to(L, g->peer)) g->st = GO_FREE;   /* (0.4.1) the tank is gone: its slot goes. The GIVEN
+                                                           note saved before GIVEN holds the gift, and brings it back here (tank_link's
+                                                           resume) - two slots held for a tank that walked off left none for a gift */
     }
     for (int i = 0; i < LINK_GIVE_MAX; i++) {
         give_in_t *g = &L->gin[i];
@@ -850,7 +882,9 @@ static void give_tick(link_t *L, uint32_t now) {
             g->st = GI_FREE;
         } else if (g->st == GI_TAKE && linked_to(L, g->from) && after(now, g->sent + LINK_GIVE_RESEND_MS)) {
             send_give(L, FR_GIVE_TAKE, g->from, g->uid, g->nonce, -1, NULL); g->sent = now;
-        }
+        } else if ((g->st == GI_TAKE || g->st == GI_ALIVE) && !linked_to(L, g->from)) g->st = GI_FREE;   /* (0.4.1: the same - its ARRIVING
+                                                           note holds it; GI_ALIVE's event carries the fish, and a lost GIVEN_OK is
+                                                           answered from RECEIVED at the next meeting) */
     }
 }
 
@@ -897,7 +931,7 @@ void link_rx(link_t *L, const uint8_t *buf, int len, int rssi, uint32_t now_ms) 
         if (type == FR_GIVE) rx_give(L, from, uid, nonce, &r);
         else if (type == FR_GIVE_TAKE) rx_give_take(L, from, uid, nonce);
         else if (type == FR_GIVE_CANCEL) rx_give_cancel(L, from, uid, nonce);
-        else if (type == FR_GIVEN) rx_given(L, from, uid, nonce);
+        else if (type == FR_GIVEN) rx_given(L, from, uid, nonce, &r);
         else { int why = type == FR_GIVE_NO ? (int)r8(&r) : 0; if (!r.bad) rx_give_reply(L, (int)type, from, uid, nonce, why); }
         break;
     }
@@ -915,7 +949,8 @@ void link_rx(link_t *L, const uint8_t *buf, int len, int rssi, uint32_t now_ms) 
         else if (type == FR_HOME) { visit_t *v = visit_find(L, uid); if (v && v->st == VS_RETURNING && v->trip == trip && v->home == from) v->st = VS_FREE; }
         else if (type == FR_RECALL) rx_recall(L, from, uid, trip);
         else if (type == FR_DROP) rx_drop(L, from, uid, trip);
-        else if (type == FR_FRY_ASK) { bool off = r.p < r.n && r8(&r) == 1; rx_fry_ask(L, from, uid, trip, off); }   /* (the flag since 2026-11-03) */
+        else if (type == FR_FRY_ASK) { int fl = r.p < r.n ? (int)r8(&r) : FRY_ASK_HOLD; rx_fry_ask(L, from, uid, trip, fl == FRY_ASK_OFF || fl == FRY_ASK_PEEK ? fl : FRY_ASK_HOLD); }   /* (the flag since
+                                                         2026-11-03; PEEK since 0.4.1 round 2; an unknown value: an ask, as before) */
         else if (type == FR_FRY_ROOM) {
             uint32_t yes = r8(&r);
             visit_t *v = visit_find(L, uid);

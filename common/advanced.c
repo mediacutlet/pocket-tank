@@ -97,13 +97,14 @@ void adv_cross_target(int i, float *x, float *y) { *x = CX[i % 3]; *y = CY[(i / 
 void adv_check_target(float *x, float *y) { *x = TANK_W * 3 / 10; *y = TANK_H * 2 / 3; }   /* none of the nine */
 
 /* ---- the page ---- */
-#define ADV_WARN_HOLD_S 2.0f                               /* the warning ignores taps this long: a quick second tap on SET does not land on it */
+#define ADV_WARN_HOLD_S 0.2f   /* the double of SET only: a press begun this soon after the warning opened is no tap (THE TOUCH RULE, touch_gate.h; 2 s at the lift before 11-06) */                               /* the warning ignores taps this long: a quick second tap on SET does not land on it */
 static int s_pg, s_cell = ADV_CELL_STOCK, s_pick = ADV_CELL_STOCK;
 static bool s_ticked;
 static touch_fit_t s_saved = { 1, 0, 1, 0 }, s_live = { 1, 0, 1, 0 }, s_new;
 static int s_i; static int s_q0;
 static float s_tx[ADV_N_CROSS], s_ty[ADV_N_CROSS], s_px[ADV_N_CROSS], s_py[ADV_N_CROSS];
-static float s_t;                                          /* the page's clock: the warning's hold, a cross's wait, the check's time left */
+static float s_t;
+static float s_press_t;                                    /* s_t at the press: the WARNING's window is read there (THE TOUCH RULE) */                                          /* the page's clock: the warning's hold, a cross's wait, the check's time left */
 static const char *s_msg;
 static bool s_down, s_skip; static float s_dx, s_dy;      /* this press: where it landed; s_skip = the finger that opened the page */
 
@@ -139,7 +140,7 @@ static int step_pick(int dir) {
 int adv_touch(float x, float y, bool down, int q) {
     if (s_pg == ADV_PG_NONE) return ADV_ACT_NONE;
     if (s_skip) { if (!down) s_skip = false; return ADV_ACT_NONE; }   /* the chord's finger: its lift is not a tap */
-    if (down && !s_down) { s_down = true; s_dx = x; s_dy = y; return ADV_ACT_NONE; }
+    if (down && !s_down) { s_down = true; s_dx = x; s_dy = y; s_press_t = s_t; return ADV_ACT_NONE; }
     if (down || !s_down) return ADV_ACT_NONE;
     s_down = false;                                        /* a release: what it pressed, if it stayed there */
     bool still = (x - s_dx) * (x - s_dx) + (y - s_dy) * (y - s_dy) < 24 * 24;
@@ -157,7 +158,7 @@ int adv_touch(float x, float y, bool down, int q) {
         }
         return ADV_ACT_NONE; }
     case ADV_PG_WARN: {
-        if (!still || s_t < ADV_WARN_HOLD_S) return ADV_ACT_NONE;
+        if (!still || s_press_t < ADV_WARN_HOLD_S) return ADV_ACT_NONE;   /* (pressed inside SET's double window: spent) */
         int h = render_battery_warning_tap(s_dx, s_dy);
         if (h == ADV_HIT_BOX) { s_ticked = !s_ticked; return ADV_ACT_TICK; }
         if (h == ADV_HIT_CANCEL) { s_pick = s_cell; go(ADV_PG_MAIN); return ADV_ACT_TICK; }

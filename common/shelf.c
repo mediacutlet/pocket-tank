@@ -4,6 +4,7 @@
 #include "collection.h"
 #include "gift.h"
 #include "passport.h"
+#include "backgrounds.h"                       /* (BG_N: a shelved tank's backgrounds in its refund, 0.4.1) */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -106,7 +107,51 @@ static bool read_hdr(int k, shelf_tank_t *h, uint8_t *save) {
                                                                                        hand-edited one's snapshot is none, never a read past the buffer) */
     return true;
 }
+/* THE JOURNALS (NEW TANK `buy`, REMOVE `rm`) read "paid" by a MARKER, never by the wallet (0.4.1 audit round 2, Strato's
+   "Marker now"; docs/audit-0.4.1/round2/FIX-saves2.md): each is written with a fresh marker, and the tank save that pays
+   carries the same one (progression's shelf marks) - at the boot, paid exactly when the loaded save's marker for that
+   kind is the journal's. Whatever moves the wallet between the two - a birth, a sale, a refused or cut save - cannot
+   fool it (the wallet's figure misread a journal at a later boot: a paid tank erased, 300 minted, a removed tank back) */
+#define RM_MAGIC  0x324d5250u                       /* "PRM2" - the marker's layout (round 3 review R2: never "PTRM"/"PBUY" again, */
+#define BUY_MAGIC 0x32594250u                       /* "PBY2"   which the release candidate's journals carry) */
+typedef struct { uint32_t magic, id, now_id; int32_t refund; uint32_t mark; } rm_j_t;
+typedef struct { uint32_t magic, id, now_id; int32_t price; uint32_t mark; } buy_j_t;
+/* the release candidate's (bb1f8d5) journals, wallet-keyed, as a board updating with one left on the flash has them: read
+   exactly as that build read them - against the wallet the save it wrote came back with (nothing has moved it since: the
+   update is the next boot), REMOVE's paid mark first (round 3 review R2) */
+#define RM_MAGIC_RC  0x4d525450u                    /* "PTRM" */
+#define BUY_MAGIC_RC 0x59554250u                    /* "PBUY" */
+typedef struct { uint32_t magic, id, now_id; int32_t wallet, refund; uint32_t paid; } rm_j_rc_t;
+typedef struct { uint32_t magic, id, now_id; int32_t wallet, price; } buy_j_rc_t;
+/* the work a refused write left, while the board runs on (0.4.1 audit round 1, R-saves S2, S3, S8; round 2): a journal or
+   the swap's carry whose delete was refused, a slot whose erase was refused. With the markers it is cleanup only - a
+   record left reads the same at any wallet - but a slot still to erase is never written over (slot_used) and its journal
+   waits for it (the journal gone first would let the slot load at the next boot). Tried in full by shelf_tidy - before
+   every save of the tank, and before every MY TANKS action, which waits until it is clear. RAM only: a restart forgets
+   it, the records stand for it. Up to two slots to erase (both boot settles at once), each named for its journal */
+#define OPEN_ERASE_N 2
+static struct {
+    int erase1[OPEN_ERASE_N]; char erase_for[OPEN_ERASE_N];  /* slots to erase, + 1 (0 none: the zeroed state is empty) - 'r'
+                                                                 REMOVE's tank, 'b' NEW TANK's */
+    bool del_rm, del_buy, del_carry;
+} s_open;
+static void open_clear(void) { memset(&s_open, 0, sizeof s_open); }
+static bool open_erasing(char owner) { for (int e = 0; e < OPEN_ERASE_N; e++) if (s_open.erase1[e] && s_open.erase_for[e] == owner) return true; return false; }
+static void open_erase(int slot, char owner) {
+    for (int e = 0; e < OPEN_ERASE_N; e++) if (!s_open.erase1[e] || s_open.erase1[e] == slot + 1) { s_open.erase1[e] = slot + 1; s_open.erase_for[e] = owner; return; }
+}
+bool shelf_tidy(void) {
+    bool clear = true;
+    for (int e = 0; e < OPEN_ERASE_N; e++)
+        if (s_open.erase1[e]) { if (shelf_port_erase(slot_off(s_open.erase1[e] - 1), 4096)) s_open.erase1[e] = 0; else clear = false; }
+    if (s_open.del_rm) { if (!open_erasing('r') && shelf_port_frame_del("rm")) s_open.del_rm = false; else clear = false; }
+    if (s_open.del_buy) { if (!open_erasing('b') && shelf_port_frame_del("buy")) s_open.del_buy = false; else clear = false; }
+    if (s_open.del_carry) { if (shelf_port_frame_del("carry")) s_open.del_carry = false; else clear = false; }
+    return clear;
+}
 static bool slot_used(int k) {
+    for (int e = 0; e < OPEN_ERASE_N; e++) if (s_open.erase1[e] == k + 1) return true;   /* (its erase refused: the tank that left is still
+                                                                                     there - never written over) */
     for (int i = 0; i < s_n; i++) if (s_t[i].slot == k) return true;
     for (int b = 0; b < s_nb; b++) if (s_bk[b].slot == k) return true;   /* (a visitor book is a used slot) */
     return false;
@@ -175,6 +220,7 @@ static bool rewrite(int i, const shelf_tank_t *nh);    /* (below: a tank's heade
 void shelf_boot(int64_t now_unix) {
     size_t area = shelf_port_size(), got;
     s_n = 0; s_stuck = false;
+    open_clear();                                     /* (RAM: a restart forgets the work - the records stand for it) */
     if (!buffers()) { s_slots = 0; printf("shelf: no memory for the shelf - only the tank on the glass\n"); }
     else {
     s_slots = (int)(area / SHELF_SLOT_SIZE); if (s_slots > SHELF_SLOTS_MAX) s_slots = SHELF_SLOTS_MAX;
@@ -203,8 +249,14 @@ void shelf_boot(int64_t now_unix) {
             shelf_tank_t h = s_t[in].h;
             bool touched, done = read_hdr(s_t[in].slot, &h, save);
             if (done) {
-                int64_t lived = (int64_t)h.banked_s + (h.time_mode == SHELF_TIME_DORMANT && now_unix > h.clock_unix ? now_unix - h.clock_unix : 0);
-                if (h.save_len) progression_blob_set_saved_unix(save, h.save_len, now_unix - lived);
+                /* a boot with no clock (now 0: a stopped chip or one that did not answer, the TIME CHECK failed): the swap's
+                   own moment stands in - the outgoing tank's shelf stamp, written before the journal - so the save is not
+                   stamped at 0 - banked, the seed resumes the clock there rather than at the BUILD time, and the next good
+                   sync lives only the time since (0.4.1 audit W1: it lived up to 7 days at once) */
+                int64_t at = now_unix;
+                if (at <= 0) { int out = find_id(j.from_id); at = out >= 0 && s_t[out].slot == j.out_slot ? s_t[out].h.clock_unix : h.clock_unix; }
+                int64_t lived = (int64_t)h.banked_s + (h.time_mode == SHELF_TIME_DORMANT && at > h.clock_unix ? at - h.clock_unix : 0);
+                if (h.save_len) progression_blob_set_saved_unix(save, h.save_len, at - lived);
                 done = glass_put(&h, save, h.save_len, s_t[in].slot, &touched);
             }
             if (done) {
@@ -216,7 +268,7 @@ void shelf_boot(int64_t now_unix) {
                 int out = find_id(j.from_id); shelf_tank_t oh;
                 bool back = out >= 0 && s_t[out].slot == j.out_slot && read_hdr(j.out_slot, &oh, save) && glass_put(&oh, save, oh.save_len, j.out_slot, &touched);
                 if (back && shelf_port_frame_del("swap")) {
-                    shelf_port_frame_del("carry");
+                    if (!shelf_port_frame_del("carry")) s_open.del_carry = true;   /* (refused: cleanup - round 2, R2S-2) */
                     forget_slot(s_t[out].slot); drop(out);
                     printf("shelf: a swap was cut short and could not be finished - undone: %s on the glass\n", s_now.name);
                 } else {
@@ -279,7 +331,7 @@ bool shelf_thumb(int i, uint16_t *out, size_t max_px) {
 }
 
 int shelf_new(int type, int64_t now_unix) {
-    if (s_stuck || shelf_free_places() < 1) return -1;
+    if (s_stuck || !shelf_tidy() || shelf_free_places() < 1) return -1;
     int pos = 0;
     while (pos < SHELF_POS_MAX && shelf_at_pos(pos) != -2) pos++;
     if (pos >= SHELF_POS_MAX) return -1;
@@ -299,6 +351,58 @@ int shelf_new(int type, int64_t now_unix) {
     if (!write_slot(k, &h, NULL, NULL, NULL, 0)) return -1;
     s_t[s_n].h = h; s_t[s_n].slot = (int16_t)k;
     return s_n++;
+}
+
+/* NEW TANK, BOUGHT (0.4.1; shelf.h): a journal `buy` in the frame - the wallet before, the price, the new tank's ID and
+   the tank on the glass - written before the slot, deleted once the wallet's save has landed. The boot after a cut
+   reads the wallet the save came back with: paid (before - price), the tank stays; not paid (before), the tank goes */
+static bool slot_gone(int i, char owner) {          /* shelf_remove, false if the flash kept the slot (its erase then waits: shelf_tidy;
+                                                       owner: the journal waiting on it, 'b' NEW TANK's, 'r' REMOVE's) */
+    shelf_book_forget(s_t[i].h.id);
+    int slot = s_t[i].slot;
+    bool ok = shelf_port_erase(slot_off(slot), 4096);
+    if (!ok) open_erase(slot, owner);
+    drop(i);
+    return ok;
+}
+int shelf_buy(int type, int64_t now_unix, int price, uint32_t mark, bool (*pay)(void *ctx), void *ctx) {
+    if (s_stuck || !shelf_tidy() || shelf_free_places() < 1 || price <= 0 || !mark || !pay) return -1;
+    buy_j_t j = { BUY_MAGIC, s_next, s_now.id, price, mark };
+    if (!shelf_port_frame_set("buy", &j, sizeof j)) return -1;              /* (refused: nothing bought, nothing paid) */
+    int i = shelf_new(type, now_unix);
+    if (i < 0 || s_t[i].h.id != j.id) {
+        if ((i < 0 || slot_gone(i, 'b')) && shelf_port_frame_del("buy")) return -1;
+        s_open.del_buy = true;                                               /* (a slot or a delete the flash refused: shelf_tidy - the
+                                                                                journal reads "not paid" by its marker meanwhile) */
+        return -1;
+    }
+    if (!pay(ctx)) {                                                         /* the price's save refused: no tank (pay put the wallet and the
+                                                                                marker back) */
+        if (!slot_gone(i, 'b') || !shelf_port_frame_del("buy")) s_open.del_buy = true;
+        return -1;
+    }
+    if (!shelf_port_frame_del("buy")) s_open.del_buy = true;                 /* (refused: cleanup - it reads paid by its marker) */
+    return i;
+}
+int shelf_buy_settle(uint32_t save_mark, int32_t wallet) {
+    union { buy_j_t j; buy_j_rc_t rc; } u; size_t got = 0;
+    if (!shelf_port_frame_get("buy", &u, sizeof u, &got) || got != sizeof(buy_j_t)) return 0;
+    bool rc = u.j.magic == BUY_MAGIC_RC;                                     /* (the release candidate's: by the wallet, as it read them - R2) */
+    if (!rc && u.j.magic != BUY_MAGIC) return 0;
+    const uint32_t id = u.j.id, now_id = u.j.now_id; const int32_t price = rc ? u.rc.price : u.j.price;
+    int k = -1;
+    for (int i = 0; i < s_n; i++) if (s_t[i].h.id == id) k = i;
+    int refund = 0;
+    bool paid = rc ? wallet == u.rc.wallet - u.rc.price : (u.j.mark && u.j.mark == save_mark);
+    bool unpaid = rc ? wallet == u.rc.wallet : !paid;
+    if (now_id != s_now.id) { }                                              /* (another tank on the glass: its save says nothing of this - kept) */
+    else if (paid) { if (k < 0) refund = price; }                            /* paid (the save carries its marker): the tank stays (none: the
+                                                                                price back - never both lost; the caller clears the marker with it) */
+    else if (unpaid && k >= 0 && !slot_gone(k, 'b')) { s_open.del_buy = true; return 0; }   /* not paid: no tank (the flash kept it: erased,
+                                                                                then the journal - shelf_tidy; round 2, R2S-1) */
+    /* (an rc journal neither paid nor not paid by the wallet: kept, nothing charged - as the release candidate read it) */
+    if (!shelf_port_frame_del("buy")) s_open.del_buy = true;                 /* (refused: cleanup - round 2, R2S-1) */
+    return refund;
 }
 
 /* a tank's whole slot rewritten to a free one with seq + 1 (a header change never erases the only copy) */
@@ -331,17 +435,52 @@ bool shelf_move(int i, int pos) {
     if (there != -2 && !set_pos(there, from)) return false;   /* (a tank there: it takes the other's old place) */
     return true;
 }
-int shelf_pieces_value(int i) {
+int shelf_refund_value(int i, int n[3]) {
+    if (n) n[0] = n[1] = n[2] = 0;
     if (i < 0 || i >= s_n || !s_t[i].h.save_len) return 0;
     shelf_tank_t h;
     if (!read_hdr(s_t[i].slot, &h, s_x->a)) return 0;
     uint32_t u = progression_blob_unlocks(s_x->a, h.save_len);
-    int v = 0;
-    for (int item = 0; item < SD_ITEM_COUNT; item++) if ((u & SD_ITEMS[item].bit) && tank_decor_placeable(item)) v += progression_sell_value(item);
+    int v = 0, k[3] = { 0, 0, 0 };
+    for (int item = 0; item < SD_ITEM_COUNT; item++)
+        if (u & SD_ITEMS[item].bit) { v += progression_sell_value(item); k[tank_decor_placeable(item) ? 0 : 1]++; }
+    for (int bg = 1; bg < BG_N; bg++) if (u & SD_ITEM_BG(bg)) { v += SD_PRICE_BG * SD_SELL_PCT / 100; k[2]++; }
+    if (n) { n[0] = k[0]; n[1] = k[1]; n[2] = k[2]; }
     return v;
 }
+/* REMOVE, PAID (0.4.1; shelf.h): a journal `rm` - the tank's ID, the tank on the glass, the wallet before, the refund,
+   and whether the refund is on the flash yet - written first; the refund paid and saved; the journal marked paid; then
+   the slot erased and the journal gone. Paid before the erase, so a refused save leaves the tank whole */
+bool shelf_remove_paid(int i, int refund, uint32_t mark, bool (*pay)(void *ctx), void *ctx) {
+    if (s_stuck || i < 0 || i >= s_n || refund < 0 || !mark || !pay || !shelf_tidy()) return false;
+    rm_j_t j = { RM_MAGIC, s_t[i].h.id, s_now.id, refund, mark };
+    if (!shelf_port_frame_set("rm", &j, sizeof j)) return false;             /* (refused: nothing removed, nothing paid) */
+    if (!pay(ctx)) { if (!shelf_port_frame_del("rm")) s_open.del_rm = true; return false; }   /* (the refund's save refused: the tank stays,
+                                                                                whole - the journal reads "not paid" by its marker) */
+    if (!slot_gone(i, 'r') || !shelf_port_frame_del("rm")) s_open.del_rm = true;  /* (an erase or a delete refused: shelf_tidy, in that
+                                                                                order - the journal reads paid by its marker meanwhile) */
+    return true;
+}
+void shelf_remove_settle(uint32_t save_mark, int32_t wallet) {
+    union { rm_j_t j; rm_j_rc_t rc; } u; size_t got = 0;
+    if (!shelf_port_frame_get("rm", &u, sizeof u, &got)) return;
+    rm_j_t j; bool paid;
+    if (got == sizeof(rm_j_rc_t) && u.rc.magic == RM_MAGIC_RC) {            /* (the release candidate's, 24 B: its paid mark, or the wallet
+                                                                                as it read them - R2) */
+        j.magic = RM_MAGIC; j.id = u.rc.id; j.now_id = u.rc.now_id; j.refund = u.rc.refund; j.mark = 0;
+        paid = u.rc.paid || (u.rc.now_id == s_now.id && wallet == u.rc.wallet + u.rc.refund);
+    } else if (got == sizeof(rm_j_t) && u.j.magic == RM_MAGIC) {
+        j = u.j;
+        paid = j.now_id == s_now.id && j.mark && j.mark == save_mark;       /* (the refund's save carries its marker - refund 0 too) */
+    } else return;
+    int k = -1;
+    for (int i = 0; i < s_n; i++) if (s_t[i].h.id == j.id) k = i;
+    if (paid && k >= 0 && !slot_gone(k, 'r')) { s_open.del_rm = true; return; }   /* (the flash kept it: erased by shelf_tidy, then the
+                                                                                journal - round 2, R2S-1) */
+    if (!shelf_port_frame_del("rm")) s_open.del_rm = true;                   /* not paid: the tank stays, nothing owed (refused: cleanup) */
+}
 bool shelf_remove(int i) {
-    if (s_stuck || i < 0 || i >= s_n) return false;
+    if (s_stuck || i < 0 || i >= s_n || !shelf_tidy()) return false;
     shelf_book_forget(s_t[i].h.id);                   /* (its visitor book with it) */
     forget_slot(s_t[i].slot);
     drop(i);
@@ -390,7 +529,7 @@ bool shelf_rename(int i, const char *name) {
 }
 
 bool shelf_swap(int i, const uint16_t *thumb, int w, int h_px, const void *carry, size_t carry_len, int64_t now_unix) {
-    if (s_stuck || i < 0 || i >= s_n) return false;
+    if (s_stuck || i < 0 || i >= s_n || !shelf_tidy()) return false;
     uint8_t *out_save = s_x->a, *in_save = s_x->b;
     size_t out_len = 0;
     if (!persist_port_load(out_save, SHELF_SAVE_MAX, &out_len)) out_len = 0;   /* nothing saved yet: it goes up fresh */
@@ -412,7 +551,7 @@ bool shelf_swap(int i, const uint16_t *thumb, int w, int h_px, const void *carry
     /* 2. the journal (and what the board carries across: without it the wallet would stay behind) */
     if (carry && carry_len && !shelf_port_frame_set("carry", carry, carry_len)) { forget_slot(k); return false; }
     swap_t j = { SWAP_MAGIC, s_now.id, in.id, (int16_t)k, s_t[i].slot, 0, lived / 3600.0f };
-    if (!shelf_port_frame_set("swap", &j, sizeof j)) { shelf_port_frame_del("carry"); forget_slot(k); return false; }   /* (a carry left
+    if (!shelf_port_frame_set("swap", &j, sizeof j)) { if (!shelf_port_frame_del("carry")) s_open.del_carry = true; forget_slot(k); return false; }   /* (a carry left
                                                                                        behind would set the wallet back at a later boot) */
     /* 3. its save into NVS: the wake lives `lived` from it (capped, D12); a fresh tank: no save, born at the boot - and its
        visitors, KIN and gift notes (none: a fresh tank's NVS has none); 4. it is the tank on the glass */
@@ -423,7 +562,8 @@ bool shelf_swap(int i, const uint16_t *thumb, int w, int h_px, const void *carry
            whole; the journal goes before slot k (a journal left over would finish the swap at the boot, from that slot) */
         bool back = !touched || glass_put(NULL, out_save, out_len, k, &touched);
         if (back && shelf_port_frame_del("swap")) {
-            shelf_port_frame_del("carry"); forget_slot(k);
+            if (!shelf_port_frame_del("carry")) s_open.del_carry = true;   /* (refused: cleanup - R2S-2) */
+            forget_slot(k);
             printf("shelf: the swap could not write the tank coming in - undone, %s stays on the glass\n", s_now.name);
         } else {
             s_stuck = true;
@@ -438,13 +578,15 @@ bool shelf_swap(int i, const uint16_t *thumb, int w, int h_px, const void *carry
     s_t[i].h = out; s_t[i].slot = (int16_t)k;
     return true;
 }
-bool shelf_take_carry(void *buf, size_t len) {
+bool shelf_peek_carry(void *buf, size_t len) {
     if (s_stuck) return false;                    /* (a swap still to finish: its carry is for the boot that finishes it) */
     size_t got;
     bool ok = shelf_port_frame_get("carry", buf, len, &got) && got == len;
-    shelf_port_frame_del("carry");
+    if (!ok) shelf_port_frame_del("carry");       /* (one of another length: no carry of ours) */
     return ok;
 }
+void shelf_carry_done(void) { if (!shelf_port_frame_del("carry")) s_open.del_carry = true; }   /* (refused: cleanup - the carry reads
+                                                                                applied by its marker, round 2) */
 float shelf_lived_h(void) { return s_lived_h; }
 void shelf_keeper_name(char *out) {
     unsigned n; char more;

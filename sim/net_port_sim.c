@@ -42,6 +42,32 @@ bool net_port_creds_set(const char *ssid, const char *pass) {
 }
 void net_port_creds_forget(void) { remove(creds_path()); }
 
+/* the board code: POCKET_TANK_BOARD_CODE (pictures), else made once into
+ * POCKET_TANK_BOARD_CODE_FILE (selftests) or ~/.cache/pocket-tank/board_code.txt.
+ * The crew answer: POCKET_TANK_CREW=1 (pictures), else what the last pretend
+ * check said - POCKET_TANK_FAKE_CREW at the check: 1 on the list, 0 not on
+ * it, unset = no clear answer (the last one stands, as on the board) */
+static int s_crew;
+bool net_port_board_code(char out[NET_CODE_LEN + 1]) {
+    const char *e = getenv("POCKET_TANK_BOARD_CODE");
+    if (e && strlen(e) == NET_CODE_LEN) { snprintf(out, NET_CODE_LEN + 1, "%s", e); return true; }
+    char p[512];
+    if (getenv("POCKET_TANK_BOARD_CODE_FILE")) snprintf(p, sizeof p, "%s", getenv("POCKET_TANK_BOARD_CODE_FILE"));
+    else snprintf(p, sizeof p, "%s/.cache/pocket-tank/board_code.txt", getenv("HOME") ? getenv("HOME") : ".");
+    FILE *f = fopen(p, "r");
+    if (f) { char b[32] = ""; bool ok = fgets(b, sizeof b, f) != NULL; fclose(f); chomp(b);
+             if (ok && strlen(b) == NET_CODE_LEN) { snprintf(out, NET_CODE_LEN + 1, "%s", b); return true; } }
+    static const char A[] = NET_CODE_ALPHABET;
+    FILE *r = fopen("/dev/urandom", "rb"); unsigned char x[8] = { 0 };
+    if (!r || fread(x, 1, 8, r) != 8) { if (r) fclose(r); return false; }
+    fclose(r);
+    for (int i = 0, k = 0; i < NET_CODE_LEN; i++) out[i] = i == 4 ? '-' : A[x[k++] % (sizeof A - 1)];
+    out[NET_CODE_LEN] = 0;
+    if (!(f = fopen(p, "w"))) return false;
+    fprintf(f, "%s\n", out); fclose(f); return true;
+}
+int net_port_crew(void) { const char *e = getenv("POCKET_TANK_CREW"); return e ? e[0] == '1' : s_crew; }
+
 /* ---- the radio ---- */
 enum { OP_NONE, OP_SCAN, OP_CONNECT, OP_CHECK, OP_INSTALL };
 static int   s_op, s_state, s_err;
@@ -73,6 +99,7 @@ void net_sim_advance(float dt) {                     /* the sim's clock */
         break;
     case OP_CHECK:
         if (s_t >= 1.0f) {
+            { const char *fc = getenv("POCKET_TANK_FAKE_CREW"); if (fc && (fc[0] == '0' || fc[0] == '1')) s_crew = fc[0] == '1'; }
             memset(&s_m, 0, sizeof s_m);
             const char *rel = fake && *fake ? fake : "0.9.9";
             if (!strcmp(rel, "fail")) { s_state = NET_FAILED; s_err = NET_ERR_NO_NET; break; }

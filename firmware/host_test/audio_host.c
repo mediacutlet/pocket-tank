@@ -4,7 +4,9 @@
  * Checks: a deferred cue is silent; cooldowns and the per-second cap drop
  * extra starts; volume off is silence; 50 % is the old QUIET (-12 dB);
  * a loop keeps going past its length and audio_stop fades it to nothing;
- * a single cue at normal volume never clips. */
+ * a single cue at normal volume never clips; every clip decodes (IMA ADPCM
+ * or PCM, 0.4.1) to exactly what tools/make_sounds.py's decoder made, and a
+ * looping ADPCM clip wraps with no click at its seam. */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -24,7 +26,7 @@ int main(void) {
     if (fread(bank, 1, SND_BANK_BYTES, f) != SND_BANK_BYTES) { printf("bank size mismatch\n"); return 1; }
     fclose(f);
     static int16_t buf[16000 * 4];
-    audio_init(bank, SND_BANK_SAMPLES);
+    audio_init(bank, SND_BANK_BYTES);
     audio_set_volume(100);
 
     CHECK(!audio_play(SND_TAP, AUDIO_PITCH_ONE, 1000), "a deferred cue (tap) started");
@@ -89,6 +91,32 @@ int main(void) {
         CHECK(p < 32767, "%s clips (%d)", SND_CUES[c].name, p);
         CHECK(p > 0, "%s is silent", SND_CUES[c].name);
     }
+    /* 0.4.1: the decoder is the tool's, sample for sample */
+    int adpcm = 0;
+    for (int i = 0; i < SND_N_CLIPS; i++) {
+        CHECK(audio_clip_check(i) == SND_CLIPS[i].check, "clip %d (%s) decodes to %08X, the tool made %08X", i,
+              SND_CLIPS[i].codec == SND_ADPCM ? "ADPCM" : "PCM", (unsigned)audio_clip_check(i), (unsigned)SND_CLIPS[i].check);
+        adpcm += SND_CLIPS[i].codec == SND_ADPCM;
+    }
+    CHECK(adpcm > 0, "no ADPCM clip in the bank");
+    CHECK(SND_CLIPS[SND_CUES[SND_INVESTIGATE].first].codec == SND_PCM, "investigate is not PCM (Strato's ear, 2026-11-04)");
+
+    /* the loop's seam through the reader: no jump bigger than the clip's own */
+    audio_stop_all(); audio_set_volume(100);
+    const snd_clip_t *lc = &SND_CLIPS[SND_CUES[SND_BUBBLES_LOOP].first];
+    CHECK(audio_play(SND_BUBBLES_LOOP, AUDIO_PITCH_ONE, 90000), "loop did not start (seam)");
+    int n_seam = (int)lc->len * 3;                        /* three times round, at its own rate */
+    if (n_seam > 16000 * 4) n_seam = 16000 * 4;
+    render_all(buf, n_seam);
+    int max_jump = 0, seam_jump = 0;
+    for (int i = 1600; i < n_seam; i++) {                 /* past the 5 ms fade-in */
+        int j = abs(buf[i] - buf[i - 1]);
+        if (j > max_jump) max_jump = j;
+        if ((uint32_t)i % lc->len == 0 && j > seam_jump) seam_jump = j;
+    }
+    CHECK(seam_jump <= max_jump && max_jump > 0, "loop seam jump %d over the clip's own %d", seam_jump, max_jump);
+    audio_stop_all();
+
     if (fails) printf("audio_host: %d FAILED\n", fails);
     else printf("audio_host: all checks passed (%u cues, bank %u KB)\n", (unsigned)SND_COUNT, (unsigned)(SND_BANK_BYTES / 1024));
     return fails != 0;

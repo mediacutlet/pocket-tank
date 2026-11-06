@@ -296,13 +296,25 @@ enum {
     /* born of a visitor and one of the tank it was born in (cross-tank fry,
        2026-10-05): no badge, never a notice - Strato: "worth double" (its
        SELL). It travels in the passport and is saved like the badges */
-    MS_CROSSBRED = 1u << 13
+    MS_CROSSBRED = 1u << 13,
+    /* bought in the shop (0.4.1, audit P10): FAMILY's THE SHOP. No parent slot and no parent ID was the test, and a fish
+       born here whose parents were both sold before 0.4 has neither - it read THE SHOP. Set by progression_buy_fry (a
+       0.4.0 shop fry still owed its welcome gets it at the load); no badge, never a notice; travels and is saved as
+       MS_CROSSBRED */
+    MS_BOUGHT = 1u << 14,
+    /* came in changed (0.4.1 audit round 1, R-progression F1): a gift, or one of ours home from a visit, whose temper drifted
+       in another tank - that drift is no THE TANK CHANGED SOMEONE here. Set at its arrival when it is already 0.11 off its
+       birth temper; cleared once it has settled back (it can change here again then). Saved with ms_bits, never travels,
+       never a notice */
+    MS_CAME_CHANGED = 1u << 15
 };
 #define MS_RETIRED_MASK (MS_RETIRED_6 | MS_RETIRED_7)
 /* tank-level milestone bits */
 enum {
     TMS_PAIR = 1u << 0, TMS_TRIO = 1u << 1, TMS_QUARTET = 1u << 2, TMS_QUINTET = 1u << 3,
-    TMS_SEXTET = 1u << 4, TMS_FIRST_FULL_NIGHT = 1u << 5,   /* the device slept a full night (was: quiet night, until 2026-09-15) */
+    TMS_RETIRED_4 = 1u << 4,                                 /* was TMS_SEXTET (six fish) until 0.4.1: POP_CAP 5 never earns it -
+                                                                retired (audit P2, Strato), the bit reserved: never set, dropped at load */
+    TMS_FIRST_FULL_NIGHT = 1u << 5,   /* the device slept a full night (was: quiet night, until 2026-09-15) */
     TMS_FIRST_PLAY_SESSION = 1u << 6,
     TMS_CHANGED_SOMEONE = 1u << 7, TMS_FIRST_FEEDING = 1u << 8,
     TMS_FIRST_TRIM = 1u << 9, TMS_FIRST_CLEANING = 1u << 10,
@@ -615,8 +627,16 @@ typedef struct tank {
                                     * placement page opens the long way only - keeper menu, UPGRADES,
                                     * its row, MOVE - and that page's LOCK button undoes it. Kept
                                     * across the shelf, cleared by a sale. Saved. */
+    uint8_t  bg_now;               /* THE BACKGROUND (0.4.1, backgrounds.h): the one this tank shows - BG_OPEN (0), or one it
+                                    * bought (SD_ITEM_BG_*). Saved. */
     uint32_t sd_paid_fish[N_FISH_MAX];
     int32_t  sd_colonies_paid, sd_inches_paid;
+    uint8_t  sd_receipts;          /* what a fresh tank starts with, already paid (0.4.1, the reset farm): SD_RCPT_GRASS - its
+                                    * starting grass; SD_RCPT_TRUST(n) - its starting pair's full trust, n of the two. Earned by
+                                    * this tank or carried by the reset that made it, so a reset never pays them again. Saved */
+#define SD_RCPT_KNOWN 0x80u      /* sd_receipts' top bit: the byte is the truth (0.4.1 audit round 2) - a save without it is
+                                    * folded from its ledger once at its load (one stamped before 0.4.1) or taken as it is (a
+                                    * 0.4.1 save), then marked */
     int32_t  sd_snacks_paid;       /* the seahorse's snacks paid so far (0.3.6) */
     /* the snail (SD_ITEM_SNAIL): crawls the glass toward the nearest film and
      * grazes it - the one creature in the tank that is not the model's. Its
@@ -779,6 +799,8 @@ typedef struct tank {
      * its depth layer (DECOR_Z_*). Both saved. */
     float    plant_x;
     uint8_t  plant_z;
+    uint8_t  plant_under;          /* (0.4.1, Strato 11-05) the sword plant BEHIND THE SEAGRASS: its leaves under the seagrass beds'
+                                    * (0: IN FRONT OF THE SEAGRASS, every plant before 0.4.1 - its look kept). Saved */
     /* the castle (2026-09-16): its centre x on the floor (<= 0 = the default
      * spot) and its depth - BACK or FRONT only (see tank_decor_z_count). Both saved. */
     float    castle_x;
@@ -880,11 +902,14 @@ typedef struct tank {
                                     * milestones, settings, the shop) - a fry's spawning
                                     * waits, so the keeper never misses it (2026-09-24).
                                     * Set every frame; not saved. */
-    uint8_t  roster_gen;           /* ticks when a fish leaves and the slots shift (tank_remove_fish):
-                                    * the advisors drop what they were asked about the old slots.
-                                    * Not saved. */
-    int8_t   removed_slot;         /* the slot the fish left from at the last roster_gen tick (-1: that tick was an
-                                    * arrival): a platform's own slot (the stat card's fish) follows its fish. Not saved. */
+    uint8_t  roster_gen;           /* ticks when the roster changes: a fish leaves (tank_remove_fish) or arrives (every
+                                    * arrival, 0.4.1 P7). Not saved. */
+    uint8_t  roster_shift;         /* ticks only when a fish leaves and the slots after it shift down: the advisors drop what
+                                    * they were asked about the old slots, and the stat card follows its fish - an arrival
+                                    * appends and shifts nothing, so it closes no card and drops no decision (0.4.1 audit
+                                    * round 1, R-seam-link-progression F5). Not saved. */
+    int8_t   removed_slot;         /* the slot the fish left from at the last roster_shift tick: a platform's own slot (the
+                                    * stat card's fish) follows its fish. Not saved. */
     int8_t   stage_fish;          /* setup: this fish is being named / coloured - it swims
                                     * a slow loop at (stage_x, stage_y), the clear spot the
                                     * page leaves for it, so it is never behind the UI
@@ -940,6 +965,8 @@ typedef struct tank {
     uint32_t fry_give_parent;
     uint32_t fry_rolled[N_VISIT_MAX];
     bool     vis_pending[N_VISIT_MAX];
+    int8_t   vis_coming;         /* visitors the link engine let in that are not drawn yet (link_visitors_coming, each tank_link_tick):
+                                    a fry born for its home needs a place beyond them (tank_link_fry_place) */
     /* home side (2026-11-03, the cap): a place HELD for a fry of ours courting next door - the host asked for room and
        we said yes. fish_held counts it, so nothing else takes it (a birth here, a gift, another fry, a shop fry). It
        ends when the fry comes (LEV_FRY_IN), when the host says the pair is off, when that fish of ours is no longer
@@ -1195,6 +1222,7 @@ void  tank_court_puff(tank_t *t, int n);
 float tank_algae_cover(const tank_t *t);
 void  tank_veg_sync(tank_t *t);                 /* veg_growth[] from veg_h[][] (after a load) */
 float tank_veg_cap(int b, int i);               /* frond i of bed b: the height it grows toward */
+int   tank_veg_cap_segs(int b, int i);          /* ... and its segments there: the tallest it ever grows by itself (0.4.1, the grass loop's band) */
 void  tank_grow_algae(tank_t *t, int steps);
 
 /* helpers shared with advisor/render/progression */
@@ -1256,6 +1284,10 @@ void  tank_set_bubble_x(tank_t *t, float x);
 enum { SD_ITEM_PLANT = 1u << 0, SD_ITEM_SNAIL = 1u << 1, SD_ITEM_CASTLE = 1u << 2, SD_ITEM_CORAL = 1u << 3, SD_ITEM_CLUSTER = 1u << 4, SD_ITEM_SHRIMP = 1u << 5,
        SD_ITEM_URCHIN = 1u << 6, SD_ITEM_SEAHORSE = 1u << 7, SD_ITEM_PUMPKIN = 1u << 8, SD_ITEM_VOLCANO = 1u << 9, SD_ITEM_CRAB = 1u << 10,
        SD_ITEM_COUNT = 11 };
+/* THE BACKGROUNDS in the shop (0.4.1): owned per tank, as decorations are - a bit each past the items (bg 1..7; Open Water,
+   0, is everyone's). Not SD_ITEMS rows: the shop's BACKGROUNDS area lists them (backgrounds.h). */
+#define SD_ITEM_BG(bg) (1u << (10 + (bg)))
+#define SD_BG_BITS     (0x7Fu << 11)
 /* per-fish paid bits (sd_paid_fish) */
 enum { SD_PAID_JUV = 1u << 0, SD_PAID_ADULT = 1u << 1, SD_PAID_ELDER = 1u << 2, SD_PAID_TRUST = 1u << 3 };
 #define PX_PER_INCH 24.0f          /* the tank reads as ~15 in tall; a fish ~1.7 in */
@@ -1415,6 +1447,8 @@ extern const uint32_t CORAL_PAL[CORAL_N];
 uint32_t tank_coral_rgb(const tank_t *t);          /* the colour, the default when unset */
 void     tank_coral_set_rgb(tank_t *t, uint32_t rgb);
 bool  tank_decor_placeable(int item);      /* SD item index: has an x and a layer */
+bool  tank_plant_under(const tank_t *t);   /* the sword plant BEHIND THE SEAGRASS (0.4.1): the back passes paint it first */
+void  tank_plant_set_under(tank_t *t, bool under);
 int   tank_decor_z_count(int item);        /* depths the item offers: 2 (BACK/FRONT) for every piece since 0.3.9.3 */
 int   tank_decor_z_at(int item, int i);    /* the i-th offered depth (the placement bar's segment i) */
 int   tank_decor_z_index(int item, int z); /* the inverse: which segment shows depth z */
@@ -1586,8 +1620,13 @@ int   tank_crab_tap(tank_t *t, float fx);  /* a tap on it (fx: the finger's x): 
                                              * into its shelter, the frontmost of the castle and the volcano (away from the finger with neither). Returns the taps so far;
                                              * 0 = the tap TOOK the sand dollar it was holding up (no card) */
 bool  tank_crab_walking(const tank_t *t);   /* its legs are striding (render; a shuffle too) */
+bool  tank_crab_in_shelter(const tank_t *t);   /* roosting, or walking in and at its shelter's opening (0.4: not the whole walk in) - render draws it inside the piece */
 bool  tank_crab_roost(tank_t *t, int cave);  /* go roost now: 2 the castle, 9 the volcano, -1 the frontmost (director, sim; it always ends in the frontmost) */
 void  tank_debug_roost_nearer(bool on);      /* (tests: the 0.3.9 pick - the nearer shelter, blind to the depth) */
+enum { POP_OLD_LANE = 1, POP_OLD_HOME = 2, POP_OLD_SH = 4 };
+void  tank_debug_pop_old(uint32_t m);       /* (tests, the layer hunt's pops as before 0.4: LANE a floor critter's lane changes clear of the pieces alone, HOME the walk
+                                               home keeps its lane, SH the seahorse changes its stack as it settles, wherever it was) */
+void  tank_debug_exit_lane_old(bool on);   /* (tests: out of a shelter IN FRONT the crab keeps the lane it came in with, as before 0.4 - the back lane walks out behind the volcano) */
 /* the volcano's cone, half its width in sprite cells (2 px) at height y
  * (cells up from the sprite's bottom row, which sits on tank_decor_fy) on
  * side s (-1 left, 1 right): the same rock render.c vo_half draws; the crab

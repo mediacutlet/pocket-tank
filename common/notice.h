@@ -22,11 +22,12 @@
  *
  * THE HOLD (2026-10-23, Strato + the community: "they accidentally close
  * those modals and don't have a chance to read them if they are tapping and
- * doing other things on screen"): for its first NOTICE_HOLD_S a notice
- * ignores taps - notice_dismiss spends the tap (returns true: it does not
- * reach the tank either) and the notice stays up for its full time. After
- * the hold a tap closes it as before. A notice that stepped aside and came
- * back starts its hold again. The lights-out notice is exempt: its tap must
+ * doing other things on screen"): a press that began before the notice
+ * came is spent (notice_dismiss_held returns true: it does not reach the
+ * tank either) and the notice stays; any later tap closes it (THE TOUCH
+ * RULE, touch_gate.h, 11-06: the 2 s hold before it is gone). One back from
+ * under a page a tap closed also spends that tap's double (the touch port).
+ * The lights-out notice is exempt: its tap must
  * reach the tank at once (below).
  *
  * NOTICE_LIGHTS_OUT (2026-10-03, Strato: "in case it surprises someone the
@@ -60,7 +61,7 @@ enum { NOTICE_MILESTONE, NOTICE_TANK_MILESTONE, NOTICE_STAGE, NOTICE_LOW_BATTERY
 typedef struct { int kind; int fish; uint32_t bit; float age; } notice_t;
 
 #define NOTICE_UP_S   6.0f
-#define NOTICE_HOLD_S 2.0f                  /* a tap this soon after it came up is spent, not a close */
+#define NOTICE_HOLD_S 2.0f                  /* (no longer a tap guard since THE TOUCH RULE, touch_gate.h: notice_dismiss_held) */
 #define NOTICE_GAP_S  1.0f
 #define NOTICE_QUEUE  8
 
@@ -68,7 +69,9 @@ void notice_sync(const tank_t *t);
 void notice_tick(const tank_t *t, float dt, bool blocked);
 const notice_t *notice_current(void);      /* NULL = none up */
 void notice_fish_removed(int idx);         /* a fish left, the slots shifted: notices follow their fish (or go) */
-bool notice_dismiss(void);                 /* a tap: true = the notice took it (closed, or held: still up), false = it goes on to the tank */
+bool notice_dismiss(void);
+bool notice_dismiss_held(float held_s);
+bool notice_came_back(void);              /* the notice up stepped aside under something and came back (a tap closed that page: the port gives it its window) */    /* the same, for a press held_s long: one begun before the notice came is spent */                 /* a tap: true = the notice took it (closed, or held: still up), false = it goes on to the tank */
 void notice_low_battery(void);             /* platform: the gauge fell to the threshold */
 void notice_updated(void);                 /* platform: the first boot of a new release (after notice_sync) */
 void notice_model_damaged(void);           /* platform: the AI model is damaged (after notice_sync): once per start */

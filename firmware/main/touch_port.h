@@ -37,7 +37,8 @@ int  touch_port_take_setting(int *value);       /* SET_TAP_* or 0 */
 /* the ADVANCED page (0.3.9.2, common/advanced.c): opened by main.c's chord on the settings page (BOOT held 5 s,
  * then a finger lands); while it is up adv_up() is true and it owns the glass. take_adv hands main ADV_ACT_CELL /
  * ADV_ACT_FIT once (save it; tell the charger) */
-void touch_port_open_advanced(void);
+int  touch_port_open_advanced(void);   /* the BOOT chord: ADVANCED up; returns the slider its tap jumped (SET_TAP_BRIGHT /
+                                        _VOLUME, unsaved: main.c puts the saved level back), else 0 */
 int  touch_port_take_adv(void);
 /* the shop page (2026-09-15): up / show it; an UNLOCK or MOVE tapped hands
  * the raw tap code (SHOP_TAP_BUY / SHOP_TAP_MOVE + item; 0 = none) to main
@@ -67,7 +68,12 @@ bool touch_port_updates(void);
 void touch_port_show_updates(bool on);
 bool touch_port_shelf(void);                  /* MY TANKS (the tank switcher, docs/tank-switcher.md): BOOT twice */
 void touch_port_show_shelf(bool on);
-bool touch_port_take_shelf_tap(float *x, float *y);   /* a tap on MY TANKS, once (frame coordinates) */
+void touch_port_shelf_back(void);             /* main.c: THE LIBRARY, a card or MOVE closed, MY TANKS's main page is back under the finger -
+                                                 its open wait again (0.4.1 audit round 2, R2T-5: a doubled BACK shut MY TANKS, a doubled
+                                                 outside tap locked the touch) */
+bool touch_port_take_shelf_tap(float *x, float *y, int64_t *press_us);   /* a tap on MY TANKS, once (frame coordinates; when its press began:
+                                                                        main.c's waits read it, touch_gate.h READ AT THE PRESS) */
+void touch_port_spend_press(void);              /* main.c took the finger down now as a hold (MY TANKS's MOVE, REMOVE): its lift is no tap (0.4.1) */
 int  touch_port_take_update(void);              /* UPD_TAP_CHECK once, else 0 */
 /* update mode's raw read (no tank, no pages): the finger in tank space, true while down */
 bool touch_port_read_raw(float *x, float *y);

@@ -62,6 +62,16 @@ enum { NET_ERR_NONE = 0, NET_ERR_NO_SIGNAL, NET_ERR_PASSWORD, NET_ERR_NO_NET, NE
 bool net_port_creds_get(char *ssid, char *pass);            /* the saved network (buffers NET_*_MAX + 1); false = none */
 bool net_port_creds_set(const char *ssid, const char *pass);
 void net_port_creds_forget(void);
+/* the Hatchery Crew (docs/hatchery-crew.md, 0.4.1). The BOARD CODE is the
+ * board's, never the save's: made once from the hardware RNG, 8 characters
+ * of NET_CODE_ALPHABET shown as XXXX-XXXX, kept beside the Wi-Fi store (a
+ * RESET keeps it). net_port_crew is the last crew check's answer, so the
+ * UPDATES page can say HATCHERY CREW without the radio: 1 on the list, 0 not
+ * on it or never asked. */
+#define NET_CODE_LEN       9                                 /* "KM4T-7RXA" */
+#define NET_CODE_ALPHABET  "ACDEFGHJKMNPQRTUVWXY34679"      /* no 0/O, 1/I/L, 2/Z, 5/S, 8/B */
+bool net_port_board_code(char out[NET_CODE_LEN + 1]);       /* false only if the store can't be written */
+int  net_port_crew(void);
 /* the radio. Every call returns at once; the flow polls the *_state calls
  * each frame (NET_BUSY / NET_DONE / NET_FAILED, the reason in
  * net_port_fail_reason). One operation at a time. */
@@ -84,7 +94,11 @@ const char *update_message_title(void);
 enum { UPD_TAP_NONE = 0, UPD_TAP_CLOSE, UPD_TAP_CHECK, UPD_TAP_FORGET };
 void render_updates_page(uint16_t *fb, int stride);
 int  updates_page_tap(float x, float y);                    /* the bare hit test */
-int  updates_page_touch(float x, float y, bool down);       /* every frame: UPD_TAP_* on a tap's release; FORGET is applied here */
+int  updates_page_touch(float x, float y, bool down, int64_t now_us);   /* every frame: UPD_TAP_* on a tap's release; FORGET is applied
+                                                                    here, on its second tap (SURE?) - now_us: the board's clock */
+void updates_page_cancel(void);                             /* the port, each poll it does not feed the page: forget the press in hand */
+void updates_page_open(void);                               /* the page comes up: FORGET is not armed */
+bool updates_forget_armed(void);
 
 /* the pages' layout (PAGE coordinates, render.h; 2026-10-01: out of update.c,
  * setup.h's way, so the sim's selftest taps where the layout says on every board) */

@@ -1,8 +1,9 @@
 /* audio.h - the sound mixer (docs/AUDIO.md section 5), pure C, shared by
  * the device (I2S -> ES8311 -> NS4150B -> the 12 mm speaker) and the sim
  * (SDL). Plays cues from the bank tools/make_sounds.py builds
- * (assets/sounds/sounds.bin: 16 kHz mono s16 clips; common/sounds.h says
- * where each cue's clips are and how loud).
+ * (assets/sounds/sounds.bin: 16 kHz mono clips, IMA ADPCM since 0.4.1 with
+ * a cue kept as s16 PCM where the ear asked; common/sounds.h says where each
+ * cue's clips are, in which codec, and how loud).
  *
  * Contract: audio_play is called from the tank/UI side and only writes a
  * voice slot; audio_render is called from the output side (a task, an SDL
@@ -37,7 +38,8 @@
 #endif
 #define AUDIO_PITCH_ONE  256      /* pitch_q8 = 256 plays a clip at its own rate */
 
-void audio_init(const int16_t *bank, uint32_t n_samples);
+void audio_init(const void *bank, uint32_t n_bytes);   /* the bank as built (SND_BANK_BYTES); flash-mapped is fine */
+uint32_t audio_clip_check(int clip);     /* SND_CLIPS[clip] decoded, FNV-1a 32: equals SND_CLIPS[clip].check (host test) */
 void audio_set_volume(int pct);          /* 0 (off) .. 100, clamped */
 int  audio_volume(void);
 int  audio_volume_from_level(int level); /* a 0.3.x level (0 off, 1 quiet, 2 normal) as the percent that sounds the same */

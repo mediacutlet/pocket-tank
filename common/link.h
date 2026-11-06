@@ -39,7 +39,8 @@
 #define LINK_PROTO        1
 #define LINK_FRAME_MAX    250        /* one ESP-NOW frame */
 #define LINK_PEERS_MAX    6          /* tanks heard and remembered */
-#define LINK_VISIT_MAX    N_VISIT_MAX  /* visitors a tank takes at once (fps + the 4 s decision budget): tank.h's slots */
+#define LINK_VISIT_MAX    N_VISIT_MAX  /* visitors the engine can hold at once: tank.h's slots. The room rule (how many a tank
+                                          takes: 2, tank_link.h TANK_LINK_VISIT_PLACES) is the host's room() */
 #define LINK_AWAY_MAX     N_FISH_MAX /* this tank's fish out at once (at most all of them) */
 #define LINK_EVQ          32
 #define LINK_BADGES       4          /* circle, triangle, square, diamond - a shape AND a color */
@@ -184,10 +185,14 @@ void    link_leaving(link_t *L, uint32_t uid, const passport_t *pp, float depth,
 void    link_deny(link_t *L, uint32_t uid, uint32_t ms);
 void    link_fry_ask(link_t *L, uint32_t parent_uid);
 void    link_fry_off(link_t *L, uint32_t parent_uid);
+/* ... link_fry_peek: room or not, and the home holds nothing (0.4.1 round 2: the pair waits for a visitor place here, and only
+ * a fry whose home HAS room waits - a full home's fry is ours). Answered as an ask is (LEV_FRY_ROOM) */
+void    link_fry_peek(link_t *L, uint32_t parent_uid);
 bool    link_fry_give(link_t *L, uint32_t parent_uid, const passport_t *fry, const link_kin_t *other);   /* other: our parent of it (may be NULL) */
 bool    link_accepted(const link_t *L, uint32_t uid, link_edge_t e);   /* home: a yes for it at that door, still in time */
 bool    link_is_away(const link_t *L, uint32_t uid);      /* one of ours, next door (not simulated here) */
 bool    link_hosting(const link_t *L, uint32_t uid);      /* a visitor simulated here */
+int     link_visitors_coming(const link_t *L);            /* places given that host.room cannot see yet (accepted, not drawn) */
 int     link_badge(const link_t *L);
 int     link_peer_badge(const link_t *L, uint32_t tank);  /* a tank heard: its badge (-1 = not heard) */
 int     link_peers(const link_t *L, link_peer_info_t *out, int max);   /* the NEARBY row: fresh tanks in link mode */
@@ -220,7 +225,8 @@ bool    link_give(link_t *L, link_edge_t e, const passport_t *pp);   /* giver: o
 void    link_give_cancel(link_t *L, uint32_t uid);                    /* giver: the keeper takes it back (only while asking) */
 bool    link_give_answer(link_t *L, uint32_t uid, uint32_t nonce, bool yes);   /* receiver: yes ONLY after the ARRIVING note
                                                                        * is saved; false = that question had closed (drop the note again) */
-void    link_give_done(link_t *L, uint32_t uid, uint32_t nonce);      /* giver: after LEV_GIVE_TAKEN's note and save */
+void    link_give_done(link_t *L, uint32_t uid, uint32_t nonce, const passport_t *pp);   /* giver: after LEV_GIVE_TAKEN's note and save - pp the
+                                                                       * fish as it left (the GIVEN note's): GIVEN carries it (0.4.1) */
 bool    link_give_keep(link_t *L, uint32_t uid, uint32_t nonce);      /* giver: a TAKEN gift that never left (the tank next door went
                                                                        * quiet, its door closed): ours after all - safe until link_give_done,
                                                                        * as the receiver brings a fish to life only on GIVEN (2026-11-02).

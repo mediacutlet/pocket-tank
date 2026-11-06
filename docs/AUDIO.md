@@ -188,6 +188,20 @@ void audio_port_sleep(void);                          // amp low, codec down, AL
   `tools/make_sounds.py` from `assets/sounds/` and `gains.csv`. Embedded with `EMBED_FILES`
   next to `tokenizer.bin`; it lives in flash-mapped `.rodata`, so no RAM.
   The manifest is shared with the sim.
+- **Compressed since 0.4.1 (2026-11-04):** the bank is IMA ADPCM, 4 bits a
+  sample, 580 -> 170 KB. rc-0.4 filled 95% of the 2.5 MB app slot; this gave
+  back 384 KB (80% full). Each clip is 256-sample blocks of 132 bytes (the
+  first sample exact as s16, the step index, a pad byte, 255 nibbles low
+  first), so every block restarts exactly and a loop seam never drifts. The
+  mixer decodes forward as a voice plays (a few bytes of state per voice, no
+  buffer); `tools/make_sounds.py` encodes with a harder search (the best
+  starting step per block, a one-sample lookahead) but the decoder is the
+  standard one. **`PCM_CUES` stay s16**: `investigate` (Strato by ear,
+  2026-11-04: the only one that "sounded considerably worse"; a soft
+  two-note tone with a long quiet fade, where ADPCM's hiss has nothing to
+  hide under). A new cue that sounds rough compressed joins `PCM_CUES`.
+  `firmware/host_test/audio_host.c` checks every clip decodes, sample for
+  sample, to the tool's own decode (`SND_CLIPS[].check`).
 - **Player task:** core 1 (the LLM core; the advisor runs at priority 5 and
   is bandwidth-bound, not latency-bound), priority 6, small stack. Wakes on
   an event or a DMA half-empty callback. Software mixer: up to 3 voices,

@@ -36,8 +36,7 @@ static void board_boot(void) {                      /* the board restarting: the
     tank_init(&s_tk, 5);
     shelf_boot(clock_port_now_unix());
     progression_boot(&s_tk);
-    progression_carry_t c;
-    if (shelf_take_carry(&c, sizeof c)) progression_carry_give(&s_tk, &c);
+    progression_swap_carry(&s_tk);
 }
 /* a visitor in slot 0 of the tank, its own look: COLLECT on its passport */
 static bool collect(int j) {

@@ -19,7 +19,8 @@ pass.
 
 | rank | painted | notes |
 |---|---|---|
-| 0 | the SCENE: the water, the sand, the pieces BEHIND (baked, with their contact shadows and the night glow), then the back grass - every frond of the seagrass (0.3.9.3: no weave; the seagrass always BEHIND) and the sword plant (one depth since 0.4: BEHIND, drawn over the seagrass - bed 3 last; Strato 11-02), laid from THE GRASS LOOP's band and fine moment for the frame (render.c) | the scene rebuilt only on a bake; the loop rebaked when the grass's look changes, drawn live meanwhile |
+| 0 | the SCENE: the water, the sand, the pieces BEHIND (baked, with their contact shadows and the night glow), then the back grass - every frond of the seagrass (0.3.9.3: no weave; the seagrass always BEHIND) and the sword plant (one depth among the pieces since 0.4; against the seagrass, since 0.4.1 (Strato 11-05), the keeper's pick on its page: IN FRONT OF THE SEAGRASS - bed 3 painted last, 0.4's one look and every older plant's - or BEHIND THE SEAGRASS - bed 3 painted FIRST (render.c bed_ord, THE BED ORDER) in every back pass: the loop's bake and its box patch, the live grass, the crab's weave, the grass cache. Either way it is back grass: a fish IN FRONT is over both, one BEHIND under both, one THROUGH (and the seahorse coiled on a blade) under the odd fronds of both. `--selftest-plant-under`, its stack cells in `--selftest-stack`), laid from THE GRASS LOOP's band and fine moment for the frame (render.c) | the scene rebuilt only on a bake; the loop rebaked when the grass's look changes, drawn live meanwhile |
+| 0b | TWILIGHT DEEP's drift (0.4.1): the far water's specks | painted late (render_tank, after the frame's own layers) but only on a pixel the frame still shows as the scene AND no piece covers (pc_covers: the castle's mask, every baked or live piece's) - so it lands on the water, the backdrop and the pieces' contact shadows only: under every frond, piece, critter and fish, never in the critters' sand lane. Before the 0.4.1 audit (P9, Strato: "only in the background") the scene test alone let ~5-7% of the specks onto the pieces, which are baked into the scene. `--selftest-backgrounds` (each frame against the same frame without the drift, over the castle, the coral and the cluster) |
 | 1 | the DEEP crab in a shelter BEHIND (ROOST / SHELTER, backed in or not) | under every frond. With the frame primed from THE GRASS LOOP (every board since 0.3.9.3) it is drawn through dep_draw at depth BEHIND inside its shelter (DEP_NOBED): the loop's grass comes back over it from the frame's mask, every row, the shelter's rock stays as it is; with the grass live, drawn plain and the back fronds of every bed crossing its rect painted over it again. (0.3.9.4: the loop path was missing - the crab sat on the fronds, C1704 on Discord; `--selftest-cave`, loop on) |
 | 2 | (gone in 0.3.9.3: the early arch pass drew a MIDDLE bed's late fronds inside a castle IN FRONT's opening; a bed BEHIND shows through the open arch from rank 0) | a bed placed IN FRONT takes no part (it stands before the castle) |
 | 3 | the DEEP crab in a castle IN FRONT's arch | over the fronds seen through the opening |
@@ -149,6 +150,96 @@ pass.
   overlay (rank 12) off the crab in the arch; a volcano IN FRONT's cave keeps
   its own lava off it as before. `--selftest-roost` (PT_ROOST_OLD=1 the pick's
   control, PT_CRAB_STACK_OLD=1 the render's).
+  The same holds for an ANIMAL'S PUT-BACK (0.4, abumaia's pendant on #help
+  11-03 "Shrimp shadows?": the castle IN FRONT over the volcano, the shrimp
+  behind the castle or the volcano "cast a shadow on the resting crab, hiding
+  it"): an animal passing behind a piece IN FRONT has the piece put back over
+  it from the scene, which has no crab - so where that piece is the crab's
+  castle or one ranked below it, the crab's pixels come back from what was
+  under the animal (the crab), not the scene (render.c dep_draw, g_dp_crab).
+  A piece ranked above the castle still comes back over the crab. And an
+  animal behind the WHOLE castle (behind or through the grass) is behind the
+  crab everywhere: the arch is open to what is behind the castle, so it showed
+  over the crab in the opening - with the volcano BEHIND nothing hid it - and
+  the grass's put-back brought the crab back in frond-shaped stripes. One in
+  front of the grass but behind the pieces still swims through the arch over
+  the crab (the crab is the deepest thing on the sand).
+  `--selftest-roost-pass` (in `make check`: both pieces in every depth order,
+  the shrimp and a fish swept across the crab at every depth pair - no crab
+  pixel may show what is behind it; with the crab in a castle IN FRONT, behind
+  the castle its front row stays exact and behind the whole castle the crab
+  stays exact; PT_ROOST_PASS_OLD=1 the control), director
+  `rpasstest [old|new|off] [front|through|behind] [pfront|pbehind]`.
+- OUT OF ITS SHELTER, IN FRONT, THE FRONT LANE (0.4, Strato on the square
+  11-04: "i absolutely saw volcano clipping over the crab"). In its shelter the
+  crab is inside that piece, in no lane; leaving it, it kept the lane it came
+  in with (inside a footprint a lane never changes), so one that came in by its
+  back lane walked out of a castle IN FRONT behind every piece IN FRONT - the
+  volcano behind the castle restored over it in the arch (rank 8), all of it,
+  until it was clear; out of a volcano IN FRONT's cave the volcano's own rock.
+  Out of a shelter IN FRONT (the roost's end, a pellet, a tap as it walks in)
+  it takes the FRONT lane - out of the opening toward the glass - and the
+  lanes' rule holds it until it is clear of every piece (tank.c crab_mode).
+  A shelter BEHIND changes nothing: the crab in it was behind every piece IN
+  FRONT already. A piece ranked above a shelter IN FRONT and standing over
+  its opening (a coral before the arch) has the crab step out over it.
+  `--selftest-roost-exit` (PT_EXIT_LANE_OLD=1 the control), director
+  `crab out [old|new]`.
+- IN ITS SHELTER MEANS AT THE OPENING (0.4, the layer hunt `--layer-hunt`:
+  in its front lane before a coral IN FRONT, the crab headed for a volcano
+  BEHIND across the tank and vanished behind the coral at once, 518 px -> 0).
+  Walking in counted as inside the shelter from the first step. Now the crab
+  is drawn inside its shelter (rank 1 / 3, the front volcano's cave in the
+  front slot) only roosting, or walking in and at the opening - the castle's
+  arch (26 px of its middle), the cave mouth (CR_NEAR_PX) - tank.c
+  tank_crab_in_shelter, the one test render.c draws by. Until then it walks
+  in its lane like any crab. Heading home from the open sand it takes the lane
+  of its shelter's depth: IN FRONT, the front lane (in view, into the
+  opening; as it comes out); BEHIND, the back lane (behind a piece IN FRONT
+  standing before the opening, not through it at the door). Already inside a
+  footprint its lane holds; heading for a shelter BEHIND in its front lane
+  from inside a piece IN FRONT's footprint (a cluster IN FRONT before a
+  castle BEHIND's arch: the hunt's tank 97, 528 px -> 0 at the door) it
+  first steps out to the nearest clear sand, takes the back lane there and
+  walks back in behind the piece (tank.c crab_home_lane). The other way
+  round needs no step: a crab in its back lane goes into a shelter IN FRONT
+  from behind, through the arch or into the cave's dark.
+  `--selftest-roost-exit`'s way in: from a coral IN FRONT to each shelter in
+  either lane, no pop but the frame it goes in, at the opening.
+- A DEPTH CHANGES ONLY WHERE NOTHING SHOWS IT (0.4, the layer hunt's last
+  four - each popped in one frame). A floor critter's lane (tank.c lane_try)
+  changes only clear of every piece IN FRONT, as since 10-24, and now also
+  with no other animal over it (the urchin stepping forward onto the crab,
+  127 -> 387 px), and in the grass only from in front of it: the front lane
+  is drawn over every frond (DEP_*_F take FISH_DEPTH_FRONT), so a critter in
+  its back lane behind or through a bed waits for the open sand to step
+  forward, and one stepping back inside a bed keeps FISH_DEPTH_FRONT - its
+  depth eases to its want clear of the beds, as it always has (the crab
+  dropping behind the sword plant's leaves, 509 -> 153 px). The seahorse's
+  lane and stacks change clear of every piece or as it settles on its hold;
+  heading for a hold in another stack with its way inside the pieces, it
+  reached the hold still in the old one and changed there (coiled in the
+  sword plant's stack behind the volcano, onto a frond of the next bed:
+  0 -> 395 px). Now it swims out round the pieces first (exit_round, the
+  finger's way out) and changes in the clear. `--selftest-pop-lanes`: the
+  urchin on the crab, the crab's lane in a bed exact (the frame against the
+  same frame with the old lane put back: 0 px), the walk home, the seahorse
+  bed to bed in three layouts; PT_POP_OLD=1 / 2 / 4 the controls, each
+  FAILS its part.
+- THE ORDER IS PART OF THE GRASS LOOP'S LOOK (0.4, Strato on the square
+  11-04: the sword plant raised over the volcano on its page - IN FRONT lit
+  - its leaves stayed cut round the volcano; toggling flickered). The loop
+  bakes each back bed's leaves cut round the pieces ranked above it
+  (veg_skip_for); its look (render.c gl_key) held the beds' kind, place and
+  fronds but not which pieces they keep off, so a re-rank of the plant was
+  never a change: the loop served the old order on the page, after DONE,
+  until a restart - against every piece BEHIND. The kept-off set is in the
+  look now; the patch repaints the pieces' boxes (gl_window). `--selftest-
+  plant-order` (the board's path - the loop on, its slices between frames -
+  against loops baked fresh with each order, every moment exact, the plant
+  against the volcano, castle, pumpkin, coral, cluster; PT_GL_SKIP_OLD=1 the
+  control). `--selftest-place` measures with the loop bypassed: it never saw
+  this.
 - Among the floor critters at one layer the crab is lowest, then the snail,
   then the urchin, in either lane; across lanes or layers the one in front is
   over (0.4: in the back lane, a critter behind the grass is under one before it).

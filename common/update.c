@@ -5,6 +5,7 @@
 #include "tank.h"
 #include "version.h"
 #include "progression.h"     /* version_port_string */
+#include "touch_gate.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -20,6 +21,8 @@
 #define C_CAPT   0x9fd8e2
 #define C_GO     0x155e58
 #define C_GO_E   0x38dcc7
+#define C_FILL   0x2f7f8a     /* a hold filling (REMOVE's deep teal: the white words read on it and on C_GO) */
+#define UPD_HOLD_S 1.0f
 #define C_WARN   0xf2b65b     /* amber: never the only signal (Strato is color blind) */
 
 /* the panel the setup uses: inside the bezel curve */
@@ -155,24 +158,43 @@ static bool in_box(float x, float y, int bx, int by, int bw, int bh, int slop) {
  * 1. THE UPDATES PAGE in the tank (no radio)
  * ==================================================================== */
 
+/* FORGET NETWORK ARMS (0.4.1 audit round 1, TCH-10; Strato 11-05: "fix this, give a confirmation 'sure?'"): one tap
+   forgot the saved Wi-Fi, and with it the morning clock check and the night's power-off on a board with no clock chip.
+   Now the first tap arms it - the button says SURE? - and a second tap forgets, the way the keeper card's SELL arms:
+   not within OPEN_WAIT_US of the tap before it, read at the second tap's press (a double tap, a mash or a firm second
+   press is spent: touch_gate.h THE TOUCH RULE, no restart). Any other release on the page, or the page
+   opening again, disarms it. */
+static bool s_forget_armed; static int64_t s_forget_at;
+void updates_page_open(void) { s_forget_armed = false; }
+bool updates_forget_armed(void) { return s_forget_armed; }
 void render_updates_page(uint16_t *fb, int stride) {
     page_bg(fb, stride);
     text_c(fb, stride, 14, 3, C_TEXT, "UPDATES");
     char line[64];
     snprintf(line, sizeof line, "VERSION %s %s", PT_RELEASE, PT_RELEASE_STAGE);
-    render_text(fb, stride, 32, 62, 2, C_TEXT, line);
+    render_text(fb, stride, 32, 56, 2, C_TEXT, line);
     snprintf(line, sizeof line, "BUILD %s", version_port_string());
-    render_text(fb, stride, 32, 84, 2, C_QUIET, line);
+    render_text(fb, stride, 32, 78, 2, C_QUIET, line);
+    /* 0.4.1: the code a keeper gives Turbo (/crew add), and once the crew
+       check said yes, the words say so (never the color alone) */
+    char code[NET_CODE_LEN + 1];
+    if (net_port_board_code(code)) {
+        const char *label = net_port_crew() ? "HATCHERY CREW" : "BOARD CODE";
+        render_text(fb, stride, 32, 100, 2, C_CAPT, label);
+        render_text(fb, stride, 32 + render_text_w(label, 2) + 14, 100, 2, C_TEXT, code);
+    }
     char ssid[NET_SSID_MAX + 1], pass[NET_PASS_MAX + 1];
     if (net_port_creds_get(ssid, pass)) {
-        render_text(fb, stride, 32, 122, 2, C_CAPT, "NETWORK");
-        update_text(fb, stride, 32 + render_text_w("NETWORK", 2) + 14, 122, 2, C_TEXT, ssid);
-    } else render_text(fb, stride, 32, 122, 2, C_CAPT, "NO NETWORK SAVED YET");
-    render_text(fb, stride, 32, 152, 2, C_QUIET, "THE TANK PAUSES FOR A MOMENT");
-    render_text(fb, stride, 32, 174, 2, C_QUIET, "AND COMES BACK BY ITSELF");
+        render_text(fb, stride, 32, 126, 2, C_CAPT, "NETWORK");
+        update_text(fb, stride, 32 + render_text_w("NETWORK", 2) + 14, 126, 2, C_TEXT, ssid);
+    } else render_text(fb, stride, 32, 126, 2, C_CAPT, "NO NETWORK SAVED YET");
+    render_text(fb, stride, 32, 152, 2, C_QUIET, "WHILE UPDATING, THE BOARD");      /* Strato's words, 2026-11-04 */
+    render_text(fb, stride, 32, 174, 2, C_QUIET, "PAUSES AND REBOOTS ITSELF");
     render_button(fb, stride, UPD_CHECK_X, UPD_CHECK_Y, UPD_CHECK_W, UPD_CHECK_H, C_GO, C_GO_E, "CHECK FOR UPDATES", 2);
-    if (net_port_creds_get(ssid, pass))
-        render_button(fb, stride, UPD_FORGET_X, UPD_FORGET_Y, UPD_FORGET_W, UPD_FORGET_H, C_INNER, C_DIM, "FORGET NETWORK", 2);
+    if (net_port_creds_get(ssid, pass)) {
+        if (s_forget_armed) render_button(fb, stride, UPD_FORGET_X, UPD_FORGET_Y, UPD_FORGET_W, UPD_FORGET_H, C_GO, C_GO_E, "SURE?", 2);
+        else render_button(fb, stride, UPD_FORGET_X, UPD_FORGET_Y, UPD_FORGET_W, UPD_FORGET_H, C_INNER, C_DIM, "FORGET NETWORK", 2);
+    }
     render_button(fb, stride, UPD_CLOSE_X, UPD_CLOSE_Y, UPD_CLOSE_W, UPD_CLOSE_H, C_INNER, C_EDGE, "CLOSE", 2);
 }
 int updates_page_tap(float x, float y) {
@@ -183,18 +205,28 @@ int updates_page_tap(float x, float y) {
     if (in_box(x, y, UPD_FORGET_X, UPD_FORGET_Y, UPD_FORGET_W, UPD_FORGET_H, 8) && net_port_creds_get(ssid, pass)) return UPD_TAP_FORGET;
     return UPD_TAP_NONE;
 }
-int updates_page_touch(float x, float y, bool down) {
-    static bool s_down; static float s_px, s_py, s_lx, s_ly; static int s_hit;
+static bool s_down; static float s_px, s_py, s_lx, s_ly; static int s_hit; static int64_t s_press_us;   /* updates_page_touch's press in hand */
+/* A PRESS CUT (0.4.1 audit round 2, R2T-3): the port calls this on every poll it does not feed the page (the gift card over it,
+   the page closed by BOOT twice or a birth) - the press is forgotten, so the next feed's "up" is no release of it (CHECK FOR
+   UPDATES fired as the card went, or the next time the page opened). An armed SURE? stays armed: only the press goes */
+void updates_page_cancel(void) { s_down = false; s_hit = UPD_TAP_NONE; }
+int updates_page_touch(float x, float y, bool down, int64_t now_us) {
     int r = UPD_TAP_NONE;
     if (down) { s_lx = x; s_ly = y; }
-    if (down && !s_down) { s_px = x; s_py = y; s_hit = updates_page_tap(x, y); }
+    if (down && !s_down) { s_px = x; s_py = y; s_hit = updates_page_tap(x, y); s_press_us = now_us; }
     else if (!down && s_down) {
         x = s_lx; y = s_ly;
         int h = updates_page_tap(x, y);
         float dx = x - s_px, dy = y - s_py;
-        if (h && h == s_hit && dx * dx + dy * dy < 24 * 24) {
-            r = h;
-            if (r == UPD_TAP_FORGET) net_port_creds_forget();
+        const bool tap = h && h == s_hit && dx * dx + dy * dy < 24 * 24;
+        if (tap && h == UPD_TAP_FORGET) {
+            if (!s_forget_armed) { s_forget_armed = true; s_forget_at = now_us; }      /* SURE? */
+            else if (!hold_spent_us_at(&s_forget_at, s_press_us, now_us, OPEN_WAIT_US)) {   /* (spent: the tap before's double) */
+                s_forget_armed = false; net_port_creds_forget(); r = UPD_TAP_FORGET;
+            }
+        } else {
+            s_forget_armed = false;                                                  /* anything else: not armed */
+            if (tap) r = h;
         }
     }
     s_down = down;
@@ -230,6 +262,7 @@ static struct {
     /* the finger: the press, and the LAST position while down - a release
        reports no position on the device, the tank's touch port does the same */
     bool down; float px, py, lx, ly; int hit;
+    float hold_t0; bool holding;             /* the OFFER's UPDATE held (Strato 11-06: an install has no way back - a 1 s hold, not a tap) */
 } s;
 
 /* ---- the keyboard ----
@@ -311,7 +344,7 @@ static void draw_field(uint16_t *fb, int stride, double clock) {    /* the typed
 
 /* ---- the pages ---- */
 
-static void go(int step, int page) { s.step = step; s.page = page; s.t = 0; s.hit = HIT_NONE; }
+static void go(int step, int page) { s.step = step; s.page = page; s.t = 0; s.hit = HIT_NONE; s.holding = false; }
 /* the message page: a title, two lines, up to three actions (row A: primary
  * left, secondary right; row B: tertiary left) and BACK TO TANK (row B,
  * right when a tertiary sits beside it, else centred) */
@@ -571,13 +604,21 @@ void update_touch(float x, float y, bool down) {
         s.down = down; return;
     }
     if (down) { s.lx = x; s.ly = y; }
-    if (down && !s.down) { s.px = x; s.py = y; s.hit = update_hit(x, y); }
+    if (down && !s.down) { s.px = x; s.py = y; s.hit = update_hit(x, y);
+                           if (s.page == UPD_PG_OFFER && s.hit == HIT_YES) { s.holding = true; s.hold_t0 = s.t; } }   /* (a press from before the
+                                                                   page came is no press here: go() forgot it - THE TOUCH RULE's G1) */
+    else if (down && s.page == UPD_PG_OFFER && s.hit == HIT_YES) {   /* UPDATE HELD (a press begun on it): it installs once the hold is
+                                                           full; slid off, the fill empties, and back on it starts again from empty */
+        if (update_hit(x, y) != HIT_YES) s.holding = false;
+        else if (!s.holding) { s.holding = true; s.hold_t0 = s.t; }
+        else if (s.t - s.hold_t0 >= UPD_HOLD_S) { s.holding = false; s.hit = HIT_NONE; start_install(); }
+    }
     else if (!down && s.down) {
         x = s.lx; y = s.ly;                              /* where the finger was, not where "nothing" is */
         int h = update_hit(x, y);
         float dx = x - s.px, dy = y - s.py;
-        if (h && h == s.hit && dx * dx + dy * dy < 30 * 30) activate(h);
-        s.hit = HIT_NONE;
+        if (h && h == s.hit && dx * dx + dy * dy < 30 * 30 && !(s.page == UPD_PG_OFFER && h == HIT_YES)) activate(h);   /* (UPDATE: its hold, not a tap) */
+        s.hit = HIT_NONE; s.holding = false;
     }
     s.down = down;
 }
@@ -680,7 +721,17 @@ void render_update(uint16_t *fb, int stride, double clock) {
         else snprintf(line, sizeof line, "IT TAKES ABOUT %d MINUTES", (secs + 30) / 60);
         text_c(fb, stride, 208, 2, C_QUIET, line);
         text_c(fb, stride, 230, 2, C_QUIET, "THE TANK RESTARTS BY ITSELF");
-        render_button(fb, stride, UPD_BTN_L_X, UPD_BTN_Y, UPD_BTN_W, UPD_BTN_H, C_GO, C_GO_E, "UPDATE", 2);
+        {   /* HOLD TO UPDATE (Strato 11-06): the fill grows across the button as the finger stays, as REMOVE's HOLD TO SELL */
+            const char *lb = "HOLD TO UPDATE";
+            float f = s.holding ? (s.t - s.hold_t0) / UPD_HOLD_S : 0; if (f > 1) f = 1;
+            render_rect(fb, stride, UPD_BTN_L_X, UPD_BTN_Y, UPD_BTN_W, UPD_BTN_H, C_GO);
+            if (f > 0) render_rect(fb, stride, UPD_BTN_L_X, UPD_BTN_Y, (int)(UPD_BTN_W * f), UPD_BTN_H, C_FILL);
+            render_rect_edge(fb, stride, UPD_BTN_L_X, UPD_BTN_Y, UPD_BTN_W, UPD_BTN_H, C_GO_E);
+            if (PAGE_BOWL) {                                 /* (the bowl's button is narrower: two lines, Strato 11-06) */
+                render_text(fb, stride, UPD_BTN_L_X + (UPD_BTN_W - render_text_w("HOLD TO", 2)) / 2, UPD_BTN_Y + 3, 2, C_TEXT, "HOLD TO");
+                render_text(fb, stride, UPD_BTN_L_X + (UPD_BTN_W - render_text_w("UPDATE", 2)) / 2, UPD_BTN_Y + UPD_BTN_H - 17, 2, C_TEXT, "UPDATE");
+            } else render_text(fb, stride, UPD_BTN_L_X + (UPD_BTN_W - render_text_w(lb, 2)) / 2, UPD_BTN_Y + (UPD_BTN_H - 14) / 2, 2, C_TEXT, lb);
+        }
         render_button(fb, stride, UPD_BTN_R_X, UPD_BTN_Y, UPD_BTN_W, UPD_BTN_H, C_INNER, C_EDGE, "NOT NOW", 2);
         break; }
     case UPD_PG_CALIB: {

@@ -26,10 +26,10 @@
  * number in that merge. At the 0.4.0 release the stage goes back to "alpha". */
 #define PT_RELEASE_MAJOR 0
 #define PT_RELEASE_MINOR 4
-#define PT_RELEASE_PATCH 0
+#define PT_RELEASE_PATCH 1
 #define PT_RELEASE_HOTFIX 0                    /* a fourth part (2026-10-21): a fix between patches - 0.3.8.1 - that
                                                   must not burn the next number. 0 = none, and the string has three parts */
-#define PT_RELEASE       "0.4.0"
+#define PT_RELEASE       "0.4.1"
 #define PT_RELEASE_STAGE "alpha"               /* pre-1.0: shown beside the number ("alpha" in a release; "dev" on main between them) */
 /* the packed number the tank compares (update.c newer(), the save's stamp):
  * a byte each, major.minor.patch.hotfix. Until 0.3.8 it was three bytes

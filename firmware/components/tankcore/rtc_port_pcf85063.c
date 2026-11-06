@@ -97,11 +97,12 @@ bool rtc_port_init(i2c_master_bus_handle_t bus) {
 }
 bool rtc_port_stopped(void) { return s_stopped; }
 bool rtc_port_unread(void) { return s_unread; }
-void rtc_port_store(void) {
-    if (!s_dev) return;
+bool rtc_port_store(void) {
+    if (!s_dev) return true;                            /* no chip: the system clock is all there is */
     time_t now = time(NULL);
-    if (now < 1704067200) return;                       /* 2024-01-01: nothing worth keeping */
+    if (now < 1704067200) return false;                 /* 2024-01-01: nothing worth keeping */
     struct tm t; gmtime_r(&now, &t);                    /* the clock is UTC throughout (mktime/gmtime pair: TZ is never set) */
-    if (rtc_write(&t)) { ESP_LOGI(TAG, "RTC chip set from the system clock (%04d-%02d-%02d %02d:%02d)", t.tm_year + 1900, t.tm_mon + 1, t.tm_mday, t.tm_hour, t.tm_min); }
-    else ESP_LOGW(TAG, "RTC chip: the write failed");
+    if (rtc_write(&t)) { ESP_LOGI(TAG, "RTC chip set from the system clock (%04d-%02d-%02d %02d:%02d)", t.tm_year + 1900, t.tm_mon + 1, t.tm_mday, t.tm_hour, t.tm_min); return true; }
+    ESP_LOGW(TAG, "RTC chip: the write failed");
+    return false;
 }

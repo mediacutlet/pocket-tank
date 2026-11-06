@@ -1,5 +1,6 @@
 /* notice.c - the announcement queue. See notice.h. */
 #include "notice.h"
+#include "progression.h"                 /* (progression_newest: a count notice's fish) */
 #include "sounds.h"
 #include <string.h>
 
@@ -11,13 +12,14 @@ static notice_t s_q[NOTICE_QUEUE];
 static int      s_qn;
 static notice_t s_cur;
 static bool     s_up;
+static bool s_came_back;                 /* the notice up stepped aside under a page and came back (notice_came_back) */
 static float    s_gap;                       /* seconds until the next may come up */
 static int      s_cue = -1;
 static bool     s_model_told;                /* NOTICE_MODEL_DAMAGED: once per start (a sync does not forget it) */
 
 /* never announced: they belong to the birth of a tank or a fish */
-#define MS_SILENT   (MS_ARRIVED | MS_INSPECTED | MS_RETIRED_6 | MS_RETIRED_7 | MS_CROSSBRED)   /* (MS_INSPECTED: no badge since 0.3.0) */
-#define TMS_SILENT  (TMS_PAIR)
+#define MS_SILENT   (MS_ARRIVED | MS_INSPECTED | MS_RETIRED_6 | MS_RETIRED_7 | MS_CROSSBRED | MS_BOUGHT | MS_CAME_CHANGED)   /* (MS_INSPECTED: no badge since 0.3.0) */
+#define TMS_SILENT  (TMS_PAIR | TMS_RETIRED_4)
 #define MS_STAGES   (MS_REACHED_JUV | MS_REACHED_ADULT | MS_REACHED_ELDER)
 
 static void push(int kind, int fish, uint32_t bit) {
@@ -56,7 +58,9 @@ void notice_tick(const tank_t *t, float dt, bool blocked) {
     }
     uint32_t fresh = t->tank_ms_bits & ~s_tms & ~TMS_SILENT;
     for (uint32_t b = 1; b && fresh; b <<= 1)
-        if (fresh & b) { push(NOTICE_TANK_MILESTONE, -1, b); fresh &= ~b; }
+        if (fresh & b) {                     /* a count (A TRIO..A QUINTET) carries the fish that made it, as it is queued: whoever
+                                                arrives before it comes up is not its picture (0.4.1 audit round 1, R-seam-keeper-sees S2) */
+            push(NOTICE_TANK_MILESTONE, (b & (TMS_TRIO | TMS_QUARTET | TMS_QUINTET)) ? progression_newest(t) : -1, b); fresh &= ~b; }
     s_tms = t->tank_ms_bits;
     if (t->light_tip_seen && !s_tip) push(NOTICE_LIGHTS_OUT, -1, 0);   /* the first double-tap that turned the light off */
     s_tip = t->light_tip_seen;
@@ -79,6 +83,7 @@ void notice_tick(const tank_t *t, float dt, bool blocked) {
     if (s_gap > 0) { s_gap -= dt; return; }
     if (blocked || !s_qn) return;
     bool again = s_q[0].age < 0;             /* stepped aside earlier: no second chime */
+    s_came_back = again;
     s_cur = s_q[0]; s_cur.age = 0;
     memmove(&s_q[0], &s_q[1], sizeof(notice_t) * (size_t)(s_qn - 1)); s_qn--;
     s_up = true;
@@ -91,21 +96,26 @@ void notice_fish_removed(int idx) {
     int n = 0;
     for (int i = 0; i < s_qn; i++) {
         notice_t q = s_q[i];
-        if (q.fish >= 0 && q.fish == idx) continue;
+        if (q.fish >= 0 && q.fish == idx && q.kind == NOTICE_TANK_MILESTONE) q.fish = -1;   /* (a count stays: its fish gone, the newest) */
+        else if (q.fish >= 0 && q.fish == idx) continue;
         if (q.fish > idx) q.fish--;
         s_q[n++] = q;
     }
     s_qn = n;
     if (s_up && s_cur.fish >= 0) {
-        if (s_cur.fish == idx) { s_up = false; s_gap = NOTICE_GAP_S; }
+        if (s_cur.fish == idx && s_cur.kind == NOTICE_TANK_MILESTONE) s_cur.fish = -1;
+        else if (s_cur.fish == idx) { s_up = false; s_gap = NOTICE_GAP_S; }
         else if (s_cur.fish > idx) s_cur.fish--;
     }
 }
 const notice_t *notice_current(void) { return s_up ? &s_cur : NULL; }
-bool notice_dismiss(void) {
+bool notice_came_back(void) { return s_up && s_came_back; }
+bool notice_dismiss(void) { return notice_dismiss_held(0); }
+bool notice_dismiss_held(float held_s) {
     if (!s_up) return false;
     if (s_cur.kind == NOTICE_LIGHTS_OUT) { s_up = false; s_gap = NOTICE_GAP_S; return false; }   /* its tap goes on to the tank: the double-tap it asks for */
-    if (s_cur.age < NOTICE_HOLD_S) return true;   /* the hold: a tap this soon is spent, the notice stays (notice.h) */
+    if (held_s >= s_cur.age) return true;   /* THE TOUCH RULE (touch_gate.h): a press begun before it came is spent, the notice stays (G1;
+                                               it comes by itself: no window - the 2 s hold before 11-06 is gone) */
     s_up = false; s_gap = NOTICE_GAP_S;
     return true;
 }

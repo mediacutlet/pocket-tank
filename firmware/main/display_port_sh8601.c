@@ -51,7 +51,12 @@ static const char *TAG = "sh8601";
 
 static esp_lcd_panel_handle_t s_panel;
 static esp_lcd_panel_io_handle_t s_io;          /* kept for DCS writes after init (brightness) */
-static uint8_t s_brightness = 0xFF;             /* what init_cmds' 0x51 sets */
+static uint8_t s_brightness = 0xFF;             /* the level wanted (the keeper's, brightness_apply) - sent once the panel is lit */
+/* DARK TILL A FRAME IS IN (0.4.1, mysiak + Bananna on Discord, "Boot animation glitch": a green triangle flashed at every boot and
+   tank switch). The init lists lit the panel at 0xFF the moment it came on, before a frame had been written: for a beat it showed
+   whatever its own memory held from before the reset. Now every init list lights it at 0 (as the watch's BSP does), and the level
+   waits here until the first whole frame - the loading's black - is in its memory (display_port_flush) */
+static bool s_dark = true;
 static uint16_t *s_stripe[2];                   /* PANEL_W x STRIPE_ROWS, DMA-capable; ping-pong */
 static SemaphoreHandle_t s_stripe_free;         /* counts stripe buffers not in DMA flight */
 /* where a flush's time goes (2026-10-03): waiting for a stripe buffer to come
@@ -299,7 +304,7 @@ static const sh8601_lcd_init_cmd_t init_cmds[] = {
     {0x3A, (uint8_t[]){0x55}, 1, 0},
     {0x35, (uint8_t[]){0x00}, 1, 0},
     {0x53, (uint8_t[]){0x20}, 1, 0},
-    {0x51, (uint8_t[]){0xFF}, 1, 0},
+    {0x51, (uint8_t[]){0x00}, 1, 0},
     {0x63, (uint8_t[]){0xFF}, 1, 0},
     {0x2A, (uint8_t[]){0x00, 0x00, 0x01, 0x6F}, 4, 0},
     {0x2B, (uint8_t[]){0x00, 0x00, 0x01, 0xBF}, 4, 0},
@@ -344,7 +349,7 @@ static const sh8601_lcd_init_cmd_t round_init_cmds[] = {
     {0x3A, (uint8_t[]){0x55}, 1, 0},
     {0x35, (uint8_t[]){0x00}, 1, 0},
     {0x53, (uint8_t[]){0x20}, 1, 0},
-    {0x51, (uint8_t[]){0xFF}, 1, 0},
+    {0x51, (uint8_t[]){0x00}, 1, 0},
     {0x63, (uint8_t[]){0xFF}, 1, 0},
     {0x2A, (uint8_t[]){0x00, 0x06, 0x01, 0xD7}, 4, 0},
     {0x2B, (uint8_t[]){0x00, 0x00, 0x01, 0xD1}, 4, 0},
@@ -366,7 +371,7 @@ static const sh8601_lcd_init_cmd_t watch_init_cmds[] = {
     {0x2A, (uint8_t[]){0x00, 0x16, 0x01, 0xAF}, 4, 0},
     {0x2B, (uint8_t[]){0x00, 0x00, 0x01, 0xF5}, 4, 0},
     {0x29, (uint8_t[]){0x00}, 0, 10},
-    {0x51, (uint8_t[]){0xFF}, 1, 0},
+    {0x51, (uint8_t[]){0x00}, 1, 0},
 };
 /* the square's init, from Waveshare's BSP (esp32_s3_touch_amoled_2_16): the
  * 1.75C's sequence (sleep out first, as the watch), the window the whole 480,
@@ -381,7 +386,7 @@ static const sh8601_lcd_init_cmd_t square_init_cmds[] = {
     {0x3A, (uint8_t[]){0x55}, 1, 0},
     {0x35, (uint8_t[]){0x00}, 1, 0},
     {0x53, (uint8_t[]){0x20}, 1, 0},
-    {0x51, (uint8_t[]){0xFF}, 1, 0},
+    {0x51, (uint8_t[]){0x00}, 1, 0},
     {0x63, (uint8_t[]){0xFF}, 1, 0},
     {0x2A, (uint8_t[]){0x00, 0x00, 0x01, 0xDF}, 4, 0},
     {0x2B, (uint8_t[]){0x00, 0x00, 0x01, 0xDF}, 4, 0},
@@ -532,6 +537,7 @@ bool display_port_init(void) {
                                               .bits_per_pixel = 16, .vendor_config = (void *)&vendor };
     ESP_ERROR_CHECK(esp_lcd_new_panel_sh8601(io, &pcfg, &s_panel));
     if (held_pins()) gpio_sleep_sel_dis(pin_lcd_rst());   /* the reset line keeps its level through the sleep grace's light sleep */
+    s_dark = true;                                  /* (lit at 0 by the init list: the level waits for the first frame) */
     ESP_ERROR_CHECK(esp_lcd_panel_reset(s_panel));
     ESP_ERROR_CHECK(esp_lcd_panel_init(s_panel));
     ESP_ERROR_CHECK(esp_lcd_panel_set_gap(s_panel, panel_x_gap(), 0));
@@ -578,12 +584,13 @@ void display_port_wake(void) {
     if (!s_panel) return;
     if (!held_pins()) expander_power_up();
     else gpio_set_level(pin_tp_rst(), 1);           /* the touch chip is reporting again by the time the panel is up */
+    s_dark = true;                                  /* (dark again till the first frame after the wake) */
     esp_lcd_panel_reset(s_panel);
     esp_lcd_panel_init(s_panel);
     esp_lcd_panel_set_gap(s_panel, panel_x_gap(), 0);
     if (s_square && s_madctl != S_MADCTL) dcs(0x36, &s_madctl, 1);   /* a way up tried from the director outlives the re-init */
     s_side_sent = -1;                               /* ... and a side: the next frame sends it again */
-    display_port_set_brightness(s_brightness);      /* init_cmds put it back at 255 */
+    display_port_set_brightness(s_brightness);      /* init_cmds put it at 0: the level waits for the first frame */
     esp_lcd_panel_disp_on_off(s_panel, true);
     s_round_clear = true;                           /* a reset panel's memory is not black */
     s_border_clear = s_fx > 0 || s_fy > 0;
@@ -592,7 +599,7 @@ void display_port_wake(void) {
 /* DCS 0x51 WRDISBV */
 void display_port_set_brightness(uint8_t level) {
     s_brightness = level;
-    dcs(0x51, &level, 1);
+    if (!s_dark) dcs(0x51, &level, 1);              /* (dark: it waits for the first frame - display_port_flush) */
 }
 uint8_t display_port_brightness(void) { return s_brightness; }
 
@@ -908,7 +915,7 @@ bool display_port_flush_async(const uint16_t *fb, void (*done)(const uint16_t *f
         xSemaphoreGive(s_fl_done);
         ESP_LOGI(TAG, "flush: asynchronous, %s", s_fl_amc ? "the stripes copied by GDMA" : "CPU fills");
     }
-    if (s_border_clear || s_round_clear) return false;      /* a clear owed: the plain flush does it */
+    if (s_border_clear || s_round_clear || s_dark) return false;   /* a clear owed, or the panel not lit yet: the plain flush does it */
     display_port_flush_wait(NULL);                          /* one frame on its way at a time */
     xSemaphoreTake(s_fl_done, 0);                           /* (it was given: ours now, until the task gives it back) */
     s_fl_fb = fb; s_fl_cb = done; s_fl_arg = arg;
@@ -918,6 +925,7 @@ bool display_port_flush_async(const uint16_t *fb, void (*done)(const uint16_t *f
 void display_port_flush(const uint16_t *fb) {               /* the plain flush, whole, here and now */
     display_port_flush_wait(NULL);
     flush_now(fb);
+    if (s_dark && s_panel && !s_probe) { s_dark = false; dcs(0x51, &s_brightness, 1); }   /* the first whole frame is in: lit (queued after its stripes) */
 }
 void display_port_flush_async_prof(int64_t *task_us, int *frames, int64_t *copy_us) {
     *task_us = s_fl_us; *frames = s_fl_frames; *copy_us = s_prof_copy; s_fl_us = s_prof_copy = 0; s_fl_frames = 0;

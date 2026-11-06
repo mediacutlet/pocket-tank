@@ -14,6 +14,7 @@
  * scene has (0: the empty tank's own). Once the fish come the empty tank's frame holds the tank drawn without them. */
 #include "boot_show.h"
 #include "render.h"
+#include "backgrounds.h"
 #include <string.h>
 
 #define BS_WATER_S   0.70f      /* the water rises (or the light comes up) */
@@ -25,16 +26,26 @@
 #define BS_LIFE_S    0.70f      /* the fish, the critters, the bubbles */
 #define BS_GLOW      7          /* of 64: how near its landing a pixel still glows */
 #define BS_PIECES    14         /* (a nibble a pixel: 0 = the empty tank) */
+/* THE BACKGROUND (0.4.1, Strato: "the background also build and filled in element by element layer by layer (without
+   making the boot sequence longer)"): its layers land far to near inside the first second - while the water rises or
+   the light comes up and the first pieces land - by a second map, half a byte a pixel, of the background's layers (from the
+   empty tank's bake: render_boot_bg_layers), held only while the show plays; behind a piece too, so a piece still to land
+   never shows a patch of background early. Before its turn a background pixel is the water alone (render_boot_water_px).
+   The grass and the animals keep their times. No memory for the map: the background comes with the water, as before. */
+#define BS_BG0_S     0.15f      /* the farthest layer starts */
+#define BS_BG_END_S  1.10f      /* the nearest has begun by ... */
+#define BS_BG_S      0.45f      /* ... each takes this long */
 
 static struct {
     bool on, fill, life;
     void (*release)(void *);
     uint16_t *empty;            /* the empty tank; in the life phase the tank drawn without its animals */
     uint8_t *land;              /* a nibble a pixel */
+    uint8_t *bgl;               /* the background's layer, a nibble a pixel (0: none) - NULL: no background, or no memory for it */
     tank_t *bare;               /* the tank without its animals, for the life phase - from alloc (PSRAM on the boards: a
                                    whole tank_t, 6 KB since 0.4's visitor slots, was internal RAM all the time, 2026-11-01) */
     uint8_t rowp[TANK_H];       /* a row a piece lands in (the rest are water and sand: a copy once the water is in) */
-    int npieces;
+    int npieces, nbg;           /* the pieces; the background's layers */
     float grass_p, life_t0;
 } s;
 
@@ -60,11 +71,16 @@ static inline int prog64(float ts, float t0, float dur) {   /* 0..64+ */
     return p <= 0 ? -1 : (int)(p * 64.0f);
 }
 
+static inline int bgl_at(int i) { return (s.bgl[i >> 1] >> ((i & 1) << 2)) & 15; }
+static void bg_capture(int y, const uint8_t *lay) {   /* the empty tank's bake hands each row's layers over */
+    uint8_t *m = s.bgl + (size_t)y * TANK_W / 2;
+    for (int x = 0; x < TANK_W; x += 2) m[x >> 1] = (uint8_t)((lay[x] & 15) | (x + 1 < TANK_W ? (lay[x + 1] & 15) << 4 : 0));
+}
 bool boot_show_on(void) { return s.on; }
 bool boot_show_ready(void) { return render_scene_buf(NULL) && (render_grass_loop_n() > 0 || !render_grass_loop_warming()); }
 
 void boot_show_end(void) {
-    if (s.release) { if (s.empty) s.release(s.empty); if (s.land) s.release(s.land); if (s.bare) s.release(s.bare); }
+    if (s.release) { if (s.empty) s.release(s.empty); if (s.land) s.release(s.land); if (s.bare) s.release(s.bare); if (s.bgl) s.release(s.bgl); }
     memset(&s, 0, sizeof s);
 }
 
@@ -79,20 +95,26 @@ bool boot_show_begin(const tank_t *t, bool fill, void *(*alloc)(size_t), void (*
     if (!s.empty || !s.land || !s.bare) { boot_show_end(); return false; }
     int items[DECOR_SLOTS], n = render_boot_pieces(t, items);   /* back to front */
     if (n > BS_PIECES) n = BS_PIECES;
+    s.nbg = bg_layers(render_bg_current());
+    if (s.nbg > BG_LAYERS_MAX) s.nbg = BG_LAYERS_MAX;
+    if (s.nbg && (s.bgl = alloc(((size_t)TANK_W * TANK_H + 1) / 2)) != NULL) memset(s.bgl, 0, ((size_t)TANK_W * TANK_H + 1) / 2);
+    else s.nbg = 0;                                     /* (no memory: the background comes with the water) */
     /* layer k = the k pieces nearest the glass. A pixel lands at the first layer from which it is what the scene has:
        the layers made from the front back, the empty tank last (it stays) */
     memset(s.land, (n << 4) | n, ((size_t)TANK_W * TANK_H + 1) / 2);
-    if (!n) render_boot_scene(t, s.empty, 0);       /* (no pieces: the empty tank is the scene) */
+    if (!n) { if (s.nbg) render_boot_bg_layers(bg_capture); render_boot_scene(t, s.empty, 0); render_boot_bg_layers(NULL); }   /* (no pieces: the empty tank is the scene) */
     for (int k = n - 1; k >= 0; k--) {
         uint32_t hide = 0;
         for (int j = 0; j < n - k; j++) hide |= 1u << items[j];   /* the n-k pieces furthest back left out */
+        if (!k && s.nbg) render_boot_bg_layers(bg_capture);      /* (the empty tank's bake: the background's layers with it) */
         render_boot_scene(t, s.empty, hide);
+        render_boot_bg_layers(NULL);
         for (int i = 0; i < TANK_W * TANK_H; i++)
             if (land_at(i) == k + 1 && s.empty[i] == sc[i]) land_set(i, k);
     }
-    for (int y = 0; y < TANK_H; y++) {
+    for (int y = 0; y < TANK_H; y++) {                  /* (a row with a piece, or with the background's: drawn a pixel at a time till all is in) */
         s.rowp[y] = 0;
-        for (int x = 0; x < TANK_W && !s.rowp[y]; x++) if (land_at(y * TANK_W + x)) s.rowp[y] = 1;
+        for (int x = 0; x < TANK_W && !s.rowp[y]; x++) if (land_at(y * TANK_W + x) || (s.bgl && bgl_at(y * TANK_W + x))) s.rowp[y] = 1;
     }
     render_boot_scene_done(t);
     s.npieces = n; s.fill = fill; s.on = true; s.life = false; s.grass_p = 0; s.life_t0 = 0;
@@ -103,7 +125,9 @@ bool boot_show_frame(const tank_t *t, uint16_t *fb, float ts, bool loop_whole, f
     if (!s.on) return false;
     const uint16_t *sc = render_scene_buf(NULL);
     if (!sc) sc = s.empty;
-    const float statics_done = s.npieces ? BS_PIECE0_S + (s.npieces - 1) * BS_GAP_S + BS_PIECE_S : BS_WATER_S;
+    const float bg_done = s.nbg ? BS_BG_END_S + BS_BG_S : 0;    /* (inside the grass's time: the show is no longer for it) */
+    float statics_done = s.npieces ? BS_PIECE0_S + (s.npieces - 1) * BS_GAP_S + BS_PIECE_S : BS_WATER_S;
+    if (bg_done > statics_done) statics_done = bg_done;
     if (!s.life && loop_whole && s.grass_p >= 1.0f && ts >= statics_done) { s.life = true; s.life_t0 = ts; }
 
     if (s.life) {                               /* the animals: the tank drawn with and without them, theirs dissolving in */
@@ -129,9 +153,11 @@ bool boot_show_frame(const tank_t *t, uint16_t *fb, float ts, bool loop_whole, f
     }
 
     int pw = prog64(ts, 0, BS_WATER_S); if (pw > 64) pw = 64;
-    int pk[BS_PIECES + 1];
+    int pk[BS_PIECES + 1], pb[16];
     for (int k = 1; k <= s.npieces; k++) pk[k] = prog64(ts, BS_PIECE0_S + (k - 1) * BS_GAP_S, BS_PIECE_S);
-    const float tg0 = s.npieces ? BS_PIECE0_S + (s.npieces - 1) * BS_GAP_S + 0.2f : BS_WATER_S;
+    for (int l = 1; l <= s.nbg; l++)                            /* the background's layers, far to near */
+        pb[l] = prog64(ts, BS_BG0_S + (s.nbg > 1 ? (l - 1) * (BS_BG_END_S - BS_BG0_S - BS_BG_S) / (s.nbg - 1) : 0), BS_BG_S);
+    const float tg0 = s.npieces ? BS_PIECE0_S + (s.npieces - 1) * BS_GAP_S + 0.2f : BS_WATER_S;   /* (the grass's time: the background does not move it) */
     float grass_s = BS_GRASS_S;
     if (!render_grass_loop_warming() && !render_grass_loop_n()) { bake_frac = 1.0f; grass_s = BS_GRASS_LIVE_S; }   /* (no loop baking: the show's clock alone) */
     float gp = (ts - tg0) / grass_s; if (gp > bake_frac) gp = bake_frac;
@@ -143,7 +169,7 @@ bool boot_show_frame(const tank_t *t, uint16_t *fb, float ts, bool loop_whole, f
     const int gq = (int)(s.grass_p * 1024), span = (int)(TANK_H * 0.72f);
     const int line = s.fill ? TANK_H - TANK_H * (pw < 0 ? 0 : pw) / 64 : 0, light = pw < 0 ? 0 : pw * 4;
 
-    const bool landed = !s.npieces || pk[s.npieces] >= 64 + BS_GLOW;   /* (the last piece lands last) */
+    const bool landed = (!s.npieces || pk[s.npieces] >= 64 + BS_GLOW) && (!s.nbg || pb[s.nbg] >= 64 + BS_GLOW);   /* (the last piece, the nearest layer) */
     for (int y = 0; y < TANK_H; y++) {
         const uint16_t *brow = band && y >= y0 ? band + (size_t)(y - y0) * TANK_W : NULL;
         const int gneed = (TANK_H - 8 - y) * 1024 / span;      /* the grass: grows up from the sand */
@@ -164,8 +190,13 @@ bool boot_show_frame(const tank_t *t, uint16_t *fb, float ts, bool loop_whole, f
             int i = y * TANK_W + x, k = land_at(i), th = bayer(x, y);
             uint16_t v;
             if (k && pk[k] >= th) v = pk[k] - th < BS_GLOW ? glow(sc[i]) : sc[i];   /* a piece's pixel, landed */
-            else if (s.fill) v = y >= line ? (y < line + 2 && pw < 64 ? glow(s.empty[i]) : s.empty[i]) : 0;   /* the water */
-            else v = light >= 256 ? s.empty[i] : dimmed(s.empty[i], light);
+            else {
+                uint16_t e = s.empty[i];                        /* the empty tank - its background a layer at a time, the water alone till each lands */
+                const int l = s.bgl ? bgl_at(i) : 0;
+                if (l) e = pb[l] < th ? render_boot_water_px(x, y) : pb[l] - th < BS_GLOW ? glow(e) : e;
+                if (s.fill) v = y >= line ? (y < line + 2 && pw < 64 ? glow(e) : e) : 0;   /* the water */
+                else v = light >= 256 ? e : dimmed(e, light);
+            }
             if (!k && brow && brow[x] != sc[i]) {              /* a grass pixel (only where the empty tank shows: the back grass stands behind every piece) */
                 int d = gq - gneed - (th >> 1);
                 if (d >= 0) v = d < 24 ? glow(brow[x]) : brow[x];

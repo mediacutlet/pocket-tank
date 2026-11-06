@@ -108,24 +108,51 @@ int  shelf_count_type(int type);                  /* tanks of a type, the one on
 
 /* a fresh tank of `type` in the first empty place; its index, or -1 (full) */
 int  shelf_new(int type, int64_t now_unix);
+/* NEW TANK, BOUGHT (0.4.1): the slot and the wallet are two writes, and a power cut between them gave a tank for nothing
+ * (slot first) or took the price for none (wallet first). A journal (`buy` in the frame: the price, the new tank's ID and
+ * `mark`, a fresh marker) is written first, then the slot, then pay(ctx) takes the price and saves the wallet WITH the
+ * marker (false: refused, both as they were), then the journal goes. Its index, or -1 (nothing bought, nothing paid).
+ * shelf_buy_settle, at the boot, with the loaded save's NEW TANK marker: the journal's - paid, the tank stays; another -
+ * not paid, the tank goes. Never the wallet's figure (round 2, "Marker now"). Returns SD to give back (paid and the tank
+ * not there - by the order, never): the caller clears the save's marker with the refund, in one save */
+int  shelf_buy(int type, int64_t now_unix, int price, uint32_t mark, bool (*pay)(void *ctx), void *ctx);
+int  shelf_buy_settle(uint32_t save_mark, int32_t wallet);   /* (wallet: only for a release candidate's journal, R2) */
 /* a new name (RENAME on its card): shelf tank i, or -1 the tank on the glass. "LINE 1\nLINE 2" or one line; each line
    trimmed; an empty name is "TANK <place>" */
 bool shelf_rename(int i, const char *name);
-/* REMOVE (D5, MORE on its card): what its pieces sell back for - every placeable piece its save owns, at its SELL
-   price (a fresh tank: 0; the tank's own price is never refunded) - and the tank gone for good, its slot erased.
-   Never the tank on the glass (it is not on the shelf). The caller pays the wallet */
-int  shelf_pieces_value(int i);
+/* REMOVE (D5, MORE on its card): what it sells back for - everything its save bought, at SD_SELL_PCT: its placeable
+   pieces (each at its SELL price), its critters (snail, shrimp, urchin, seahorse, crab) and its backgrounds (0.4.1,
+   audit P6: Strato, "give partial refund for critters and backgrounds"; the pieces alone until then). A fresh tank: 0;
+   the tank's own price is never refunded. n (NULL: not wanted): how many pieces, critters and backgrounds, for the
+   modal's words. Then the tank gone for good, its slot erased. Never the tank on the glass (it is not on the shelf).
+   The caller pays the wallet */
+int  shelf_refund_value(int i, int n[3]);
 /* MOVE (0.3.9.3): tank i (-1 the tank on the glass) to place `pos`; a tank already there trades places with it. Two
    rewrites when they trade - a cut between leaves two at one place, which the boot sorts (the later finds a free one) */
 bool shelf_move(int i, int pos);
 bool shelf_remove(int i);
+/* REMOVE, PAID (0.4.1): the slot's erase and the refund's save are two writes - erased first, a power cut between lost the
+ * refund, and a refused erase brought the tank back at the boot with its refund paid. A journal (`rm` in the frame: the
+ * tank, the refund, `mark`) is written first, then pay(ctx) adds the refund and saves it WITH the marker (false: refused,
+ * both as they were - nothing removed), then the slot is erased and the journal goes. shelf_remove_settle, at the boot
+ * with the loaded save's REMOVE marker: the journal's - paid, the tank is erased if it is still there; another - not paid,
+ * the tank stays (round 2, "Marker now") */
+bool shelf_remove_paid(int i, int refund, uint32_t mark, bool (*pay)(void *ctx), void *ctx);
+void shelf_remove_settle(uint32_t save_mark, int32_t wallet);
 /* DORMANT <-> PAUSED; banks what a DORMANT stretch lived (rewritten to a free slot, the old erased) */
 bool shelf_set_time(int i, int mode, int64_t now_unix);
 /* the tank on the glass onto the shelf (its snapshot `thumb`, w x h), shelf tank i onto the glass.
  * `carry` (what the board shares) is kept for the boot that follows: the caller restarts. */
 bool shelf_swap(int i, const uint16_t *thumb, int w, int h, const void *carry, size_t carry_len, int64_t now_unix);
-/* the carry, once, after the incoming tank has loaded (false = none) */
-bool shelf_take_carry(void *buf, size_t len);
+/* the carry, after the incoming tank has loaded (false = none). Read, not taken: progression gives it to the tank unless
+   the loaded save already carries its marker (progression_carry_t.mark - applied, round 2), saves, and only once that save
+   has landed calls shelf_carry_done (0.4.1 audit round 1, R-saves S1: it was deleted first, and a power cut before the save
+   lost the wallet). A carry left behind (a cut, a refused delete) reads as applied by its marker at every later boot */
+/* the work a refused write left (a journal or the carry not deleted, a slot not erased): cleanup only with the markers - tried
+   before every save of the tank and before any MY TANKS action, which is refused while it is not clear. true = none left */
+bool shelf_tidy(void);
+bool shelf_peek_carry(void *buf, size_t len);
+void shelf_carry_done(void);
 /* the tank on the glass's name as it travels on its fish's passports (passport_t.home_name, 16 bytes): one line, or ""
    for a name the keeper never gave it - MY TANK, TANK <n> - so its HOME WATERS stand alone next door */
 void shelf_keeper_name(char *out);

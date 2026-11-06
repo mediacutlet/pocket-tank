@@ -31,7 +31,7 @@ no toolchain needed. Come hang out with other keepers on the
 **[Pocket Tank Discord](https://pocketank.com/discord)**: show off your tank,
 get help, and share ideas for what comes next.
 
-The current release is **v0.4.0** (alpha); the settings page shows the one
+The current release is **v0.4.1** (alpha); the settings page shows the one
 on your tank. What changed in each release:
 **[pocketank.com/updates](https://pocketank.com/updates/)**.
 
@@ -393,6 +393,16 @@ tap it to take it, 10 sand dollars the first time and 20 every time after.
 The crab, the urchin and the snail wander in front of your decorations as
 often as behind them.
 
+**Backgrounds.** New in 0.4.1: the shop has three areas, DECORATIONS,
+CRITTERS and BACKGROUNDS, as squares along the bottom, and the ? square is
+HOW TO EARN. BACKGROUNDS holds seven new backdrops for the back of the
+tank: ATLANTIS, KELP FOREST, TWILIGHT DEEP, LAGOON, ROCK RIDGES, REEF WALLS
+and GROTTO, 100 sand dollars each. OPEN WATER, the original background,
+stays free. UNLOCK pays and puts it in use, and USE switches between the
+ones you own for free. A background
+belongs to the tank it was bought in. The sword plant can stand behind the
+seagrass again, too: pick BEHIND or IN FRONT under THE SEAGRASS on its page.
+
 **The shelf, and the lock.** Since 0.3.9 anything you can move you can
 also put away: SHELVE on a piece's page or in its shop panel, and it waits
 on the shelf, drawn as it is in a little tank on its shop row, where a
@@ -484,7 +494,9 @@ the arrows on the sides that touch, and the glass between them opens. The
 fish swim over to visit, look around, and come home on their own. If the
 tanks move apart, every fish finds its way home. The tanks talk to each
 other directly by radio, with no Wi-Fi network and no internet. A tank
-holds five fish, visitors included.
+holds five fish of its own, and since 0.4.1 it always has room for two
+visitors on top, so up to seven swim during a visit. Your own fish coming
+home always get in.
 
 **Visitors.** A visitor wears its home tank's badge, small, above it. Tap
 it to see its passport: its name, its look, its home, and which of your

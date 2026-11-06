@@ -13,8 +13,16 @@
 #include "tank.h"
 #include "link.h"
 
-#define TANK_LINK_SWIM_MAX 5       /* fish swimming in one tank at once, home + visitors: the room a tank offers (Strato 2026-10-05: a 5-fish
-                                      limit per tank, not a fixed visitor cap - 2 fish host 3, 4 host 1, 5 host none until one of theirs is away) */
+/* the room during a visit (Strato 2026-11-05, replacing his 10-05 "5 fish a tank, visitors counted": two full tanks linked
+   and no fish ever visited): a tank always has TANK_LINK_VISIT_PLACES places for visitors, whatever its own count - "5 local
+   fish and 2 visitor slots ... 7 fish cap during visitations". POP_CAP bounds our own fish (owned, away or home), the places
+   bound the visitors, so a fish of ours coming home never needs room: it always has its place, and the sum holds at 7.
+   A fry born here for a visitor's home swims home as a visitor: it needs one of the places too (progression do_arrival) */
+#define TANK_LINK_VISIT_PLACES 2
+#define TANK_LINK_SWIM_MAX (POP_CAP + TANK_LINK_VISIT_PLACES)   /* fish swimming in one tank at once, home + visitors: 7 */
+#if TANK_LINK_VISIT_PLACES > N_VISIT_MAX
+#error "the visitor places live in tank.h's visitor slots: N_VISIT_MAX must hold them"
+#endif
 #define TANK_LINK_CURIOUS  2.0f    /* curiosity a door opening gives every fish here ("something new over there") */
 #define TANK_LINK_REFUSED_S 10.0f  /* a door that refused a fish is glass for it this long ... */
 #define TANK_LINK_FULL_S    60.0f  /* ... and this long when the tank next door was full */
@@ -30,7 +38,23 @@
 #endif
 
 link_host_t tank_link_host(tank_t *t, void (*send)(void *ctx, uint32_t to, const uint8_t *buf, int len));
-int  tank_link_room(void *t);                                     /* link_host_t.room */
+int  tank_link_room(void *t);                                     /* link_host_t.room: visitor places free now */
+/* a place free for a fry born here to swim home in as a visitor: the places the tank sees free, less the ones the engine
+   gave and the tank has not drawn yet (tank_t.vis_coming) */
+bool tank_link_fry_place(const tank_t *t);
+/* the ONE check for a fry that belongs next door (0.4.1 audit round 2, R2-4 / R2L-1; Strato 11-05: it "waits quietly while the
+   tank it would be born in has no visitor place: no courting, no dance, nothing held at its home; it comes once a place
+   opens"). no_place: the fry partner is a visitor here and no place is free - places TAKEN, not promised (vis_coming: a
+   promise that never came cut a dance and dropped the home's hold, the review's F2; the birth itself still checks
+   tank_link_fry_place). tank_link_tick then only PEEKS at its home's room (nothing held there). waits: no place, unless its
+   home said NO - a home with room (or not yet heard): the fry belongs next door; a full home's fry is ours, born here as
+   before (the review's F1).
+   progression: nobody courts for a fry that waits */
+bool tank_link_cross_no_place(const tank_t *t);
+bool tank_link_cross_waits(const tank_t *t);
+/* THE SWIM LIMIT's guard (0.4.1): a tank with more than TANK_LINK_VISIT_PLACES visitors, or more than TANK_LINK_SWIM_MAX
+   swimming, calls this (the sim's selftests fail, the device logs once); NULL = no guard */
+extern void (*tank_link_swim_hook)(const tank_t *t, int swim, int visitors, const char *path);
 bool tank_link_visitor(void *t, uint32_t uid, passport_t *pp);    /* link_host_t.visitor */
 void tank_link_tick(tank_t *t, link_t *L);
 /* one engine event: true = it was about a fish of this tank or a visitor here */

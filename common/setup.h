@@ -145,6 +145,7 @@ enum { SETUP_PG_RENAME = SETUP_PG_PLACE + 1 };
 #define SETUP_KEY_N     28
 #define SETUP_HIT_Z0    60               /* + DECOR_Z_BACK..FRONT: the placement page's layer row */
 #define SETUP_HIT_ORD0  64               /* + 0 BEHIND / 1 IN FRONT: the sword plant's ORDER SQUARES (0.4) - behind or in front of the piece they show */
+#define SETUP_HIT_SG0   66               /* + 0 BEHIND / 1 IN FRONT: the sword plant's SEAGRASS squares (0.4.1) - behind or in front of the seagrass */
 #define SETUP_HIT_COLOR0 80              /* + 0..CORAL_N-1: the coral's colour swatches (its placement page) */
 
 /* geometry (tank coordinates), shared by the drawing, the hit test and the
@@ -286,7 +287,13 @@ enum { SETUP_PG_RENAME = SETUP_PG_PLACE + 1 };
 #define SETUP_DEPTH_HINT_Y (SETUP_DEPTH_Y + SETUP_DEPTH_H + 8)
 #define SETUP_ORDSQ_X      ((PAGE_W - 2 * SETUP_DEPTH_SEG_W) / 2)   /* the sword plant's ORDER SQUARES (0.4): two segments in the DEPTH bar's place -
                                                                  BEHIND | IN FRONT of the piece beside it in the stack, a universal block for it */
+/* the sword plant's page since 0.4.1 (Strato 11-05: BEHIND THE SEAGRASS back): TWO rows of two squares, each under a caption that
+   names what they are behind or in front of - THE SEAGRASS in the DEPTH bar's place, then, with a piece beside the plant, the
+   ORDER SQUARES (THE PUMPKIN) under it, the arrows at their ends (alone, the arrows stay at the first row's, dim) */
+#define SETUP_ORDSQ2_Y     (SETUP_DEPTH_Y + SETUP_DEPTH_H + 30)
+#define SETUP_ORD2_Y       (SETUP_ORDSQ2_Y + (SETUP_DEPTH_H - SETUP_BTN_H) / 2)
 #define SETUP_PLACE_Y      (SETUP_DEPTH_HINT_Y + 20)
+#define SETUP_PLACE_PLANT2_Y (SETUP_ORDSQ2_Y + SETUP_DEPTH_H + 6)   /* (the plant's page with its second row: the drag zone and the stripe start under it) */
 /* the coral's placement page (2026-09-23) trades the hint line for a COLOR
  * row: CORAL_N swatches at the colour page's pitch, shorter (42 x 26), the
  * chosen one ringed; the coral on the floor below wears the pick at once.
@@ -320,5 +327,11 @@ enum { SETUP_PG_RENAME = SETUP_PG_PLACE + 1 };
 #define SETUP_STAGE_EDIT_X (PAGE_X + SETUP_ED_NOW_X)   /* the editor's NOW */
 #define SETUP_STAGE_EDIT_Y (PAGE_Y + SETUP_ED_PREVIEW_Y)
 void setup_fish_removed(tank_t *t, int idx);   /* a fish left, the slots shifted: the page follows its fish (or closes) */
+
+/* the words the birth flow says of a fry (0.4.1; the tests read them): its announcement's two lines (FROM THE SHOP, /
+   BORN TO A AND B - DOWN IN THE GRASS, or NEXT DOOR. for a fry born next door and come home), and where its gene g came
+   from on the family page (a parent's name, THE SHOP, NEW!, or "?" for a parent nobody here knows) */
+void setup_born_lines(const tank_t *t, int fish, char *l1, size_t n1, const char **l2);
+const char *setup_from_name(const tank_t *t, int fish, int g);
 
 #endif

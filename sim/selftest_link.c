@@ -502,11 +502,13 @@ int selftest_link(void) {
 typedef struct { int to, len; uint8_t b[LINK_FRAME_MAX]; } dframe_t;
 static dframe_t dq[256]; static int dqn;
 static tank_t DA, DB; static link_t *LA, *LB;
+static uint32_t dnow;
+static int d_drop_type, d_drop_to; static uint32_t d_drop_until;   /* (a test: frames of this type to tank d_drop_to (0 A, 1 B) lost until then) */
 static void d_send(void *ctx, uint32_t to, const uint8_t *buf, int len) {
     int from = ctx == &DA ? 0 : 1;
+    if (d_drop_type && len > 3 && buf[3] == d_drop_type && 1 - from == d_drop_to && (int32_t)(d_drop_until - dnow) > 0) return;
     if (dqn < 256 && (!to || to == (from ? DA.uid : DB.uid))) { dq[dqn].to = 1 - from; dq[dqn].len = len; memcpy(dq[dqn].b, buf, (size_t)len); dqn++; }
 }
-static uint32_t dnow;
 static bool d_deaf[2];                         /* 0 = A, 1 = B: that tank hears nothing (the other went quiet) */
 static int d_fails;
 #define DCHECK(cond, ...) do { if (!(cond)) { if (d_fails < 10) { printf("FAIL t=%.1f s: ", dnow / 1000.0); printf(__VA_ARGS__); printf("\n"); } d_fails++; } } while (0)
@@ -580,23 +582,165 @@ static int d_wait_home(tank_t *t, uint32_t uid) {
     }
     return -1;
 }
+/* 8. a fish that leaves (sold or given) lets go of every visitor's time together with it (0.4.1 audit round 1, R-link F1 =
+   R-progression F5; the link reviewer's L1a/L1b). L1a: a visitor 90 s beside A2, A2 sold - its time together starts over
+   with a fish still here. L1b: the pair formed (B1 and A2), A2 sold - the pair is let go (fry_mate never the sold fish),
+   and B1's home stops holding a place for a fry that cannot come */
+static void dm_hold_doors(tank_t *t, double s) { for (int i = 0; i < t->n_fish; i++) t->fish[i].door_seen = t->clock + s; }
+static int dm_visit(tank_t *home, int i, int edge, tank_t *host) {
+    uint32_t u = home->fish[i].uid; d_head_for(home, i, edge);
+    for (int n = 0; n < 1800 * ((TANK_W + 447) / 448); n++) { d_step(1); if (d_vis_of(host, u) >= 0) return n; }
+    return -1;
+}
+static void dm_pin(tank_t *host, uint32_t vis, int beside) {
+    int v = d_vis_of(host, vis); if (v < 0) return;
+    fish_t *g = &host->fish[v], *m = &host->fish[beside];
+    for (int i = 0; i < host->n_fish; i++) if (i != beside) { host->fish[i].x = m->x < TANK_W / 2 ? TANK_W - 40 : 40; host->fish[i].y = TANK_BOT - 80; }
+    g->x = m->x + 30; g->y = m->y; g->homeward = false; host->vis_since[v - N_FISH_MAX] = host->clock;
+}
+static int dm_holds(const tank_t *t) { int n = 0; for (int h = 0; h < TANK_FRY_HOLDS; h++) n += t->fry_hold[h].peer != 0; return n; }
+static void doors_mate_left(void) {
+    dnow = 1000; dqn = 0; d_deaf[0] = d_deaf[1] = false;
+    tank_init(&DA, 61); progression_fresh(&DA); tank_ensure_ids(&DA);
+    tank_init(&DB, 62); tank_new_population(&DB); tank_ensure_ids(&DB);
+    while (DA.n_fish < 3) tank_add_fish(&DA, 0, 1);
+    while (progression_newborn() >= 0) progression_newborn_done(&DA);
+    while (DB.n_fish < 4) { tank_make_fish(&DB, DB.n_fish, DB.n_fish % 3, 0.5f, 0.5f, STAGE_ADULT); DB.n_fish++; } tank_ensure_ids(&DB);
+    for (int i = 0; i < DA.n_fish; i++) { progression_set_age(&DA, i, STAGE_ADULT_AGE + 60); DA.fish[i].stage = STAGE_ADULT; }
+    for (int i = 0; i < DB.n_fish; i++) DB.fish[i].stage = STAGE_ADULT;
+    LA = calloc(1, (size_t)link_size()); LB = calloc(1, (size_t)link_size());
+    link_host_t ha = tank_link_host(&DA, d_send), hb = tank_link_host(&DB, d_send);
+    link_init(LA, DA.uid, &ha, 1, dnow); link_init(LB, DB.uid, &hb, 2, dnow);
+    link_mode(LA, true); link_mode(LB, true); d_step(10);
+    link_arm(LA, LINK_RIGHT); d_step(5); link_arm(LB, LINK_LEFT); d_step(30); d_step(400);
+    DCHECK(DA.door_open[LINK_RIGHT] && DB.door_open[LINK_LEFT], "8: the doors did not open");
+    dm_hold_doors(&DA, 1e6); dm_hold_doors(&DB, 1e6);
+    /* L1a */
+    { uint32_t par = DB.fish[0].uid;
+      DCHECK(dm_visit(&DB, 0, LINK_LEFT, &DA) >= 0, "8 L1a: B0 never visited");
+      for (int n = 0; n < 90; n++) { dm_pin(&DA, par, 2); d_step(1); progression_tick(&DA, 1.0f); }
+      uint32_t mate = 0, sold = DA.fish[2].uid; float b0 = progression_bond(&DA, par, &mate);
+      DCHECK(mate == sold && b0 > 0, "8 L1a: staging - no time together beside A2 (bond %.2f)", b0);
+      DCHECK(progression_sell_fish(&DA, 2), "8 L1a: the sale failed");
+      (void)progression_bond(&DA, par, &mate);
+      DCHECK(mate != sold, "8 L1a: after A2 was sold the visitor's time together is still with it");
+      for (int n = 0; n < 300; n++) { dm_pin(&DA, par, 0); d_step(1); progression_tick(&DA, 1.0f); }
+      float b1 = progression_bond(&DA, par, &mate);
+      DCHECK(mate && mate != sold && b1 > 0, "8 L1a: 5 min beside A0 after the sale: bond %.2f, mate %s", b1, mate == sold ? "the sold fish" : mate ? "another" : "none");
+      printf("selftest-doors: 8 L1a. a visitor's time together with a fish sold starts over with one still here (bond %.2f -> %.2f)\n", b0, b1); }
+    /* L1b */
+    { while (DA.n_fish < 3) tank_add_fish(&DA, 0, 1);
+      while (progression_newborn() >= 0) progression_newborn_done(&DA);
+      for (int i = 0; i < DA.n_fish; i++) { progression_set_age(&DA, i, STAGE_ADULT_AGE + 60); DA.fish[i].stage = STAGE_ADULT; }
+      dm_hold_doors(&DA, 1e6);
+      for (int q = 0; q < 2400; q++) {                      /* every visitor home */
+          int left = 0;
+          for (int k = 0; k < N_VISIT_MAX; k++) {
+              if (DA.vis_used[k]) { DA.fish[N_FISH_MAX + k].homeward = DA.fish[N_FISH_MAX + k].bolt_home = true; left++; }
+              if (DB.vis_used[k]) { DB.fish[N_FISH_MAX + k].homeward = DB.fish[N_FISH_MAX + k].bolt_home = true; left++; } }
+          for (int i = 0; i < DA.n_fish; i++) left += DA.fish[i].away;
+          for (int i = 0; i < DB.n_fish; i++) left += DB.fish[i].away;
+          if (!left) break;
+          d_step(1);
+      }
+      uint32_t p2 = DB.fish[1].uid;
+      DCHECK(dm_visit(&DB, 1, LINK_LEFT, &DA) >= 0, "8 L1b: B1 never visited");
+      int t_set = -1;
+      for (int n = 0; n < 900 && t_set < 0; n++) { dm_pin(&DA, p2, 2); d_step(1); progression_tick(&DA, 1.0f); if (DA.fry_partner == p2) t_set = n; }
+      uint32_t m2 = DA.fish[2].uid;
+      if (t_set < 0 || DA.fry_mate != m2) printf("selftest-doors: 8 L1b. (the pair did not form in 900 s here - nothing to let go)\n");
+      else {
+          DCHECK(progression_sell_fish(&DA, 2), "8 L1b: the sale failed");
+          DCHECK(DA.fry_mate != m2 && DA.fry_partner != p2, "8 L1b: after A2 was sold the pair stands (partner B1 %d, fry_mate the sold fish %d)", DA.fry_partner == p2, DA.fry_mate == m2);
+          for (int n = 0; n < 120; n++) { dm_pin(&DA, p2, 0); d_step(1); progression_tick(&DA, 1.0f); }
+          DCHECK(DA.fry_mate != m2, "8 L1b: 2 min later fry_mate is the sold fish again");
+          DCHECK(dm_holds(&DB) == 0, "8 L1b: B1's home still holds %d place(s) for a fry that cannot come (fry room %d)", dm_holds(&DB), progression_fry_room(&DB));
+          printf("selftest-doors: 8 L1b. the pair formed after %d s; its fish sold - the pair let go, and B1's home holds no place for it\n", t_set);
+      }
+    }
+    free(LA); free(LB); LA = LB = NULL;
+}
+/* 9. a GIVE brings the fish to life as it LEFT, not as it was when the keeper asked (0.4.1 audit round 1,
+   R-seam-link-progression F3, its told case S3): A asks to give a juvenile; while B's keeper reads the card it grows up
+   in A. B must get an adult that has REACHED ADULT (its stage paid once, in A) - and a gift restored from bubbles comes
+   back from its GIVEN note's own passport, never the engine's older copy */
+static int dg_home(const tank_t *t, uint32_t u) { for (int i = 0; i < t->n_fish; i++) if (t->fish[i].uid == u) return i; return -1; }
+static void doors_give_fresh(void) {
+    dnow = 1000; dqn = 0; d_deaf[0] = d_deaf[1] = false;
+    static gift_book_t ga, gb; memset(&ga, 0, sizeof ga); memset(&gb, 0, sizeof gb);
+    tank_init(&DA, 71); progression_fresh(&DA); tank_ensure_ids(&DA);
+    tank_init(&DB, 72); tank_new_population(&DB); tank_ensure_ids(&DB);
+    gift_attach(&DA, &ga); gift_attach(&DB, &gb);
+    while (DA.n_fish < 3) tank_add_fish(&DA, 0, 1);
+    while (progression_newborn() >= 0) progression_newborn_done(&DA);
+    for (int i = 0; i < 2; i++) { progression_set_age(&DA, i, STAGE_ADULT_AGE + 60); DA.fish[i].stage = STAGE_ADULT; DB.fish[i].stage = STAGE_ADULT; }
+    progression_set_age(&DA, 2, STAGE_JUV_AGE + 60); DA.fish[2].stage = STAGE_JUV;
+    DA.fish[2].ms_bits |= MS_REACHED_JUV; DA.fish[2].ms_bits &= ~MS_REACHED_ADULT;
+    LA = calloc(1, (size_t)link_size()); LB = calloc(1, (size_t)link_size());
+    link_host_t ha = tank_link_host(&DA, d_send), hb = tank_link_host(&DB, d_send);
+    link_init(LA, DA.uid, &ha, 1, dnow); link_init(LB, DB.uid, &hb, 2, dnow);
+    link_mode(LA, true); link_mode(LB, true); d_step(10);
+    link_arm(LA, LINK_RIGHT); d_step(5); link_arm(LB, LINK_LEFT); d_step(30); d_step(400);
+    DCHECK(DA.door_open[LINK_RIGHT] && DB.door_open[LINK_LEFT], "9: the doors did not open");
+    for (int i = 0; i < DA.n_fish; i++) DA.fish[i].door_seen = DA.clock + 1e6;
+    uint32_t gu = DA.fish[2].uid;
+    ga.want_uid = gu; d_step(10);
+    DCHECK(gb.ask.on && gb.ask.uid == gu, "9: the question never reached B");
+    {   int i = dg_home(&DA, gu);                                /* B's keeper reads the card: the fish grows up in A meanwhile */
+        progression_set_age(&DA, i, STAGE_ADULT_AGE + 60); progression_tick(&DA, 0.1f);
+        DCHECK(DA.fish[i].stage == STAGE_ADULT && (DA.fish[i].ms_bits & MS_REACHED_ADULT), "9: staging - it did not grow up in A"); }
+    gb.ask.answer = 1;
+    int n = 0; for (; n < 1800 && dg_home(&DB, gu) < 0; n++) d_step(1);
+    int j = dg_home(&DB, gu);
+    DCHECK(j >= 0, "9: the gift never reached B");
+    if (j >= 0) {
+        DCHECK(DB.fish[j].stage == STAGE_ADULT && (DB.fish[j].ms_bits & MS_REACHED_ADULT), "9: it left A an adult and arrived in B a %s (REACHED ADULT %d) - the ask's passport",
+               DB.fish[j].stage == STAGE_JUV ? "juvenile" : "fish of another stage", !!(DB.fish[j].ms_bits & MS_REACHED_ADULT));
+        DCHECK(DB.sd_paid_fish[j] & SD_PAID_ADULT, "9: B will pay its adult stage again (paid %x)", DB.sd_paid_fish[j]);
+        if (DB.fish[j].stage == STAGE_ADULT) printf("selftest-doors: 9. GIVE: it grew up while B's keeper read the card - it arrived in B an adult, its stage paid once\n");
+    }
+    for (n = 0; n < 600 && (ga.n_given || gb.n_arr); n++) d_step(1);
+    free(LA); free(LB); LA = LB = NULL;
+    /* the restore: a GIVEN note (the fish as it left: an adult) and GIVEN_LOST carrying an older copy (a juvenile) */
+    {   int i = 0; passport_t left, asked;
+        passport_from_fish(&left, &DA.fish[i], DA.uid, STAGE_ADULT_AGE + 60); asked = left;
+        asked.stage = STAGE_JUV; asked.ms_bits &= ~MS_REACHED_ADULT; asked.age_s = STAGE_JUV_AGE + 60;
+        uint32_t u = DA.fish[i].uid;
+        DCHECK(gift_given_add(&ga, u, 0x77u, DB.uid, &left), "9: staging the GIVEN note");
+        progression_give_out(&DA, i);
+        link_ev_t ev; memset(&ev, 0, sizeof ev); ev.type = LEV_GIVE_RESTORE; ev.uid = u; ev.peer = DB.uid; ev.nonce = 0x77u; ev.pp = asked;
+        tank_link_event(&DA, NULL, &ev);
+        int k = dg_home(&DA, u);
+        DCHECK(k >= 0 && DA.fish[k].stage == STAGE_ADULT && (DA.fish[k].ms_bits & MS_REACHED_ADULT),
+               "9: restored from bubbles a %s, not as its GIVEN note has it", k < 0 ? "nothing" : DA.fish[k].stage == STAGE_JUV ? "juvenile" : "fish of another stage");
+        if (k >= 0 && DA.fish[k].stage == STAGE_ADULT) printf("selftest-doors: 9. a gift restored from bubbles comes back from its GIVEN note's own passport\n");
+    }
+    gift_attach(&DA, NULL); gift_attach(&DB, NULL);
+}
 int selftest_doors(void) {
     setenv("POCKET_TANK_SAVE", "/tmp/pocket-tank-selftest-doors.sav", 1);   /* (the births and welcomes save: never into the sim's own tank) */
     d_fails = 0; dnow = 1000; dqn = 0;
     tank_init(&DA, 31); progression_fresh(&DA); tank_ensure_ids(&DA);   /* (progression booted for A: scenario 6 runs its tick) */
     tank_init(&DB, 32); tank_new_population(&DB); tank_ensure_ids(&DB);
     for (int i = 0; i < 2; i++) { progression_set_age(&DA, i, STAGE_ADULT_AGE + 60); DA.fish[i].stage = STAGE_ADULT; DB.fish[i].stage = STAGE_ADULT; }
-    /* the room: a 5-fish limit per tank, home fish and visitors alike (Strato 2026-10-05) */
+    /* the room: two visitor places whatever our own count, 7 swimming at most (Strato 2026-11-05; was 10-05's "5 fish a tank,
+       visitors counted": two full tanks linked and nobody ever visited) */
     { static tank_t R; memset(&R, 0, sizeof R); tank_init(&R, 33); tank_new_population(&R); int n0 = R.n_fish;
       for (int n = 2; n <= N_FISH_MAX; n++) {
           R.n_fish = n;
-          int want = TANK_LINK_SWIM_MAX - n < 0 ? 0 : TANK_LINK_SWIM_MAX - n; if (want > N_VISIT_MAX) want = N_VISIT_MAX;
+          int want = n <= POP_CAP ? TANK_LINK_VISIT_PLACES : TANK_LINK_SWIM_MAX - n;   /* (past the cap: an older build's save, cap_over) */
           DCHECK(tank_link_room(&R) == want, "room with %d fish at home: %d, want %d", n, tank_link_room(&R), want);
       }
-      R.n_fish = 4; R.fish[0].away = R.fish[1].away = true;           /* two of four away: room for three */
-      DCHECK(tank_link_room(&R) == 3, "two of four away: room %d, want 3", tank_link_room(&R));
-      R.n_fish = n0;
-      printf("selftest-doors: room = 5 fish a tank: 2 at home host 3, 4 host 1, 5 host none; fish away make room\n"); }
+      R.n_fish = 4; R.fish[0].away = R.fish[1].away = true;           /* fish away make no room: their places wait for them */
+      DCHECK(tank_link_room(&R) == 2, "two of four away: room %d, want 2", tank_link_room(&R));
+      R.fish[0].away = R.fish[1].away = false; R.n_fish = POP_CAP;
+      R.vis_used[0] = true; DCHECK(tank_link_room(&R) == 1, "five fish + a visitor: room %d, want 1", tank_link_room(&R));
+      R.vis_pending[1] = true; DCHECK(tank_link_room(&R) == 0, "five + a visitor + a fry waiting for its home: room %d, want 0", tank_link_room(&R));
+      DCHECK(!tank_link_fry_place(&R), "a fry place with both places taken");
+      R.vis_pending[1] = false; R.vis_coming = 1;
+      DCHECK(tank_link_room(&R) == 1 && !tank_link_fry_place(&R), "a visitor let in, not drawn yet: the fry took its place (room %d)", tank_link_room(&R));
+      R.vis_used[0] = false; R.vis_coming = 0; R.n_fish = n0;
+      printf("selftest-doors: room = 2 visitor places whatever the tank holds (2..5 fish: 2), 7 swimming at most; fish away make no room; a fry for its home takes a place\n"); }
     LA = calloc(1, (size_t)link_size()); LB = calloc(1, (size_t)link_size());
     (void)system("rm -rf /tmp/pt-doors-shelf && mkdir -p /tmp/pt-doors-shelf/frame");   /* (the keeper's name for A, on its passports) */
     setenv("POCKET_TANK_STORAGE", "/tmp/pt-doors-shelf/storage.bin", 1); setenv("POCKET_TANK_FRAME", "/tmp/pt-doors-shelf/frame", 1);
@@ -772,6 +916,21 @@ int selftest_doors(void) {
         if (sc == 2) {                                     /* B fills up while its fish is over here (new fish with no wanderlust yet) */
             while (DB.n_fish < POP_CAP && DB.n_fish < N_FISH_MAX) { int j = tank_add_fish(&DB, 0, 1); if (j >= 0) DB.fish[j].door_seen = DB.clock + 600; }
             nB = DB.n_fish;
+        }
+        for (int q = 0, quiet = 0; q < 3600 && quiet < 90; q++) {   /* the scene's one visitor: another that wandered over goes home and none
+                                                                       sets out (0.4.1: a fry for its home needs a visitor place - two in, it waits) */
+            int other = 0;
+            for (int k = 0; k < N_VISIT_MAX; k++) {
+                if (DA.vis_used[k] && DA.fish[N_FISH_MAX + k].uid != par) { DA.fish[N_FISH_MAX + k].homeward = DA.fish[N_FISH_MAX + k].bolt_home = true; other++; }
+                if (DB.vis_used[k]) { DB.fish[N_FISH_MAX + k].homeward = DB.fish[N_FISH_MAX + k].bolt_home = true; other++; }
+            }
+            for (int t2 = 0; t2 < 2; t2++) { tank_t *h = t2 ? &DB : &DA;
+                for (int i = 0; i < h->n_fish; i++) { fish_t *f = &h->fish[i]; if (f->uid == par) continue;
+                    f->door_seen = h->clock + 3600;
+                    if (f->away) other++; else if (f->door == DOOR_HEADING) f->door = DOOR_NONE; else if (f->door != DOOR_NONE) other++; } }
+            int pv = d_vis_of(&DA, par); if (pv >= 0) { DA.fish[pv].homeward = false; DA.vis_since[pv - N_FISH_MAX] = DA.clock; }
+            quiet = other ? 0 : quiet + 1;
+            d_step(1);
         }
         DA.fry_partner = par; DA.fry_asked = false; DA.fry_home_room = -1;
         for (int n = 0; n < 60 && DA.fry_home_room < 0; n++) d_step(1);
@@ -952,11 +1111,11 @@ int selftest_doors(void) {
         int ax = (TANK_W - GIFT_CARD_W) / 2 + 12 + GIFT_BTN_W / 2, ay = (TANK_H - GIFT_CARD_H) / 2 + GIFT_BTN_Y + GIFT_BTN_H / 2;
         int nx = (TANK_W + GIFT_CARD_W) / 2 - 12 - GIFT_BTN_W / 2;
         DCHECK(render_gift_hit((float)ax, (float)ay) == GIFT_HIT_ACCEPT && render_gift_hit((float)nx, (float)ay) == GIFT_HIT_NO, "7c: the gift card's buttons are not where they are drawn");
-        /* a kid's tap the moment the card comes up is spent - for GIFT_HOLD_S neither button answers (2026-11-02) */
-        DCHECK(!gift_answer(&GA, DA.clock, true) && !gift_answer(&GA, DA.clock, false) && GA.ask.on && !GA.ask.answer, "7c: the gift card took a tap the moment it came up");
+        /* THE TOUCH RULE (touch_gate.h, 11-06): a press begun before the card came is no answer; there is no hold (2 s before) */
+        DCHECK(!gift_answer(&GA, GA.ask.seen - 0.05, DA.clock, true) && !gift_answer(&GA, GA.ask.seen - 0.05, DA.clock, false) && GA.ask.on && !GA.ask.answer, "7c: a press from before the gift card answered it");
         d_step((int)(GIFT_HOLD_S * 30) + 2);
-        DCHECK(gift_answer(&GA, DA.clock, render_gift_hit((float)ax, (float)ay) == GIFT_HIT_ACCEPT) && GA.ask.answer == 1, "7c: ACCEPT did not answer after the hold");   /* (the touch port's ACCEPT) */
-        DCHECK(!gift_answer(&GA, DA.clock, false) && GA.ask.answer == 1, "7c: a second tap changed the answer");
+        DCHECK(gift_answer(&GA, DA.clock, DA.clock, render_gift_hit((float)ax, (float)ay) == GIFT_HIT_ACCEPT) && GA.ask.answer == 1, "7c: ACCEPT did not answer after the hold");   /* (the touch port's ACCEPT) */
+        DCHECK(!gift_answer(&GA, DA.clock, DA.clock, false) && GA.ask.answer == 1, "7c: a second tap changed the answer");
         d_step(20); render_milestones(&DB, pfb, TANK_W); D_SHOT(&DB, "5_leaving");
         DCHECK(render_give_modal_step(&DB) == RENDER_GM_OFF, "7c: the modal stayed up once the gift was taken");
         if (shot && D_HOME(&DB, gu) >= 0) { render_tank(&DB, pfb, TANK_W); render_stats_card(&DB, D_HOME(&DB, gu), pfb, TANK_W); D_SHOT(&DB, "5s_stat"); }
@@ -1092,11 +1251,21 @@ int selftest_doors(void) {
         while (DA.n_fish > 3) tank_remove_fish(&DA, DA.n_fish - 1);
         if (!(DA.door_open[LINK_RIGHT] && DB.door_open[LINK_LEFT])) { link_close(LA, LINK_RIGHT); link_close(LB, LINK_LEFT); d_step(60);
             link_mode(LA, true); link_mode(LB, true); link_arm(LA, LINK_RIGHT); d_step(5); link_arm(LB, LINK_LEFT); d_step(30); d_step(400); }
+        for (int q = 0, quiet = 0; q < 3600 && quiet < 90; q++) {   /* (A's places free first, and B's other fish stay home: two of them
+                                                                       wandering over filled A's two places - 0.4.1) */
+            int in = 0; for (int k = 0; k < N_VISIT_MAX; k++) if (DA.vis_used[k]) { DA.fish[N_FISH_MAX + k].homeward = DA.fish[N_FISH_MAX + k].bolt_home = true; in++; }
+            for (int i = 0; i < DB.n_fish; i++) { fish_t *f = &DB.fish[i]; f->door_seen = DB.clock + 3600;
+                if (f->away) in++; else if (f->door == DOOR_HEADING) f->door = DOOR_NONE; else if (f->door != DOOR_NONE) in++; }
+            quiet = in ? 0 : quiet + 1;
+            d_step(1);
+        }
         int vi = -1; uint32_t vu = 0;
         for (int i = DB.n_fish - 1; i >= 0 && vi < 0; i--) if (!DB.fish[i].away && DB.fish[i].door == DOOR_NONE && progression_fish_givable(&DB, i)) vi = i;
         if (vi >= 0) { vu = DB.fish[vi].uid; d_head_for(&DB, vi, LINK_LEFT); }
         for (int q = 0; q < 1800 && vu && d_vis_of(&DA, vu) < 0; q++) { d_step(1); int h = D_HOME(&DB, vu); if (h >= 0 && !DB.fish[h].away && DB.fish[h].door == DOOR_NONE) d_head_for(&DB, h, LINK_LEFT); }
-        DCHECK(vu && d_vis_of(&DA, vu) >= 0, "7j: B's fish never reached A");
+        DCHECK(vu && d_vis_of(&DA, vu) >= 0, "7j: B's fish never reached A (A room %d, %d visitors, %d swimming; B's fish door %d refused %.0f s)", tank_link_room(&DA),
+               DA.vis_used[0] + DA.vis_used[1] + DA.vis_used[2] + DA.vis_used[3], DA.vis_used[0] + DA.vis_used[1] + DA.vis_used[2] + DA.vis_used[3] + DA.n_fish,
+               vi >= 0 ? DB.fish[vi].door : -9, vi >= 0 ? DB.fish[vi].door_refused - DB.clock : 0);
         { int h = D_HOME(&DB, vu);   /* next door: not for sale (it swims on over there), but it can be given where it is */
           DCHECK(h >= 0 && DB.fish[h].away && !progression_fish_sellable(&DB, h) && progression_fish_givable(&DB, h), "7j: a fish next door was for sale (or could not be given)");
           /* its card: SELL dim, and the line a tap on it brings (every world: the words) */
@@ -1231,10 +1400,8 @@ int selftest_doors(void) {
             d_step(30); render_give_tap(&DB, D_HOME(&DB, su)); d_step((int)(GIFT_HOLD_S * 30) + 2);
             render_give_modal_button(&DB, RENDER_GM_TAP_GIVE, &mx, &my); render_give_modal_tap(&DB, (float)mx, (float)my); d_step(10);
             DCHECK(GB.asking_uid == su && GA.ask.on, "7g: the second ask did not go");
-            DCHECK(render_give_modal_button(&DB, RENDER_GM_TAP_CALLOFF, &ox, &oy) && render_give_modal_tap(&DB, (float)ox, (float)oy) == RENDER_GM_TAP_HELD,
-                   "7g: CALL OFF took a tap the moment ASKING came up");
-            d_step((int)(GIFT_HOLD_S * 30) + 2);
-            DCHECK(render_give_modal_tap(&DB, (float)ox, (float)oy) == RENDER_GM_TAP_CALLOFF && render_give_modal_step(&DB) == RENDER_GM_OFF, "7g: CALL OFF did not close the modal");
+            DCHECK(render_give_modal_button(&DB, RENDER_GM_TAP_CALLOFF, &ox, &oy) && render_give_modal_tap(&DB, (float)ox, (float)oy) == RENDER_GM_TAP_CALLOFF
+                   && render_give_modal_step(&DB) == RENDER_GM_OFF, "7g: CALL OFF 0.3 s after ASKING came up did not close the modal (THE TOUCH RULE: no hold)");
             d_step(15);
             DCHECK(!GB.asking_uid && !GA.ask.on && D_HOME(&DB, su) >= 0, "7g: CALL OFF did not take the gift back (asking %08x, A asked %d)", GB.asking_uid, GA.ask.on);
             /* the door is the keeper's pick: no tank at B's right, and a tank at its left that is not the one picked - it cannot go */
@@ -1304,7 +1471,9 @@ int selftest_doors(void) {
         U.clock += GIFT_HOLD_S + 0.1f; U.door_open[LINK_RIGHT] = false;
         DCHECK(render_give_modal_step(&U) == RENDER_GM_SAID && !strcmp(render_give_modal_line(&U), "CANNOT BE GIVEN RIGHT NOW") && !UG.want_uid,
                "7k: its door closed under CONFIRM, and it did not say so");
-        DCHECK(render_give_modal_button(&U, RENDER_GM_TAP_OK, &x, &y) && render_give_modal_tap(&U, (float)x, (float)y) == RENDER_GM_TAP_HELD, "7k: OK took a tap the moment the words came up");
+        render_tap_press(U.clock - 0.05);                    /* (THE TOUCH RULE: the words came by themselves - only a press from before them is spent) */
+        DCHECK(render_give_modal_button(&U, RENDER_GM_TAP_OK, &x, &y) && render_give_modal_tap(&U, (float)x, (float)y) == RENDER_GM_TAP_HELD, "7k: OK took a press that began before the words came up");
+        render_tap_press_end();
         render_tank(&U, ufb, TANK_W); render_tank(&U, ufb, TANK_W); render_give_modal(&U, ufb, TANK_W); d_shot(ufb, "g9_cannot");
         DCHECK(!d_bake_diff(&U, false), "7k: CANNOT from its bake is not CANNOT drawn whole");
         U.clock += GIFT_HOLD_S + 0.1f; render_give_modal_tap(&U, (float)x, (float)y);
@@ -1411,7 +1580,7 @@ int selftest_doors(void) {
         UG.ask.on = true; UG.ask.uid = 0x77u; passport_from_fish(&UG.ask.pp, &U.fish[0], 0x49439648u, 3600); UG.ask.pp.uid = 0x77u;
         UG.ask.since = U.clock; UG.ask.shown = false;
         U.clock += 5;                                                       /* (5 s under a page: never drawn) */
-        DCHECK(!gift_answer(&UG, U.clock, true), "7n: a card never seen took a tap");
+        DCHECK(!gift_answer(&UG, U.clock, U.clock, true), "7n: a card never seen took a tap");
         render_gift_allow(false); render_tank(&U, nfb, TANK_W); render_gift(&U, nfb, TANK_W);
         DCHECK(!UG.ask.shown && !render_gift_up(&U) && render_gift_take_cue() < 0, "7n: the card came up while it must wait (shown %d)", UG.ask.shown);
         render_gift_allow(true);
@@ -1425,8 +1594,8 @@ int selftest_doors(void) {
           render_tank(&U, nfb, TANK_W); render_tank(&U, nfb, TANK_W); render_link_mode(&lv, nfb, TANK_W, 1.0f); render_gift(&U, nfb, TANK_W);
           render_link_leave(); d_shot(nfb, "n2_gift_over_link"); }
         render_milestones_show_fish(&U, 1);
-        DCHECK(!gift_answer(&UG, U.clock + 1.0f, true), "7n: the card took a tap 1 s after it was first seen (it waited 5 s under a page)");
-        DCHECK(gift_answer(&UG, U.clock + GIFT_HOLD_S + 0.1f, true) && UG.ask.answer == 1, "7n: ACCEPT did not answer after the hold from first seen");
+        DCHECK(!gift_answer(&UG, UG.ask.seen - 0.05, U.clock + 1.0f, true), "7n: a press from before the card was seen answered it");   /* (THE TOUCH RULE: G1, no hold) */
+        DCHECK(gift_answer(&UG, U.clock + 1.0f, U.clock + 1.0f, true) && UG.ask.answer == 1, "7n: ACCEPT 1 s after it was seen did not answer");
         render_milestones_leave(); UG.ask.on = false; UG.ask.answer = 0;
         /* the GIVE modal back from under a page: a fresh hold */
         render_give_tap(&U, 0); render_frame_begin(); render_tank(&U, nfb, TANK_W); render_give_modal(&U, nfb, TANK_W);
@@ -1630,6 +1799,64 @@ int selftest_doors(void) {
         }
         DCHECK(n == 3 && got == 0, "7t: three gifts at trust 9.6, raised to 10 here, paid +%d SD over %d trips (want +0)", got, n);
         printf("selftest-doors: 7t. a 30 h elder stays an elder home from a visit and as a gift; three trips at trust 9.6 -> 10 paid +0\n"); }
+      /* 7u. MORE NOTES THAN THE ENGINE HAS SLOTS (0.4.1, release-0.4.md 2g's deferred list): a book holds GIFT_NOTES (4) GIVEN
+         and ARRIVING notes, the engine LINK_GIVE_MAX (2) gifts each way, and a note was handed to the engine only at LINKED -
+         a third waited for the next unlink and relink: its fish in neither tank (GIVEN) or a place held (ARRIVING). Now the
+         notes are handed over again once a second while linked: all three settle in one meeting. And slots held for a tank
+         that walked off (GIVEN sent, its OK never heard) left none for a gift to the tank next door: they go with the link */
+      { while (progression_newborn() >= 0) progression_newborn_done(&DA);
+        while (progression_newborn() >= 0) progression_newborn_done(&DB);
+        GA.ask.on = false; GA.ask.answer = 0; GB.said_uid = 0; GB.asking_uid = 0; GA.n_given = GA.n_arr = 0; GB.n_given = GB.n_arr = 0;
+        while (DA.n_fish > 2) tank_remove_fish(&DA, DA.n_fish - 1);
+        while (DB.n_fish > 3) tank_remove_fish(&DB, DB.n_fish - 1);
+        while (DB.n_fish < 3) { tank_make_fish(&DB, DB.n_fish, DB.n_fish % 3, 0.5f, 0.5f, STAGE_ADULT); DB.n_fish++; } tank_ensure_ids(&DB);
+        if (!(DA.door_open[LINK_RIGHT] && DB.door_open[LINK_LEFT])) { link_close(LA, LINK_RIGHT); link_close(LB, LINK_LEFT); d_step(60);
+            link_mode(LA, true); link_mode(LB, true); link_arm(LA, LINK_RIGHT); d_step(5); link_arm(LB, LINK_LEFT); d_step(30); d_step(400); }
+        /* (a) B gave two fish to a tank C that walked off before its GIVEN_OK: the engine held both slots (GO_GIVEN) */
+        const uint32_t C = 0xc3c3c3c3u;
+        passport_t pc; passport_from_fish(&pc, &DB.fish[0], DB.uid, 3600);
+        for (int k = 0; k < 2; k++) { pc.uid = 0x7c000001u + (uint32_t)k; DCHECK(gift_given_add(&GB, pc.uid, 0x51u + (uint32_t)k, C, &pc), "7u: B's note to C %d", k);
+                                      link_give_resume_out(LB, C, pc.uid, 0x51u + (uint32_t)k, &pc); }
+        d_step(2);
+        uint32_t f1 = DB.fish[DB.n_fish - 1].uid; d_wait_home(&DB, f1);
+        GB.want_uid = f1; GB.want_door = GIFT_DOOR_LEFT; GB.want_peer = DA.uid; d_step(10);
+        DCHECK(GB.asking_uid == f1 && GA.ask.on && GA.ask.uid == f1, "7u: with two GIVEN to a tank gone, B could not give next door (asking %08x, said %08x/%d)",
+               GB.asking_uid, GB.said_uid, GB.said_reason);
+        GB.cancel_uid = f1; d_step(10);
+        DCHECK(!GA.ask.on && !GB.asking_uid && GB.n_given == 2, "7u: CALL OFF (A's card %d, asking %08x, B's notes %d)", GA.ask.on, GB.asking_uid, GB.n_given);
+        GB.n_given = 0;                                                     /* (C's notes: not this case's - C never comes back here) */
+        while (DB.n_fish > 2) tank_remove_fish(&DB, DB.n_fish - 1);
+        /* (b) three GIVEN notes in B whose fish A never got (A's ARRIVING notes ran out): A answers GIVEN_LOST, each comes home
+           to B; three ARRIVING notes in A for gifts B called off (B answers CANCEL): each lets go. Unlinked while they are made */
+        link_close(LA, LINK_RIGHT); link_close(LB, LINK_LEFT); d_step(60);
+        DCHECK(link_neighbor(LA, LINK_RIGHT) != DB.uid, "7u: still linked");
+        passport_t pg; passport_from_fish(&pg, &DB.fish[0], DB.uid, 3600);
+        uint32_t back[3], gone[3];
+        for (int k = 0; k < 3; k++) {
+            pg.uid = back[k] = 0x7b000001u + (uint32_t)k; DCHECK(gift_given_add(&GB, pg.uid, 0x61u + (uint32_t)k, DA.uid, &pg), "7u: B's note %d", k);
+            pg.uid = gone[k] = 0x7a000001u + (uint32_t)k; DCHECK(gift_arriving_add(&GA, pg.uid, 0x71u + (uint32_t)k, DB.uid, &pg), "7u: A's note %d", k);
+        }
+        DCHECK(progression_fish_held(&DA) == POP_CAP && progression_fish_held(&DB) == POP_CAP, "7u: held A %d B %d (want %d each)", progression_fish_held(&DA), progression_fish_held(&DB), POP_CAP);
+        link_mode(LA, true); link_mode(LB, true); link_arm(LA, LINK_RIGHT); d_step(5); link_arm(LB, LINK_LEFT);
+        int done = -1, linked = -1;
+        for (int q = 0; q < 600 && done < 0; q++) {
+            d_step(1);
+            if (linked < 0 && link_neighbor(LA, LINK_RIGHT) == DB.uid && link_neighbor(LB, LINK_LEFT) == DA.uid) linked = q;
+            if (linked < 0) continue;
+            for (int k = 0; k < 3; k++) {
+                bool inB = D_HOME(&DB, back[k]) >= 0;
+                DCHECK(!(inB && D_HOME(&DA, back[k]) >= 0), "7u: %08x in both tanks", back[k]);
+                DCHECK(inB || gift_given_has(&GB, back[k]), "7u: %08x lives nowhere and no note holds it", back[k]);
+            }
+            DCHECK(link_neighbor(LA, LINK_RIGHT) == DB.uid, "7u: the link dropped mid-meeting");
+            if (!GB.n_given && !GA.n_arr) done = q;
+        }
+        int home = 0; for (int k = 0; k < 3; k++) home += D_HOME(&DB, back[k]) >= 0 && D_HOME(&DA, gone[k]) < 0 && D_HOME(&DB, gone[k]) < 0;
+        DCHECK(done >= 0 && home == 3 && DB.n_fish == POP_CAP && DA.n_fish == 2,
+               "7u: one meeting settled %d of 3 each way (B notes %d, A notes %d, home in B %d, B %d fish, A %d)", done < 0 ? 3 - (GB.n_given > GA.n_arr ? GB.n_given : GA.n_arr) : 3,
+               GB.n_given, GA.n_arr, home, DB.n_fish, DA.n_fish);
+        if (done >= 0) printf("selftest-doors: 7u. three GIVEN notes and three ARRIVING notes, one meeting: all settled %.1f s after the link (two slots each way); two slots held for a tank gone let a gift go next door\n", (done - linked) / 30.0);
+        while (DB.n_fish > 3) tank_remove_fish(&DB, DB.n_fish - 1); }
       gift_attach(&DA, NULL); gift_attach(&DB, NULL);
       #undef D_HOME
     }
@@ -1640,6 +1867,8 @@ int selftest_doors(void) {
     d_step(600);
     DCHECK(!DA.fish[0].away && DA.fish[0].x < tank_glass_x1(DA.fish[0].y), "a fish went through a closed door");
     free(LA); free(LB);
+    doors_mate_left();
+    doors_give_fresh();
     printf("selftest-doors: %s\n", d_fails ? "FAILED" : "OK");
     return d_fails ? 1 : 0;
 }
@@ -1699,6 +1928,21 @@ int selftest_fry_cap(void) {
         for (int i = 0; i < DA.n_fish; i++) DA.fish[i].door_seen = DA.clock + 3600;   /* only B's fish 0 goes visiting */
         for (int i = 1; i < DB.n_fish; i++) DB.fish[i].door_seen = DB.clock + 3600;
         uint32_t par = DB.fish[0].uid;
+        for (int q = 0, quiet = 0; q < 3600 && quiet < 90; q++) {   /* the scene's one visitor: any other that wandered over before the holds
+                                                            goes home, and none sets out (0.4.1: a fry for its home needs a visitor place free -
+                                                            two in and it waits). Quiet for 3 s, the holds afresh each frame (a welcome home clears them) */
+            int other = 0;
+            for (int k = 0; k < N_VISIT_MAX; k++) {
+                if (DA.vis_used[k] && DA.fish[N_FISH_MAX + k].uid != par) { DA.fish[N_FISH_MAX + k].homeward = DA.fish[N_FISH_MAX + k].bolt_home = true; other++; }
+                if (DB.vis_used[k]) { DB.fish[N_FISH_MAX + k].homeward = DB.fish[N_FISH_MAX + k].bolt_home = true; other++; }
+            }
+            for (int t2 = 0; t2 < 2; t2++) { tank_t *h = t2 ? &DB : &DA;
+                for (int i = 0; i < h->n_fish; i++) { fish_t *f = &h->fish[i]; if (f->uid == par) continue;
+                    f->door_seen = h->clock + 3600;
+                    if (f->away) other++; else if (f->door == DOOR_HEADING) f->door = DOOR_NONE; else if (f->door != DOOR_NONE) other++; } }
+            quiet = other ? 0 : quiet + 1;
+            d_step(1);
+        }
         if (d_vis_of(&DA, par) < 0) { d_head_for(&DB, 0, LINK_LEFT); for (int n = 0; n < 1800 * ((TANK_W + 447) / 448) && d_vis_of(&DA, par) < 0; n++) d_step(1); }
         DCHECK(d_vis_of(&DA, par) >= 0, "%c: B's fish never visited (door %d, away %d)", 'a' + sc, DB.fish[0].door, DB.fish[0].away);
         if (d_vis_of(&DA, par) < 0) break;
@@ -1882,7 +2126,7 @@ static void g_work(int i) {
             j.type = GJ_TAKEN_OUT; j.at = now + rndi(0, 200); g->job[g->njob++] = j;
             break;
         }
-        case GJ_TAKEN_OUT: gf_remove(g, j.uid); link_give_done(t->L, j.uid, j.nonce); break;   /* save 2: the fish out */
+        case GJ_TAKEN_OUT: gf_remove(g, j.uid); link_give_done(t->L, j.uid, j.nonce, NULL); break;   /* save 2: the fish out */
         case GJ_ALIVE_ADD:                                        /* save 1: the fish in */
             gf_add(g, &j.pp); g_recv_add(g, j.uid, j.nonce);
             j.type = GJ_ALIVE_DONE; j.at = now + rndi(0, 200); g->job[g->njob++] = j;
@@ -2089,7 +2333,7 @@ static void vg_work(int i) {
             if (f->st == 2) vs_.here++;
             j.type = GJ_TAKEN_OUT; j.at = now + rndi(0, 2600); g->job[g->njob++] = j;   /* (next door: the GIVEN stamp's 2.5 s) */
             break; }
-        case GJ_TAKEN_OUT: { vgf_t *f = vg_f(g, j.uid); if (f) f->st = 0; link_give_done(t->L, j.uid, j.nonce); break; }
+        case GJ_TAKEN_OUT: { vgf_t *f = vg_f(g, j.uid); if (f) f->st = 0; link_give_done(t->L, j.uid, j.nonce, NULL); break; }
         case GJ_ALIVE_ADD: {                        /* save 1: the fish in - a visitor of it becomes ours where it swims */
             vgv_t *v = vg_v(g, j.uid);
             passport_t pp = v ? v->pp : j.pp;
@@ -2304,4 +2548,583 @@ int selftest_clock_doors(double day0) {
     if (!d_fails) printf("selftest-clock: day %.0f - through the door in %.1f s, home on its own %.0f s later\n", day0 / 86400, in / 30.0, home / 30.0);
     link_mode(LA, false); link_mode(LB, false);
     return d_fails;
+}
+
+/* ---- --selftest-visitors (0.4.1): the room during a visit, Strato 2026-11-05: "5 local fish and 2 visitor slots so
+   that a tank with 5 fish can still get a visitor or two. 7 fish cap during visitations". Two real tanks:
+   V1 two full tanks linked: visitors both ways, 2 each, the third refused FULL;
+   V2 a fish of ours home to a tank hosting 2: always let in, nobody sent away - 7 swimming;
+   V3 two (and three) offers at once: one place, one in (the audit's F2a: both came in);
+   V4 fish trading places one at a time (the audit's F2c: 8 swam);
+   V5 a fry for its home with two visitors in: it waits for a place, then swims home (never a third visitor);
+   V6 doors left to chance for 20 minutes: crossings both ways.
+   Through all of it no tank swims more than 7 or hosts more than 2 (the swim guard, sim/main.c, fails at once too),
+   and none owns more than 5. 0 = all held ---- */
+static int vt_max_swim[2], vt_max_vis[2], vt_max_held[2];
+static int vt_swim(const tank_t *t) { int n = 0; for (int i = 0; i < N_FISH_SLOTS; i++) n += tank_swims(t, i); return n; }
+static int vt_vis(const tank_t *t) { int n = 0; for (int k = 0; k < N_VISIT_MAX; k++) n += t->vis_used[k]; return n; }
+static void vt_step(int frames) {
+    for (int n = 0; n < frames; n++) {
+        d_step(1);
+        tank_t *T2[2] = { &DA, &DB };
+        for (int k = 0; k < 2; k++) {
+            int s = vt_swim(T2[k]), v = vt_vis(T2[k]), h = progression_fish_held(T2[k]);
+            if (s > vt_max_swim[k]) vt_max_swim[k] = s;
+            if (v > vt_max_vis[k]) vt_max_vis[k] = v;
+            if (h > vt_max_held[k]) vt_max_held[k] = h;
+        }
+    }
+}
+static void vt_hold_doors(tank_t *t) { for (int i = 0; i < t->n_fish; i++) t->fish[i].door_seen = t->clock + 1e6; }
+static void vt_keep_visitors(tank_t *t) {             /* the visitors here stay (no pull home) */
+    for (int k = 0; k < N_VISIT_MAX; k++) if (t->vis_used[k]) { t->fish[N_FISH_MAX + k].homeward = false; t->vis_since[k] = t->clock; }
+}
+/* home's fish i to host by its door: frames until it swims there, or -1 (refused, or not there in time) */
+static int vt_visit(tank_t *home, int i, int edge, tank_t *host) {
+    uint32_t u = home->fish[i].uid; d_head_for(home, i, edge);
+    for (int n = 0; n < 1800 * ((TANK_W + 447) / 448); n++) {
+        vt_keep_visitors(host);
+        vt_step(1);
+        if (d_vis_of(host, u) >= 0) return n;
+        if (home->fish[i].door_refused > home->clock) return -1;
+    }
+    return -1;
+}
+static void vt_home_all(void) {                        /* every visitor both ways home */
+    for (int q = 0; q < 3600; q++) {
+        int left = 0;
+        tank_t *T2[2] = { &DA, &DB };
+        for (int t = 0; t < 2; t++) {
+            for (int k = 0; k < N_VISIT_MAX; k++) if (T2[t]->vis_used[k]) { T2[t]->fish[N_FISH_MAX + k].homeward = T2[t]->fish[N_FISH_MAX + k].bolt_home = true; left++; }
+            for (int i = 0; i < T2[t]->n_fish; i++) left += T2[t]->fish[i].away;
+        }
+        if (!left) break;
+        vt_step(1);
+    }
+    for (int i = 0; i < DA.n_fish; i++) DA.fish[i].door_refused = 0;
+    for (int i = 0; i < DB.n_fish; i++) DB.fish[i].door_refused = 0;
+    vt_hold_doors(&DA); vt_hold_doors(&DB);
+}
+static void vt_fill(tank_t *t, int n) {
+    while (t->n_fish < n) { tank_make_fish(t, t->n_fish, t->n_fish % 3, 0.5f, 0.5f, STAGE_ADULT); t->n_fish++; }
+    while (t->n_fish > n) tank_remove_fish(t, t->n_fish - 1);
+    tank_ensure_ids(t);
+    if (t == &DA) for (int i = 0; i < t->n_fish; i++) progression_set_age(t, i, STAGE_ADULT_AGE + 60);
+    for (int i = 0; i < t->n_fish; i++) t->fish[i].stage = STAGE_ADULT;
+    vt_hold_doors(t);
+}
+/* ---- V7-V9 (0.4.1 audit round 2: R2L-1, R2-4, R2L-2; Strato 11-05: "a fry that belongs next door waits quietly while
+   the tank it would be born in has no visitor place: no courting, no dance, nothing held at its home; it comes once a
+   place opens"). Each its own pair of tanks: A 3 fish, B's fish visiting it ---- */
+static int vt_holds(const tank_t *t) { int n = 0; for (int h = 0; h < TANK_FRY_HOLDS; h++) n += t->fry_hold[h].peer != 0; return n; }
+static void vt_link_pair(uint32_t sa, uint32_t sb, int na, int nb) {
+    dnow = 1000; dqn = 0; d_deaf[0] = d_deaf[1] = false;
+    tank_init(&DA, sa); progression_fresh(&DA); tank_ensure_ids(&DA);
+    tank_init(&DB, sb); tank_new_population(&DB); tank_ensure_ids(&DB);
+    vt_fill(&DA, na); vt_fill(&DB, nb);
+    if (!LA) LA = calloc(1, (size_t)link_size());
+    if (!LB) LB = calloc(1, (size_t)link_size());
+    memset(LA, 0, (size_t)link_size()); memset(LB, 0, (size_t)link_size());
+    link_host_t ha = tank_link_host(&DA, d_send), hb = tank_link_host(&DB, d_send);
+    link_init(LA, DA.uid, &ha, 1, dnow); link_init(LB, DB.uid, &hb, 2, dnow);
+    link_mode(LA, true); link_mode(LB, true); vt_step(10);
+    link_arm(LA, LINK_RIGHT); vt_step(5); link_arm(LB, LINK_LEFT); vt_step(30); vt_step(400);
+    vt_hold_doors(&DA); vt_hold_doors(&DB);
+    while (progression_newborn() >= 0) progression_newborn_done(&DA);
+}
+/* V7 (R2L-1, from the round-2 link reviewer's --selftest-r2staged): our fry staged by the checklist, the coin given to one
+   of two visitors. Pass 0: no courting, no dance, nothing held at its home. Pass 1, the other visitor home: it comes */
+static void vt_v7(void) {
+    vt_link_pair(61, 62, 3, 3);
+    uint32_t par = DB.fish[0].uid, oth = DB.fish[1].uid;
+    int in = (vt_visit(&DB, 0, LINK_LEFT, &DA) >= 0) + (vt_visit(&DB, 1, LINK_LEFT, &DA) >= 0);
+    DCHECK(in == 2, "V7: B's two did not visit (%d)", in);
+    int nB = DB.n_fish, said[2] = { 0, 0 };
+    for (int pass = 0; pass < 2; pass++) {
+        if (pass == 0) { DA.fry_partner = par; DA.fry_mate = 0; DA.fry_home_room = -1; DA.fry_asked = false; progression_stage_arrival(&DA); }
+        int dances = 0, court = 0, born = 0, nA = DA.n_fish, held_b = 0, holds_b = 0; bool was = false; double t0 = DA.clock;
+        for (int n = 0; n < 240 * 30 && !born; n++) {
+            vt_keep_visitors(&DA);
+            if (pass == 1) { int ov = d_vis_of(&DA, oth); if (ov >= 0) DA.fish[ov].homeward = DA.fish[ov].bolt_home = true; }
+            vt_step(1); progression_tick(&DA, 0.033f);
+            if (DA.spawning && !was) dances++;
+            was = DA.spawning; court += DA.courting;
+            if (progression_fish_held(&DB) > held_b) held_b = progression_fish_held(&DB);
+            if (vt_holds(&DB) > holds_b) holds_b = vt_holds(&DB);
+            if (DA.fry_give_k >= 0 || DA.n_fish != nA) born = DA.fry_give_k >= 0 ? 2 : 1;
+        }
+        if (pass == 0) {
+            DCHECK(!court && !dances && !born, "V7: two visitors in, the coin's visitor courted anyway (%d courting frames, %d dances, born %d)", court, dances, born);
+            DCHECK(!holds_b && held_b == nB, "V7: B held a place for a fry that cannot come (%d held, %d fish)", held_b, nB);
+            DCHECK(DA.fry_partner == par && progression_arrival_pending(), "V7: the pair or the staged fry let go while waiting (partner %08x, staged %d)", DA.fry_partner, progression_arrival_pending());
+            said[0] = !court && !dances && !born && !holds_b;
+        } else {
+            DCHECK(born && dances >= 1, "V7: a place free, the fry never came (%d dances, %.0f s)", dances, DA.clock - t0);
+            said[1] = born;
+            if (born) printf("selftest-visitors: V7. our staged fry, the coin's visitor partner, two visitors in: no courting, no dance, nothing held at B for 240 s;"
+                             " the other visitor home: %s after %.0f s\n", born == 2 ? "born for B's home" : "born here", DA.clock - t0);
+        }
+    }
+    while (progression_newborn() >= 0) progression_newborn_done(&DA);
+    vt_home_all();
+    link_mode(LA, false); link_mode(LB, false);
+    (void)said;
+}
+/* V7c (the sibling): two visitors in, neither our fry's partner - our own pair courts and the fry is born here */
+static void vt_v7c(void) {
+    vt_link_pair(63, 64, 3, 3);
+    int in = (vt_visit(&DB, 0, LINK_LEFT, &DA) >= 0) + (vt_visit(&DB, 1, LINK_LEFT, &DA) >= 0);
+    DCHECK(in == 2, "V7c: B's two did not visit (%d)", in);
+    DA.fry_partner = 0; DA.fry_mate = 0;
+    progression_stage_arrival(&DA);
+    int nA = DA.n_fish, court = 0; double t0 = DA.clock;
+    for (int n = 0; n < 240 * 30 && DA.n_fish == nA; n++) { vt_keep_visitors(&DA); vt_step(1); progression_tick(&DA, 0.033f); court += DA.courting; }
+    bool ours = DA.n_fish == nA + 1;
+    if (ours) { const fish_t *f = &DA.fish[DA.n_fish - 1]; for (int p = 0; p < 2; p++) for (int k = 0; k < N_VISIT_MAX; k++) ours &= !(DA.vis_used[k] && DA.fish[N_FISH_MAX + k].uid == f->parent_uid[p]); }
+    DCHECK(ours && court, "V7c: two visitors in and no partner among them: our own pair's fry did not come (A %d -> %d fish, %d courting frames)", nA, DA.n_fish, court);
+    if (ours) printf("selftest-visitors: V7c. two visitors in, neither the partner: our own pair courted and its fry was born here after %.0f s\n", DA.clock - t0);
+    while (progression_newborn() >= 0) progression_newborn_done(&DA);
+    vt_home_all();
+    link_mode(LA, false); link_mode(LB, false);
+}
+/* V8 (R2-4): the time-together pair (fry_mate set) with one visitor in: its home holds the place. A second visitor comes:
+   the pair stops courting and the home lets go (a 4-fish home is not FULL for a fry that cannot come). The second one
+   home: asked again, the dance, the fry - for its home (fry_force), through the place */
+static void vt_v8(void) {
+    vt_link_pair(65, 66, 3, 4);
+    uint32_t par = DB.fish[0].uid;
+    DCHECK(vt_visit(&DB, 0, LINK_LEFT, &DA) >= 0, "V8: B's partner did not visit");
+    DA.fry_partner = par; DA.fry_mate = DA.fish[0].uid; DA.fry_home_room = -1; DA.fry_asked = false;
+    DA.ui_cover = true;                                       /* (a page up: the pair courts, the dance waits - the hold seen first) */
+    for (int n = 0; n < 90; n++) { vt_keep_visitors(&DA); vt_step(1); progression_tick(&DA, 0.033f); }
+    DCHECK(DA.courting && DA.fry_home_room == 1 && vt_holds(&DB) == 1 && progression_fish_held(&DB) == POP_CAP,
+           "V8: one visitor in: the pair courts and B holds the place (courting %d, room %d, holds %d, B held %d)", DA.courting, DA.fry_home_room, vt_holds(&DB), progression_fish_held(&DB));
+    DCHECK(vt_visit(&DB, 1, LINK_LEFT, &DA) >= 0, "V8: B's second fish did not visit");
+    DA.ui_cover = false;
+    int dances = 0, court = 0, holds = 0, full = 0; bool was = false;
+    for (int n = 0; n < 150 * 30; n++) {
+        vt_keep_visitors(&DA); vt_step(1); progression_tick(&DA, 0.033f);
+        if (n < 60) continue;                                 /* (two seconds for the call-off to reach B) */
+        if (DA.spawning && !was) dances++;
+        was = DA.spawning; court += DA.courting; holds += vt_holds(&DB) > 0; full += progression_fish_held(&DB) >= POP_CAP;
+    }
+    DCHECK(!court && !dances && !holds && !full && DA.fry_give_k < 0, "V8: two visitors in, the pair still courted or B still held (%d courting frames, %d dances, %d frames held, %d FULL)", court, dances, holds, full);
+    DCHECK(DA.fry_partner == par && DA.fry_mate, "V8: the pair let go while waiting");
+    int oth = d_vis_of(&DA, DB.fish[1].uid);
+    int nB = DB.n_fish, born = 0; double t0 = DA.clock;
+    DA.fry_force = 1;
+    for (int n = 0; n < 240 * 30 && !born; n++) {
+        if (oth >= 0 && d_vis_of(&DA, DB.fish[1].uid) >= 0) DA.fish[oth].homeward = DA.fish[oth].bolt_home = true;
+        int pv = d_vis_of(&DA, par); if (pv >= 0) { DA.fish[pv].homeward = false; DA.vis_since[pv - N_FISH_MAX] = DA.clock; }
+        vt_step(1); progression_tick(&DA, 0.033f);
+        if (DB.n_fish > nB) born = 1;
+    }
+    DCHECK(born, "V8: the second visitor home, the fry for B never came (B %d fish, give %d, room %d)", DB.n_fish, DA.fry_give_k, DA.fry_home_room);
+    if (born) printf("selftest-visitors: V8. the time-together pair with two visitors in: no courting, B let go of its place (not FULL) for 150 s; the other home: the fry came to B %.0f s later\n", DA.clock - t0);
+    while (progression_newborn() >= 0) progression_newborn_done(&DA);
+    vt_home_all();
+    link_mode(LA, false); link_mode(LB, false);
+}
+/* V9 (R2L-2): THE SWIM LIMIT's guard counts a fry waiting in a visitor's place as a place (tank_link_room does) */
+static int vt_guard_calls, vt_guard_vis;
+static void vt_guard(const tank_t *t, int swim, int visitors, const char *path) { (void)t; (void)swim; (void)path; vt_guard_calls++; vt_guard_vis = visitors; }
+static void vt_v9(void) {
+    static tank_t R; memset(&R, 0, sizeof R); tank_init(&R, 67); tank_new_population(&R); tank_ensure_ids(&R);
+    void (*was)(const tank_t *, int, int, const char *) = tank_link_swim_hook;
+    tank_link_swim_hook = vt_guard; vt_guard_calls = 0;
+    for (int k = 0; k < 2; k++) { R.fish[N_FISH_MAX + k] = R.fish[k]; R.fish[N_FISH_MAX + k].uid ^= 0x5a5a0000u + (uint32_t)k; R.vis_used[k] = true; }
+    tank_link_tick(&R, NULL);
+    int two = vt_guard_calls;                                 /* two visitors: within the rule */
+    R.fish[N_FISH_MAX + 2] = R.fish[0]; R.fish[N_FISH_MAX + 2].uid ^= 0x0f0f0000u; R.vis_pending[2] = true;
+    tank_link_tick(&R, NULL);
+    tank_link_swim_hook = was;
+    DCHECK(!two && vt_guard_calls == 1 && vt_guard_vis == 3, "V9: the guard: two visitors called it %d times; two + a fry waiting: %d calls, %d places counted (want 1 call, 3)", two, vt_guard_calls - two, vt_guard_vis);
+    if (!two && vt_guard_calls == 1) printf("selftest-visitors: V9. the swim guard: two visitors are within the rule; two + a fry waiting in a visitor's place is three places\n");
+}
+/* V10 (the review's F1): a FULL home (B at 5 held) - its fry can only be ours. Two of B's fish in A, A's fry staged, the
+   coin's visitor partner: the pair courts and the fry is born HERE, in base's time (27-35 s in the review's probe). V10b:
+   the same on the time-together path (fry_mate set, nothing staged) */
+static void vt_v10(void) {
+    for (int path = 0; path < 2; path++) {
+        vt_link_pair(71 + path, 73 + path, 3, POP_CAP);
+        uint32_t par = DB.fish[0].uid;
+        int in = (vt_visit(&DB, 0, LINK_LEFT, &DA) >= 0) + (vt_visit(&DB, 1, LINK_LEFT, &DA) >= 0);
+        DCHECK(in == 2, "V10%s: B's two did not visit (%d)", path ? "b" : "", in);
+        DA.fry_partner = par; DA.fry_mate = path ? DA.fish[0].uid : 0; DA.fry_home_room = -1; DA.fry_asked = false;
+        if (!path) progression_stage_arrival(&DA);
+        int nA = DA.n_fish, court = 0, born = 0, said = -1; double t0 = DA.clock;
+        for (int n = 0; n < 120 * 30 && !born; n++) {
+            vt_keep_visitors(&DA); vt_step(1);
+            if (DA.fry_home_room >= 0) said = DA.fry_home_room;   /* (B's answer, before the birth clears it: fry_partner_clear) */
+            progression_tick(&DA, 0.033f); court += DA.courting;
+            if (DA.n_fish > nA) born = 1; else if (DA.fry_give_k >= 0) born = 2;
+        }
+        DCHECK(said == 0, "V10%s: B full: its answer was %d, want 0 (no room) - the fry was ours for another reason", path ? "b" : "", said);
+        DCHECK(born == 1 && court && DA.clock - t0 < 60, "V10%s: B full, two visitors in: the fry is ours - not born here in 60 s (born %d, %d courting frames, %.0f s, B said %d)",
+               path ? "b" : "", born, court, DA.clock - t0, said);
+        if (born == 1 && said == 0) printf("selftest-visitors: V10%s. B full, two of its fish in A, %s: B said no room; courted, born HERE after %.0f s\n",
+                              path ? "b" : "", path ? "the time-together pair" : "our staged fry with the coin's visitor", DA.clock - t0);
+        while (progression_newborn() >= 0) progression_newborn_done(&DA);
+        vt_home_all(); link_mode(LA, false); link_mode(LB, false);
+    }
+}
+/* V11 (the review's F4): the coin rolls ON ITS OWN (visitors here a minute, vis_since not reset) while two are in. B with
+   room: a visitor that wins it waits - nobody courts, nothing held at B - and the fry comes once the other leaves. B full:
+   born here. A few tanks are tried until the coin falls to a visitor */
+static void vt_v11(void) {
+    for (int full = 0; full < 2; full++) {
+        int won = 0;
+        for (int tryn = 0; tryn < 8 && !won; tryn++) {
+            vt_link_pair(81 + (uint32_t)tryn * 2 + (uint32_t)full * 40, 82 + (uint32_t)tryn * 2 + (uint32_t)full * 40, 3, full ? POP_CAP : 3);
+            int in = (vt_visit(&DB, 0, LINK_LEFT, &DA) >= 0) + (vt_visit(&DB, 1, LINK_LEFT, &DA) >= 0);
+            if (in != 2) { DCHECK(0, "V11: B's two did not visit (%d)", in); break; }
+            DA.fry_partner = 0; DA.fry_mate = 0;
+            for (int n = 0; n < 65 * 30; n++) {                  /* (their minute here first: the coin rolls only for a visitor here 60 s,
+                                                                    and only while our fry is staged - else our own pair is quicker) */
+                for (int k = 0; k < N_VISIT_MAX; k++) if (DA.vis_used[k]) DA.fish[N_FISH_MAX + k].homeward = false;
+                vt_step(1); progression_tick(&DA, 0.033f);
+            }
+            progression_stage_arrival(&DA);
+            int nA = DA.n_fish, born = 0, court_wait = 0, holds = 0; uint32_t par = 0; double t_won = -1;
+            for (int n = 0; n < 240 * 30 && !born; n++) {
+                for (int k = 0; k < N_VISIT_MAX; k++) if (DA.vis_used[k]) DA.fish[N_FISH_MAX + k].homeward = false;   /* (here, but their minute runs) */
+                vt_step(1); progression_tick(&DA, 0.033f);
+                if (!par && DA.fry_partner && d_vis_of(&DA, DA.fry_partner) >= 0) { par = DA.fry_partner; t_won = DA.clock; }
+                if (par && vt_vis(&DA) == 2 && !full) { court_wait += DA.courting; holds += vt_holds(&DB) > 0; }
+                if (par && !full && DA.clock - t_won > 60 && vt_vis(&DA) == 2) {   /* a minute of waiting seen: the other one home */
+                    for (int k = 0; k < N_VISIT_MAX; k++) if (DA.vis_used[k] && DA.fish[N_FISH_MAX + k].uid != par) DA.fish[N_FISH_MAX + k].homeward = DA.fish[N_FISH_MAX + k].bolt_home = true;
+                }
+                if (DA.n_fish > nA) born = 1; else if (DA.fry_give_k >= 0) born = 2;
+            }
+            if (!par) { while (progression_newborn() >= 0) progression_newborn_done(&DA); vt_home_all(); link_mode(LA, false); link_mode(LB, false); continue; }
+            won = 1;
+            if (full) DCHECK(born == 1 && DA.clock - t_won < 60, "V11: B full, the coin's visitor: not born here within 60 s of the coin (born %d, %.0f s)", born, DA.clock - t_won);
+            else {
+                DCHECK(!court_wait && !holds, "V11: B with room, the coin's visitor, two in: courted %d frames, B held %d frames", court_wait, holds);
+                DCHECK(born, "V11: B with room: the other visitor home, the fry never came");
+            }
+            if ((full && born == 1) || (!full && born && !court_wait && !holds))
+                printf("selftest-visitors: V11. the coin on its own, two in, B %s: a visitor won it (try %d); %s %.0f s after the coin\n",
+                       full ? "full" : "with room", tryn + 1, full ? "born here" : "it waited quietly, then came", DA.clock - t_won);
+            while (progression_newborn() >= 0) progression_newborn_done(&DA);
+            vt_home_all(); link_mode(LA, false); link_mode(LB, false);
+        }
+        DCHECK(won, "V11: in 8 tanks the coin never fell to a visitor (B %s)", full ? "full" : "with room");
+    }
+}
+/* V2c (the review's F2): a place only PROMISED (an OFFER accepted, its GO never coming: B never hears the ACCEPT) while the
+   time-together pair dances with one visitor in: the dance goes on, the home keeps its place, the fry comes */
+static void vt_v2c(void) {
+    vt_link_pair(91, 92, 3, 3);
+    uint32_t par = DB.fish[0].uid;
+    DCHECK(vt_visit(&DB, 0, LINK_LEFT, &DA) >= 0, "V2c: B's partner did not visit");
+    DA.fry_partner = par; DA.fry_mate = DA.fish[0].uid; DA.fry_home_room = -1; DA.fry_asked = false;
+    int nA = DA.n_fish, born = 0, blip = 0, cut = 0, called_off = 0; bool armed = false;
+    for (int n = 0; n < 150 * 30 && !born; n++) {
+        vt_keep_visitors(&DA);
+        if (!armed && DA.spawning) {                          /* the dance under way: B's fish 1 at the door, its ACCEPT lost */
+            armed = true; d_drop_type = 6 /* FR_ACCEPT */; d_drop_to = 1; d_drop_until = dnow + 6000;
+            d_at_door_facing_in(&DB, 1, LINK_LEFT);
+        }
+        bool sp = DA.spawning; uint32_t ask = DA.fry_ask_uid;
+        vt_step(1); progression_tick(&DA, 0.033f);
+        if (DA.vis_coming > 0) { blip++; if (sp && !DA.spawning && DA.n_fish == nA && DA.fry_give_k < 0) cut++; if (ask && !DA.fry_ask_uid) called_off++; }
+        if (DA.n_fish > nA || DA.fry_give_k >= 0) born = 1;
+    }
+    d_drop_type = 0;
+    DCHECK(blip > 0, "V2c: no promised place seen (the ACCEPT drop did not hold one)");
+    DCHECK(!cut && !called_off && born, "V2c: a promised place cut the dance %d times, called the home off %d times; fry %d", cut, called_off, born);
+    if (blip && !cut && !called_off && born) printf("selftest-visitors: V2c. a place promised for %.1f s mid-dance (its GO never came): the dance went on, the home kept its place, the fry came\n", blip / 30.0);
+    while (progression_newborn() >= 0) progression_newborn_done(&DA);
+    vt_home_all(); link_mode(LA, false); link_mode(LB, false);
+}
+int selftest_visitors(void) {
+    setenv("POCKET_TANK_SAVE", "/tmp/pocket-tank-selftest-visitors.sav", 1);
+    d_fails = 0; dnow = 1000; dqn = 0; d_deaf[0] = d_deaf[1] = false;
+    memset(vt_max_swim, 0, sizeof vt_max_swim); memset(vt_max_vis, 0, sizeof vt_max_vis); memset(vt_max_held, 0, sizeof vt_max_held);
+    tank_init(&DA, 71); progression_fresh(&DA); tank_ensure_ids(&DA);
+    tank_init(&DB, 72); tank_new_population(&DB); tank_ensure_ids(&DB);
+    vt_fill(&DA, POP_CAP); vt_fill(&DB, POP_CAP);
+    if (!LA) LA = calloc(1, (size_t)link_size());
+    if (!LB) LB = calloc(1, (size_t)link_size());
+    memset(LA, 0, (size_t)link_size()); memset(LB, 0, (size_t)link_size());
+    link_host_t ha = tank_link_host(&DA, d_send), hb = tank_link_host(&DB, d_send);
+    link_init(LA, DA.uid, &ha, 1, dnow); link_init(LB, DB.uid, &hb, 2, dnow);
+    link_mode(LA, true); link_mode(LB, true); vt_step(10);
+    link_arm(LA, LINK_RIGHT); vt_step(5); link_arm(LB, LINK_LEFT); vt_step(30); vt_step(400);
+    DCHECK(DA.door_open[LINK_RIGHT] && DB.door_open[LINK_LEFT], "the doors did not open");
+    vt_hold_doors(&DA); vt_hold_doors(&DB);
+
+    /* V1. two full tanks linked: 2 visitors each way, the third refused as FULL */
+    DCHECK(tank_link_room(&DA) == 2 && tank_link_room(&DB) == 2, "V1: a full tank's room %d / %d, want 2", tank_link_room(&DA), tank_link_room(&DB));
+    int a_in = 0, b_in = 0;
+    a_in += vt_visit(&DA, 0, LINK_RIGHT, &DB) >= 0; a_in += vt_visit(&DA, 1, LINK_RIGHT, &DB) >= 0;
+    b_in += vt_visit(&DB, 0, LINK_LEFT, &DA) >= 0;  b_in += vt_visit(&DB, 1, LINK_LEFT, &DA) >= 0;
+    DCHECK(a_in == 2 && b_in == 2, "V1: two full tanks: %d of A's and %d of B's got through (want 2 and 2)", a_in, b_in);
+    DCHECK(tank_link_room(&DA) == 0 && tank_link_room(&DB) == 0, "V1: two visitors in, room %d / %d, want 0", tank_link_room(&DA), tank_link_room(&DB));
+    int a3 = vt_visit(&DA, 2, LINK_RIGHT, &DB); double a3_for = DA.fish[2].door_refused - DA.clock;
+    int b3 = vt_visit(&DB, 2, LINK_LEFT, &DA);
+    DCHECK(a3 < 0 && b3 < 0 && vt_vis(&DA) == 2 && vt_vis(&DB) == 2, "V1: a third visitor got in (A's %d, B's %d; visitors %d / %d)", a3, b3, vt_vis(&DA), vt_vis(&DB));
+    DCHECK(a3_for > TANK_LINK_FULL_S - 2, "V1: the third was not refused as FULL (refused for %.0f s)", a3_for);
+    if (!d_fails) printf("selftest-visitors: V1. two full tanks linked: 2 of A's in B, 2 of B's in A, the third refused FULL each way; each swims %d (3 of its own + 2)\n", vt_swim(&DA));
+
+    /* V2. A's two come home while A hosts B's two: let in, nobody sent away - 5 + 2 = 7 */
+    {   int mx0 = vt_max_swim[0]; (void)mx0; vt_max_swim[0] = 0;
+        int home = -1;
+        for (int q = 0; q < 3600 && home < 0; q++) {
+            for (int k = 0; k < N_VISIT_MAX; k++) if (DB.vis_used[k]) DB.fish[N_FISH_MAX + k].homeward = DB.fish[N_FISH_MAX + k].bolt_home = true;
+            vt_keep_visitors(&DA);
+            vt_step(1);
+            if (!DA.fish[0].away && !DA.fish[1].away && DA.fish[0].door == DOOR_NONE && DA.fish[1].door == DOOR_NONE) home = q;
+        }
+        bool stay = vt_vis(&DA) == 2; for (int k = 0; k < N_VISIT_MAX; k++) if (DA.vis_used[k]) stay &= !DA.fish[N_FISH_MAX + k].homeward;
+        DCHECK(home >= 0, "V2: A's two did not come home (away %d %d)", DA.fish[0].away, DA.fish[1].away);
+        DCHECK(stay, "V2: a visitor was sent away to make room (%d visitors)", vt_vis(&DA));
+        DCHECK(vt_swim(&DA) == TANK_LINK_SWIM_MAX && vt_max_swim[0] == TANK_LINK_SWIM_MAX, "V2: A swims %d (most %d), want %d", vt_swim(&DA), vt_max_swim[0], TANK_LINK_SWIM_MAX);
+        DCHECK(tank_link_room(&DA) == 0, "V2: A room %d at 7 swimming", tank_link_room(&DA));
+        if (home >= 0 && stay) printf("selftest-visitors: V2. A's two came home %.1f s after the call while A hosted two of B's: all let in, nobody sent away - A swam %d at most\n", home / 30.0, vt_max_swim[0]);
+        vt_home_all();
+    }
+    /* V3. two offers at once: A holds 5 and hosts one of B's (one place left); two of B's reach the door together */
+    {   int in1 = vt_visit(&DB, 0, LINK_LEFT, &DA) >= 0;
+        DCHECK(in1 && tank_link_room(&DA) == 1, "V3: the first visitor (in %d), room %d, want 1", in1, tank_link_room(&DA));
+        d_at_door_facing_in(&DB, 1, LINK_LEFT); d_at_door_facing_in(&DB, 2, LINK_LEFT); DB.fish[2].y += 20;
+        int both_asked = -1, offers = 0;
+        for (int n = 0; n < 600; n++) {
+            vt_keep_visitors(&DA); vt_step(1);
+            if (both_asked < 0 && DB.fish[1].door_sent && DB.fish[2].door_sent) both_asked = n;
+            offers = (d_vis_of(&DA, DB.fish[1].uid) >= 0) + (d_vis_of(&DA, DB.fish[2].uid) >= 0);
+        }
+        DCHECK(both_asked >= 0, "V3: the two never asked together");
+        DCHECK(offers == 1 && vt_vis(&DA) == 2, "V3: two offers at once with one place: %d came in (%d visitors)", offers, vt_vis(&DA));
+        int refused = (DB.fish[1].door_refused > DB.clock) + (DB.fish[2].door_refused > DB.clock);
+        DCHECK(refused == 1, "V3: the other was not refused (%d refused)", refused);
+        if (offers == 1) printf("selftest-visitors: V3. one place left, two of B's at the door together (asked %.1f s apart at most): one in, the other refused - A hosts %d\n", both_asked / 30.0, vt_vis(&DA));
+        vt_home_all();
+        /* ... and three at once into two places */
+        for (int i = 0; i < 3; i++) d_at_door_facing_in(&DB, i, LINK_LEFT);
+        DB.fish[1].y += 20; DB.fish[2].y -= 20;
+        for (int n = 0; n < 600; n++) { vt_keep_visitors(&DA); vt_step(1); }
+        int in3 = 0; for (int i = 0; i < 3; i++) in3 += d_vis_of(&DA, DB.fish[i].uid) >= 0;
+        DCHECK(in3 == 2, "V3: three at once into two places: %d came in", in3);
+        if (in3 == 2) printf("selftest-visitors: V3. three of B's at the door together, two places: two in\n");
+        vt_home_all();
+    }
+    /* V4. fish trading places one at a time (A 5, B 3), every crossing with room, then all of A's home */
+    {   vt_fill(&DB, 3); vt_max_swim[0] = 0;
+        int ok = 0;
+        ok += vt_visit(&DA, 0, LINK_RIGHT, &DB) >= 0; ok += vt_visit(&DA, 1, LINK_RIGHT, &DB) >= 0;   /* B 3 + 2 */
+        ok += vt_visit(&DB, 0, LINK_LEFT, &DA) >= 0;  ok += vt_visit(&DB, 1, LINK_LEFT, &DA) >= 0;    /* A 3 + 2 */
+        ok += vt_visit(&DA, 2, LINK_RIGHT, &DB) >= 0;                                                 /* B full of visitors: refused */
+        ok += vt_visit(&DB, 2, LINK_LEFT, &DA) >= 0;                                                  /* A too */
+        DCHECK(ok == 4, "V4: %d of the six crossings made (want 4: the two past the places refused)", ok);
+        for (int q = 0; q < 3600; q++) {                  /* A's home; B's stay at A */
+            for (int k = 0; k < N_VISIT_MAX; k++) if (DB.vis_used[k]) DB.fish[N_FISH_MAX + k].homeward = DB.fish[N_FISH_MAX + k].bolt_home = true;
+            vt_keep_visitors(&DA); vt_step(1);
+            int away = 0; for (int i = 0; i < DA.n_fish; i++) away += DA.fish[i].away;
+            if (!away && q > 60) break;
+        }
+        DCHECK(vt_max_swim[0] <= TANK_LINK_SWIM_MAX && vt_vis(&DA) == 2, "V4: A swam %d at most (%d visitors)", vt_max_swim[0], vt_vis(&DA));
+        printf("selftest-visitors: V4. fish trading places (A 5, B 3): %d crossings, the two past the places refused; all of A's home: A swam %d at most (the audit's run: 8)\n", ok, vt_max_swim[0]);
+        vt_home_all(); vt_fill(&DB, POP_CAP - 1);
+    }
+    /* V5. a fry for its home with two visitors in: it waits for a place (the coin stays fair: not ours because the tank is
+       crowded), then is born and swims home - the visitors here never more than 2 */
+    {   vt_fill(&DA, POP_CAP - 1);
+        uint32_t par = DB.fish[0].uid, oth = DB.fish[1].uid;
+        int in = (vt_visit(&DB, 0, LINK_LEFT, &DA) >= 0) + (vt_visit(&DB, 1, LINK_LEFT, &DA) >= 0);
+        DCHECK(in == 2, "V5: B's two did not visit (%d)", in);
+        DA.fry_partner = par; DA.fry_asked = false; DA.fry_home_room = -1;
+        for (int n = 0; n < 60; n++) { vt_keep_visitors(&DA); vt_step(1); }
+        /* (round 2, Strato 11-05: it waits QUIETLY - with no place its home is only peeked at: its room known, nothing held there) */
+        DCHECK(DA.fry_home_room == 1 && !vt_holds(&DB), "V5: two visitors in: B's room not known, or B held a place (room %d, holds %d)", DA.fry_home_room, vt_holds(&DB));
+        int nA = DA.n_fish;
+        DA.fry_force = 1; progression_force_arrival(&DA);
+        DCHECK(DA.n_fish == nA && DA.fry_give_k < 0 && vt_vis(&DA) == 2, "V5: a fry was born with both places taken (A %d -> %d, give %d)", nA, DA.n_fish, DA.fry_give_k);
+        int ov = d_vis_of(&DA, oth); if (ov >= 0) DA.fish[ov].homeward = DA.fish[ov].bolt_home = true;
+        for (int n = 0; n < 900 && d_vis_of(&DA, oth) >= 0; n++) { int p = d_vis_of(&DA, par); if (p >= 0) { DA.fish[p].homeward = false; DA.vis_since[p - N_FISH_MAX] = DA.clock; } vt_step(1); }
+        DCHECK(d_vis_of(&DA, oth) < 0, "V5: the other visitor never went home");
+        for (int n = 0; n < 60 && !vt_holds(&DB); n++) { int p = d_vis_of(&DA, par); if (p >= 0) { DA.fish[p].homeward = false; DA.vis_since[p - N_FISH_MAX] = DA.clock; } vt_step(1); }
+        DCHECK(DA.fry_home_room == 1 && vt_holds(&DB) == 1, "V5: a place free: B not asked, or not holding (room %d, holds %d)", DA.fry_home_room, vt_holds(&DB));
+        DA.fry_force = 1; progression_force_arrival(&DA);
+        DCHECK(DA.fry_give_k >= 0, "V5: a place free, the fry for its home was not born (give %d, A %d fish)", DA.fry_give_k, DA.n_fish);
+        uint32_t fry = DA.fry_give_k >= 0 ? DA.fish[N_FISH_MAX + DA.fry_give_k].uid : 0;
+        int nB = DB.n_fish, got = -1;
+        for (int n = 0; n < 1800 && got < 0; n++) { vt_step(1); for (int i = 0; i < DB.n_fish; i++) if (DB.fish[i].uid == fry && !DB.fish[i].away && d_vis_of(&DA, par) < 0) got = n; }
+        DCHECK(got >= 0 && DB.n_fish == nB + 1, "V5: the fry and its parent were not home (%d fish, was %d)", DB.n_fish, nB);
+        if (got >= 0) printf("selftest-visitors: V5. a fry for its home with two visitors in waited; the other visitor gone, it was born and swam home with its parent (%.1f s) - A hosted %d at most\n", got / 30.0, vt_max_vis[0]);
+        vt_home_all(); vt_fill(&DA, POP_CAP); vt_fill(&DB, POP_CAP);
+    }
+    /* V6. 20 minutes of doors left to chance: every few seconds a fish of either tank heads for the door, a visitor heads home */
+    {   int cross[2] = { 0, 0 }; bool was[2][N_VISIT_MAX] = { { 0 } };
+        rs = 0x5157u;
+        for (int n = 0; n < 20 * 60 * 30; n++) {
+            if (n % 45 == 0) {                            /* a fish of ours, home and clear of the doors, for the door */
+                tank_t *h = rnd() & 1 ? &DA : &DB; int i = (int)(rnd() % (uint32_t)h->n_fish);
+                if (!h->fish[i].away && h->fish[i].door == DOOR_NONE) d_head_for(h, i, h == &DA ? LINK_RIGHT : LINK_LEFT);
+            }
+            if (n % 70 == 0) {                            /* a visitor's time is up */
+                tank_t *h = rnd() & 1 ? &DA : &DB; int k = (int)(rnd() % N_VISIT_MAX);
+                if (h->vis_used[k]) h->fish[N_FISH_MAX + k].homeward = true;
+            }
+            vt_step(1);
+            for (int t = 0; t < 2; t++) { tank_t *h = t ? &DB : &DA; for (int k = 0; k < N_VISIT_MAX; k++) { if (h->vis_used[k] && !was[t][k]) cross[t]++; was[t][k] = h->vis_used[k]; } }
+        }
+        DCHECK(cross[0] >= 10 && cross[1] >= 10, "V6: 20 min of open doors: %d visits into A, %d into B", cross[0], cross[1]);
+        printf("selftest-visitors: V6. 20 min of doors left to chance, two full tanks: %d visits into A, %d into B\n", cross[0], cross[1]);
+        vt_home_all();
+    }
+    link_mode(LA, false); link_mode(LB, false);
+    vt_v7(); vt_v7c(); vt_v8(); vt_v9(); vt_v10(); vt_v11(); vt_v2c();                     /* (round 2: each its own pair of tanks; the maxima below cover them too) */
+    for (int k = 0; k < 2; k++) {
+        DCHECK(vt_max_swim[k] <= TANK_LINK_SWIM_MAX && vt_max_vis[k] <= TANK_LINK_VISIT_PLACES && vt_max_held[k] <= POP_CAP,
+               "%c: %d swam, %d visited, %d owned at most (limits %d, %d, %d)", 'A' + k, vt_max_swim[k], vt_max_vis[k], vt_max_held[k], TANK_LINK_SWIM_MAX, TANK_LINK_VISIT_PLACES, POP_CAP);
+        printf("selftest-visitors: %c at most %d swimming, %d visiting, %d owned\n", 'A' + k, vt_max_swim[k], vt_max_vis[k], vt_max_held[k]);
+    }
+    link_mode(LA, false); link_mode(LB, false);
+    printf("selftest-visitors: %s\n", d_fails ? "FAILED" : "OK");
+    return d_fails ? 1 : 0;
+}
+
+/* ---- 0.4.1 audit ROUND 2, reviewer "link": a soak of the visitor places with everything else on - births and
+   cross-tank fry on A (progression_tick), a forced time-together pair, sales, GIVEs both ways, DEPORTs, a deaf radio.
+   Every frame: no tank past 2 places (drawn + a fry waiting), 7 swimming, 5 held; no fish of B unseen for long
+   (neither home nor drawn at A: an invisible visitor). Prints what it saw; FAIL lines count ---- */
+static int r2_places(const tank_t *t) { int n = 0; for (int k = 0; k < N_VISIT_MAX; k++) n += t->vis_used[k] || t->vis_pending[k]; return n; }
+int selftest_r2link_soak(void) {
+    setenv("POCKET_TANK_SAVE", "/tmp/pocket-tank-selftest-r2soak.sav", 1);
+    int seeds = getenv("R2_SEEDS") ? atoi(getenv("R2_SEEDS")) : 3, mins = getenv("R2_MINS") ? atoi(getenv("R2_MINS")) : 30;   /* (make check: a short gate; the audit ran 8-12 x 60) */
+    int fails0 = 0, home_fry_all = 0, probes_all = 0, refused_all = 0;
+    for (int sd = 0; sd < seeds; sd++) {
+        d_fails = 0; dnow = 1000; dqn = 0; d_deaf[0] = d_deaf[1] = false;
+        memset(vt_max_swim, 0, sizeof vt_max_swim); memset(vt_max_vis, 0, sizeof vt_max_vis); memset(vt_max_held, 0, sizeof vt_max_held);
+        tank_init(&DA, 81 + sd); progression_fresh(&DA); tank_ensure_ids(&DA);
+        tank_init(&DB, 91 + sd); tank_new_population(&DB); tank_ensure_ids(&DB);
+        int na = 3 + sd % 3, nb = 5 - sd % 3;
+        vt_fill(&DA, na); vt_fill(&DB, nb);
+        static gift_book_t GA, GB; memset(&GA, 0, sizeof GA); memset(&GB, 0, sizeof GB);
+        gift_attach(&DA, &GA); gift_attach(&DB, &GB);
+        if (!LA) LA = calloc(1, (size_t)link_size());
+        if (!LB) LB = calloc(1, (size_t)link_size());
+        memset(LA, 0, (size_t)link_size()); memset(LB, 0, (size_t)link_size());
+        link_host_t ha = tank_link_host(&DA, d_send), hb = tank_link_host(&DB, d_send);
+        link_init(LA, DA.uid, &ha, 1, dnow); link_init(LB, DB.uid, &hb, 2, dnow);
+        link_mode(LA, true); link_mode(LB, true); vt_step(10);
+        link_arm(LA, LINK_RIGHT); vt_step(5); link_arm(LB, LINK_LEFT); vt_step(30); vt_step(400);
+        DCHECK(DA.door_open[LINK_RIGHT] && DB.door_open[LINK_LEFT], "soak %d: the doors did not open", sd);
+        rs = 0x9e37u + (uint32_t)sd * 7919u;
+        int unseen[N_FISH_MAX] = { 0 }; uint32_t unseen_uid[N_FISH_MAX] = { 0 };
+        int births = 0, cross_home = 0, kept = 0, sold = 0, gifts = 0, deports = 0, dances = 0, max_unseen = 0, deaf_n = 0, place_bad = 0;
+        int max_places[2] = { 0, 0 }, deaf_left = 0, deaf_who = 0; bool was_sp = false; int nA_prev = DA.n_fish; uint32_t spell_uid = 0; int relinks = 0; uint32_t pend_probe_uid = 0; int pend_probes = 0, pend_refused = 0;
+        for (int n = 0; n < mins * 60 * 30; n++) {
+            /* (round 2, review F4: a quiet spell of 3 min every 10 - no fish sent to the doors, every visitor but A's partner
+               home - so a cross fry for B's home can come and the to-home path runs: vis_pending, fry_give_k, LEV_FRY_OUT) */
+            const bool quiet = n % (30 * 600) >= 30 * 420;
+            if (quiet && spell_uid && !DA.fry_partner && n % 15 == 0)   /* (on its way until it is over: a new goal clears a door, tank.c) */
+                for (int i = 0; i < DB.n_fish; i++) if (DB.fish[i].uid == spell_uid && !DB.fish[i].away && DB.fish[i].door == DOOR_NONE) {
+                    DB.fish[i].hunger = 1; DB.fish[i].energy = 8;   /* (B runs no keeper: its fish starve, and the rules' SEEK FOOD clears a door) */
+                    d_at_door_facing_in(&DB, i, LINK_LEFT); }
+            if (getenv("R2_TRACE") && quiet && n % 150 == 0) printf("  spell sd %d t=%.0f: partner %08x mate %08x vis %d courting %d spawning %d room %d B held %d A held %d coming %d\n",
+                sd, n / 30.0, DA.fry_partner, DA.fry_mate, vt_vis(&DA), DA.courting, DA.spawning, DA.fry_home_room, progression_fish_held(&DB), progression_fish_held(&DA), DA.vis_coming);
+            if (n % (30 * 600) == 30 * 420 - 30 * 20 && !deaf_left && (!DA.door_open[LINK_RIGHT] || !DB.door_open[LINK_LEFT])) {   /* (a deaf spell of
+                                                                    over 10 s unlinked them, and nothing linked them again: the doors
+                                                                    stayed shut for the rest of the seed) */
+                link_mode(LA, true); link_mode(LB, true); link_arm(LA, LINK_RIGHT); link_arm(LB, LINK_LEFT); relinks++;
+            }
+            if (n % (30 * 600) == 30 * 420) {                     /* the spell begins: B with room (a sale there, if full), one of B's sent over */
+                if (progression_fish_held(&DB) >= POP_CAP) for (int i = DB.n_fish - 1; i >= 0; i--) if (!DB.fish[i].away && DB.fish[i].door == DOOR_NONE) { tank_remove_fish(&DB, i); break; }
+                for (int i = 0; i < DB.n_fish; i++) if (!DB.fish[i].away && DB.fish[i].door == DOOR_NONE) { d_head_for(&DB, i, LINK_LEFT); spell_uid = DB.fish[i].uid; break; }
+            }
+            if (quiet && !DA.fry_partner && DA.fry_give_k < 0 && DA.n_fish) {   /* the spell: a pair with one of B's here, the coin its home's */
+                int pk = -1; for (int k = 0; k < N_VISIT_MAX && pk < 0; k++) if (DA.vis_used[k] && !DA.fish[N_FISH_MAX + k].homeward && DA.fish[N_FISH_MAX + k].stage >= STAGE_JUV) pk = k;
+                int m = (int)(rnd() % (uint32_t)DA.n_fish);
+                if (pk >= 0 && !DA.fish[m].away) { DA.fry_partner = DA.fish[N_FISH_MAX + pk].uid; DA.fry_mate = DA.fish[m].uid; DA.fry_home_room = -1; DA.fry_asked = false; DA.fry_force = 1; }
+            }
+            if (quiet && n % 30 == 0) {                         /* (through the spell: B keeps a place - gifts and its fish home refill it - and
+                                                                    any pair here has the coin its home's) */
+                if (progression_fish_held(&DB) >= POP_CAP) for (int i = DB.n_fish - 1; i >= 0; i--) if (!DB.fish[i].away && DB.fish[i].door == DOOR_NONE && DB.fish[i].uid != spell_uid) { tank_remove_fish(&DB, i); break; }
+                if (DA.fry_partner) DA.fry_force = 1;
+            }
+            if (quiet) for (int k = 0; k < N_VISIT_MAX; k++) {
+                if (DA.vis_used[k] && DA.fish[N_FISH_MAX + k].uid != DA.fry_partner) DA.fish[N_FISH_MAX + k].homeward = true;
+                if (DA.vis_used[k] && DA.fish[N_FISH_MAX + k].uid == DA.fry_partner && !DA.fish[N_FISH_MAX + k].bolt_home) { DA.fish[N_FISH_MAX + k].homeward = false; DA.vis_since[k] = DA.clock; }
+                if (DB.vis_used[k]) DB.fish[N_FISH_MAX + k].homeward = true;
+            }
+            if (!quiet && n % 45 == 0) { tank_t *h = rnd() & 1 ? &DA : &DB; if (h->n_fish) { int i = (int)(rnd() % (uint32_t)h->n_fish);
+                if (!h->fish[i].away && h->fish[i].door == DOOR_NONE) d_head_for(h, i, h == &DA ? LINK_RIGHT : LINK_LEFT); } }
+            if (n % 90 == 0) { tank_t *h = rnd() & 1 ? &DA : &DB; int k = (int)(rnd() % N_VISIT_MAX);
+                if (h->vis_used[k] && rnd() % 3 == 0) h->fish[N_FISH_MAX + k].homeward = true; }
+            if (n % 600 == 300 && !DA.fry_partner && DA.fry_give_k < 0) {   /* a time-together pair at A with one of B's here */
+                for (int k = 0; k < N_VISIT_MAX; k++) if (DA.vis_used[k] && !DA.fish[N_FISH_MAX + k].homeward && DA.fish[N_FISH_MAX + k].stage >= STAGE_JUV && DA.n_fish) {
+                    int m = (int)(rnd() % (uint32_t)DA.n_fish); if (DA.fish[m].away) break;
+                    DA.fry_partner = DA.fish[N_FISH_MAX + k].uid; DA.fry_mate = DA.fish[m].uid; DA.fry_home_room = -1; DA.fry_asked = false; break; }
+            }
+            if (n % 1500 == 700 && rnd() % 2) { DA.fry_force = (int8_t)(rnd() % 2); progression_force_arrival(&DA); }
+            if (n % 2700 == 1300 && DA.n_fish > 3) { int i = (int)(rnd() % (uint32_t)DA.n_fish); if (progression_fish_sellable(&DA, i) && progression_sell_fish(&DA, i)) sold++; }
+            if (n % 2100 == 1000) {                              /* a GIVE, one way or the other */
+                tank_t *g = rnd() & 1 ? &DA : &DB; gift_book_t *gb = g == &DA ? &GA : &GB;
+                if (!gb->want_uid && !gb->asking_uid && !gb->leaving_uid && g->n_fish > 2) { int i = (int)(rnd() % (uint32_t)g->n_fish);
+                    if (progression_fish_givable(g, i)) { gb->want_uid = g->fish[i].uid; gb->want_door = GIFT_DOOR_ANY; gb->want_peer = 0; gifts++; } }
+            }
+            if (GA.ask.on && !GA.ask.answer && rnd() % 60 == 0) GA.ask.answer = rnd() % 4 ? 1 : -1;
+            if (GB.ask.on && !GB.ask.answer && rnd() % 60 == 0) GB.ask.answer = rnd() % 4 ? 1 : -1;
+            if (n % 3300 == 2000) { tank_t *h = rnd() & 1 ? &DA : &DB; int k = (int)(rnd() % N_VISIT_MAX); if (h->vis_used[k]) { tank_link_deport(h, N_FISH_MAX + k); deports++; } }
+            if (!deaf_left && n % 5000 == 4000 && rnd() % 2) { deaf_who = (int)(rnd() % 2); deaf_left = (int)rndi(90, 900); d_deaf[deaf_who] = true; deaf_n++; }
+            if (deaf_left && !--deaf_left) d_deaf[deaf_who] = false;
+            /* B tops itself up when low (a fish bought; outside progression: B runs only the link) */
+            if (n % 3000 == 0 && progression_fish_held(&DB) < 4 && DB.n_fish < N_FISH_MAX) {
+                tank_make_fish(&DB, DB.n_fish, DB.n_fish % 3, 0.5f, 0.5f, STAGE_ADULT); DB.n_fish++; tank_ensure_ids(&DB); }
+            if (n % 3000 == 1500 && progression_fish_held(&DA) < 3 && DA.n_fish < N_FISH_MAX) {
+                tank_make_fish(&DA, DA.n_fish, DA.n_fish % 3, 0.5f, 0.5f, STAGE_ADULT); DA.n_fish++; tank_ensure_ids(&DA); progression_set_age(&DA, DA.n_fish - 1, STAGE_ADULT_AGE + 60); }
+            int fgk = DA.fry_give_k;
+            vt_step(1);
+            progression_tick(&DA, 0.033f);
+            while (progression_newborn() >= 0) progression_newborn_done(&DA);
+            if (DA.spawning && !was_sp) dances++;
+            was_sp = DA.spawning;
+            if (DA.fry_give_k >= 0 && fgk < 0) {
+                cross_home++;
+                /* (round 2, the review's G5) the fry waits in a visitor's place for its home's OK - its FRY lost 3 s (the hand-off
+                   waits LINK_CROSS_MS) - and meanwhile one of B's fish asks at our door: the partner and the waiting fry take both
+                   places, so it is refused. A room that forgot the waiting fry lets it in: three places, caught below */
+                d_drop_type = 18 /* FR_FRY */; d_drop_to = 1; d_drop_until = dnow + 3000;
+                for (int i = 0; i < DB.n_fish; i++) if (!DB.fish[i].away && DB.fish[i].door == DOOR_NONE) {
+                    DB.fish[i].hunger = 1; DB.fish[i].energy = 8; d_at_door_facing_in(&DB, i, LINK_LEFT); pend_probe_uid = DB.fish[i].uid; pend_probes++; break; }
+            }
+            if (pend_probe_uid && DA.fry_give_k >= 0) for (int i = 0; i < DB.n_fish; i++)   /* (kept at the door while the fry waits) */
+                if (DB.fish[i].uid == pend_probe_uid && !DB.fish[i].away && DB.fish[i].door == DOOR_NONE && DB.fish[i].door_refused <= DB.clock) d_at_door_facing_in(&DB, i, LINK_LEFT);
+            if (pend_probe_uid && DA.fry_give_k < 0) {
+                for (int i = 0; i < DB.n_fish; i++) if (DB.fish[i].uid == pend_probe_uid && DB.fish[i].door_refused > DB.clock) pend_refused++;
+                pend_probe_uid = 0;
+            }
+            if (DA.n_fish > nA_prev) births += DA.n_fish - nA_prev;
+            nA_prev = DA.n_fish;
+            tank_t *T2[2] = { &DA, &DB };
+            for (int k = 0; k < 2; k++) { int p = r2_places(T2[k]); if (p > max_places[k]) max_places[k] = p;
+                if (p > TANK_LINK_VISIT_PLACES && place_bad++ < 3) { printf("FAIL soak %d t=%.1f: %c holds %d places (drawn + a fry waiting)\n", sd, n / 30.0, 'A' + k, p); d_fails++; } }
+            /* B's fish: home, or drawn at A. Unseen too long = an invisible visitor */
+            for (int i = 0; i < DB.n_fish; i++) {
+                if (unseen_uid[i] != DB.fish[i].uid) { unseen_uid[i] = DB.fish[i].uid; unseen[i] = 0; }
+                bool seen = tank_swims(&DB, i) || d_vis_of(&DA, DB.fish[i].uid) >= 0;
+                unseen[i] = seen ? 0 : unseen[i] + 1;
+                if (unseen[i] > max_unseen) max_unseen = unseen[i];
+                if (unseen[i] == 30 * 120 && !d_deaf[0] && !d_deaf[1]) { printf("FAIL soak %d t=%.1f: B's fish %08x seen nowhere for 120 s (away %d)\n", sd, n / 30.0, DB.fish[i].uid, DB.fish[i].away); d_fails++; }
+            }
+        }
+        (void)kept; home_fry_all += cross_home; probes_all += pend_probes; refused_all += pend_refused; d_drop_type = 0; if (relinks) printf("selftest-r2soak %d: linked again %d times (a deaf spell unlinked them)\n", sd, relinks);
+        printf("selftest-r2soak %d: A %d->%d fish, B %d->%d; %d births on A, %d cross fry for B's home, %d dances, %d sold, %d GIVEs asked, %d deports, %d deaf spells; "
+               "most swimming A %d B %d, visitors A %d B %d, places A %d B %d, held A %d B %d; longest a fish of B unseen %.1f s\n",
+               sd, na, DA.n_fish, nb, DB.n_fish, births, cross_home, dances, sold, gifts, deports, deaf_n, vt_max_swim[0], vt_max_swim[1], vt_max_vis[0], vt_max_vis[1],
+               max_places[0], max_places[1], vt_max_held[0], vt_max_held[1], max_unseen / 30.0);
+        DCHECK(vt_max_swim[0] <= TANK_LINK_SWIM_MAX && vt_max_swim[1] <= TANK_LINK_SWIM_MAX && vt_max_held[0] <= POP_CAP && vt_max_held[1] <= POP_CAP, "soak %d: past a limit", sd);
+        vt_home_all();
+        link_mode(LA, false); link_mode(LB, false);
+        gift_attach(&DA, NULL); gift_attach(&DB, NULL);
+        fails0 += d_fails;
+    }
+    if (!home_fry_all) { printf("FAIL r2soak: no cross fry for B's home in %d seeds: the to-home path never ran\n", seeds); fails0++; }
+    if (!refused_all) { printf("FAIL r2soak: no fish of B refused at the door while a fry waited in a visitor's place (%d tries)\n", probes_all); fails0++; }
+    printf("selftest-r2soak: %s (%d; %d cross fry for B's home; %d times one of B's asked at the door while it waited, %d refused)\n",
+           fails0 ? "FAILED" : "OK", fails0, home_fry_all, probes_all, refused_all);
+    return fails0 ? 1 : 0;
 }

@@ -3,7 +3,7 @@
 
 Run before every flash (tools/flash.sh does), and any morning after a night
 on battery. It asks the director for `batlog` and `state` and writes both to
-docs/batlog/<YYYY-MM-DD_HHMM>.txt (committed history: every night's numbers
+docs/batlog/<YYYY-MM-DD_HHMM>_<port>.txt (never written over) (committed history: every night's numbers
 stay readable after the log itself is gone). Exits 1 if the tank is not on
 USB, if the device on the port does not answer as the tank's director, or if
 several boards are plugged in and TANK_PORT does not name the tank (2026-10-01:
@@ -28,7 +28,9 @@ here = os.path.dirname(os.path.abspath(__file__))
 out_dir = os.path.join(here, "..", "docs", "batlog")
 os.makedirs(out_dir, exist_ok=True)
 stamp = datetime.datetime.now().strftime("%Y-%m-%d_%H%M")
-path = os.path.join(out_dir, f"{stamp}.txt")
+# the file is named by the minute AND the port, and never written over: on 11-05 two boards flashed in one minute
+# shared a name, and the watch's archive replaced the 1.8's (the log is gone once a board loses power)
+tag = os.path.basename(port).replace("cu.", "").replace("tty.", "")
 
 s = serial.Serial(); s.port, s.baudrate, s.timeout = port, 115200, 0.1
 s.open(); s.reset_input_buffer()          # a plain open: DTR/RTS untouched, the tank keeps running
@@ -44,7 +46,13 @@ s.close()
 keep = [l for l in lines if "batlog:" in l or "director:" in l]
 if not any("director:" in l for l in keep):   # another board on that port, or the tank asleep: nothing to archive, nothing to flash
     sys.exit(f"preflight: no director on {port} - not the tank, or it is asleep; refusing to continue")
-with open(path, "w") as f:
+for n in range(1, 100):                    # (open "x": two preflights at once cannot both take one name)
+    path = os.path.join(out_dir, f"{stamp}_{tag}.txt" if n == 1 else f"{stamp}_{tag}-{n}.txt")
+    try: f = open(path, "x"); break
+    except FileExistsError: continue
+else:
+    sys.exit(f"preflight: no free archive name for {stamp}_{tag} in {out_dir}; refusing to continue")
+with f:
     f.write(f"# pocket-tank preflight {stamp} on {port}\n")
     f.write("\n".join(keep) + "\n")
 n_samples = next((l for l in keep if "samples (h:mm" in l), "no samples")

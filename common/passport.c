@@ -37,7 +37,7 @@ static const uint8_t GENE_VALUES[PASSPORT_GENES] = { SHAPE_N, FINS_N, PATTERN_N,
 _Static_assert(PASSPORT_GENES == GENE_N, "the passport carries every gene");
 _Static_assert(GENE_SHAPE == 0 && GENE_FINS == 1 && GENE_PATTERN == 2 && GENE_BODY == 3 && GENE_ACCENT == 4, "passport v1's gene order");
 _Static_assert(SHAPE_N <= 255 && FINS_N <= 255 && PATTERN_N <= 255 && LOOK_N <= 255, "a gene value is one byte");
-#define MS_TRAVELS ((((1u << MS_FISH_COUNT) - 1u) & ~MS_RETIRED_MASK) | MS_CROSSBRED)
+#define MS_TRAVELS ((((1u << MS_FISH_COUNT) - 1u) & ~MS_RETIRED_MASK) | MS_CROSSBRED | MS_BOUGHT)
 
 static float clampf_(float v, float lo, float hi) { return v < lo ? lo : v > hi ? hi : v; }
 static void put16(uint8_t *b, int o, uint32_t v) { b[o] = (uint8_t)v; b[o + 1] = (uint8_t)(v >> 8); }

@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include "gift.h"
 #include "progression.h"
+#include "touch_gate.h"
 
 /* the blob: magic, version, the three counts, the record size; then the
    GIVEN notes, the ARRIVING notes (uid, nonce, peer, the passport's length
@@ -11,6 +12,7 @@
 #define GIFT_PP    128                      /* a passport's room in a record (v1 is 94 bytes) */
 #define GIFT_REC_V1 (12 + 1 + GIFT_PP)
 #define GIFT_REC   (GIFT_REC_V1 + 4)           /* v2 (11-02 sweep): + the ARRIVING note's held seconds - an older build reads past it */
+#define GIFT_BACK  0x4b434142u                 /* "BACK" in that word of a GIVEN note (0.4.1: its held time was never used) */
 _Static_assert(8 + 2 * GIFT_NOTES * GIFT_REC + GIFT_RECEIVED * 8 == GIFT_BLOB_MAX, "GIFT_BLOB_MAX (gift.h) is the full blob");
 
 static struct { const void *t; gift_book_t *b; } s_att[4];
@@ -41,7 +43,7 @@ static bool save(const gift_book_t *b) {   /* false: not on the flash */
         for (int i = 0; i < k; i++, p += GIFT_REC) {
             put32(p, 0, n[i].uid); put32(p, 4, n[i].nonce); put32(p, 8, n[i].peer);
             int w = passport_write(&n[i].pp, p + 13, GIFT_PP); p[12] = (uint8_t)(w > 0 ? w : 0);
-            put32(p, GIFT_REC_V1, (uint32_t)(n[i].held > 0 ? n[i].held : 0));
+            put32(p, GIFT_REC_V1, list ? (uint32_t)(n[i].held > 0 ? n[i].held : 0) : n[i].back ? GIFT_BACK : 0);
         }
     }
     for (int i = 0; i < b->n_recv; i++, p += 8) { put32(p, 0, b->recv[i].uid); put32(p, 4, b->recv[i].nonce); }
@@ -67,7 +69,8 @@ void gift_load(gift_book_t *b) {
                     n.uid = get32(p, 0); n.nonce = get32(p, 4); n.peer = get32(p, 8);
                     int w = p[12] <= GIFT_PP ? p[12] : 0;
                     if (!n.uid || !w || !passport_read(&n.pp, p + 13, w)) continue;   /* (a note we cannot read: it was never there) */
-                    if (rec >= GIFT_REC) n.held = (float)get32(p, GIFT_REC_V1);
+                    if (rec >= GIFT_REC && list) n.held = (float)get32(p, GIFT_REC_V1);
+                    if (rec >= GIFT_REC && !list) n.back = get32(p, GIFT_REC_V1) == GIFT_BACK;
                     if (list && b->n_arr < GIFT_NOTES) b->arriving[b->n_arr++] = n;
                     else if (!list && b->n_given < GIFT_NOTES) b->given[b->n_given++] = n;
                 }
@@ -93,21 +96,35 @@ static int find(const gift_note_t *n, int k, uint32_t uid, uint32_t nonce) {
 int gift_state(const gift_book_t *b, uint32_t uid, uint32_t nonce, passport_t *pp) {
     if (!b) return LINK_GS_NONE;
     int i;
-    if ((i = find(b->given, b->n_given, uid, nonce)) >= 0) { if (pp) *pp = b->given[i].pp; return LINK_GS_GIVEN; }
+    if ((i = find(b->given, b->n_given, uid, nonce)) >= 0 && !b->given[i].back) { if (pp) *pp = b->given[i].pp; return LINK_GS_GIVEN; }   /* (BACK: the
+                                                       fish is here - a TAKE for it is answered CANCEL, never GIVEN) */
     if ((i = find(b->arriving, b->n_arr, uid, nonce)) >= 0) { if (pp) *pp = b->arriving[i].pp; return LINK_GS_ARRIVING; }
     for (i = 0; i < b->n_recv; i++) if (b->recv[i].uid == uid && b->recv[i].nonce == nonce) return LINK_GS_ALIVE;
     return LINK_GS_NONE;
 }
 bool gift_given_has(const gift_book_t *b, uint32_t uid) { return b && find(b->given, b->n_given, uid, 0) >= 0; }
+bool gift_note_live(const gift_note_t *n) { return n && !n->back; }
+bool gift_given_back(gift_book_t *b, uint32_t uid, const passport_t *pp) {
+    if (!b) return false;
+    bool was[GIFT_NOTES], any = false;
+    passport_t ppw[GIFT_NOTES];
+    for (int i = 0; i < b->n_given; i++) {
+        was[i] = b->given[i].back; ppw[i] = b->given[i].pp;
+        if (b->given[i].uid == uid) { any = true; b->given[i].back = true; if (pp) b->given[i].pp = *pp; }
+    }
+    if (!any || save(b)) return true;
+    for (int i = 0; i < b->n_given; i++) { b->given[i].back = was[i]; b->given[i].pp = ppw[i]; }   /* (not on the flash: as it was) */
+    return false;
+}
 /* a note counts only once it is on the flash: GIVEN before the fish leaves, ARRIVING before the yes. A save that
    fails (the flash full, saving off after a bad load) takes the note back out, so nobody acts on it (2026-11-02) */
 static bool add(gift_book_t *b, gift_note_t *n, uint8_t *k, uint32_t uid, uint32_t nonce, uint32_t peer, const passport_t *pp) {
     if (!b) return false;
     int i = find(n, *k, uid, nonce);
     const uint8_t k0 = *k;
-    if (i < 0) { if (*k >= GIFT_NOTES) return false; i = (*k)++; n[i].held = 0; }   /* (a new note: held from now) */
+    if (i < 0) { if (*k >= GIFT_NOTES) return false; i = (*k)++; n[i].held = 0; n[i].back = false; }   /* (a new note: held from now) */
     const gift_note_t was = n[i];
-    n[i].uid = uid; n[i].nonce = nonce; n[i].peer = peer; n[i].pp = *pp;
+    n[i].uid = uid; n[i].nonce = nonce; n[i].peer = peer; n[i].pp = *pp; n[i].back = false;
     if (save(b)) return true;
     n[i] = was; *k = k0;
     return false;
@@ -142,8 +159,31 @@ void gift_received(gift_book_t *b, uint32_t uid, uint32_t nonce) {
     drop(b, b->arriving, &b->n_arr, uid, nonce, false);
     save(b);
 }
-bool gift_answer(gift_book_t *b, double clock, bool yes) {
-    if (!b || !b->ask.on || b->ask.answer || !b->ask.shown || clock - b->ask.seen < GIFT_HOLD_S) return false;   /* (not yet seen: no tap of its) */
+/* one of the gifts this tank took in, by its RECEIVED note on the flash - the last GIFT_RECEIVED kept, as 0.4.0 kept
+   them: what a save from 0.4.0 has that tells a gift from a fish of its own (the receipts fold, round 2 review F1). Read
+   from the flash, not a book: the fold runs at the load, before gift_boot */
+bool gift_saved_received(uint32_t uid) {
+    if (!uid) return false;
+    const size_t cap = 8 + 2 * GIFT_NOTES * 256 + GIFT_RECEIVED * 8;
+    uint8_t *buf = malloc(cap); size_t got = 0; bool hit = false;
+    if (!buf) return false;
+    if (persist_port_blob_load(GIFT_NVS_KEY, buf, cap, &got) && got >= 8 && (buf[0] | buf[1] << 8) == GIFT_MAGIC) {
+        int ng = buf[3], na = buf[4], nr = buf[5], rec = buf[6] | buf[7] << 8;
+        if (rec >= GIFT_REC_V1) {
+            const uint8_t *p = buf + 8 + (size_t)(ng + na) * (size_t)rec, *end = buf + got;
+            for (int i = 0; i < nr && p + 8 <= end; i++, p += 8) hit |= get32(p, 0) == uid;
+        }
+    }
+    free(buf);
+    return hit;
+}
+bool gift_answer(gift_book_t *b, double press, double clock, bool yes) {
+    if (!b || !b->ask.on || b->ask.answer || !b->ask.shown) return false;   /* (not yet seen: no tap of its) */
+    if (b->ask.seen > clock) b->ask.seen = clock;   /* (a clock gone back since it was first seen: as if it came now) */
+    if (press <= b->ask.seen) return false;   /* THE TOUCH RULE (touch_gate.h; Strato 11-06: the card's answer is G1 only): a press begun
+                                                before the card came (a finger resting on the water as a friend's GIVE popped it, TCH-2) is no
+                                                answer - and one in the poll before the card's first draw stamped it (main.c polls before it draws: the same clock), hence <=.
+                                                No hold, no restart (round 1's 2 s, restarted by every tap, is gone) */
     b->ask.answer = yes ? 1 : -1;
     return true;
 }

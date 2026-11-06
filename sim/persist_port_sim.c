@@ -52,7 +52,14 @@ bool persist_port_save(const void *buf, size_t len) {
     size_t n = fwrite(buf, 1, len, f); fclose(f); return n == len;
 }
 static const char *blob_path(const char *key) { static char p[600]; snprintf(p, sizeof p, "%s.%s", path(), key); return p; }
-bool persist_port_erase(void) { remove(blob_path("visitors")); remove(blob_path("kin")); remove(blob_path("gifts")); return remove(path()) == 0 || errno == ENOENT; }
+bool persist_port_erase(void) {                  /* the device's order (persist_port_esp.c): the save first, then the blobs - each one a write
+                                                   the selftests' power cut can stop (0.4.1: it was never cut here) */
+    static const char *const OWN[3] = { "visitors", "kin", "gifts" };
+    if (!alive()) return false;
+    if (remove(path()) != 0 && errno != ENOENT) return false;
+    for (int k = 0; k < 3; k++) { if (!alive()) return false; remove(blob_path(OWN[k])); }
+    return true;
+}
 bool persist_port_blob_load(const char *key, void *buf, size_t max, size_t *got) {
     FILE *f = fopen(blob_path(key), "rb"); if (!f) return false;
     size_t n = fread(buf, 1, max, f);
@@ -78,7 +85,10 @@ const char *g_sim_hw;                                              /* --hw <id>:
 const char *board_port_hw(void) { return g_sim_hw ? g_sim_hw : PT_BOARD; }
 static int64_t s_clock_shift;                     /* selftests move the wall clock (time on the shelf) */
 void sim_clock_shift(int64_t s) { s_clock_shift += s; }
-int64_t clock_port_now_unix(void) { return (int64_t)time(NULL) + s_clock_shift; }
+static int64_t s_clock_frozen;                    /* a selftest that compares a save's bytes across a load holds the wall clock still: a
+                                                     second ticking between the save and the load is lived, and moves ages and clocks */
+void sim_clock_freeze(int on) { s_clock_frozen = on ? (int64_t)time(NULL) : 0; }
+int64_t clock_port_now_unix(void) { return (s_clock_frozen ? s_clock_frozen : (int64_t)time(NULL)) + s_clock_shift; }
 
 /* ---- the shelf's ports (the tank switcher, common/shelf.h): `storage` as a
  * file (POCKET_TANK_STORAGE, erased = 0xFF like flash) and the NVS namespace
@@ -89,10 +99,14 @@ int64_t clock_port_now_unix(void) { return (int64_t)time(NULL) + s_clock_shift; 
 #define SIM_SHELF_SIZE (0x2E0000 - 0x10000)       /* the boards' storage, less its first 64 KB */
 static int s_cut = -1;                             /* writes left before the cut; -1 = never */
 static int s_fail = -1;                            /* writes left before ONE that fails (a refused write: the board runs on) */
+static int s_fail_n = 1;                           /* ... and how many refused in a row from there (shelf_port_sim_fail_n) */
 int shelf_port_sim_cut(int writes) { int was = s_cut; s_cut = writes; return was; }    /* (was: writes still left, 0 = it cut) */
-int shelf_port_sim_fail(int writes) { int was = s_fail; s_fail = writes; return was; }  /* (was -1: it failed, or was off) */
+int shelf_port_sim_fail(int writes) { int was = s_fail; s_fail = writes; s_fail_n = 1; return was; }  /* (was -1: it failed, or was off) */
+int shelf_port_sim_fail_n(int writes, int n) { int was = s_fail; s_fail = writes; s_fail_n = n > 0 ? n : 1; return was; }   /* n refused in a row */
+static int s_refused;                              /* (audit r2 harness: refused writes, counted) */
+int shelf_port_sim_refused(void) { int n = s_refused; s_refused = 0; return n; }
 static bool alive(void) {
-    if (s_fail >= 0 && s_fail-- == 0) return false;
+    if (s_fail >= 0) { if (s_fail == 0) { s_refused++; if (--s_fail_n <= 0) s_fail = -1; return false; } s_fail--; }
     if (s_cut < 0) return true; if (s_cut == 0) return false; s_cut--; return true;
 }
 static const char *store_path(void) {
@@ -141,7 +155,10 @@ static const char *frame_path(const char *key) {
 }
 bool shelf_port_frame_get(const char *key, void *buf, size_t max, size_t *got) {
     FILE *f = fopen(frame_path(key), "rb"); if (!f) return false;
-    size_t n = fread(buf, 1, max, f); fclose(f);
+    fseek(f, 0, SEEK_END); long size = ftell(f); fseek(f, 0, SEEK_SET);
+    if (size <= 0 || (size_t)size > max) { fclose(f); return false; }   /* (a record longer than the buffer: refused, as nvs_get_blob's
+                                                                         ESP_ERR_NVS_INVALID_LENGTH - never a prefix; round 3 review R2) */
+    size_t n = fread(buf, 1, (size_t)size, f); fclose(f);
     *got = n; return n > 0;
 }
 bool shelf_port_frame_set(const char *key, const void *buf, size_t n) {

@@ -184,6 +184,9 @@ with 20 position updates a second. v1 lets the bezel gap hide the handoff.
 - At most 2 visitors per tank, and at most 6 fish swimming in a tank in all
   (the device has never run more than its 5): fps and the 4 s decision
   budget. Phase 4 measures it; the cap moves with the numbers.
+  **10-05:** 5 swimming a tank, visitors counted. **0.4.1 (Strato 11-05):** two
+  visitor places whatever the tank holds - 5 of its own + 2 = 7 swimming at
+  most (release-0.4.md 2k).
 - The host keeper can tap a visitor: its card says the fish's name and
   "VISITING FROM" + the home tank's badge. No SELL, no RENAME.
 - Every second B sends A a **VISIT** report: the visitor's drives, meals,

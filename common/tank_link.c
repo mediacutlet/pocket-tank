@@ -37,13 +37,35 @@ static void arrive_at(fish_t *f, int e, float depth, float speed) {
     f->explore_set = false;
 }
 
+/* the room for a visitor (Strato 2026-11-05): TANK_LINK_VISIT_PLACES places, whatever our own count - a visitor here or a
+   fry waiting in a visitor's place for its home takes one. The swim count is a backstop: own fish past POP_CAP (an older
+   build's save, tank_t.cap_over) take places, never our own fish coming home - POP_CAP keeps them within their five */
 int tank_link_room(void *ctx) {
     const tank_t *t = ctx;
-    int swim = 0, free_k = 0;
+    int swim = 0, vis = 0, free_k = 0;
     for (int i = 0; i < N_FISH_SLOTS; i++) swim += tank_swims(t, i);
-    for (int k = 0; k < N_VISIT_MAX; k++) free_k += !t->vis_used[k] && !t->vis_pending[k];
-    int room = TANK_LINK_SWIM_MAX - swim;
-    return room < free_k ? (room < 0 ? 0 : room) : free_k;
+    for (int k = 0; k < N_VISIT_MAX; k++) { vis += t->vis_used[k] || t->vis_pending[k]; free_k += !t->vis_used[k] && !t->vis_pending[k]; }
+    int room = TANK_LINK_VISIT_PLACES - vis;
+    if (TANK_LINK_SWIM_MAX - swim < room) room = TANK_LINK_SWIM_MAX - swim;
+    if (free_k < room) room = free_k;
+    return room < 0 ? 0 : room;
+}
+bool tank_link_fry_place(const tank_t *t) { return tank_link_room((void *)t) - t->vis_coming > 0; }
+bool tank_link_cross_no_place(const tank_t *t) { return t->fry_partner && vis_slot(t, t->fry_partner) >= 0 && tank_link_room((void *)t) <= 0; }
+bool tank_link_cross_waits(const tank_t *t) {
+    return tank_link_cross_no_place(t) && t->fry_home_room != 0;   /* (until its home has said NO: a yes, or no answer yet - the peek's
+                                                                      answer comes in a frame or two; a home never heard from loses its
+                                                                      visitor to the lease within seconds. A yes gone stale reads -1:
+                                                                      asked again every TANK_LINK_FRY_ASK_S) */
+}
+void (*tank_link_swim_hook)(const tank_t *t, int swim, int visitors, const char *path);
+static void swim_check(const tank_t *t, const char *path) {
+    if (!tank_link_swim_hook) return;
+    int swim = 0, vis = 0;
+    for (int i = 0; i < N_FISH_SLOTS; i++) swim += tank_swims(t, i);
+    for (int k = 0; k < N_VISIT_MAX; k++) vis += t->vis_used[k] || t->vis_pending[k];   /* (a fry waiting in a visitor's place takes one, as
+                                                                                     tank_link_room counts it - 0.4.1 audit round 2, R2L-2) */
+    if (vis > TANK_LINK_VISIT_PLACES || (swim > TANK_LINK_SWIM_MAX && t->n_fish <= POP_CAP)) tank_link_swim_hook(t, swim, vis, path);
 }
 /* a passport for a fish here, with its home tank's name: ours as the keeper named it, a visitor's as it came */
 static void pp_of(const tank_t *t, passport_t *pp, const fish_t *f, uint32_t home, float age_s) {
@@ -90,6 +112,7 @@ static void welcome_home(tank_t *t, int i, const passport_t *pp) {
         f->sociable = pp->sociable; f->bold = pp->bold; f->drift_acc = pp->drift_acc;
         if (pp->eaten > f->eaten) f->eaten = pp->eaten;
         f->ms_bits |= pp->ms_bits;
+        progression_came_in(f);                      /* (drift gained next door: no THE TANK CHANGED SOMEONE here - R-progression F1) */
         progression_age_from_passport(t, i, pp->age_s);   /* (its stage kept: a visit never demotes - an elder grown
                                                              under 0.3.4's shorter times came home an adult, 11-03 rc) */
     }
@@ -136,7 +159,7 @@ static void gift_commit(tank_t *t, link_t *L, gift_book_t *g, int i, bool bubble
     g->leaving_uid = 0; g->leaving_here = false;
     if (bubbles) tank_poof(t, f->x, f->y);
     progression_give_out(t, i);
-    link_give_done(L, uid, nonce);
+    link_give_done(L, uid, nonce, &pp);          /* (as it left: the receiver brings this one to life - R-seam F3) */
 }
 /* the door a gift goes out by - the one place it is chosen (2026-11-02, Strato: a tank in the middle lets the keeper
    pick; it always went LEFT): the keeper's pick if that door is open to the tank picked, else none (-1: the card says
@@ -149,6 +172,13 @@ static int gift_door(const tank_t *t, const link_t *L, const gift_book_t *g, con
     }
     if (t->door_open[LINK_LEFT] && t->door_open[LINK_RIGHT]) return f->x < TANK_W * 0.5f ? LINK_LEFT : LINK_RIGHT;
     return t->door_open[LINK_LEFT] ? LINK_LEFT : t->door_open[LINK_RIGHT] ? LINK_RIGHT : -1;
+}
+/* the notes we hold with that tank, handed to the engine (it keeps nothing across a boot or an unlink, and has
+   LINK_GIVE_MAX slots each way: a note it has no slot for now waits - resume is a no-op for one it already has) */
+static void gift_resume(link_t *L, gift_book_t *g, uint32_t peer) {
+    if (!peer) return;
+    for (int k = 0; k < g->n_given; k++) if (g->given[k].peer == peer && gift_note_live(&g->given[k])) link_give_resume_out(L, peer, g->given[k].uid, g->given[k].nonce, &g->given[k].pp);
+    for (int k = 0; k < g->n_arr; k++) if (g->arriving[k].peer == peer) link_give_resume_in(L, peer, g->arriving[k].uid, g->arriving[k].nonce, &g->arriving[k].pp);
 }
 static void gift_tick(tank_t *t, link_t *L, gift_book_t *g) {
     if (g->n_arr) {                                  /* ARRIVING notes held past their time, the giver not next door: let go (11-02 sweep) */
@@ -163,6 +193,14 @@ static void gift_tick(tank_t *t, link_t *L, gift_book_t *g) {
             }
     }
     g->arr_aged_at = t->clock;
+    for (int k = 0; k < LINK_GIVE_MAX; k++) {        /* a gift come alive whose save had not landed: settled once one has (0.4.1) */
+        uint32_t uid = g->unsaved[k].uid, nonce = g->unsaved[k].nonce;
+        if (!uid || progression_dirty()) continue;
+        g->unsaved[k].uid = 0;
+        if (home_slot(t, uid) < 0) continue;         /* (gone meanwhile: its ARRIVING note stays the word) */
+        gift_received(g, uid, nonce);
+        if (L) link_give_alive(L, uid, nonce);
+    }
     if (!L) {                                        /* no engine: no question stands, nothing is being asked, nothing leaves */
         g->ask.on = false; g->asking_uid = 0; g->want_uid = g->cancel_uid = g->wait_uid = 0;
         if (g->leaving_uid) gift_keep(t, NULL, g, home_slot(t, g->leaving_uid));
@@ -251,6 +289,7 @@ void tank_link_tick(tank_t *t, link_t *L) {
             f->x = TANK_W * 0.5f; f->y = DOOR_Y; tank_glass_clamp(&f->x, &f->y, 30);
             welcome_home(t, i, NULL);
             tank_poof(t, f->x, f->y);
+            progression_fry_home(t, i);              /* (a fry born next door: its birth flow now - its born_away saved, audit P5) */
         }
     }
     /* home: a held place ends when its time runs out, the engine is gone, or that fish of ours is no longer next
@@ -258,6 +297,8 @@ void tank_link_tick(tank_t *t, link_t *L) {
     for (int h = 0; h < TANK_FRY_HOLDS; h++)
         if (t->fry_hold[h].peer && (!L || t->clock > t->fry_hold[h].until || !link_is_away(L, t->fry_hold[h].parent)))
             t->fry_hold[h].peer = t->fry_hold[h].parent = 0;
+    t->vis_coming = L ? (int8_t)link_visitors_coming(L) : 0;
+    swim_check(t, "tank_link_tick");
     if (!L) {
         /* the radio went down with a fry waiting: not yet offered = ours (if there is
            room: progression_fry_kept); offered = its home may have taken it (it
@@ -273,13 +314,20 @@ void tank_link_tick(tank_t *t, link_t *L) {
        while we keep asking, and a yes not heard again in TANK_LINK_FRY_FRESH_S is not known any more - no fry is born
        for its home on it (progression.c do_arrival). The pair off: its home lets go at once - unless the fry is on
        its way there (its FRY ends the hold) */
-    if (t->fry_ask_uid && t->fry_ask_uid != t->fry_partner) {
+    /* round 2 (R2-4, the review's F1/F2): with no visitor place for its fry the home is only PEEKED at - its room learned, nothing
+       held there; fry_ask_uid = a HOLDING ask stands. The place gone: a holding ask is called off once (its yes stays our word on
+       the home's room). A place again: an ask that holds, the same tick */
+    const bool no_place = tank_link_cross_no_place(t);
+    if (t->fry_ask_uid && (t->fry_ask_uid != t->fry_partner || no_place)) {
         if (t->fry_give_k < 0 || t->fry_give_parent != t->fry_ask_uid) link_fry_off(L, t->fry_ask_uid);
         t->fry_ask_uid = 0;
+        if (no_place) t->fry_asked = false;            /* (peeked at the same tick) */
     }
     if (t->fry_home_room == 1 && t->clock - t->fry_room_at > TANK_LINK_FRY_FRESH_S) t->fry_home_room = -1;
-    if (t->fry_partner && (!t->fry_asked || t->clock - t->fry_ask_at >= TANK_LINK_FRY_ASK_S)) {
-        link_fry_ask(L, t->fry_partner); t->fry_asked = true; t->fry_ask_at = t->clock; t->fry_ask_uid = t->fry_partner;
+    if (t->fry_partner && (!t->fry_asked || t->clock - t->fry_ask_at >= TANK_LINK_FRY_ASK_S || (!no_place && !t->fry_ask_uid))) {
+        if (no_place) link_fry_peek(L, t->fry_partner);
+        else { link_fry_ask(L, t->fry_partner); t->fry_ask_uid = t->fry_partner; }
+        t->fry_asked = true; t->fry_ask_at = t->clock;
     }
     if (t->fry_give_k >= 0 && !t->fry_give_sent) {
         int k = t->fry_give_k;
@@ -300,6 +348,12 @@ void tank_link_tick(tank_t *t, link_t *L) {
     if (gb) for (int e = 0; e < LINK_EDGES; e++) {        /* who is next door: the GIVE modal names it */
         gb->door_peer[e] = t->door_open[e] ? link_neighbor(L, (link_edge_t)e) : 0;
         gb->door_badge[e] = gb->door_peer[e] ? (int8_t)link_peer_badge(L, gb->door_peer[e]) : -1;
+    }
+    if (gb && (gb->n_given || gb->n_arr) && (t->clock - gb->resumed_at >= 1.0 || t->clock < gb->resumed_at)) {
+        gb->resumed_at = t->clock;                       /* (0.4.1) once a second, not only at LINKED: a book holds GIFT_NOTES each way,
+                                                            the engine LINK_GIVE_MAX - a third note waited for the next LINKED (an unlink
+                                                            and a relink), its fish in neither tank or a place held meanwhile */
+        for (int e = 0; e < LINK_EDGES; e++) gift_resume(L, gb, link_neighbor(L, (link_edge_t)e));
     }
     t->link_badge = (int8_t)link_badge(L);
     if (t->deport_uid) { link_deny(L, t->deport_uid, LINK_DEPORT_MS); t->deport_uid = 0; }
@@ -372,6 +426,7 @@ bool tank_link_event(tank_t *t, link_t *L, const link_ev_t *e) {
         t->vis_badge[k] = L ? (int8_t)link_peer_badge(L, e->peer) : -1;
         collection_visit(e->uid);
         kin_learn(e->uid, f->name, f->color, f->bold, f->sociable);   /* (a family line can name it) */
+        swim_check(t, "LEV_VISITOR_IN");
         return true; }
     case LEV_VISITOR_POOF:
         if ((i = vis_slot(t, e->uid)) < 0) return false;
@@ -389,6 +444,7 @@ bool tank_link_event(tank_t *t, link_t *L, const link_ev_t *e) {
         welcome_home(t, i, &e->pp);
         arrive_at(&t->fish[i], e->edge, e->depth, e->speed);
         progression_fry_home(t, i);                      /* (a fry born next door: its birth flow now) */
+        swim_check(t, "LEV_FISH_BACK");                  /* (no room asked, ever: ours has its place - POP_CAP + the visitor places) */
         return true;
     case LEV_FISH_RESTORE:
         if ((i = home_slot(t, e->uid)) < 0) return false;
@@ -401,6 +457,7 @@ bool tank_link_event(tank_t *t, link_t *L, const link_ev_t *e) {
           f->door = DOOR_NONE;
           tank_poof(t, f->x, f->y);
           progression_fry_home(t, i); }
+        swim_check(t, "LEV_FISH_RESTORE");
         return true;
     /* cross-tank fry (phase 5) */
     case LEV_FRY_ROOM:
@@ -421,6 +478,7 @@ bool tank_link_event(tank_t *t, link_t *L, const link_ev_t *e) {
         t->fry_give_k = -1; t->fry_give_sent = false;
         int p = vis_slot(t, t->fry_give_parent);
         if (p >= 0) { t->fish[p].homeward = true; t->fish[p].follow_uid = e->uid; }   /* (Strato: the parent from next door follows the baby home) */
+        swim_check(t, "LEV_FRY_OUT");
         return true; }
     case LEV_FRY_KEEP:
         if (t->fry_give_k >= 0) { progression_fry_kept(t, t->fry_give_k); t->fry_give_k = -1; t->fry_give_sent = false; }
@@ -431,10 +489,7 @@ bool tank_link_event(tank_t *t, link_t *L, const link_ev_t *e) {
     case LEV_LINKED: {                                   /* something new over there */
         for (int j = 0; j < t->n_fish; j++) if (!t->fish[j].away) t->fish[j].curiosity = clampf_(t->fish[j].curiosity + TANK_LINK_CURIOUS, 0, 10);
         gift_book_t *g = gift_of(t);                     /* a gift we were in the middle of with that tank */
-        if (g && L) {
-            for (int k = 0; k < g->n_given; k++) if (g->given[k].peer == e->peer) link_give_resume_out(L, e->peer, g->given[k].uid, g->given[k].nonce, &g->given[k].pp);
-            for (int k = 0; k < g->n_arr; k++) if (g->arriving[k].peer == e->peer) link_give_resume_in(L, e->peer, g->arriving[k].uid, g->arriving[k].nonce, &g->arriving[k].pp);
-        }
+        if (g && L) gift_resume(L, g, e->peer);
         return false; }
     /* GIVE (phase 6) */
     case LEV_GIVE_ASK: {                                 /* a gift offered to us: the question on our glass (one at a time) */
@@ -496,8 +551,14 @@ bool tank_link_event(tank_t *t, link_t *L, const link_ev_t *e) {
             if (ed >= 0) arrive_at(&t->fish[i], ed, 0.5f, 30);
             else { fish_t *f = &t->fish[i]; f->x = TANK_W * 0.5f; f->y = DOOR_Y; tank_glass_clamp(&f->x, &f->y, 30); tank_poof(t, f->x, f->y); }
         }
+        progression_cap_check(t, "LEV_GIVE_ALIVE");   /* (the note beside the fish is the fish: counted once) */
+        if (progression_dirty()) {                   /* (0.4.1) the fish's save did not land (the flash refused it): its ARRIVING note
+                                                        stays - it is the fish until a save does (gift_tick settles it then); a power cut
+                                                        meanwhile and the giver's GIVEN brings it again. Never the OK before the save */
+            for (int k = 0; k < LINK_GIVE_MAX; k++) if (!g->unsaved[k].uid || g->unsaved[k].uid == e->uid) { g->unsaved[k].uid = e->uid; g->unsaved[k].nonce = e->nonce; break; }
+            return true;
+        }
         gift_received(g, e->uid, e->nonce);
-        progression_cap_check(t, "LEV_GIVE_ALIVE");   /* (after the note: the place it held is the fish now) */
         if (L) link_give_alive(L, e->uid, e->nonce);
         return true; }
     case LEV_GIVE_CLOSED: gift_given_drop(gift_of(t), e->uid, e->nonce); return true;
@@ -505,15 +566,18 @@ bool tank_link_event(tank_t *t, link_t *L, const link_ev_t *e) {
         gift_book_t *g = gift_of(t);
         if (!g) return true;
         if (home_slot(t, e->uid) < 0) {
-            int i = progression_gift_adopt(t, &e->pp);
-            if (i < 0) {                                 /* (no slot: the note stays and holds its place - the next meeting asks
-                                                            again. Never a fish nobody holds: 11-03 rc) */
-                printf("tank_link: GIVE_RESTORE %08x: no slot (%d fish), its note kept\n", (unsigned)e->uid, t->n_fish);
+            passport_t pp = e->pp;                       /* (its GIVEN note's own passport - the fish as it left - over the engine's copy,
+                                                            which a boot or an older build may hold from the ask: R-seam F3) */
+            for (int k = 0; k < g->n_given; k++) if (g->given[k].uid == e->uid && g->given[k].nonce == e->nonce) pp = g->given[k].pp;
+            int i = progression_gift_adopt(t, &pp);      /* (its notes say BACK, then the fish is saved, then they go: 0.4.1) */
+            if (i < 0) {                                 /* (no slot, or the flash refused the BACK: the note stays and holds its place -
+                                                            the next meeting asks again. Never a fish nobody holds: 11-03 rc) */
+                printf("tank_link: GIVE_RESTORE %08x: no slot (%d fish) or no BACK on the flash, its note kept\n", (unsigned)e->uid, t->n_fish);
                 return true;
             }
             fish_t *f = &t->fish[i]; f->x = TANK_W * 0.5f; f->y = DOOR_Y; tank_glass_clamp(&f->x, &f->y, 30); tank_poof(t, f->x, f->y);
-        }
-        gift_given_drop(g, e->uid, e->nonce);
+        } else if (gift_given_back(g, e->uid, NULL))    /* (here already - a second GIVEN_LOST: its notes go once a save has it) */
+            progression_save(t);
         progression_cap_check(t, "LEV_GIVE_RESTORE");
         return true; }
     default:

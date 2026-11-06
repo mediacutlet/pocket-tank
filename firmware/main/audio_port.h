@@ -25,6 +25,7 @@ void audio_port_prewarm(void);
 void audio_port_set_volume(int pct);                  /* 0 off .. 100 % (0.4; a 0.3.x level is read as its percent); saved to NVS */
 void audio_port_preview_volume(int pct);              /* the slider under a finger: heard (and drawn) now, not saved */
 int  audio_port_volume(void);
+void audio_port_restore_volume(void);                 /* a preview undone: the level last saved, nothing written (the BOOT chord's tap) */
 void audio_port_sleep(void);                          /* silence + everything down; returns when it is */
 void audio_port_deep_sleep_pins(void);                /* right before esp_deep_sleep_start: I2S + amp CTRL driven low and HELD (2026-09-16) */
 void audio_port_tune(int codec_ms, int amp_ms, int idle_s);   /* -1 = keep; idle 0 = warm while awake; bench knobs */

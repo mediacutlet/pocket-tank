@@ -22,7 +22,7 @@ static SemaphoreHandle_t g_mx, g_req_sem;
 static char g_req_state[400]; static int g_req_fish = -1;
 static goal_t g_resp_goal; static int g_resp_fish = -1; static bool g_busy;
 static bool g_pending[N_FISH_SLOTS]; static int g_next;
-/* the roster a request was made against (tank_t.roster_gen): a fish sold
+/* the roster a request was made against (tank_t.roster_shift: the slots as they were): a fish sold
  * shifts the slots, and a decision asked for the old ones is dropped */
 static uint8_t g_gen, g_req_gen, g_resp_gen;
 static uint32_t g_decisions, g_last_ms; static float g_tok_s;
@@ -120,7 +120,8 @@ goal_t advisor_llm_esp(const tank_t *t, int fish_idx, bool request) {
     goal_t out = f->goal;
     if (!g_ok) return out;
     xSemaphoreTake(g_mx, portMAX_DELAY);
-    if (t->roster_gen != g_gen) { g_gen = t->roster_gen; memset(g_pending, 0, sizeof g_pending); if (g_resp_gen != g_gen) g_resp_fish = -1; }
+    if (t->roster_shift != g_gen) { g_gen = t->roster_shift;   /* (slots shifted - an arrival shifts none: its decisions stand, R-seam F5) */
+        memset(g_pending, 0, sizeof g_pending); if (g_resp_gen != g_gen) g_resp_fish = -1; }
     if (g_resp_fish == fish_idx && g_resp_gen != g_gen) g_resp_fish = -1;   /* asked of the slot's last tenant */
     if (g_resp_fish == fish_idx) {
         if (g_resp_goal.id < GOAL_COUNT) out = g_resp_goal;

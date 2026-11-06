@@ -10,7 +10,9 @@
 bool rtc_port_init(i2c_master_bus_handle_t bus);
 bool rtc_port_stopped(void);                  /* the chip had lost its time at this boot */
 bool rtc_port_unread(void);                   /* the chip did not answer at this boot (its time unknown: never seed the save's into it) */
-void rtc_port_store(void);                    /* the system clock -> the chip (no chip, or a clock before 2024: nothing) */
+bool rtc_port_store(void);                    /* the system clock -> the chip (no chip, or a clock before 2024: nothing). false: a chip
+                                                 that was not written (its write failed, or a clock before 2024) - 0.4.1: the owed
+                                                 mark is cleared only once the chip has the time */
 /* A board with NO RTC chip (the round 1.75C), or one whose chip STOPPED: the
  * system clock is the ESP32's own RTC timer - it counts through deep sleep
  * and restarts, not through a power cut. At a boot that finds it unset

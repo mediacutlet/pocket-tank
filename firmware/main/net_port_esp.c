@@ -46,6 +46,9 @@
 #include "lwip/sockets.h"
 #include "lwip/netdb.h"
 #include "cJSON.h"
+#include "esp_mac.h"
+#include "esp_random.h"
+#include "mbedtls/sha256.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/event_groups.h"
@@ -58,6 +61,11 @@ static const char *TAG = "net";
  * update_target_board: another board's version installed here fetches this
  * board's own) */
 #define OTA_MANIFEST_BASE "https://github.com/mediacutlet/pocket-tank/releases/latest/download/latest-"
+/* the Hatchery Crew check (docs/hatchery-crew.md, 0.4.1): asked before the
+ * manifest; a crew board is pointed at the early builds' manifest. Any
+ * answer but a clear one leaves the release channel alone. */
+#define CREW_CHECK_URL    "https://pocketank.com/crew/check.php"
+#define CREW_TIMEOUT_MS   6000
 /* the board marker: in .rodata_custom_desc, which the linker places right
  * after esp_app_desc_t - a fixed offset in the image (PT_BOARD_MARKER_OFFSET;
  * tools/make_ota_manifest.py and make_installer.py read it back from the .bin) */
@@ -79,6 +87,7 @@ bool net_port_creds_get(char *ssid, char *pass) {
 bool net_port_creds_set(const char *ssid, const char *pass) {
     nvs_handle_t h; if (nvs_open(WIFI_NVS_NS, NVS_READWRITE, &h) != ESP_OK) return false;
     nvs_erase_key(h, "chan");                               /* a new network: its channel is learned at the first connect */
+    nvs_erase_key(h, "miss");                               /* ... and the boot's time check looks for it in full (0.4.1, the quick look) */
     bool ok = nvs_set_str(h, "ssid", ssid) == ESP_OK && nvs_set_str(h, "pass", pass ? pass : "") == ESP_OK && nvs_commit(h) == ESP_OK;
     nvs_close(h);
     ESP_LOGI(TAG, "network saved: %s (%s)", ssid, pass && pass[0] ? "with a password" : "open");
@@ -86,7 +95,7 @@ bool net_port_creds_set(const char *ssid, const char *pass) {
 }
 void net_port_creds_forget(void) {
     nvs_handle_t h; if (nvs_open(WIFI_NVS_NS, NVS_READWRITE, &h) != ESP_OK) return;
-    nvs_erase_key(h, "ssid"); nvs_erase_key(h, "pass"); nvs_erase_key(h, "chan"); nvs_commit(h); nvs_close(h);
+    nvs_erase_key(h, "ssid"); nvs_erase_key(h, "pass"); nvs_erase_key(h, "chan"); nvs_erase_key(h, "miss"); nvs_commit(h); nvs_close(h);
     ESP_LOGI(TAG, "network forgotten");
 }
 const char *net_port_manifest_url(void) {                   /* the director's override, else the release channel */
@@ -104,6 +113,47 @@ bool net_port_set_manifest_url(const char *url) {           /* NULL / "" = back 
     bool ok = url && url[0] ? nvs_set_str(h, "url", url) == ESP_OK : (nvs_erase_key(h, "url"), true);
     ok = nvs_commit(h) == ESP_OK && ok; nvs_close(h);
     return ok;
+}
+
+/* ---- the Hatchery Crew: the board code and the last answer (update.h) ----
+ * Made once, kept in the Wi-Fi namespace (never the save: a RESET keeps it).
+ * The RNG is not guaranteed random before the radio has run, and the code is
+ * made long before that (the UPDATES page shows it), so the MAC goes into the
+ * hash too: every board's code is its own, and the hash keeps the MAC from
+ * being read back out of it.
+ * Read or made ONCE a boot (the UPDATES page asks every frame): a code the
+ * flash would not keep is tried once, never shown - given to Turbo it would be
+ * gone at the next boot - and the next boot tries again (0.4.1 audit F2: a
+ * refused write was a new code, a SHA-256 and an NVS write every frame). */
+static char s_code[NET_CODE_LEN + 1];
+static int8_t s_code_st;                                    /* 0 not yet, 1 read or kept, -1 made and NOT kept */
+bool net_port_board_code(char out[NET_CODE_LEN + 1]) {
+    if (s_code_st) { if (s_code_st < 0) return false; memcpy(out, s_code, sizeof s_code); return true; }
+    if (nvs_get_str_ns("code", out, NET_CODE_LEN + 1) && strlen(out) == NET_CODE_LEN) { memcpy(s_code, out, sizeof s_code); s_code_st = 1; return true; }
+    uint8_t seed[6 + 32 + 8] = { 0 }, h[32];
+    esp_read_mac(seed, ESP_MAC_WIFI_STA);
+    esp_fill_random(seed + 6, 32);
+    int64_t t = esp_timer_get_time(); memcpy(seed + 38, &t, sizeof t);
+    mbedtls_sha256(seed, sizeof seed, h, 0);
+    static const char A[] = NET_CODE_ALPHABET;
+    for (int i = 0, k = 0; i < NET_CODE_LEN; i++) out[i] = i == 4 ? '-' : A[h[k++] % (sizeof A - 1)];
+    out[NET_CODE_LEN] = 0;
+    nvs_handle_t nh; if (nvs_open(WIFI_NVS_NS, NVS_READWRITE, &nh) != ESP_OK) { s_code_st = -1; return false; }
+    bool ok = nvs_set_str(nh, "code", out) == ESP_OK && nvs_commit(nh) == ESP_OK; nvs_close(nh);
+    ESP_LOGI(TAG, "board code made (%s)", ok ? "kept" : "NOT kept - not shown, tried again at the next boot");
+    if (ok) memcpy(s_code, out, sizeof s_code);
+    s_code_st = ok ? 1 : -1;
+    return ok;
+}
+int net_port_crew(void) {
+    nvs_handle_t h; uint8_t v = 0;
+    if (nvs_open(WIFI_NVS_NS, NVS_READONLY, &h) != ESP_OK) return 0;
+    if (nvs_get_u8(h, "crew", &v) != ESP_OK) v = 0;
+    nvs_close(h); return v == 1;
+}
+static void crew_set(int on) {
+    nvs_handle_t h; if (nvs_open(WIFI_NVS_NS, NVS_READWRITE, &h) != ESP_OK) return;
+    nvs_set_u8(h, "crew", on ? 1 : 0); nvs_commit(h); nvs_close(h);
 }
 
 /* ---- the radio ---- */
@@ -182,7 +232,23 @@ static int chan_get(void) {
     if (nvs_open(WIFI_NVS_NS, NVS_READONLY, &h) == ESP_OK) { nvs_get_u8(h, "chan", &c); nvs_close(h); }
     return c >= 1 && c <= 14 ? c : 0;
 }
+/* THE QUICK LOOK (0.4.1): "miss" = the boot's time checks in a row that never saw the router (net_time_sync,
+   main.c clock_gate.h). Any connect clears it - the boot's, the updates page's, the Wi-Fi setup's - and so does
+   saving a network (net_port_creds_set) */
+static int miss_get(void) {
+    nvs_handle_t h; uint8_t v = 0;
+    if (nvs_open(WIFI_NVS_NS, NVS_READONLY, &h) == ESP_OK) { nvs_get_u8(h, "miss", &v); nvs_close(h); }
+    return v;
+}
+static void miss_put(int v) {
+    nvs_handle_t h; if (nvs_open(WIFI_NVS_NS, NVS_READWRITE, &h) != ESP_OK) return;
+    if (v > 255) v = 252;                                     /* (on round: 252 looks in full, 253-255 quick - clock_gate.h CLOCK_FULL_EVERY) */
+    if (v) nvs_set_u8(h, "miss", (uint8_t)v); else nvs_erase_key(h, "miss");
+    nvs_commit(h); nvs_close(h);
+}
+int net_time_missed(void) { return miss_get(); }
 static void chan_learn(void) {                               /* written only when it moved: the boot connects every morning */
+    if (miss_get()) miss_put(0);                             /* (the router is there: the next time check looks in full) */
     wifi_ap_record_t ap;
     if (esp_wifi_sta_get_ap_info(&ap) != ESP_OK || ap.primary == chan_get()) return;
     nvs_handle_t h; if (nvs_open(WIFI_NVS_NS, NVS_READWRITE, &h) != ESP_OK) return;
@@ -190,6 +256,7 @@ static void chan_learn(void) {                               /* written only whe
     ESP_LOGI(TAG, "%s answers on channel %d", s_ssid, ap.primary);
 }
 static int s_tries, s_last_reason; static bool s_last_timed_out;   /* the last connect, for net_time_why */
+static bool s_seen;                                          /* the last connect saw the router: some try ended other than "not found" */
 static void sta_config(int chan) {                           /* chan 0: sweep every channel, the strongest answer wins */
     wifi_config_t wc = { 0 };
     memcpy(wc.sta.ssid, s_ssid, sizeof wc.sta.ssid);             /* 32 bytes, NUL-padded or full (the driver takes both) */
@@ -209,12 +276,16 @@ static void sta_config(int chan) {                           /* chan 0: sweep ev
  * empty sweep ends a try in ~2-4 s, so three were over in 12-15 s (Strato's
  * stopwatch, 2026-10-23) and the 30 s went unused. The page keeps its quick
  * NO SIGNAL. */
-static void do_connect_n(int attempts, int wait_ms, int64_t deadline_us, bool boot) {
+/* quick (0.4.1, a chip-board that owes time and did not see its router at the last boot: clock_gate.h): `quick`
+ * tries while the router is still not seen, then the time check gives up; a router seen in them gets the
+ * whole budget, tries and sweeps as ever. */
+static void do_connect_n(int attempts, int wait_ms, int64_t deadline_us, bool boot, int quick) {
     int chan = boot ? chan_get() : 0;
     sta_config(chan);
     int err = NET_ERR_NO_SIGNAL;
-    s_tries = 0; s_last_reason = 0; s_last_timed_out = false;
+    s_tries = 0; s_last_reason = 0; s_last_timed_out = false; s_seen = false;
     for (int attempt = 0; !s_abort; attempt++) {                  /* routers refuse first tries; the page's TRY AGAIN does five more */
+        if (quick && !s_seen && attempt >= quick) break;          /* the quick look: still nobody there */
         if (attempt >= attempts && !(boot && deadline_us && s_last_reason == WIFI_REASON_NO_AP_FOUND)) break;
         int wait = wait_ms;
         if (deadline_us) {
@@ -226,9 +297,10 @@ static void do_connect_n(int attempts, int wait_ms, int64_t deadline_us, bool bo
         s_disc_reason = 0; s_tries = attempt + 1;
         if (esp_wifi_connect() != ESP_OK) { err = NET_ERR_RADIO; break; }
         EventBits_t b = xEventGroupWaitBits(s_ev, EV_GOT_IP | EV_DISCONNECTED, pdTRUE, pdFALSE, pdMS_TO_TICKS(wait));
-        if (b & EV_GOT_IP) { ESP_LOGI(TAG, "connected to %s (attempt %d)", s_ssid, attempt + 1); chan_learn(); s_state = NET_DONE; return; }
+        if (b & EV_GOT_IP) { ESP_LOGI(TAG, "connected to %s (attempt %d)", s_ssid, attempt + 1); s_seen = true; chan_learn(); s_state = NET_DONE; return; }
         int r = s_disc_reason;
         s_last_reason = r; s_last_timed_out = !(b & EV_DISCONNECTED);
+        if (r != WIFI_REASON_NO_AP_FOUND) s_seen = true;          /* refused, silent, dropped: the router is there (a radio that would not start is not) */
         ESP_LOGW(TAG, "connect attempt %d%s: %s (reason %d)", attempt + 1, chan ? " (learned channel)" : "", b & EV_DISCONNECTED ? "disconnected" : "timed out", r);
         if (r == WIFI_REASON_NO_AP_FOUND && !boot) { err = NET_ERR_NO_SIGNAL; break; }
         if (r == WIFI_REASON_4WAY_HANDSHAKE_TIMEOUT || r == WIFI_REASON_AUTH_FAIL || r == WIFI_REASON_HANDSHAKE_TIMEOUT
@@ -244,7 +316,7 @@ static void do_connect_n(int attempts, int wait_ms, int64_t deadline_us, bool bo
     s_err = s_abort ? NET_ERR_ABORTED : err; s_state = NET_FAILED;
 }
 static int s_attempts = 5, s_wait_ms = 15000;
-static void do_connect(void) { do_connect_n(s_attempts, s_wait_ms, 0, false); }
+static void do_connect(void) { do_connect_n(s_attempts, s_wait_ms, 0, false, 0); }
 /* provisioning at install (update_mode.c): the page waits 45 s for an answer */
 void net_port_esp_connect_budget(int attempts, int wait_ms) { s_attempts = attempts; s_wait_ms = wait_ms; }
 
@@ -282,6 +354,7 @@ static bool ntp_ask(const char *host, int64_t *unix_out) {
 #define SYNC_TRIES    3
 #define SYNC_WAIT_MS  10000
 #define SYNC_BUDGET_US 30000000LL
+#define SYNC_QUICK_TRIES 2                                     /* the quick look (0.4.1): the learned channel, then one sweep of them all */
 static char s_why[80] = "no sync yet";
 const char *net_time_why(void) { return s_why; }
 static void why_connect_failed(void) {
@@ -291,7 +364,7 @@ static void why_connect_failed(void) {
                      : s_last_timed_out ? "no answer from the router" : "the router dropped it";
     snprintf(s_why, sizeof s_why, "%s, %d %s, reason %d", what, s_tries, s_tries == 1 ? "try" : "tries", s_last_reason);
 }
-bool net_time_sync(int64_t *unix_out, int64_t *at_us) {
+bool net_time_sync(int64_t *unix_out, int64_t *at_us, bool quick) {
     char ssid[NET_SSID_MAX + 1], pass[NET_PASS_MAX + 1];
     if (!net_port_creds_get(ssid, pass)) { snprintf(s_why, sizeof s_why, "no network saved"); return false; }
     int64_t t0 = esp_timer_get_time(), deadline = t0 + SYNC_BUDGET_US;
@@ -301,8 +374,13 @@ bool net_time_sync(int64_t *unix_out, int64_t *at_us) {
     bool ok = false;
     if (!radio_up()) snprintf(s_why, sizeof s_why, "the radio would not start");
     else {
-        do_connect_n(SYNC_TRIES, SYNC_WAIT_MS, deadline, true);
-        if (s_state != NET_DONE) why_connect_failed();
+        do_connect_n(SYNC_TRIES, SYNC_WAIT_MS, deadline, true, quick ? SYNC_QUICK_TRIES : 0);
+        if (s_state != NET_DONE) {
+            why_connect_failed();
+            if (s_err != NET_ERR_RADIO && !s_seen) miss_put(miss_get() + 1);   /* nobody there: the next boot's check is a quick look */
+            else if (s_seen && miss_get()) miss_put(0);                          /* seen, just not answering: the next one looks in full */
+            if (quick && !s_seen && s_err != NET_ERR_RADIO) { size_t n = strlen(s_why); snprintf(s_why + n, sizeof s_why - n, " (a quick look)"); }
+        }
         else {
             static const char *HOSTS[] = { "pool.ntp.org", "time.google.com", "time.cloudflare.com" };
             for (size_t i = 0; i < sizeof HOSTS / sizeof *HOSTS && !ok; i++) {
@@ -348,39 +426,94 @@ static bool parse_manifest(const char *json, update_manifest_t *m) {
     cJSON_Delete(root);
     return s_app_url[0] != 0 && m->release_num != 0;
 }
-static void do_check(void) {
-    const char *url = net_port_manifest_url();
-    ESP_LOGI(TAG, "manifest: %s", url);
-    esp_http_client_config_t hc = { .url = url, .crt_bundle_attach = esp_crt_bundle_attach, .timeout_ms = 12000,
+/* one small GET into buf (cap - 1 bytes and a 0): the HTTP status, 0 = no
+ * answer. GitHub answers a release asset's address with a redirect, twice
+ * (releases/latest/download -> releases/download/<tag> -> the asset host, a
+ * 900-byte signed address). The open / fetch_headers pair used here does NOT
+ * follow redirects by itself (only esp_http_client_perform does): 0.3.0's
+ * first build read the 302 as the answer and said NO ANSWER to every check
+ * against the real release - a tank that could never see an update
+ * (2026-10-04; the rehearsal's files sat on a host that answers directly).
+ * Follow them by hand, a few hops at most. */
+static int http_get_small(const char *url, char *buf, int cap, int timeout_ms, int *len) {
+    *len = 0; buf[0] = 0;
+    esp_http_client_config_t hc = { .url = url, .crt_bundle_attach = esp_crt_bundle_attach, .timeout_ms = timeout_ms,
                                     .buffer_size = 2048, .buffer_size_tx = 2048, .max_redirection_count = 8 };
     esp_http_client_handle_t c = esp_http_client_init(&hc);
-    if (!c) { s_err = NET_ERR_NO_NET; s_state = NET_FAILED; return; }
-    char *buf = heap_caps_malloc(4096, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    int err = NET_ERR_NO_NET, n = 0;
-    /* GitHub answers a release asset's address with a redirect, twice (releases/latest/download ->
-     * releases/download/<tag> -> the asset host, a 900-byte signed address). The open / fetch_headers
-     * pair used here does NOT follow redirects by itself (only esp_http_client_perform does): 0.3.0's
-     * first build read the 302 as the answer and said NO ANSWER to every check against the real
-     * release - a tank that could never see an update (2026-10-04; the rehearsal's files sat on a
-     * host that answers directly). Follow them by hand, a few hops at most. */
+    if (!c) return 0;
     int status = 0;
-    for (int hop = 0; buf && hop < 6; hop++) {
+    for (int hop = 0; hop < 6; hop++) {
         if (esp_http_client_open(c, 0) != ESP_OK) { status = 0; break; }
         (void)esp_http_client_fetch_headers(c);
         status = esp_http_client_get_status_code(c);
         if (status != 301 && status != 302 && status != 303 && status != 307 && status != 308) break;
-        ESP_LOGI(TAG, "manifest: HTTP %d, following the redirect (hop %d)", status, hop + 1);
+        ESP_LOGI(TAG, "HTTP %d, following the redirect (hop %d)", status, hop + 1);
         if (esp_http_client_set_redirection(c) != ESP_OK) break;
         int drained = 0; esp_http_client_flush_response(c, &drained);
         esp_http_client_close(c);
     }
-    if (buf && status) {
-        while (n < 4095) { int r = esp_http_client_read(c, buf + n, 4095 - n); if (r <= 0) break; n += r; }
-        buf[n] = 0;
-        if (status == 200 && n > 0) err = parse_manifest(buf, &s_m) ? NET_ERR_NONE : NET_ERR_BAD_MANIFEST;
-        else { ESP_LOGW(TAG, "manifest: HTTP %d, %d bytes", status, n); err = status == 404 ? NET_ERR_BAD_MANIFEST : NET_ERR_NO_NET; }
+    int n = 0;
+    if (status) { while (n < cap - 1) { int r = esp_http_client_read(c, buf + n, cap - 1 - n); if (r <= 0) break; n += r; } }
+    buf[n] = 0; *len = n;
+    esp_http_client_close(c); esp_http_client_cleanup(c);
+    return status;
+}
+
+/* the crew check: the board's code hashed (the code itself never leaves the
+ * board), the board it IS. 200 {"crew":true,"manifest":"https://..."} -> that
+ * manifest; {"crew":true} -> crew, the release channel; 404 or "crew":false
+ * -> not crew; anything else (no answer, a 5xx, a page we don't understand)
+ * -> the release channel and the last answer stands. A crew outage can never
+ * stop a public update. */
+static void crew_check(char *manifest, size_t cap, char *buf, int bufcap) {
+    manifest[0] = 0;
+    char code[NET_CODE_LEN + 1];
+    if (!net_port_board_code(code)) return;
+    uint8_t h[32]; mbedtls_sha256((const uint8_t *)code, NET_CODE_LEN, h, 0);
+    char url[NET_URL_MAX + 1], hex[65];
+    for (int i = 0; i < 32; i++) snprintf(hex + 2 * i, 3, "%02x", h[i]);
+    snprintf(url, sizeof url, CREW_CHECK_URL "?b=%s&c=%s", update_target_board(), hex);
+    int n = 0, status = http_get_small(url, buf, bufcap, CREW_TIMEOUT_MS, &n);
+    if (status == 404) { ESP_LOGI(TAG, "crew: not on the list (%.8s)", hex); crew_set(0); return; }
+    if (status != 200 || n <= 0) { ESP_LOGI(TAG, "crew: no clear answer (HTTP %d) - the release channel", status); return; }
+    cJSON *root = cJSON_Parse(buf);
+    const cJSON *crew = root ? cJSON_GetObjectItem(root, "crew") : NULL, *m = root ? cJSON_GetObjectItem(root, "manifest") : NULL;
+    if (cJSON_IsBool(crew)) {
+        crew_set(cJSON_IsTrue(crew));
+        if (cJSON_IsTrue(crew) && cJSON_IsString(m) && !strncmp(m->valuestring, "https://", 8) && strlen(m->valuestring) <= cap - 1)
+            snprintf(manifest, cap, "%s", m->valuestring);
+        ESP_LOGI(TAG, "crew: %s (%.8s)%s%s", cJSON_IsTrue(crew) ? "HATCHERY CREW" : "not on the list", hex,
+                 manifest[0] ? ", early builds at " : "", manifest);
+    } else ESP_LOGW(TAG, "crew: an answer without \"crew\" - the release channel");
+    cJSON_Delete(root);
+}
+
+static int fetch_manifest(const char *url, char *buf) {   /* the manifest at url into s_m / s_app_url: a NET_ERR_* */
+    ESP_LOGI(TAG, "manifest: %s", url);
+    int n = 0, status = http_get_small(url, buf, 4096, 12000, &n);
+    if (status == 200 && n > 0) return parse_manifest(buf, &s_m) ? NET_ERR_NONE : NET_ERR_BAD_MANIFEST;
+    ESP_LOGW(TAG, "manifest: HTTP %d, %d bytes", status, n);
+    return status == 404 ? NET_ERR_BAD_MANIFEST : NET_ERR_NO_NET;
+}
+static void do_check(void) {
+    char *buf = heap_caps_malloc(4096 + NET_URL_MAX + 1, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!buf) { s_err = NET_ERR_NO_NET; s_state = NET_FAILED; return; }
+    char *crew_manifest = buf + 4096;                       /* the early manifest's URL rides past the answer's 4 KB, in PSRAM: never
+                                                               .bss (161 B of internal RAM, 0.4.1 audit F3) nor the worker's stack,
+                                                               where the TLS handshake runs (an answer stops at 4095 bytes + its 0) */
+    crew_manifest[0] = 0;
+    char override[NET_URL_MAX + 1];
+    bool test_channel = nvs_get_str_ns("url", override, sizeof override) && override[0];   /* the director's `ota url` wins */
+    if (!test_channel) crew_check(crew_manifest, NET_URL_MAX + 1, buf, 4096);
+    const char *url = !test_channel && crew_manifest[0] ? crew_manifest : net_port_manifest_url();
+    int err = fetch_manifest(url, buf);
+    if (err != NET_ERR_NONE && url == crew_manifest) {   /* the early manifest would not come (a 404, a 5xx, no answer, a page we
+                                                            can't read): the release channel's, as the crew check promises - a crew
+                                                            outage never stops a public update (0.4.1 audit F4) */
+        ESP_LOGW(TAG, "crew: the early manifest failed - the release channel's instead");
+        err = fetch_manifest(net_port_manifest_url(), buf);
     }
-    esp_http_client_close(c); esp_http_client_cleanup(c); free(buf);
+    free(buf);
     if (err == NET_ERR_NONE) {
         ESP_LOGI(TAG, "manifest: release %s for %s (build %s), app %lu B at %s%s", s_m.release, s_m.board[0] ? s_m.board : "NO BOARD", s_m.build,
                  (unsigned long)s_m.app_size, s_app_url, s_m.needs_cable ? " - NEEDS THE CABLE" : "");

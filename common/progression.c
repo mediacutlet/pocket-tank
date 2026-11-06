@@ -1,4 +1,5 @@
 #include "progression.h"
+#include "backgrounds.h"
 #include "setup.h"
 #include "render.h"
 #include "notice.h"
@@ -33,7 +34,7 @@ const char *const MS_NAMES[MS_FISH_COUNT] = {
     "first rest in the seagrass",
 };
 const char *const TMS_NAMES[TMS_COUNT] = {
-    "a pair", "a trio", "a quartet", "a quintet", "a sextet",
+    "a pair", "a trio", "a quartet", "a quintet", "(retired)",   /* (bit 4: the sextet until 0.4.1) */
     "first full night's sleep", "first play session", "the tank changed someone", "first feeding",
     "first trimming", "first glass cleaning", "a school of ten shrimp",
     "first visit to the reef",
@@ -116,7 +117,7 @@ typedef struct {
     /* placement tail (2026-09-16, the placement page): the plant's centre x
      * (0 = the default spot) and its layer + 1 (0 = MIDDLE, an older save) */
     float    plant_x;
-    uint8_t  plant_z1, pad_place[3];
+    uint8_t  plant_z1, plant_under, pad_place[2];   /* plant_under (0.4.1): 1 = the sword plant BEHIND THE SEAGRASS; 0 = IN FRONT (every save before) */
     /* the snail's tally (2026-09-16, its card): cells grazed clean, lifetime.
      * Older saves read 0 - it starts counting from this build on. */
     int32_t  snail_grazed;
@@ -177,7 +178,8 @@ typedef struct {
      * light_tip_seen's padding, which every build wrote as zeros - still
      * 1688 B; older saves read 0, unlocked. */
     uint8_t  tools_locked;
-    uint8_t  fry_sold, pad_tip;          /* the fry offer's blanks, bit k = fry k bought (0.3.5) */
+    uint8_t  fry_sold, sd_receipts;      /* the fry offer's blanks, bit k = fry k bought (0.3.5); the starting set's receipts
+                                            (0.4.1, tank_t.sd_receipts) in what was pad_tip - zeros in every older save */
     /* the genes (0.4, heredity): per fish, [GS_HAS] 1 = written by 0.4+ (an
      * older save reads 0: its fish keep the look they have - every one
      * CLASSIC / CLASSIC / BARS - and the copies they carry are rolled once,
@@ -205,8 +207,11 @@ typedef struct {
     /* the tank link (0.4, docs/tank-link-0.4.md): bit i = fish i was next door
      * when this was saved. Read back through tail_slot like the genes; a boot
      * that finds one brings it home from bubbles LINK_RESTORE_MS later (the
-     * host may still hold it on its last lease). */
-    uint8_t  link_away, pad_link[3];
+     * host may still hold it on its last lease). link_born_away (0.4.1, audit
+     * P5; pad_link[0] until then, written 0): bit i = fish i is one of ours
+     * born next door, still owed its welcome (fish_t.born_away) - only with
+     * its link_away bit. */
+    uint8_t  link_away, link_born_away, pad_link[2];
     /* 0.3.6 wrote 176 zero bytes here (1688..1863) and put the seahorse at
      * 1864: the 0.4 tail above is exactly that span, so a 0.3.x save loads
      * here as a tank without genes (as every older save does) and a 0.4
@@ -266,6 +271,12 @@ typedef struct {
     /* the seahorse's time with the keeper in whole seconds + 1 (0.4; 0 = an older save): sh_s at 1864 is a float,
      * which stops adding a frame at ~12 days - it is still written, for a rollback to read */
     uint32_t sh_secs;
+    /* THE BACKGROUND (0.4.1, backgrounds.h): the one this tank shows (0 = Open Water; an older save reads it) */
+    uint8_t  bg_now, pad_bg[3];
+    /* THE SHELF'S MARKERS (0.4.1 audit round 2, Strato's "Marker now"; FIX-saves2.md): the marker of the last NEW TANK
+     * journal, REMOVE journal and swap carry this save paid or applied (SHELF_MARK_*; 0 none). A record reads "paid" /
+     * "applied" exactly when its marker is the save's - never by the wallet's figure. Zeros in every older save */
+    uint32_t shelf_mark[3];
     /* never a field: where this build's fields end and a newer build's tail
      * begins (SAVE_FIELDS_END; new fields go above it) */
     uint8_t  newer_tail[];
@@ -330,7 +341,7 @@ SAVE_AT(light_idle_s, 1476); SAVE_AT(light_auto, 1478); SAVE_AT(light_manual_off
 SAVE_AT(sd_balance, 1480); SAVE_AT(sd_earned, 1484); SAVE_AT(sd_unlocks, 1488); SAVE_AT(sd_paid_fish, 1492);   /* shop, 09-15 */
 SAVE_AT(sd_colonies_paid, 1516); SAVE_AT(sd_inches_paid, 1520); SAVE_AT(algae_colonies, 1524);
 SAVE_AT(trim_px, 1528); SAVE_AT(snail_x, 1532); SAVE_AT(snail_y, 1536); SAVE_AT(veg_h3, 1540);
-SAVE_AT(plant_x, 1604); SAVE_AT(plant_z1, 1608); SAVE_AT(pad_place, 1609);                            /* placement, 09-16 */
+SAVE_AT(plant_x, 1604); SAVE_AT(plant_z1, 1608); SAVE_AT(plant_under, 1609); SAVE_AT(pad_place, 1610);                            /* placement, 09-16 */
 SAVE_AT(snail_grazed, 1612);
 SAVE_AT(castle_x, 1616); SAVE_AT(castle_z1, 1620); SAVE_AT(pad_castle, 1621);                         /* castle, 09-16 */
 SAVE_AT(coral_x, 1624); SAVE_AT(coral_z1, 1628); SAVE_AT(pad_coral, 1629); SAVE_AT(coral_rgb, 1632);  /* coral, 09-23 */
@@ -350,7 +361,7 @@ SAVE_AT(screen_turned, 1672); SAVE_AT(orient, 1673); SAVE_AT(autofeed_off, 1674)
 _Static_assert(sizeof(save_t) >= 1680, "SAVE LAYOUT LOCK: save_t only ever grows");
 SAVE_AT(urchin_x, 1676); SAVE_AT(urchin_grazed_px, 1680);                                              /* the urchin, 10-02 */
 _Static_assert(sizeof(save_t) >= 1688, "SAVE LAYOUT LOCK: save_t only ever grows");
-SAVE_AT(light_tip_seen, 1684); SAVE_AT(tools_locked, 1685); SAVE_AT(fry_sold, 1686); SAVE_AT(pad_tip, 1687);   /* the lights-out notice, 10-03; the toolbox's LOCK and the fry's blanks, 0.3.5 */
+SAVE_AT(light_tip_seen, 1684); SAVE_AT(tools_locked, 1685); SAVE_AT(fry_sold, 1686); SAVE_AT(sd_receipts, 1687);   /* the lights-out notice, 10-03; the toolbox's LOCK and the fry's blanks, 0.3.5 */
 _Static_assert(sizeof(save_t) >= 1688, "SAVE LAYOUT LOCK: save_t only ever grows");
 SAVE_AT(genes, 1688);                                                                                  /* the genes, 0.4 */
 _Static_assert(sizeof(save_t) >= 1760, "SAVE LAYOUT LOCK: save_t only ever grows");
@@ -359,7 +370,7 @@ _Static_assert(sizeof(save_t) >= 1840, "SAVE LAYOUT LOCK: save_t only ever grows
 /* (the next field: SAVE_AT(its_name, 1836 or its type's alignment past it);) */
 SAVE_AT(fish_print, 1836);                                                                             /* who each fish is, 0.4 (rollbacks) */
 _Static_assert(sizeof(save_t) >= 1864, "SAVE LAYOUT LOCK: save_t only ever grows");   /* 1860 of fields, padded to 8 */
-SAVE_AT(link_away, 1860); SAVE_AT(pad_link, 1861);                                                   /* fish next door, 0.4 (the tank link) */
+SAVE_AT(link_away, 1860); SAVE_AT(link_born_away, 1861); SAVE_AT(pad_link, 1862);                    /* fish next door, 0.4 (the tank link); born there, 0.4.1 */
 _Static_assert(sizeof(save_t) >= 1864, "SAVE LAYOUT LOCK: save_t only ever grows");
 SAVE_AT(sh_s, 1864); SAVE_AT(sh_hitches, 1868); SAVE_AT(sh_trust_passed, 1872); SAVE_AT(sh_eaten, 1876);  /* the seahorse, 0.3.6 (1876: pad_sh until its snacks) */
 _Static_assert(sizeof(save_t) >= 1880, "SAVE LAYOUT LOCK: save_t only ever grows");
@@ -385,7 +396,11 @@ SAVE_AT(lay_cols, 1948); SAVE_AT(lay_rows, 1949); SAVE_AT(pad_lay, 1950);       
 _Static_assert(sizeof(save_t) >= 1952, "SAVE LAYOUT LOCK: save_t only ever grows");
 SAVE_AT(sh_secs, 1952);                                                                                 /* the seahorse's days, precise, 0.4 */
 _Static_assert(sizeof(save_t) >= 1960, "SAVE LAYOUT LOCK: save_t only ever grows");   /* 1956 of fields, padded to 8 */
-/* (the next field: SAVE_AT(its_name, 1956 or its type's alignment past it);) */
+SAVE_AT(bg_now, 1956); SAVE_AT(pad_bg, 1957);                                                          /* the background, 0.4.1 */
+_Static_assert(sizeof(save_t) >= 1960, "SAVE LAYOUT LOCK: save_t only ever grows");   /* 1960 of fields */
+SAVE_AT(shelf_mark, 1960);                                                                             /* the shelf's markers, 0.4.1 round 2 */
+_Static_assert(sizeof(save_t) >= 1976, "SAVE LAYOUT LOCK: save_t only ever grows");   /* 1972 of fields, padded to 8 */
+/* (the next field: SAVE_AT(its_name, 1972 or its type's alignment past it);) */
 /* A ROLLBACK keeps the newer build's tail (2026-10-05): a save longer than
  * this build's fields loads its head, and every save writes the bytes past
  * SAVE_FIELDS_END back as they were - so the update back up finds its tail
@@ -449,9 +464,14 @@ static bool  s_setup_pending;        /* the first-run flow still owed (setup.c) 
    took a held place - a sixth fish, then the gift stalled; 11-03: a fry's yes held nothing, the same sixth fish). A GIVEN
    note holds its place too until the gift settles: GIVEN_LOST brings the fish back (11-03 rc: the giver refilled to five
    while the note was out, and the restore made a sixth) */
+static bool fish_here(const tank_t *t, uint32_t uid) { for (int i = 0; i < t->n_fish; i++) if (t->fish[i].uid == uid) return true; return false; }
 static int fish_held(const tank_t *t) {
     const gift_book_t *g = gift_of(t);
-    int n = t->n_fish + (g ? g->n_arr + g->n_given : 0);
+    int n = t->n_fish;
+    if (g) for (int k = 0; k < g->n_given; k++) n += gift_note_live(&g->given[k]) || !fish_here(t, g->given[k].uid);   /* (a BACK note beside
+                                                                                     its fish is that fish, counted once - 0.4.1) */
+    if (g) for (int k = 0; k < g->n_arr; k++) n += !fish_here(t, g->arriving[k].uid);   /* (... and an ARRIVING note beside its fish, alive
+                                                                                     here, its save not landed yet: 0.4.1) */
     for (int h = 0; h < TANK_FRY_HOLDS; h++) n += t->fry_hold[h].peer != 0;
     return n;
 }
@@ -479,7 +499,28 @@ static void owe_birth(int slot) {
     if (s_newborn_qn < N_FISH_MAX) s_newborn_q[s_newborn_qn++] = (int8_t)slot;
 }
 static int   s_sd_pending;           /* dollars awarded and not yet shown (the toast) */
-static int32_t s_sale_need;               /* player_feedings the next fry waits for since a fish was sold (0 = none sold) */
+enum { SHELF_MARK_BUY, SHELF_MARK_RM, SHELF_MARK_CARRY };
+static uint32_t s_mark[3];                 /* save_t.shelf_mark: loaded and saved with the tank; carried through a reset */
+static bool    s_carry_seen;              /* the boot found a swap's carry (applied at the wake, or already applied): swap_carry ends it */
+static bool    s_marks_known;             /* the markers came from a loaded save, or a reset journal: the shelf may settle by them */
+/* a fresh marker for a shelf record of `kind`: never 0, never the save's own (so a record reads "not paid" until the save
+   that pays it lands). The platform's entropy (esp_random on the boards); without it (the selftests) a mix of a counter
+   that never restarts in the process, the clock and the old marker */
+static uint32_t new_mark(int kind) {
+    static uint32_t n;
+    for (;;) {
+        uint32_t z;
+        if (tank_entropy) z = tank_entropy();
+        else {
+            uint64_t x = ((uint64_t)++n * 0x9E3779B97F4A7C15ull) ^ ((uint64_t)clock_port_now_unix() << 20) ^ s_mark[kind] ^ ((uint64_t)kind << 40);
+            x = (x ^ (x >> 30)) * 0xBF58476D1CE4E5B9ull; x = (x ^ (x >> 27)) * 0x94D049BB133111EBull;
+            z = (uint32_t)(x ^ (x >> 31));
+        }
+        if (z && z != s_mark[kind]) return z;
+    }
+}
+static int32_t s_sale_need;               /* player_feedings the next fry waits for since a fish was sold or given (0 = none) */
+static bool    s_sold_before_035;         /* the save loaded: a 0.3.4 or older tank's sale (its fry wait saved), never marked */
 static uint16_t s_fry_seed;               /* the fry offer (progression_fry_*): its seed, 0 = none drawn */
 static double   s_fry_age;                /* ... its age in tank seconds (a double, as s_age) */
 static uint8_t  s_fry_sold;               /* ... bit k = fry k bought */
@@ -544,13 +585,17 @@ void progression_sd_grant(tank_t *t, int n) {
  * shop (paid bits all zero: the stages and the trust it already has, the
  * hundreds its counters already passed - once). MEALS are the exception: a
  * meal pays as it happens, so the count is adopted, not back-paid. */
+static void rcpt_trust(tank_t *t) {          /* a full trust paid: one of the two a reset will not pay again (0.4.1) */
+    unsigned n = SD_RCPT_TRUST(t->sd_receipts);
+    if (n < 2) t->sd_receipts = (uint8_t)((t->sd_receipts & ~(3u << SD_RCPT_TRUST_SH)) | (n + 1) << SD_RCPT_TRUST_SH);
+}
 static void sd_tick(tank_t *t) {
     for (int i = 0; i < t->n_fish; i++) {
         fish_t *f = &t->fish[i]; uint32_t *paid = &t->sd_paid_fish[i];
         if ((f->ms_bits & MS_REACHED_JUV)   && !(*paid & SD_PAID_JUV))   { *paid |= SD_PAID_JUV;   sd_award(t, SD_STAGE_JUV); }
         if ((f->ms_bits & MS_REACHED_ADULT) && !(*paid & SD_PAID_ADULT)) { *paid |= SD_PAID_ADULT; sd_award(t, SD_STAGE_ADULT); }
         if ((f->ms_bits & MS_REACHED_ELDER) && !(*paid & SD_PAID_ELDER)) { *paid |= SD_PAID_ELDER; sd_award(t, SD_STAGE_ELDER); }
-        if (f->trust >= 10.0f && !(*paid & SD_PAID_TRUST))               { *paid |= SD_PAID_TRUST; sd_award(t, SD_TRUST); }
+        if (f->trust >= 10.0f && !(*paid & SD_PAID_TRUST))               { *paid |= SD_PAID_TRUST; sd_award(t, SD_TRUST); rcpt_trust(t); }
     }
     for (int i = 0; i < t->n_fish; i++) {        /* a meal pays per fish, once per its own gap (0.3.9) */
         fish_t *f = &t->fish[i];
@@ -560,7 +605,7 @@ static void sd_tick(tank_t *t) {
     int32_t hund = t->algae_colonies / SD_CHORE_EVERY;
     if (hund > t->sd_colonies_paid) { sd_award(t, SD_CHORE * (hund - t->sd_colonies_paid)); t->sd_colonies_paid = hund; }
     hund = (int32_t)(t->trim_px / (PX_PER_CM * SD_TRIM_CM));
-    if (hund > t->sd_inches_paid) { sd_award(t, SD_CHORE * (hund - t->sd_inches_paid)); t->sd_inches_paid = hund; }
+    if (hund > t->sd_inches_paid) { sd_award(t, SD_CHORE * (hund - t->sd_inches_paid)); t->sd_inches_paid = hund; t->sd_receipts |= SD_RCPT_GRASS; }
     if (t->sh_snack_pay > t->sd_snacks_paid) { sd_award(t, SD_SNACK * (t->sh_snack_pay - t->sd_snacks_paid)); t->sd_snacks_paid = t->sh_snack_pay; }   /* the seahorse's snack (0.3.6) */
     while (t->cr_found > t->cr_found_paid) {    /* the crab's sand dollar, taken (0.3.9): the first pays SD_CRAB_FIND and earns the badge, every one after it double */
         t->cr_found_paid++; sd_award(t, t->cr_found_paid == 1 ? SD_CRAB_FIND : SD_CRAB_FIND_AGAIN);
@@ -661,11 +706,22 @@ bool progression_fish_sellable(const tank_t *t, int fish) {
 }
 static void set_tms(tank_t *t, uint32_t bit);   /* (below) */
 static void fry_age(tank_t *t, float seconds);
+static void fry_partner_clear(tank_t *t);
+/* a fish that left (sold, given): every visitor's time together with it starts over, and a pair it was in is let go -
+   tank_link then tells the visitor's home, which stops holding a place for a fry that cannot come (0.4.1 audit round 1,
+   R-link F1 = R-progression F5: the bond froze, the pair stuck, and the home showed THE TANK IS FULL at four fish) */
+static void mate_left(tank_t *t, uint32_t uid) {
+    if (!uid) return;
+    for (int i = 0; i < 6; i++) if (t->bond[i].vis && t->bond[i].mate == uid) { t->bond[i].mate = 0; t->bond[i].s = 0; }
+    if (t->fry_mate == uid) fry_partner_clear(t);
+}
 bool progression_sell_fish(tank_t *t, int fish) {
     if (!progression_fish_sellable(t, fish)) return false;
     int worth = progression_fish_value(t, fish);
+    uint32_t uid = t->fish[fish].uid;
     if (!tank_remove_fish(t, fish)) return false;
     fish_removed(t, fish);
+    mate_left(t, uid);
     for (int i = fish; i < t->n_fish; i++) { s_age[i] = s_age[i + 1]; s_starve_s[i] = s_starve_s[i + 1]; }   /* the clocks move down with their fish */
     s_age[t->n_fish] = 0; s_starve_s[t->n_fish] = 0;
     /* the slot it leaves is earned again by care, not handed back: a fry
@@ -701,6 +757,17 @@ bool progression_buy(tank_t *t, int item) {
     if (it->bit == SD_ITEM_CRAB) { t->cr_variant = (uint8_t)(tank_randf(t, 0, 255.999f)); tank_crab_place(t); }   /* its seed pattern is drawn once, at the sale */
     if (tank_decor_placeable(item)) tank_decor_raise(t, item);   /* the piece placed last goes on top (2026-10-17) */
     progression_save(t);                                   /* a purchase sticks at once */
+    return true;
+}
+bool progression_bg_buy(tank_t *t, int bg) {
+    if (bg <= BG_OPEN || bg >= BG_N || (t->sd_unlocks & SD_ITEM_BG(bg)) || t->sd_balance < SD_PRICE_BG) return false;
+    t->sd_balance -= SD_PRICE_BG; t->sd_unlocks |= SD_ITEM_BG(bg); t->bg_now = (uint8_t)bg;
+    progression_save(t);                                   /* a purchase sticks at once */
+    return true;
+}
+bool progression_bg_use(tank_t *t, int bg) {
+    if (bg < BG_OPEN || bg >= BG_N || (bg != BG_OPEN && !(t->sd_unlocks & SD_ITEM_BG(bg)))) return false;
+    if (t->bg_now != bg) { t->bg_now = (uint8_t)bg; progression_save(t); }
     return true;
 }
 const char *const *progression_sd_earn_lines(void) {
@@ -742,7 +809,18 @@ static void apply_growth(fish_t *f) {
     f->size = f->base_size * stage_scale[f->stage] * fed;
 }
 
-static const uint32_t POP_TMS[N_FISH_MAX + 1] = { 0, 0, TMS_PAIR, TMS_TRIO, TMS_QUARTET, TMS_QUINTET, TMS_SEXTET };
+static const uint32_t POP_TMS[N_FISH_MAX + 1] = { 0, 0, TMS_PAIR, TMS_TRIO, TMS_QUARTET, TMS_QUINTET, 0 };   /* (six: no badge - P2) */
+/* every count the tank has reached, up to the fish it has now (0.4.1, Bananna on Discord 11-04: a square with five fish
+   showed no "first mutation" slot - its third fish came as a gift, and a gift marked no count, so the tank never had
+   its trio and the badge that waits for it never showed). Every arrival marks through here: a birth, a fry bought,
+   a gift, a gift coming back from bubbles - and a save loads through it, so a tank that missed a count before gets
+   it back quietly at the boot (notice_sync follows the load) */
+static void pop_marks(tank_t *t) {
+    int n = 0;                                     /* (a fry of ours born next door counts once it is home: its welcome
+                                                      says it - progression_fry_home; 0.4.1 audit P4) */
+    for (int i = 0; i < t->n_fish; i++) n += !t->fish[i].born_away;
+    for (int k = 2; k <= n && k <= N_FISH_MAX; k++) if (POP_TMS[k]) set_tms(t, POP_TMS[k]);
+}
 
 /* the parents: the two most trusting grown fish - or, with fewer than two
  * grown (at two fish no stage is gated), the most trusting of the rest fill
@@ -768,6 +846,9 @@ static void pick_parents(const tank_t *t, int *pa, int *pb) {
         else if (b < 0 || r > parent_rank(&t->fish[b])) b = i;
     }
     int v = partner_slot(t);                                 /* a visitor courts our best (phase 5) - or the one it grew close to */
+    if (v >= 0 && tank_link_cross_waits(t)) { *pa = a; *pb = -1; return; }   /* its fry has no visitor place to swim home in: nobody
+                                                                courts for it until one opens (0.4.1 audit round 2, R2L-1: the coin's
+                                                                visitor danced every ~30 s and no fry came) */
     if (v >= 0 && a >= 0) {
         int m = slot_of_uid(t, t->fry_mate);
         if (m >= 0) a = m;
@@ -846,6 +927,7 @@ static void bond_tick(tank_t *t, float dt) {
 static bool cross_ready(const tank_t *t) {
     if (!t->fry_mate || partner_slot(t) < 0 || slot_of_uid(t, t->fry_mate) < 0) return false;
     if (tank_algae_cover(t) > ALGAE_DIRTY || tank_nursery_bed(t) < 0 || t->n_fish >= N_FISH_MAX) return false;
+    if (tank_link_cross_waits(t)) return false;             /* (no visitor place for its fry: it waits quietly - round 2, R2-4) */
     return fish_held(t) < POP_CAP || fry_home_yes(t);
 }
 float progression_bond(const tank_t *t, uint32_t vis, uint32_t *mate) {   /* the passport's line: 0..1 */
@@ -863,13 +945,27 @@ static void fry_partner_clear(tank_t *t) {
 /* a new fish of this tank: its clock, badge, ledger, the tank's count, the
  * birth flow and the birth's sand dollars (an arrival here, a cross-tank fry
  * kept here, one of ours born next door) */
-static void welcome_birth(tank_t *t, int slot) {
+/* a fry of this tank born with something neither parent shows (0.4): FIRST MUTATION - born here, or one of ours born
+   next door once it is home (progression_fry_home; Strato 11-05). A mutated gift never earns it (0.4.1 audit P3: the
+   tick lit it for any fish with `mutated`). Its notice waits for the birth flow, as every notice does */
+static void mutation_born(tank_t *t, int slot) { if (t->fish[slot].mutated) set_tms(t, TMS_FIRST_MUTATION); }
+static uint32_t s_newest_uid;                   /* (progression_newest) */
+static void newest(const tank_t *t, int slot) { s_newest_uid = slot >= 0 && slot < t->n_fish ? t->fish[slot].uid : 0; }
+static void arrived(tank_t *t) { t->roster_gen++; }   /* (no slot shifted: roster_shift and removed_slot stay - R-seam F5) */   /* the roster grew (tank.h: -1, an arrival): EVERY
+                                                   arrival ticks it - a birth, a fry bought, kept or born next door, a gift
+                                                   - so an open fish card and the advisor see the same (0.4.1 audit P7) */
+static void new_fish(tank_t *t, int slot) {     /* its clock, badge and ledger: a new fish of ours, here or still next door */
+    arrived(t);
     s_age[slot] = 0;
     t->fish[slot].ms_bits |= MS_ARRIVED;
     t->sd_paid_fish[slot] = 0;               /* a new ledger for the new fish */
-    if (t->n_fish <= N_FISH_MAX) set_tms(t, POP_TMS[t->n_fish]);
-    sd_award(t, SD_BIRTH);
     mark_dirty();
+}
+static void welcome_birth(tank_t *t, int slot) {
+    new_fish(t, slot);
+    newest(t, slot);
+    pop_marks(t);
+    sd_award(t, SD_BIRTH);
 }
 
 /* the arrival itself: a fry in the nursery grass, traits inherited from the
@@ -895,9 +991,13 @@ static void do_arrival(tank_t *t) {
     int k2 = -1, kp = cross ? b - N_FISH_MAX : -1;
     if (cross) {
         for (int k = 0; k < N_VISIT_MAX && k2 < 0; k++) if (!t->vis_used[k] && !t->vis_pending[k]) k2 = k;
-        bool home_ok = fry_home_yes(t) && k2 >= 0 && t->door_open[t->fish[b].door_edge];
+        bool home_yes = fry_home_yes(t) && t->door_open[t->fish[b].door_edge];
+        bool home_ok = home_yes && k2 >= 0 && tank_link_fry_place(t);
         bool ours_ok = fish_held(t) < POP_CAP;
         if (!home_ok && !ours_ok) { s_spawn_in = -1; t->spawning = false; t->spawn_danced = 0; return; }   /* no room either side: it waits */
+        if (home_yes && !home_ok) { s_spawn_in = -1; t->spawning = false; t->spawn_danced = 0; return; }   /* its home has room, but the fry would
+                                       swim home as a third visitor (0.4.1: two visitor places, 7 swimming at most): it waits for a place - the
+                                       coin stays fair, never ours because the tank is crowded */
         to_home = home_ok && (!ours_ok || (t->fry_force >= 0 ? t->fry_force == 1 : tank_randf(t, 0, 1) < 0.5f));
         t->fry_force = -1;
     }
@@ -928,6 +1028,9 @@ static void do_arrival(tank_t *t) {
     }
     owe_birth(slot);                         /* owed its welcome: the birth flow (setup.c) */
     welcome_birth(t, slot);
+    mutation_born(t, slot);
+    progression_save(t);                     /* (saved at once, as a fry from next door: a cut in the 30 s coalesce lost it and
+                                                the welcome perhaps up - 0.4.1 audit round 1, R-link F5) */
     progression_cap_check(t, "do_arrival: a birth here");
 }
 /* host: the fry's home said no (or the hand-off could not start, or the radio
@@ -952,6 +1055,8 @@ void progression_fry_kept(tank_t *t, int k) {
     t->fish[slot].homeward = t->fish[slot].bolt_home = false; t->fish[slot].door = DOOR_NONE;
     owe_birth(slot);
     welcome_birth(t, slot);
+    mutation_born(t, slot);                  /* (born here, in our grass: the host's) */
+    progression_save(t);                     /* (at once: it waited in a hidden place no save holds - R-link F5) */
     progression_cap_check(t, "progression_fry_kept");
 }
 /* home: one of ours, born next door (LEV_FRY_IN) - away there, swimming home */
@@ -964,7 +1069,8 @@ int progression_fry_adopt(tank_t *t, const passport_t *pp, int edge) {
     f->away = true; f->door = DOOR_NONE; f->door_edge = (int8_t)edge; f->born_away = true;
     f->homeward = f->bolt_home = false; f->ms_bits &= MS_CROSSBRED;   /* (nothing earned yet but its birth between two tanks) */
     t->n_fish++;
-    welcome_birth(t, slot);
+    new_fish(t, slot);                       /* (nothing said yet - its count, its sand dollars and its welcome wait for
+                                                it to come home: progression_fry_home; 0.4.1 audit P4) */
     progression_cap_check(t, "progression_fry_adopt");
     progression_save(t);                     /* (saved at once, as a gift: the host has handed it over - 11-03 rc) */
     return slot;
@@ -976,14 +1082,18 @@ int progression_fry_room(const tank_t *t) {
 bool progression_fish_givable(const tank_t *t, int fish) {   /* the keeper's own rules, a sale's: the last pair stays, a welcome owed
                                                                 first. Where the fish swims is not one (2026-11-01, Strato): next door
                                                                 it is given where it is, in a doorway the gift waits (tank_link) */
-    return keeper_may_part(t, fish);
+    /* ... and never a fry of ours born next door before it is home: no tank would welcome it or pay its birth (0.4.1 audit
+       round 1, R-seam-link-progression F4) - its welcome is owed, as an owed welcome already blocks a sale or a GIVE */
+    return keeper_may_part(t, fish) && !t->fish[fish].born_away;
 }
 /* one of ours, gone next door for good: out of the tank and its clocks, no
    sand dollars (a gift), and the slot earned again by care as after a sale */
 bool progression_give_out(tank_t *t, int fish) {
     if (fish < 0 || fish >= t->n_fish) return false;
+    uint32_t uid = t->fish[fish].uid;
     if (!tank_remove_fish(t, fish)) return false;
     fish_removed(t, fish);
+    mate_left(t, uid);
     for (int i = fish; i < t->n_fish; i++) { s_age[i] = s_age[i + 1]; s_starve_s[i] = s_starve_s[i + 1]; }
     s_age[t->n_fish] = 0; s_starve_s[t->n_fish] = 0;
     s_arrival_pending = false; s_spawn_in = -1;
@@ -997,11 +1107,18 @@ bool progression_give_out(tank_t *t, int fish) {
    mints no sand dollars */
 int progression_gift_adopt(tank_t *t, const passport_t *pp) {
     if (t->n_fish >= N_FISH_MAX) return -1;               /* (the place was held when we said yes: only the hard cap stops it) */
+    gift_book_t *g = gift_of(t);                   /* one of ours given before, here again (GIVEN_LOST, or given back through a third
+                                                      tank): its GIVEN notes say BACK on the flash BEFORE the fish is saved, so a cut
+                                                      after the save never has the boot take it out again (0.4.1). Not on the flash:
+                                                      the note still holds it - no fish now (the next meeting asks again) */
+    if (g && gift_given_has(g, pp->uid) && !gift_given_back(g, pp->uid, pp)) return -1;
     int slot = t->n_fish;
     tank_make_fish(t, slot, pp->preset, pp->sociable, pp->bold, (stage_t)(pp->stage & 3));
     fish_t *f = &t->fish[slot];
     passport_to_fish(pp, f);
     f->away = false; f->homeward = f->bolt_home = false; f->door = DOOR_NONE; f->born_away = false;
+    progression_came_in(f);
+    f->drift_acc = 0;                              /* (its CHANGE starts here: pressure from its first tank is not change made here, F7) */
     t->n_fish++;
     s_age[slot] = 0; s_starve_s[slot] = 0;
     progression_age_from_passport(t, slot, pp->age_s);   /* (the stage its passport says is kept: a gift never demotes - 11-03 rc) */
@@ -1012,14 +1129,96 @@ int progression_gift_adopt(tank_t *t, const passport_t *pp) {
     paid |= SD_PAID_TRUST;                         /* (always: its trust bonus is its first tank's - one given at 9.6 and
                                                       tapped to 10 here, back and forth, minted it every trip, 11-03 rc) */
     t->sd_paid_fish[slot] = paid;
-    t->roster_gen++; t->removed_slot = -1;
-    progression_save(t);
-    gift_book_t *g = gift_of(t);                   /* an old GIVEN note of this fish goes: it is here (given to B, B's GIVEN_OK lost,
-                                                      back through C - gift_boot read the note as a gift cut short and took it out
-                                                      at the next boot, and fish_held counted it twice; 0.4 rc round two). After
-                                                      the save: GIVE_RESTORE's note is the fish until then */
-    while (g && gift_given_has(g, pp->uid)) gift_given_drop(g, pp->uid, 0);
+    arrived(t); newest(t, slot);
+    pop_marks(t);                                  /* the tank grew: its count, as a birth's (a gift marked none until 0.4.1) */
+    progression_save(t);                           /* (its BACK notes go once this lands: gift_settle - a save the flash refused keeps
+                                                      them until one does. An old GIVEN note left out took the fish out at the next
+                                                      boot, and fish_held counted it twice; 0.4 rc round two) */
     return slot;
+}
+/* a fish come in from another tank (a gift, one of ours home from a visit): drift it gained there is no change made here
+   (R-progression F1) - marked, until it settles back */
+/* the youngest fish of ours, by its age (0.4.1 audit round 1, R-progression F7 + P15): GROW's "THE YOUNGEST FISH MUST GROW
+   UP" and CHANGE read the last slot, and a gifted adult there met both. Wherever it is (round 2, R2-2: one next door was
+   left out, so its visit met GROW and staged a fry): a fish next door keeps the age it left with (it ages there, and its
+   passport brings that home), never older than it is. Visitors are never in the loop. Ties: the later slot */
+int progression_youngest(const tank_t *t) {
+    int y = -1;
+    for (int i = 0; i < t->n_fish; i++) if (y < 0 || s_age[i] <= s_age[y]) y = i;
+    return y >= 0 ? y : t->n_fish - 1;
+}
+/* the fish whose arrival made the tank's latest count (a population notice's picture, R-progression F3: a fry of ours
+   home from next door is not in the last slot when a gift came meanwhile). RAM: unknown after a boot, the last slot */
+int progression_newest(const tank_t *t) {
+    for (int i = 0; i < t->n_fish; i++) if (s_newest_uid && t->fish[i].uid == s_newest_uid) return i;
+    return t->n_fish - 1;
+}
+void progression_came_in(fish_t *f) {
+    f->ms_bits &= ~MS_CAME_CHANGED;
+    if (fabsf(f->bold - f->bold0) >= 0.11f || fabsf(f->sociable - f->sociable0) >= 0.11f) f->ms_bits |= MS_CAME_CHANGED;
+}
+/* a fish here whose GIVEN notes say BACK: on the flash now (a save just landed), so the notes go (0.4.1) */
+static void gift_settle(tank_t *t) {
+    gift_book_t *g = gift_of(t);
+    if (!g) return;
+    for (int k = 0; k < g->n_given; )
+        if (g->given[k].back && fish_here(t, g->given[k].uid)) gift_given_drop(g, g->given[k].uid, g->given[k].nonce); else k++;
+}
+/* NEW TANK (MY TANKS' library, 0.4.1): the wallet saved as it stands (shelf_buy's journal holds what the flash has), then
+   the journal, the slot, the price taken and saved, the journal gone - shelf.h. -1: nothing bought, nothing paid */
+typedef struct { tank_t *t; int delta, kind; uint32_t mark; } pay_ctx_t;
+static bool shelf_pay(void *ctx) {             /* the wallet moved by delta and saved WITH the journal's marker - the one save that
+                                                  pays it (a price < 0, a refund > 0; round 2, "Marker now") */
+    pay_ctx_t *b = ctx;
+    uint32_t was = s_mark[b->kind];
+    b->t->sd_balance += b->delta; s_mark[b->kind] = b->mark;
+    if (progression_save(b->t)) return true;
+    b->t->sd_balance -= b->delta; s_mark[b->kind] = was;   /* (refused: both as they were - the shelf undoes its half) */
+    return false;
+}
+int progression_buy_tank(tank_t *t, int price, int64_t now_unix) {
+    if (price <= 0 || t->sd_balance < price || !progression_save(t)) return -1;
+    pay_ctx_t b = { t, -price, SHELF_MARK_BUY, new_mark(SHELF_MARK_BUY) };
+    return shelf_buy(0, now_unix, price, b.mark, shelf_pay, &b);
+}
+/* REMOVE (MORE on a shelved tank's card, 0.4.1): its pieces' worth paid and saved, then the tank erased - shelf.h
+   shelf_remove_paid. The refund, or -1 (the flash refused: nothing removed, nothing paid) */
+int progression_remove_tank(tank_t *t, int i) {
+    int refund = shelf_refund_value(i, NULL);
+    if (!progression_save(t)) return -1;
+    pay_ctx_t b = { t, refund, SHELF_MARK_RM, new_mark(SHELF_MARK_RM) };
+    return shelf_remove_paid(i, refund, b.mark, shelf_pay, &b) ? refund : -1;
+}
+/* the boot after a SWAP IN, at the wake (progression_wake, right after the save loads and before a staged fry is born): the
+   wallet and the board's settings the swap carried, given to the tank that came in - and its marker with them, so the
+   first save that lands has the carry applied. A carry whose marker the loaded save already has was applied before (a boot
+   after its delete was refused or cut): not given again. The fry born after it pays on top of the carried wallet and is
+   saved at once, with the marker (round 2: X5 by the order, R3 gone) */
+static void wake_carry(tank_t *t) {
+    progression_carry_t c;
+    s_carry_seen = shelf_peek_carry(&c, sizeof c);
+    if (!s_carry_seen || (c.mark && c.mark == s_mark[SHELF_MARK_CARRY])) return;
+    progression_carry_give(t, &c);
+    s_mark[SHELF_MARK_CARRY] = c.mark;
+}
+/* ... and once the boot's settles are done (main.c's order): saved, and the carry let go once that save has landed (0.4.1
+   audit round 1, R-saves S1). A refused save or delete leaves the carry - the marker reads it at the next boot. false: none */
+bool progression_swap_carry(tank_t *t) {
+    if (!s_carry_seen) return false;
+    s_carry_seen = false;
+    if (progression_save(t)) shelf_carry_done();
+    return true;
+}
+void progression_shelf_settle(tank_t *t) {   /* the boot: a NEW TANK or a REMOVE a power cut stopped half way, settled by the markers the
+                                                save carries - never the wallet's figure (round 2) */
+    if (!s_marks_known) return;              /* (no save loaded - one that would not read - and no reset journal gave them: the
+                                                journals wait for a boot that loads one; the board blocks this one's saves meanwhile.
+                                                Read against zeros they settled "not paid": a paid tank erased, a removed one back
+                                                with its refund - round 3 review R1) */
+    int back = shelf_buy_settle(s_mark[SHELF_MARK_BUY], t->sd_balance);
+    if (back > 0) { t->sd_balance += back; s_mark[SHELF_MARK_BUY] = 0; progression_save(t); }   /* (the price back and the marker
+                                                cleared in one save: a journal left after it reads "not paid" - never a second refund) */
+    shelf_remove_settle(s_mark[SHELF_MARK_RM], t->sd_balance);
 }
 /* a boot: what the notes settle before the link is up - a fish with a GIVEN
    note was given (the note wins), an ARRIVING gift already alive here was
@@ -1028,8 +1227,20 @@ static void gift_boot(tank_t *t) {
     gift_book_t *g = gift_of(t);
     if (!g) return;
     gift_load(g);
+    /* a BACK note is the fish (0.4.1): the save has it - the note goes; the save has not - it is made from the note (its
+       save drops the note; a save the flash refuses leaves it BACK beside the fish, settled by the next save that lands) */
+    for (int k = 0; k < g->n_given; )
+        if (g->given[k].back && fish_here(t, g->given[k].uid)) gift_given_drop(g, g->given[k].uid, g->given[k].nonce); else k++;
+    passport_t back[GIFT_NOTES]; int nb = 0;
+    for (int k = 0; k < g->n_given; k++) {
+        bool seen = false;
+        for (int j = 0; j < nb; j++) seen |= back[j].uid == g->given[k].uid;
+        if (g->given[k].back && !seen) back[nb++] = g->given[k].pp;
+    }
+    for (int j = 0; j < nb; j++) progression_gift_adopt(t, &back[j]);   /* (no room: the note waits, holding its place) */
     for (int k = 0; k < g->n_given; k++)
-        for (int i = 0; i < t->n_fish; i++) if (t->fish[i].uid == g->given[k].uid) { progression_give_out(t, i); break; }
+        if (!g->given[k].back)
+            for (int i = 0; i < t->n_fish; i++) if (t->fish[i].uid == g->given[k].uid) { progression_give_out(t, i); break; }
     for (int k = 0; k < g->n_arr; ) {
         bool here = false;
         for (int i = 0; i < t->n_fish; i++) here |= t->fish[i].uid == g->arriving[k].uid;
@@ -1040,8 +1251,15 @@ static void gift_boot(tank_t *t) {
 void progression_fry_home(tank_t *t, int slot) {
     if (slot < 0 || slot >= t->n_fish || !t->fish[slot].born_away) return;
     t->fish[slot].born_away = false;
+    newest(t, slot);                         /* (its count's picture: this fry - F3) */
+    mutation_born(t, slot);                  /* (one of ours, born with something new: FIRST MUTATION now it is home - Strato,
+                                                R-seam-keeper-sees S1) */
+    pop_marks(t);                            /* the tank's count, and the birth's sand dollars, now it is here (audit P4) */
+    sd_award(t, SD_BIRTH);
     owe_birth(slot);
-    mark_dirty();
+    progression_save(t);                     /* (saved at once, as a birth here and a fry kept: a cut in the 30 s coalesce found it
+                                                next door again at the boot - home from bubbles, its birth flow and count again;
+                                                0.4.1 audit round 2, N1-fry) */
 }
 
 /* ---- fry for sale (0.3.5) ---- */
@@ -1100,10 +1318,11 @@ bool progression_buy_fry(tank_t *t, int k) {
     t->sd_balance -= SD_PRICE_FRY;
     s_fry_sold |= (uint8_t)(1u << k);
     s_age[slot] = 0; s_starve_s[slot] = 0;
-    t->fish[slot].ms_bits = MS_ARRIVED;
+    t->fish[slot].ms_bits = MS_ARRIVED | MS_BOUGHT;   /* (FAMILY's THE SHOP: audit P10) */
     t->sd_paid_fish[slot] = 0;                     /* its stages pay; no birth dollars - it was bought */
+    arrived(t); newest(t, slot);
     apply_growth(&t->fish[slot]);
-    if (t->n_fish <= N_FISH_MAX) set_tms(t, POP_TMS[t->n_fish]);
+    pop_marks(t);
     if (fish_held(t) >= POP_CAP) { s_arrival_pending = false; s_spawn_in = -1; t->spawning = false; t->spawn_danced = 0; }   /* the last slot: a staged fry is called off */
     s_newborn = slot;                              /* owed its welcome: the birth flow (setup.c) */
     progression_save(t);
@@ -1122,7 +1341,7 @@ static int care_gates(const tank_t *t, gate_t g[CARE_GATES_MAX]) {
     float min_trust = 10;
     for (int i = 0; i < t->n_fish; i++)
         if (t->fish[i].trust < min_trust) min_trust = t->fish[i].trust;
-    int last = t->n_fish - 1;
+    int last = progression_youngest(t);            /* (the youngest by age, not the last slot - P15) */
     float age = last >= 0 ? (float)s_age[last] : 0;
     int n = 0;
     /* the MEALS gate after a sale: the table's count, or the meals owed since
@@ -1242,14 +1461,14 @@ int progression_next_fry(const tank_t *t, fry_req_t out[FRY_REQ_MAX], bool *stag
             snprintf(r->progress, sizeof r->progress, r->met ? "DONE" : "NOT YET");
             break;
         case FRY_REQ_GROW: {
-            const fish_t *f = &t->fish[t->n_fish - 1];
+            const fish_t *f = &t->fish[progression_youngest(t)];
             snprintf(r->title, sizeof r->title, "GROW");
             snprintf(r->words, sizeof r->words, "THE YOUNGEST FISH MUST");
             snprintf(r->words2, sizeof r->words2, need >= STAGE_ADULT_AGE ? "GROW INTO AN ADULT" : "GROW INTO A JUVENILE");
             snprintf(r->progress, sizeof r->progress, "%s IS %s", f->name, STAGE_WORDS[f->stage & 3]);
             break; }
         case FRY_REQ_CHANGE: {
-            const fish_t *f = &t->fish[t->n_fish - 1];
+            const fish_t *f = &t->fish[progression_youngest(t)];
             snprintf(r->title, sizeof r->title, "CHANGE");
             snprintf(r->words, sizeof r->words, "%s'S PERSONALITY", f->name);
             snprintf(r->words2, sizeof r->words2, "MUST START TO SHIFT");
@@ -1344,6 +1563,7 @@ static int tail_slot(const save_t *sv, int i, uint32_t *used) {
 
 void progression_fresh(tank_t *t) {
     newer_drop();                    /* a new tank: no older save's tail goes with it */
+    memset(s_mark, 0, sizeof s_mark); s_marks_known = false;   /* (and no shelf markers - a reset puts the old tank's back: its journal carries them) */
     tank_new_population(t);          /* a new tank: two FRY, contrasting -
                                       * the keeper watches them grow up */
     for (int i = 0; i < N_FISH_MAX; i++) s_age[i] = 0;
@@ -1355,23 +1575,89 @@ void progression_fresh(tank_t *t) {
     s_setup_pending = true;          /* a new tank: welcome, names, colours */
     s_newborn = -1; s_newborn_qn = 0;
     s_sd_pending = 0;                         /* a fresh ledger (tank_init zeroed the tank's) */
-    s_sale_need = 0;
+    s_sale_need = 0; s_sold_before_035 = false;
     s_fry_seed = 0; s_fry_age = 0; s_fry_sold = 0;
     s_booted = true;
     mark_dirty();
 }
 
+/* THE RESET FARM (0.4.1, progression.h SD_RCPT_*): what the tank's starting set has paid - its receipts, and an older
+   save's own ledger (its grass paid at least once; its fish paid full trust) */
+/* a save from before 0.4.1 has no receipts byte (pad_tip, zero): what its ledger shows paid stands in, folded in ONCE at
+   its load - the grass paid, and the fish whose full trust is marked paid (two at most). From 0.4.1 on the byte is the
+   truth (sd_tick marks what really paid): a gift's ledger says SD_PAID_TRUST with nothing paid here, and counted at every
+   reset it made the new pair's trust pay short (0.4.1 audit round 1, R-progression F2 / R-seam-saves F1) */
+static uint8_t receipts_fold(const tank_t *t, uint32_t release) {
+    uint8_t r = t->sd_receipts;
+    if (t->sd_inches_paid > 0) r |= SD_RCPT_GRASS;
+    unsigned n = SD_RCPT_TRUST(r), m = 0;
+    for (int i = 0; i < t->n_fish; i++) {         /* every fish whose trust bonus is marked paid - but a gift, marked paid at any trust and
+                                                     never paid here (round 2, R2P-2): gifts came with 0.4.0, and a 0.4.0 save tells one
+                                                     by its RECEIVED note (the last 16 a tank took in). Never by its trust now: trust
+                                                     falls with a tap or hunger, and a pair really paid read as unpaid (review F1) */
+        if (!(t->sd_paid_fish[i] & SD_PAID_TRUST)) continue;
+        if (release >= 0x00040000u && gift_saved_received(t->fish[i].uid)) continue;
+        m++;
+    }
+    if (m > n) n = m > 2 ? 2 : m;
+    return (uint8_t)((r & SD_RCPT_GRASS) | n << SD_RCPT_TRUST_SH);
+}
+static uint8_t receipts_of(const tank_t *t) { return t->sd_receipts; }
+/* a fresh tank made by a reset: its starting set paid already, as the receipts say - its starting grass is owed before
+   any cut pays (trim_px starts that far below zero; the grass that grows back pays), its pair's full trust is paid; and
+   its fish's first meal waits, as after any boot */
+static void reset_fresh(tank_t *t, uint8_t r) {
+    t->sd_receipts = r;
+    if (r & SD_RCPT_GRASS) {
+        float px = 0;
+        for (int b = 0; b < tank_veg_beds(t); b++) {
+            if (tank_veg_kind(t, b) != VEG_KIND_GRASS) continue;
+            int n; float x0, x1; tank_veg_bed(t, b, &x0, &x1, NULL, &n);
+            for (int i = 0; i < n && i < VEG_FRONDS_MAX; i++) px += fmaxf(0, t->veg_h[b][i] - VEG_NUB) * (VEG_SEGS_FULL - 1) * VEG_PAY_PX;
+        }
+        t->trim_px = -px;
+    }
+    for (int k = 0; k < (int)SD_RCPT_TRUST(r) && k < t->n_fish; k++) t->sd_paid_fish[k] |= SD_PAID_TRUST;
+    for (int i = 0; i < t->n_fish; i++) t->fish[i].meal_pay_wait = SD_MEAL_GAP_S;
+}
+/* the reset's journal (0.4.1): the old tank was wiped, then the new one saved - a power cut between booted a fresh tank
+   with an EMPTY wallet (the wallet rode in RAM). Now the new tank is made in RAM first, then `reset` in the frame (the two
+   tank IDs, the carry, the receipts), then the wipe, the save, the journal gone; the boot finishes one cut short */
+#define RESET_MAGIC 0x54535250u                     /* "PRST" */
+typedef struct { uint32_t magic, old_uid, new_uid, shelf_id; progression_carry_t carry; uint8_t receipts, pad[3]; uint32_t marks[3]; } reset_j_t;
+static void reset_settle(tank_t *t, bool loaded) {
+    reset_j_t j; size_t got = 0;
+    if (!shelf_port_frame_get("reset", &j, sizeof j, &got) || got != sizeof j || j.magic != RESET_MAGIC) return;
+    if (!loaded && shelf_now()->id == j.shelf_id) {   /* no save, the same place on the shelf: the old tank wiped, the new one never
+                                                       saved - this fresh tank is it (by the save, not its ID: a fresh tank's ID can
+                                                       repeat). A save loaded is never wiped here, whoever's it is */
+        persist_port_erase(); collection_reset(); gift_clear(gift_of(t));   /* (whatever of the old tank's books the cut left) */
+        progression_carry_give(t, &j.carry);
+        memcpy(s_mark, j.marks, sizeof s_mark); s_marks_known = true;   /* (the shelf's markers stay with the place, as the wallet does - round 2) */
+        reset_fresh(t, j.receipts);
+        if (!progression_save(t)) return;           /* (refused: the next boot again) */
+    }                                               /* (a save: the old tank whole - the reset never began - or the new one, it finished) */
+    shelf_port_frame_del("reset");
+}
 /* the keeper's reset (BOOT 5 s + a tap): the tank on the glass only (D13,
    the tank switcher) - the shelf, the wallet and the board's settings stay */
 void progression_reset(tank_t *t, uint32_t seed) {
-    progression_carry_t c; progression_carry_take(t, &c);
-    persist_port_erase(); collection_reset(); gift_clear(gift_of(t));
+    reset_j_t j; memset(&j, 0, sizeof j);
+    j.magic = RESET_MAGIC; j.old_uid = t->uid; j.receipts = receipts_of(t);
+    progression_carry_take(t, &j.carry);
+    memcpy(j.marks, s_mark, sizeof j.marks);   /* the shelf's markers stay with the place, as the wallet does: a NEW TANK paid just
+                                                  before, its journal left, still reads paid after the reset (round 2) */
     render_give_modal_close();       /* the old tank's GIVE modal (the evening sweep: CANNOT BE GIVEN RIGHT NOW over the new one) */
     tank_init(t, seed);
     progression_fresh(t);
-    progression_carry_give(t, &c);
+    progression_carry_give(t, &j.carry);
+    memcpy(s_mark, j.marks, sizeof s_mark); s_marks_known = true;
     tank_ensure_ids(t);              /* a new tank: a new tank ID (tank_init cleared the old one) */
-    progression_save(t);
+    reset_fresh(t, j.receipts);
+    j.new_uid = t->uid; j.shelf_id = shelf_now()->id;
+    shelf_port_frame_set("reset", &j, sizeof j);   /* (refused: as before 0.4.1 - only a cut in the next moment costs the wallet) */
+    persist_port_erase(); collection_reset(); gift_clear(gift_of(t));
+    if (progression_save(t)) shelf_port_frame_del("reset");
 }
 
 static void set_age(tank_t *t, int idx, float seconds, bool down) {
@@ -1424,7 +1710,7 @@ static void relayout(tank_t *t, save_t *sv) {
  * *saved_unix gets the save's wall-clock stamp (0 if unknown). */
 static bool load_save(tank_t *t, int64_t *saved_unix) {
     save_t sv; memset(&sv, 0, sizeof sv);
-    *saved_unix = 0; s_loaded_release = 0; s_loaded_unix = 0;
+    *saved_unix = 0; s_loaded_release = 0; s_loaded_unix = 0; s_sold_before_035 = false;
     /* an older build's shorter save fills a prefix; the zeroed rest reads as
      * every later tail's defaults (see the tail comments in save_t) */
     /* a NEWER build's longer save (a rollback) loads its head - tails only
@@ -1476,12 +1762,21 @@ static bool load_save(tank_t *t, int64_t *saved_unix) {
         if (ts >= 0 && sv.fish_uid[ts]) { f->uid = sv.fish_uid[ts]; f->parent_uid[0] = sv.parent_uid[ts][0]; f->parent_uid[1] = sv.parent_uid[ts][1]; }
         else upgraded = true;
         if (ts >= 0 && (sv.link_away >> ts & 1)) { f->away = true; any_away = true; }   /* next door when it was saved */
+        f->born_away = f->away && ts >= 0 && (sv.link_born_away >> ts & 1);           /* ... born there, its welcome owed (P5) */
     }
     if (any_away) t->link_restore_at = t->clock + LINK_BOOT_RESTORE_S;   /* home from bubbles once the host's lease is surely over */
     if (sv.tank_uid) t->uid = sv.tank_uid;
     tank_ensure_ids(t);                       /* a pre-0.4 save: fresh IDs, the parents' from their slots */
     s_setup_pending = sv.setup_pending != 0;
     s_newborn = sv.newborn_p1 && sv.newborn_p1 <= sv.n_fish ? sv.newborn_p1 - 1 : -1; s_newborn_qn = 0;
+    if (s_newborn >= 0 && sv.saved_release >= 0x00030500u && sv.saved_release < 0x00040100u) {
+                                                   /* a shop fry bought before 0.4.1 (0.3.5..0.4.0: the shop's fry, no mark
+                                                      yet), still owed its welcome: its mark (P10). A fish owed its welcome with
+                                                      no parent at all was bought - a parent is never sold while a welcome is
+                                                      owed (keeper_may_part); an older save may have no parents saved at all */
+        fish_t *nf = &t->fish[s_newborn];
+        if (nf->parent_a < 0 && nf->parent_b < 0 && !nf->parent_uid[0] && !nf->parent_uid[1] && !(nf->ms_bits & MS_CROSSBRED)) nf->ms_bits |= MS_BOUGHT;
+    }
     if (sv.bubble_x > 0) tank_set_bubble_x(t, sv.bubble_x);
     t->light_idle_s = sv.light_idle_s ? sv.light_idle_s : LIGHT_IDLE_S;
     t->light_auto = sv.light_auto != 0;
@@ -1494,8 +1789,9 @@ static bool load_save(tank_t *t, int64_t *saved_unix) {
     t->light_override = false; t->light_on = true;   /* never restored (2026-09-15): a saved
                                                       * override once froze a tank in permanent day */
     t->feed_spot_x = sv.feed_spot_x; t->player_feedings = sv.player_feedings;
-    t->hold_approaches = sv.hold_approaches; t->tank_ms_bits = sv.tank_ms_bits;
+    t->hold_approaches = sv.hold_approaches; t->tank_ms_bits = sv.tank_ms_bits & ~TMS_RETIRED_4;   /* (an older six-fish tank's sextet: gone) */
     t->tank_ms_seen = sv.tank_ms_seen & t->tank_ms_bits;
+    pop_marks(t);                                  /* a count a gift never marked (before 0.4.1): back, quietly */
     for (int b = 0; b < VEG_BEDS; b++) {
         if (sv.veg_h[b][0] > 0)
             for (int i = 0; i < VEG_FRONDS_MAX; i++) t->veg_h[b][i] = sv.veg_h[b][i];
@@ -1505,11 +1801,20 @@ static bool load_save(tank_t *t, int64_t *saved_unix) {
     memcpy(t->algae, sv.algae, ALGAE_CELLS);
     t->trims = sv.trims; t->cells_cleaned = sv.cells_cleaned;
     /* the sand dollar tail (zeros for an older save: the ledger back-pays) */
-    t->sd_balance = sv.sd_balance; t->sd_earned = sv.sd_earned; t->sd_unlocks = sv.sd_unlocks & ((1u << SD_ITEM_COUNT) - 1);
-    t->sd_shelved = sv.sd_shelved & t->sd_unlocks & SD_DECOR_BITS;   /* the shelf (0.3.9): only owned, placeable pieces are ever on it */
+    t->sd_balance = sv.sd_balance; t->sd_earned = sv.sd_earned; t->sd_unlocks = sv.sd_unlocks & (((1u << SD_ITEM_COUNT) - 1) | SD_BG_BITS);   /* (the backgrounds' bits, 0.4.1) */
+    t->sd_shelved = sv.sd_shelved & t->sd_unlocks & SD_DECOR_BITS;
+    t->bg_now = sv.bg_now < BG_N ? sv.bg_now : BG_OPEN;   /* the background (0.4.1) */   /* the shelf (0.3.9): only owned, placeable pieces are ever on it */
     t->sd_locked = sv.sd_locked & t->sd_unlocks & SD_DECOR_BITS;     /* the locks (0.3.9): the same bits */
     for (int i = 0; i < N_FISH_MAX; i++) t->sd_paid_fish[i] = i < t->n_fish ? sv.sd_paid_fish[i] : 0;
-    t->sd_colonies_paid = sv.sd_colonies_paid; t->sd_inches_paid = sv.sd_inches_paid;
+    t->sd_colonies_paid = sv.sd_colonies_paid; t->sd_inches_paid = sv.sd_inches_paid; t->sd_receipts = sv.sd_receipts;
+    for (int k = 0; k < 3; k++) s_mark[k] = sv.shelf_mark[k];   /* (the shelf's markers: zeros in an older save) */
+    s_marks_known = true;
+    if (!(t->sd_receipts & SD_RCPT_KNOWN)) {      /* not yet the truth: an older save's ledger folded in - once, keyed on the byte, not the
+                                                     release (a crew early build's 0.4.0.201 save folded at every load: round 2, R2-5) -
+                                                     or a 0.4.1 save taken as it is */
+        if (sv.saved_release < 0x00040100u) t->sd_receipts = receipts_fold(t, sv.saved_release);
+        t->sd_receipts |= SD_RCPT_KNOWN;
+    }
     t->algae_colonies = sv.algae_colonies; t->trim_px = sv.trim_px;
     if (sv.snail_x > 0) { t->snail_x = sv.snail_x; t->snail_y = sv.snail_y; }
     t->snail_grazed = sv.snail_grazed;
@@ -1519,6 +1824,7 @@ static bool load_save(tank_t *t, int64_t *saved_unix) {
         tank_veg_sync(t);
     }
     if (sv.plant_x > 0) tank_decor_set(t, 0, sv.plant_x, sv.plant_z1 ? sv.plant_z1 - 1 : DECOR_Z_MIDDLE);
+    tank_plant_set_under(t, sv.plant_under == 1);   /* (0.4.1: a pad byte before, written 0 - IN FRONT, the look every older plant had) */
     if (sv.castle_x > 0) tank_decor_set(t, 2, sv.castle_x, sv.castle_z1 ? sv.castle_z1 - 1 : DECOR_Z_FRONT);
     if (sv.coral_x > 0) tank_decor_set(t, 3, sv.coral_x, sv.coral_z1 ? sv.coral_z1 - 1 : DECOR_Z_FRONT);   /* (an AMONG save reads as FRONT) */
     if (sv.coral_rgb) tank_coral_set_rgb(t, sv.coral_rgb);
@@ -1566,6 +1872,7 @@ static bool load_save(tank_t *t, int64_t *saved_unix) {
     s_sd_pending = 0;
     s_arrival_pending = sv.arrival_pending; s_spawn_in = -1;
     s_sale_need = sv.sale_meals_need > 0 ? sv.sale_meals_need : 0;
+    s_sold_before_035 = s_sale_need > 0 && sv.saved_release < 0x00030500u;   /* (PT_RELEASE_NUM's 0.3.5; no GIVE before 0.4) */
     s_fry_seed = sv.fry_seed; s_fry_age = sv.fry_age_min * 60.0f; s_fry_sold = sv.fry_sold & ((1u << FRY_OFFER_N) - 1);
     s_prev_night = t->night;
     /* what this load made up (a pre-0.4 tank's secrets and IDs) is saved at
@@ -1595,6 +1902,7 @@ void progression_settings_changed(void) { mark_dirty(); }
 
 void progression_carry_take(const tank_t *t, progression_carry_t *c) {
     memset(c, 0, sizeof *c);
+    c->mark = new_mark(SHELF_MARK_CARRY);   /* (the swap's: the save that applies it will carry it - a reset's carry never reads it) */
     c->sd_balance = t->sd_balance;
     c->light_idle_s = (uint16_t)t->light_idle_s; c->light_auto = t->light_auto; c->light_tip_seen = t->light_tip_seen;
     c->screen_turned = t->screen_turned; c->orient_lock = t->orient_lock; c->orient_q = t->orient_q;
@@ -1646,8 +1954,13 @@ float progression_wake(tank_t *t, int64_t now_unix) {
     int64_t saved_unix;
     s_booted = true;
     collection_load();
-    if (!load_save(t, &saved_unix)) { progression_fresh(t); tank_ensure_ids(t); gift_boot(t); return -1; }
+    if (!load_save(t, &saved_unix)) { progression_fresh(t); tank_ensure_ids(t); wake_carry(t); gift_boot(t); reset_settle(t, false); return -1; }
+    wake_carry(t);                           /* (a SWAP IN's carry, before anything this wake pays: round 2) */
     gift_boot(t);
+    reset_settle(t, true);
+    for (int i = 0; i < t->n_fish; i++) t->fish[i].meal_pay_wait = SD_MEAL_GAP_S;   /* (0.4.1) a boot starts each fish's meal wait
+                                                       FULL - the time away runs it down below (a night, a power cut): a quick
+                                                       power-cycle paid every fish's meal again (the reset farm's little brother) */
     float slept = -1;
     if (now_unix > 0 && saved_unix > 0 && now_unix > saved_unix) {
         int64_t span = now_unix - saved_unix;
@@ -1709,7 +2022,8 @@ void progression_tick(tank_t *t, float dt) {
         if (warm > 0) { f->sociable = clampf(f->sociable + k * warm, 0.05f, 0.95f); pressure += k * warm; }
         f->sociable += (f->sociable0 - f->sociable) * k * TRAIT_SETTLE;
         f->drift_acc += pressure;
-        if (fabsf(f->bold - f->bold0) >= 0.11f || fabsf(f->sociable - f->sociable0) >= 0.11f) changed_someone = true;
+        if (fabsf(f->bold - f->bold0) >= 0.11f || fabsf(f->sociable - f->sociable0) >= 0.11f) { if (!(f->ms_bits & MS_CAME_CHANGED)) changed_someone = true; }
+        else if (f->ms_bits & MS_CAME_CHANGED) { f->ms_bits &= ~MS_CAME_CHANGED; mark_dirty(); }   /* (settled back: its own again) */
 
         /* milestones: firsts the fish chose to do */
         if (f->goal.id == GOAL_DART_PLAY && f->goal_age > 1.0f) set_ms(f, MS_FIRST_DART);
@@ -1741,10 +2055,11 @@ void progression_tick(tank_t *t, float dt) {
     if ((t->sd_unlocks & SD_ITEM_SEAHORSE) && t->sh_eaten > 0) set_tms(t, TMS_SEAHORSE_FED);   /* its first snack (0.3.6) */
     if ((t->sd_unlocks & SD_ITEM_CRAB) && t->cr_found > 0) set_tms(t, TMS_CRAB_FIND);         /* the crab's first find, taken (0.3.9) */
     if (reef_visit) set_tms(t, TMS_FIRST_REEF);  /* a fish chose to look at the reef cluster */
-    for (int i = 0; i < t->n_fish; i++)            /* a fry born with something neither parent shows (0.4); its
-                                                      notice waits for the birth flow, as every notice does */
-        if (t->fish[i].mutated) { set_tms(t, TMS_FIRST_MUTATION); break; }
-    if (s_sale_need > 0) set_tms(t, TMS_FIRST_SALE);   /* a tank that sold a fish before 0.3.5: its badge, and the fry */
+    /* (FIRST MUTATION: set at a birth here - mutation_born - not by any fish that has one: a mutated gift, or one of
+       ours born next door, earned it for the tank that took it in, audit P3) */
+    /* a tank that sold a fish before 0.3.5: its badge, and the fry - once, from the save's release (0.4.1 audit P1: any
+       wait counted here, and a GIVE's wait for the next fry earned FIRST FISH SOLD and opened the shop's fry) */
+    if (s_sold_before_035) { s_sold_before_035 = false; set_tms(t, TMS_FIRST_SALE); }
     fry_age(t, aged);
     if (t->trims != s_prev_trims || t->cells_cleaned != s_prev_cleaned) {
         s_prev_trims = t->trims; s_prev_cleaned = t->cells_cleaned;
@@ -1846,6 +2161,8 @@ void progression_tick(tank_t *t, float dt) {
 }
 
 bool progression_save(tank_t *t) {
+    shelf_tidy();                                      /* (a journal or carry a refused write left: gone BEFORE the wallet moves on the flash
+                                                          - a boot never reads it against a wallet the keeper changed since, R-saves S2/S3/S8) */
     kin_flush();                                       /* (the KIN book's waiting change, with the tank's: sleep, a SWAP IN, a sale) */
     save_t sv; memset(&sv, 0, sizeof sv);
     sv.magic = SAVE_MAGIC; sv.saved_unix = clock_port_now_unix(); sv.clock = (float)t->clock;
@@ -1872,12 +2189,13 @@ bool progression_save(tank_t *t) {
     sv.trims = t->trims; sv.cells_cleaned = t->cells_cleaned;
     sv.sd_balance = t->sd_balance; sv.sd_earned = t->sd_earned; sv.sd_unlocks = t->sd_unlocks; sv.sd_shelved = t->sd_shelved; sv.sd_locked = t->sd_locked;
     for (int i = 0; i < N_FISH_MAX; i++) sv.sd_paid_fish[i] = t->sd_paid_fish[i];
-    sv.sd_colonies_paid = t->sd_colonies_paid; sv.sd_inches_paid = t->sd_inches_paid;
+    sv.sd_colonies_paid = t->sd_colonies_paid; sv.sd_inches_paid = t->sd_inches_paid; sv.sd_receipts = t->sd_receipts;
+    for (int k = 0; k < 3; k++) sv.shelf_mark[k] = s_mark[k];
     sv.algae_colonies = t->algae_colonies; sv.trim_px = t->trim_px;
     sv.snail_x = t->snail_x > 0 ? t->snail_x : 0; sv.snail_y = t->snail_y > 0 ? t->snail_y : 0;
     sv.snail_grazed = t->snail_grazed;
     for (int i = 0; i < VEG_FRONDS_MAX; i++) sv.veg_h3[i] = (t->sd_unlocks & SD_ITEM_PLANT) ? t->veg_h[3][i] : 0;
-    sv.plant_x = t->plant_x > 0 ? t->plant_x : 0; sv.plant_z1 = (uint8_t)(t->plant_z + 1);
+    sv.plant_x = t->plant_x > 0 ? t->plant_x : 0; sv.plant_z1 = (uint8_t)(t->plant_z + 1); sv.plant_under = tank_plant_under(t) ? 1 : 0;
     sv.castle_x = t->castle_x > 0 ? t->castle_x : 0; sv.castle_z1 = (uint8_t)(t->castle_z + 1);
     sv.coral_x = t->coral_x > 0 ? t->coral_x : 0; sv.coral_z1 = (uint8_t)(t->coral_z + 1); sv.coral_rgb = t->coral_rgb;
     sv.coral_growth = t->coral_growth;
@@ -1896,6 +2214,7 @@ bool progression_save(tank_t *t) {
     sv.cr_find_wait = 1u + (t->cr_find > 0 ? 0u : (uint32_t)fmaxf(0, t->cr_find_cool));   /* one held up: due again at the next load */
     sv.lay_w = TANK_W; sv.lay_h = TANK_H; sv.lay_fx0 = TANK_FX0; sv.lay_fx1 = TANK_FX1;   /* this board's world (0.3.9.3) */
     sv.lay_cols = ALGAE_COLS; sv.lay_rows = ALGAE_ROWS;
+    sv.bg_now = t->bg_now;                            /* the background (0.4.1) */
     if (t->sd_unlocks & SD_ITEM_SEAHORSE) {
         sv.sh_s = t->sh_s > 0 ? (float)t->sh_s : 0; sv.sh_secs = 1u + (uint32_t)(t->sh_s > 0 ? t->sh_s : 0); sv.sh_hitches = t->sh_hitches; sv.sh_trust_passed = t->sh_trust_passed;
         sv.sh_eaten = t->sh_eaten; sv.sh_snack_pay = t->sh_snack_pay; sv.sd_snacks_paid = t->sd_snacks_paid; sv.sh_snack_cool = t->sh_snack_cool > 0 ? t->sh_snack_cool : 0;
@@ -1923,6 +2242,7 @@ bool progression_save(tank_t *t) {
         sv.fish_uid[i] = f->uid; sv.parent_uid[i][0] = f->parent_uid[0]; sv.parent_uid[i][1] = f->parent_uid[1];
         sv.fish_print[i] = fish_print(f->preset, f->bold0, f->sociable0);
         if (f->away) sv.link_away |= (uint8_t)(1u << i);
+        if (f->away && f->born_away) sv.link_born_away |= (uint8_t)(1u << i);
     }
     sv.tank_uid = t->uid;
     const void *out = &sv; size_t out_n = sizeof sv; uint8_t *joined = NULL;
@@ -1938,6 +2258,7 @@ bool progression_save(tank_t *t) {
         return false;
     }
     s_since_save = 0; s_dirty = false; s_dirty_since = 0;
+    gift_settle(t);
     return true;
 }
 
@@ -1945,6 +2266,14 @@ void progression_ack_milestones(tank_t *t) {
     bool changed = false;
     for (int i = 0; i < t->n_fish; i++)
         if (t->fish[i].ms_seen != t->fish[i].ms_bits) { t->fish[i].ms_seen = t->fish[i].ms_bits; changed = true; }
-    if (t->tank_ms_seen != t->tank_ms_bits) { t->tank_ms_seen = t->tank_ms_bits; changed = true; }
+    /* the tank's: only the badges the page drew (a page the keeper never flipped to keeps its rings - 0.4.1 audit round 1,
+       R-seam-keeper-sees S6), and every bit with no badge at all (the counts) */
+    uint32_t seen = t->tank_ms_seen | (t->tank_ms_bits & (render_milestones_tank_shown() | ~render_tank_badge_bits()));
+    if (t->tank_ms_seen != seen) { t->tank_ms_seen = seen; changed = true; }
     if (changed) mark_dirty();
 }
+#ifdef PT_SEAM
+/* (0.4.1 audit harness, --selftest-seam: the clocks it checks across the doors) */
+float   progression_dbg_starve(int i) { return i >= 0 && i < N_FISH_MAX ? s_starve_s[i] : 0; }
+int32_t progression_dbg_sale_need(void) { return s_sale_need; }
+#endif

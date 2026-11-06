@@ -40,6 +40,7 @@ static bool s_ok, s_up;
 static volatile bool s_sleep_req, s_warm_req;
 static int64_t s_quiet_since;
 static int s_volume = 100;                   /* percent (0.4: the settings slider), 0 = off */
+static int s_saved_volume = 100;             /* ... as last read from or written to NVS (audio_port_restore_volume) */
 static int16_t s_buf[BLOCK];
 /* cold-start settle, tunable live (director `snd settle <codec ms> <amp ms>`,
    `snd idle <s>`) until the bench says what the DAC and the NS4150B need */
@@ -160,6 +161,7 @@ static void load_volume(void) {
     if (nvs_get_u8(h, "sndp", &v) == ESP_OK && v <= 100) s_volume = v;
     else if (nvs_get_u8(h, "snd", &v) == ESP_OK && v <= 2) s_volume = audio_volume_from_level(v);
     nvs_close(h);
+    s_saved_volume = s_volume;
 }
 
 bool audio_port_init(i2c_master_bus_handle_t bus) {
@@ -180,7 +182,7 @@ bool audio_port_init(i2c_master_bus_handle_t bus) {
                       .invert_flags = { 0 } },
     };
     if (i2s_channel_init_std_mode(s_tx, &std) != ESP_OK) { ESP_LOGE(TAG, "I2S std init failed"); return false; }
-    audio_init((const int16_t *)_binary_sounds_bin_start, SND_BANK_SAMPLES);   /* flash-mapped: no RAM */
+    audio_init(_binary_sounds_bin_start, SND_BANK_BYTES);   /* flash-mapped: no RAM */
     load_volume(); audio_set_volume(s_volume);
     s_mx = xSemaphoreCreateMutex();
     if (!s_mx || xTaskCreatePinnedToCore(player, "audio", 4096, NULL, 6, &s_task, 1) != pdPASS) {   /* (no player, no sound: s_ok stays false -
@@ -226,7 +228,7 @@ void audio_port_preview_volume(int pct) {    /* not saved, but what audio_port_v
 }
 void audio_port_set_volume(int pct) {
     int was = s_volume;
-    s_volume = pct < 0 ? 0 : pct > 100 ? 100 : pct;
+    s_volume = pct < 0 ? 0 : pct > 100 ? 100 : pct; s_saved_volume = s_volume;
     if (s_ok) { xSemaphoreTake(s_mx, portMAX_DELAY); audio_set_volume(s_volume); xSemaphoreGive(s_mx); }
     mute_edge(was);
     nvs_handle_t h;                            /* "snd" too, the nearest old level: a board taken back to 0.3.x keeps a near volume */
@@ -237,6 +239,7 @@ void audio_port_set_volume(int pct) {
     if (s_volume) ESP_LOGI(TAG, "volume %d%%", s_volume); else ESP_LOGI(TAG, "volume off");
 }
 int  audio_port_volume(void) { return s_volume; }
+void audio_port_restore_volume(void) { audio_port_preview_volume(s_saved_volume); }   /* a preview undone: the saved level back (mute's edges too), nothing written, no sound */
 void audio_port_sleep(void) {
     if (!s_ok || !s_up) return;
     s_sleep_req = true; xTaskNotifyGive(s_task);

@@ -8,7 +8,9 @@ include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 execute_process(COMMAND git describe --always --dirty --exclude=*
                 WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}
                 OUTPUT_VARIABLE PT_BUILD_ID OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
-if(PT_BUILD_ID)
+if(PT_EARLY_ID)                     # tools/crew_release.py: "<commit>-early<n>" (the build's own commit, clean)
+    set(PROJECT_VER ${PT_EARLY_ID})
+elseif(PT_BUILD_ID)
     set(PROJECT_VER ${PT_BUILD_ID})
 endif()
 # execute_process runs at configure time only: without this, a build after a

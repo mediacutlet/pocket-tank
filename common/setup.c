@@ -4,6 +4,7 @@
 #include "tank_events.h"
 #include "render.h"
 #include "progression.h"
+#include "touch_gate.h"
 #include <string.h>
 #include <math.h>
 #include <stdio.h>
@@ -44,9 +45,11 @@ static float s_ly;             /* last y, for the wheel */
 static float s_acc;            /* vertical travel toward the next step */
 static bool  s_spun;           /* this press has turned the wheel (or moved the column): no tap on release */
 static bool  s_sell_armed;     /* the placement page's SELL tapped once (2026-09-24) */
+static double s_press_clock;   /* the tank clock at setup_touch's press (0.4.1 audit round 2, R2-1): SELL's wait is read there */
+static bool   s_tap_press;     /* ... named for the release's setup_activate (a direct call has none: its press is its lift) */
 static double s_sell_clock;    /* ... when: a second tap within SETUP_SELL_WAIT_S is the same press doubled, not the yes (0.4, the
                                   11-02 sweep: a double-tap sold the piece - after the pumpkin leaves the shop, for good) */
-#define SETUP_SELL_WAIT_S 0.6f   /* as the fish card's SELL (render.c MSP_SELL_WAIT_S) */
+#define SETUP_SELL_WAIT_S TAP_W_S   /* as the fish card's SELL (render.c MSP_SELL_WAIT_S) */
 static int   s_same_note;      /* the editor (0.4): frames left of "SAME AS ITS BODY" after a tap on the struck-out swatch */
 /* the legacy keyboards (setup.h, SETUP_KBD_*) */
 static int  s_kbd;             /* the name page's design: the wheel unless the director says otherwise */
@@ -62,7 +65,8 @@ static bool page_is_last(void) { return s_page == SETUP_PG_CARE || s_page == SET
 static bool page_one_button(void) { return s_page == SETUP_PG_WELCOME || s_page == SETUP_PG_BORN; }   /* a lone NEXT at the foot */
 static int  first_page(void) { return s_rename ? SETUP_PG_RENAME : s_place ? SETUP_PG_PLACE : s_birth ? SETUP_PG_BORN : SETUP_PG_WELCOME; }
 static bool nav_on_top(void) { return (page_is_name() && s_kbd != SETUP_KBD_GRID) || page_is_look() || s_page == SETUP_PG_BUBBLES || s_page == SETUP_PG_PLACE; }
-static int  place_y(void) { return s_item == 3 ? SETUP_PLACE_CORAL_Y : s_item == 4 ? SETUP_PLACE_CLUSTER_Y : SETUP_PLACE_Y; }   /* where the drag zone starts */
+static bool s_plant_two;                  /* the sword plant's page has its second row (a piece beside it) - as last drawn, for the hit test */
+static int  place_y(void) { return s_item == 3 ? SETUP_PLACE_CORAL_Y : s_item == 4 ? SETUP_PLACE_CLUSTER_Y : s_item == 0 && s_plant_two ? SETUP_PLACE_PLANT2_Y : SETUP_PLACE_Y; }   /* where the drag zone starts */
 /* a fish's parent w (0 = parent_uid[0] / parent_a, 1 = the other), wherever it
    lives (2026-10-06): one of ours by its ID - away or not - else a fish of
    another tank by name (kin: a visitor, a cross-tank fry's other parent),
@@ -78,6 +82,25 @@ static parent_t parent_of(const tank_t *t, const fish_t *f, int w) {
     const kin_t *k = kin_find(uid);
     if (k) { p.name = k->name; p.color = k->color; p.bold = k->bold; p.sociable = k->sociable; p.known = true; }
     return p;
+}
+/* where a fry came from (0.4.1): a fry from the shop is marked so at the sale (MS_BOUGHT, audit P10 - no parent slot
+   and no ID was the test, and a fish born here whose parents were both sold before 0.4 has neither: its FAMILY said THE
+   SHOP; with no parent known it reads "?", as 0.4.0). A fry born next door and come home (a cross-tank fry,
+   MS_CROSSBRED) has two parent IDs and no slot here (passport_to_fish gives none); its parents are named, wherever they live */
+static bool from_shop(const fish_t *f) { return (f->ms_bits & MS_BOUGHT) != 0; }
+static bool born_next_door(const fish_t *f) { return (f->ms_bits & MS_CROSSBRED) && f->parent_a < 0 && f->parent_b < 0 && !from_shop(f); }
+void setup_born_lines(const tank_t *t, int fish, char *l1, size_t n1, const char **l2) {
+    const fish_t *f = &t->fish[fish];
+    bool shop = from_shop(f);                                         /* bought (0.3.5): no parents, in at the surface */
+    if (shop) snprintf(l1, n1, "FROM THE SHOP,");
+    else snprintf(l1, n1, "BORN TO %s AND %s", parent_of(t, f, 0).name, parent_of(t, f, 1).name);
+    *l2 = shop ? "IN AT THE SURFACE." : born_next_door(f) ? "NEXT DOOR." : "DOWN IN THE GRASS.";
+}
+const char *setup_from_name(const tank_t *t, int fish, int g) {
+    const fish_t *f = &t->fish[fish];
+    if (f->mutated == g + 1) return "NEW!";
+    if (from_shop(f)) return "THE SHOP";                              /* (0.4.1: was "?" on every row) */
+    return parent_of(t, f, (f->from_b >> g & 1) ? 1 : 0).name;
 }
 /* a mutation in words for the announcement (0.4): "SOMETHING NEW: SAIL FINS";
    false = none */
@@ -120,6 +143,7 @@ void setup_begin_place(tank_t *t, int item) {
     if (!tank_decor_placeable(item)) return;
     s_active = true; s_birth = false; s_place = true; s_rename = false; s_item = item; s_fish = -1; s_page = SETUP_PG_PLACE; s_slot = 0; s_down = false;
     s_sell_armed = false; s_moved = false; s_ref = -1;
+    s_plant_two = item == 0 && order_ref(t) >= 0;
     stage(t);
 }
 int setup_poll_birth(tank_t *t) {
@@ -384,10 +408,14 @@ int setup_hit(float x, float y) {
             if (in_box(x, y, SETUP_TOP_LOCK_X, SETUP_TOP_BTN_Y, SETUP_PL_BTN_W, SETUP_BTN_H, m)) return SETUP_HIT_LOCK;
         }
         else if (in_box(x, y, SETUP_TOP_NEXT_X, SETUP_TOP_BTN_Y, SETUP_TOP_BTN_W, SETUP_BTN_H, m)) return SETUP_HIT_NEXT;
-        if (s_place && in_box(x, y, SETUP_ORD_X0, SETUP_ORD_Y, SETUP_ORD_W, SETUP_BTN_H, 6)) return SETUP_HIT_BCK;   /* (every piece, the sword plant too) */
-        if (s_place && tank_decor_z_count(s_item) < 2 && in_box(x, y, SETUP_ORDSQ_X, SETUP_DEPTH_Y, 2 * SETUP_DEPTH_SEG_W, SETUP_DEPTH_H, 6))
-            return SETUP_HIT_ORD0 + (x >= SETUP_ORDSQ_X + SETUP_DEPTH_SEG_W);   /* the plant's ORDER SQUARES (no piece beside it: setup_activate does nothing) */
-        if (s_place && in_box(x, y, SETUP_ORD_X1, SETUP_ORD_Y, SETUP_ORD_W, SETUP_BTN_H, 6)) return SETUP_HIT_FWD;
+        const bool plant = s_place && s_item == 0, two = plant && s_plant_two;   /* (the plant's page: two rows with a piece beside it) */
+        const int ord_y = two ? SETUP_ORD2_Y : SETUP_ORD_Y;
+        if (s_place && in_box(x, y, SETUP_ORD_X0, ord_y, SETUP_ORD_W, SETUP_BTN_H, 6)) return SETUP_HIT_BCK;   /* (every piece, the sword plant too) */
+        if (plant && in_box(x, y, SETUP_ORDSQ_X, SETUP_DEPTH_Y, 2 * SETUP_DEPTH_SEG_W, SETUP_DEPTH_H, 6))
+            return SETUP_HIT_SG0 + (x >= SETUP_ORDSQ_X + SETUP_DEPTH_SEG_W);    /* the plant's SEAGRASS squares (0.4.1) */
+        if (two && in_box(x, y, SETUP_ORDSQ_X, SETUP_ORDSQ2_Y, 2 * SETUP_DEPTH_SEG_W, SETUP_DEPTH_H, 6))
+            return SETUP_HIT_ORD0 + (x >= SETUP_ORDSQ_X + SETUP_DEPTH_SEG_W);   /* ... and its ORDER SQUARES, the row under them */
+        if (s_place && in_box(x, y, SETUP_ORD_X1, ord_y, SETUP_ORD_W, SETUP_BTN_H, 6)) return SETUP_HIT_FWD;
         if (!s_place && in_box(x, y, SETUP_TOP_BACK_X, SETUP_TOP_BTN_Y, SETUP_TOP_BTN_W, SETUP_BTN_H, m)) return SETUP_HIT_BACK;
         if (page_is_look() && in_box(x, y, SETUP_ROLL_X, SETUP_TOP_BTN_Y, SETUP_TOP_BTN_W, SETUP_BTN_H, m)) return SETUP_HIT_ROLL;
     } else {
@@ -462,7 +490,8 @@ void setup_activate(tank_t *t, int id) {
     if (s_place) {                                      /* DONE saves the spot; a layer button sets the depth; SELL twice sells */
         if (id == SETUP_HIT_SELL) {
             if (!s_sell_armed) { s_sell_armed = true; s_sell_clock = t->clock; return; }
-            if (t->clock - s_sell_clock < SETUP_SELL_WAIT_S) { s_sell_clock = t->clock; return; }   /* a doubled tap (or a mash): still armed, the wait again from it */
+            if (hold_spent_at(&s_sell_clock, s_tap_press ? s_press_clock : t->clock, t->clock, SETUP_SELL_WAIT_S)) return;   /* a doubled tap (or a mash, or a
+                                                               firm second press: read at its PRESS, R2-1): still armed (THE TOUCH RULE: not restarted) */
             s_sell_armed = false;
             if (progression_sell(t, s_item)) { s_active = false; tank_emit(TEV_CONFIRM, -1); }
             return;
@@ -484,6 +513,10 @@ void setup_activate(tank_t *t, int id) {
         else if (id == SETUP_HIT_BCK || id == SETUP_HIT_FWD) {                       /* the stack: a step; DONE saves it */
             const int dir = id == SETUP_HIT_FWD ? 1 : -1, past = tank_decor_neighbor(t, s_item, dir);
             if (tank_decor_shift(t, s_item, dir)) { s_moved = true; s_ref = past; }      /* (the squares follow the piece just passed) */
+        }
+        else if (s_item == 0 && (id == SETUP_HIT_SG0 || id == SETUP_HIT_SG0 + 1)) {   /* the SEAGRASS squares: the plant behind / in front of it */
+            const bool under = id == SETUP_HIT_SG0;
+            if (tank_plant_under(t) != under) { tank_plant_set_under(t, under); s_moved = true; }
         }
         else if (id == SETUP_HIT_ORD0 || id == SETUP_HIT_ORD0 + 1) {               /* the ORDER SQUARES: behind / in front of their piece - the arrow's step */
             const int ref = order_ref(t); const bool front = id == SETUP_HIT_ORD0 + 1;
@@ -557,7 +590,7 @@ void setup_touch(tank_t *t, float x, float y, bool down) {
     stage(t);                                           /* every frame: the tank keeps the fish on stage */
     if (!s_active) { s_down = down; return; }
     if (down && !s_down) {                              /* press */
-        s_px = x; s_py = y; s_ly = y; s_acc = 0; s_spun = false;
+        s_px = x; s_py = y; s_ly = y; s_acc = 0; s_spun = false; s_press_clock = t->clock;
         int h = setup_hit(x, y);
         if (page_is_name() && h >= SETUP_HIT_SLOT0 && h < SETUP_HIT_SLOT0 + FISH_NAME_MAX)
             pick_slot(&t->fish[page_fish()], h - SETUP_HIT_SLOT0);   /* picked on touch: the drag turns it */
@@ -582,7 +615,7 @@ void setup_touch(tank_t *t, float x, float y, bool down) {
     } else if (!down && s_down) {                       /* release: a tap, unless the wheel turned */
         if (!s_spun) {
             int h = setup_hit(s_px, s_py);
-            if (h && h == setup_hit(x, y)) setup_activate(t, h);
+            if (h && h == setup_hit(x, y)) { s_tap_press = true; setup_activate(t, h); s_tap_press = false; }
         }
     }
     s_down = down;
@@ -890,8 +923,10 @@ void render_setup(const tank_t *t, uint16_t *fb, int stride, double clock) {
            is named on the hint line ("UNDER THE CORAL"). At the ends of the
            DEPTH row since 0.3.9; the plant (no stack, three tiles) has none */
         int below = tank_decor_neighbor(t, s_item, -1), above = tank_decor_neighbor(t, s_item, 1);
-        ord_arrow(fb, stride, SETUP_ORD_X0, SETUP_ORD_Y, false, below >= 0);   /* (the sword plant too since 0.3.9.4: a piece in the stack like the rest) */
-        ord_arrow(fb, stride, SETUP_ORD_X1, SETUP_ORD_Y, true, above >= 0);
+        s_plant_two = s_item == 0 && order_ref(t) >= 0;                    /* (the plant: its order squares a row down, the arrows with them) */
+        const int ord_y = s_plant_two ? SETUP_ORD2_Y : SETUP_ORD_Y;
+        ord_arrow(fb, stride, SETUP_ORD_X0, ord_y, false, below >= 0);   /* (the sword plant too since 0.3.9.4: a piece in the stack like the rest) */
+        ord_arrow(fb, stride, SETUP_ORD_X1, ord_y, true, above >= 0);
         /* the relation, in the depth bar's own words (Strato 2026-10-17: "behind
            the coral" / "in front of the coral"); "THE" goes when the line is too
            long for where it sits (the hint line, or beside COLOR / LOOK) */
@@ -927,16 +962,30 @@ void render_setup(const tank_t *t, uint16_t *fb, int stride, double clock) {
         }
         render_rect_edge(fb, stride, bx, SETUP_DEPTH_Y, bw, SETUP_DEPTH_H, C_EDGE);
         }
-        const int ref = n < 2 ? order_ref(t) : -1;          /* THE ORDER SQUARES (the plant, one depth): in the DEPTH bar's place, the arrows at its ends;
-                                                               the hint line names their piece */
-        if (ref >= 0) {
-            order_bar(t, fb, stride, SETUP_ORDSQ_X, SETUP_DEPTH_Y, SETUP_DEPTH_SEG_W, SETUP_DEPTH_H, SETUP_DEPTH_TILE_H, s_item, ref);
-            for (int pass = 0; pass < 2; pass++) {
-                const char *the = pass ? "" : "THE ";
-                if (tank_decor_above(t, ref, s_item)) snprintf(rel, sizeof rel, "BEHIND %s%s", the, SD_ITEMS[ref].name);
-                else snprintf(rel, sizeof rel, "IN FRONT OF %s%s", the, SD_ITEMS[ref].name);
-                if (render_text_w(rel, 2) <= rel_avail) break;
+        if (s_item == 0) {                                 /* THE SWORD PLANT (0.4.1, Strato 11-05): the SEAGRASS squares in the DEPTH bar's place - BEHIND |
+                                                               IN FRONT of the seagrass, the old plant tiles (its leaves under or over the fronds) - under THE
+                                                               SEAGRASS; with a piece beside it, the ORDER SQUARES a row down under that piece's name. Each row's
+                                                               caption names what it is behind or in front of: no hint line */
+            const bool under = tank_plant_under(t);
+            text_c(fb, stride, CX, SETUP_DEPTH_Y - 18, 2, C_CAPT, "THE SEAGRASS");
+            render_rect(fb, stride, SETUP_ORDSQ_X, SETUP_DEPTH_Y, 2 * SETUP_DEPTH_SEG_W, SETUP_DEPTH_H, C_KEY);
+            static const char *const W[2] = { "BEHIND", "IN FRONT" };
+            for (int i = 0; i < 2; i++) {
+                const int sx = SETUP_ORDSQ_X + i * SETUP_DEPTH_SEG_W; const bool on = (i == 0) == under;
+                if (on) { render_rect(fb, stride, sx, SETUP_DEPTH_Y, SETUP_DEPTH_SEG_W, SETUP_DEPTH_H, C_INNER);
+                          render_rect_edge(fb, stride, sx + 1, SETUP_DEPTH_Y + 1, SETUP_DEPTH_SEG_W - 2, SETUP_DEPTH_H - 2, C_EDGE); }
+                else if (i > 0) render_rect(fb, stride, sx, SETUP_DEPTH_Y + 6, 1, SETUP_DEPTH_H - 12, C_DIM);
+                depth_tile(t, fb, stride, sx, SETUP_DEPTH_Y + 4, SETUP_DEPTH_SEG_W, SETUP_DEPTH_TILE_H, i == 0 ? DECOR_Z_BACK : DECOR_Z_FRONT, 0, clock);
+                text_c(fb, stride, sx + SETUP_DEPTH_SEG_W / 2, SETUP_DEPTH_Y + SETUP_DEPTH_TILE_H + 10, 2, on ? C_TEXT : dim(C_CAPT, 45), W[i]);
             }
+            render_rect_edge(fb, stride, SETUP_ORDSQ_X, SETUP_DEPTH_Y, 2 * SETUP_DEPTH_SEG_W, SETUP_DEPTH_H, C_EDGE);
+            const int ref = order_ref(t);
+            if (ref >= 0) {
+                char cap[40]; snprintf(cap, sizeof cap, "THE %s", SD_ITEMS[ref].name);
+                text_c(fb, stride, CX, SETUP_ORDSQ2_Y - 18, 2, C_CAPT, cap);
+                order_bar(t, fb, stride, SETUP_ORDSQ_X, SETUP_ORDSQ2_Y, SETUP_DEPTH_SEG_W, SETUP_DEPTH_H, SETUP_DEPTH_TILE_H, s_item, ref);
+            }
+            rel[0] = 0;
         }
         if (s_item == 4) {
             /* the cluster: a LOOK row of three tiles - the coral, the tubes and
@@ -973,7 +1022,7 @@ void render_setup(const tank_t *t, uint16_t *fb, int stride, double clock) {
                 render_rect_edge(fb, stride, x, SETUP_COL_Y, SETUP_COL_W, SETUP_COL_H, on ? C_TEXT : C_DIM);
                 if (on) render_rect_edge(fb, stride, x + 1, SETUP_COL_Y + 1, SETUP_COL_W - 2, SETUP_COL_H - 2, C_TEXT);
             }
-        } else text_c(fb, stride, CX, SETUP_DEPTH_HINT_Y, 2, C_CAPT, rel[0] ? rel : s_item == 2 || s_item == 8 || s_item == 9 ? castle_hint[z] : hint[z]);
+        } else if (s_item != 0) text_c(fb, stride, CX, SETUP_DEPTH_HINT_Y, 2, C_CAPT, rel[0] ? rel : s_item == 2 || s_item == 8 || s_item == 9 ? castle_hint[z] : hint[z]);
         float x0 = tank_decor_x(t, s_item) - tank_decor_half_w(s_item) - 10, x1 = tank_decor_x(t, s_item) + tank_decor_half_w(s_item) + 10, top = TANK_BOT - 16 - 40;
         if (s_item == 0) tank_veg_bed(t, 3, NULL, NULL, &top, NULL);   /* the leaves' reach */
         else top = tank_decor_fy(t, s_item) - tank_decor_height(s_item);   /* its highest pixel on its depth's floor line (0.3.9) */
@@ -1122,12 +1171,10 @@ void render_setup(const tank_t *t, uint16_t *fb, int stride, double clock) {
         fish_ring(fb, stride, f, r + 8, mut ? C_NEW : C_EDGE);     /* a mutation: a gold outer ring */
         render_rect_blend(fb, stride, -PAGE_X, 92, TANK_W, mut ? 138 : 116, C_PANEL, 150);
         text_c(fb, stride, CX, 104, 3, C_TEXT, "A NEW FRY!");
-        char l1[FISH_NAME_MAX * 2 + 24];
-        bool shop = f->parent_a < 0 && f->parent_b < 0;              /* bought (0.3.5): no parents, in at the surface */
-        if (shop) snprintf(l1, sizeof l1, "FROM THE SHOP,");
-        else snprintf(l1, sizeof l1, "BORN TO %s AND %s", parent_of(t, f, 0).name, parent_of(t, f, 1).name);
+        char l1[FISH_NAME_MAX * 2 + 24]; const char *l2;
+        setup_born_lines(t, page_fish(), l1, sizeof l1, &l2);
         text_c(fb, stride, CX, 140, 2, C_CAPT, l1);
-        text_c(fb, stride, CX, 162, 2, C_CAPT, shop ? "IN AT THE SURFACE." : "DOWN IN THE GRASS.");
+        text_c(fb, stride, CX, 162, 2, C_CAPT, l2);
         text_c(fb, stride, CX, 184, 2, C_CAPT, "GO AND SAY HELLO.");
         if (mut) text_c(fb, stride, CX, 206, 2, C_NEW, news);      /* 0.4: neither parent shows it */
         render_button(fb, stride, SETUP_MID_X, SETUP_BTN_Y, SETUP_BTN_W, SETUP_BTN_H, C_GO, C_GO_E, "MEET IT", 2);
@@ -1156,6 +1203,7 @@ void render_setup(const tank_t *t, uint16_t *fb, int stride, double clock) {
                 render_rect(fb, stride, vx, y - 1, 16, 16, rgb); render_rect_edge(fb, stride, vx, y - 1, 16, 16, C_INNER);
             } else render_text(fb, stride, vx, y, 2, C_TEXT, g == GENE_SHAPE ? SHAPE_NAMES[f->shape] : g == GENE_FINS ? FINS_NAMES[f->fins] : PATTERN_NAMES[f->pattern]);
             if (f->mutated == g + 1) { render_text(fb, stride, SETUP_FAM_FROM_X, y, 2, C_NEW, "NEW!"); continue; }
+            if (from_shop(f)) { render_text(fb, stride, SETUP_FAM_FROM_X, y, 2, C_CAPT, "THE SHOP"); continue; }   /* (0.4.1: was "?" on every row) */
             parent_t p = parent_of(t, f, (f->from_b >> g & 1) ? 1 : 0);
             bool sec = f->from_carried >> g & 1;
             hidden |= sec;
@@ -1170,7 +1218,7 @@ void render_setup(const tank_t *t, uint16_t *fb, int stride, double clock) {
         const fish_t *f = &t->fish[page_fish()];
         parent_t PA = parent_of(t, f, 0), PB = parent_of(t, f, 1);
         const parent_t *pa = PA.known ? &PA : NULL, *pb = PB.known ? &PB : NULL;
-        bool shop = f->parent_a < 0 && f->parent_b < 0;              /* bought (0.3.5): its look is the shop's */
+        bool shop = from_shop(f);                                    /* bought (0.3.5): its look is the shop's */
         const char *na = shop ? "THE SHOP" : PA.name, *nb = shop ? "THE SHOP" : PB.name;
         uint32_t ca = pa ? name_rgb(pa->color) : shop ? C_CAPT : C_DIM, cb = pb ? name_rgb(pb->color) : shop ? C_CAPT : C_DIM;
         panel(fb, stride);

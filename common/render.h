@@ -206,7 +206,8 @@ void render_give_tap(const tank_t *t, int fish_idx);   /* a tap on it (or the ke
 /* THE GIVE MODAL (0.4, Strato 2026-11-02): both GIVE buttons open one card over the live tank or the keeper page -
  * CONFIRM (the tank it goes to, GIVE | BACK), PICK (both doors open: a row a tank, BACK; picking is the yes), ASKING
  * (the other keeper's time, CALL OFF), SAID (a NO, or it cannot go now: until OK), WHY (a dim GIVE: why, OK). Every
- * button but BACK ignores taps GIFT_HOLD_S after its step comes up. While it is up it takes every tap (a tap off it:
+ * button but BACK ignores a press that began before its step came up, and, where a tap brought the step, that tap's
+ * double (THE TOUCH RULE, touch_gate.h). While it is up it takes every tap (a tap off it:
  * nothing). render_give_modal draws it over the live tank; the keeper page draws its own. */
 enum { RENDER_GM_OFF, RENDER_GM_CONFIRM, RENDER_GM_PICK, RENDER_GM_ASKING, RENDER_GM_SAID, RENDER_GM_WHY };
 enum { RENDER_GM_TAP_NONE, RENDER_GM_TAP_CARD, RENDER_GM_TAP_HELD, RENDER_GM_TAP_GIVE, RENDER_GM_TAP_LEFT, RENDER_GM_TAP_RIGHT,
@@ -215,6 +216,12 @@ int  render_give_modal_step(const tank_t *t);            /* RENDER_GM_OFF: not u
 void render_give_modal_close(void);                     /* as BACK (the director) */
 const char *render_give_modal_line(const tank_t *t);     /* its words as drawn ("IT WOULD LIVE THERE", "THEIR TANK IS FULL", ...) */
 void render_give_modal(const tank_t *t, uint16_t *fb, int stride);
+/* A TAP'S PRESS (0.4.1 audit round 1, TCH-1, touch_gate.h READ AT THE PRESS): the touch port names the tank clock its
+   press began at before the release's taps, and ends it after; the waits in the taps below (the keeper card's SELL, the
+   shop's modal wait, its SELL and its rows, the GIVE modal) test that against their stamps; nothing restarts them.
+   With none named (a direct caller, the sim's own mouse) the press is the lift, as before. */
+void render_tap_press(double clock);
+void render_tap_press_end(void);
 int  render_give_modal_tap(const tank_t *t, float x, float y);   /* RENDER_GM_TAP_*: what the tap did */
 bool render_give_modal_button(const tank_t *t, int which, int *x, int *y);   /* a button's middle (tests, the director); false: not shown */
 /* the NEXT FISH arrow (0.3.9, Bananna on Discord: "sometimes fish hide
@@ -329,6 +336,8 @@ enum { MS_TAP_NONE = 0, MS_TAP_KEPT = 1, MS_TAP_CLOSE = 2, MS_TAP_SETTINGS = 3, 
  * (setup_take_renamed) it brings the page back with render_milestones_show_fish.
  * MS_TAP_SELL + fish: the card's SELL, confirmed (its second tap) - the
  * caller calls progression_sell_fish; the page stays up, a row shorter. */
+uint32_t render_milestones_tank_shown(void);   /* the tank badges the keeper page has drawn since it opened (seen at its close) */
+uint32_t render_tank_badge_bits(void);         /* every tank badge's bit (the rest have no badge: no ring to keep) */
 int  render_milestones_tap(const tank_t *t, float x, float y);
 void render_milestones_show_fish(const tank_t *t, int fish);   /* put a fish's card up (the page must be showing) */
 /* where things are, in the FRAME's coordinates as a tap arrives - for the
@@ -358,7 +367,9 @@ void render_fish_removed(int idx);   /* a fish left, the slots shifted: the keep
  * SHOP_TAP_KEPT when a modal opened or closed. Page state is render-local;
  * render_shop_leave clears it when the page closes. */
 enum { SHOP_TAP_NONE = 0, SHOP_TAP_KEPT = 1, SHOP_TAP_CLOSE = 2, SHOP_TAP_BUY = 16, SHOP_TAP_MOVE = 32, SHOP_TAP_SELL = 64,
-       SHOP_TAP_FRY = 128, SHOP_TAP_SHELVE = 256, SHOP_TAP_PLACE = 512 };   /* BUY / MOVE / SELL / SHELVE / PLACE + item index; FRY + the fry's place in the offer (0.3.5) */
+       SHOP_TAP_FRY = 128, SHOP_TAP_SHELVE = 256, SHOP_TAP_PLACE = 512, SHOP_TAP_BG_BUY = 1024, SHOP_TAP_BG_USE = 2048 };
+/* SHOP_TAP_BG_BUY / SHOP_TAP_BG_USE + bg (0.4.1, THE BACKGROUNDS): a background's modal UNLOCK (progression_bg_buy) or USE
+ * (progression_bg_use); the platform calls them - the shop stays up, the tank rebuilds when it closes */   /* BUY / MOVE / SELL / SHELVE / PLACE + item index; FRY + the fry's place in the offer (0.3.5) */
 /* SHOP_TAP_SHELVE / SHOP_TAP_PLACE (0.3.9, the decoration shelf): a piece in
  * the tank has MOVE | SHELVE in its modal (SELL moved to the placement page);
  * SHELVE puts it away (progression_shelve) and the shop stays up - its row
@@ -378,9 +389,26 @@ enum { SHOP_TAP_NONE = 0, SHOP_TAP_KEPT = 1, SHOP_TAP_CLOSE = 2, SHOP_TAP_BUY = 
 /* SHOP_TAP_MOVE (2026-09-16): an owned, placeable item's modal carries a MOVE
  * button - the platform closes the shop and opens setup.c's placement page
  * (setup_begin_place), the same page a purchase opens. */
+/* THE BOOT SHOW (0.4.1): while set, every bake hands hook each row's background layers (0 the water; 1.. far to near) - the
+ * boot show builds the background up by them. NULL: off. */
+void render_boot_bg_layers(void (*hook)(int y, const uint8_t *lay));
+int      render_bg_current(void);                 /* the background the last tank was drawn on */
+uint16_t render_boot_water_px(int x, int y);      /* the water alone at (x, y), as baked at full light: a background pixel not yet landed */
+void render_debug_specks_off(bool off);   /* (tests: Twilight's drift left out of the frame, to compare against) */
+void render_debug_force_bg(int bg);   /* THE BACKGROUNDS (0.4.1): the sim draws every tank on background bg (-1: each tank its own) */
 void render_shop(const tank_t *t, uint16_t *fb, int stride);
 int  render_shop_tap(const tank_t *t, float x, float y);
+bool render_shop_modal_up(void);   /* a row's modal or HOW TO EARN is up */
 void render_shop_leave(void);
+/* THE SHOP'S AREAS (0.4.1): the foot's squares and what each lists. A row's code is an SD_ITEMS index, SHOP_ROW_FRY for the
+ * fry, or SHOP_ROW_BG + a background. render_shop_find says where a row is (the tests walk there with the foot and arrows). */
+enum { SHP_AREA_DECOR, SHP_AREA_CRITTERS, SHP_AREA_BG, SHP_AREAS };
+enum { SHF_EARN, SHF_DECOR, SHF_CRIT, SHF_BG, SHF_CLOSE, SHF_N };
+#define SHOP_ROW_FRY (-1)
+#define SHOP_ROW_BG  100
+bool render_shop_find(const tank_t *t, int code, int *area, int *page, int *row);
+int  render_shop_area_rows(const tank_t *t, int area);
+void render_shop_foot_box(int b, int *x, int *y);   /* the shop foot's square b (0 ?, 1 DECORATIONS, 2 CRITTERS, 3 BACKGROUNDS, 4 X), page coordinates */
 /* the tests: piece `item` painted pixel (x, y) in the last render_tank (its
  * recorded silhouette; the castle's static one) */
 bool render_decor_covers(int item, int x, int y);
@@ -410,6 +438,9 @@ void     render_set_grass_cache_on(bool on, int period_ms);
  * band ready - copy render_scene_buf as before). render_grass_loop_n and _ready count fine moments.
  * render_grass_loop_lock(m): the loop plans m moments (0: as many as the budget holds) and STEPS one a frame - the
  * grass moves with the frames, its sway's period m frames x 2 (0: the moment is the clock's). */
+/* THE BACKGROUNDS' bake scratch (0.4.1): bg_scratch_size() bytes borrowed for each bake and given back at once. Not the grass
+ * loop's lender: its headroom is for memory it keeps (on the boards the loop leaves ~1.25 MB of PSRAM free). Unset: malloc. */
+void     render_set_bake_scratch(void *(*alloc)(size_t), void (*release)(void *));
 void     render_set_grass_loop(void *(*alloc)(size_t), void (*release)(void *), size_t budget);
 void     render_grass_loop_on(bool on);
 bool     render_grass_loop_is_on(void);
@@ -543,6 +574,8 @@ void render_touch_cross(uint16_t *fb, int stride, int i, int n, int tx, int ty);
 void render_touch_check(uint16_t *fb, int stride, int tx, int ty, float secs_left, float secs_total);
 int  render_settings_tap(float x, float y, int *value);
 int  render_settings_touch(tank_t *t, float x, float y, bool down, int *value);
+int  render_settings_cut(int *value);           /* the port: a press cut (the page not fed) - forgotten; a slider in hand: its last
+                                                   shown step returned as the setting to save (SET_TAP_BRIGHT / _VOLUME), else NONE */
 void render_settings_cancel(void);              /* forget the press in hand (the BOOT chord took that finger to the ADVANCED page) */
 
 /* UI primitives (2026-09-13) for panels built outside this file (the first-
@@ -608,7 +641,8 @@ int render_passport_hit(float x, float y);   /* a tap while a visitor's passport
 #define GIFT_BTN_W  140
 enum { GIFT_HIT_NONE = 0, GIFT_HIT_ACCEPT, GIFT_HIT_NO, GIFT_HIT_CARD };
 void render_gift(const tank_t *t, uint16_t *fb, int stride);
-void render_gift_allow(bool ok);             /* main, each frame: false under the tank's own setup, the reset prompt, ADVANCED (it waits) */
+void render_gift_allow(bool ok);
+bool render_gift_back_window(const tank_t *t, double press);   /* the card just back from under a page a tap closed: that tap's double (W) */             /* main, each frame: false under the tank's own setup, the reset prompt, ADVANCED (it waits) */
 bool render_gift_up(const tank_t *t);        /* a card to show now: it has the glass first, over any page */
 bool render_card_over_tank(const tank_t *t); /* the GIVE modal or a gift card up: the live tank's own holds and swipes stop (the evening sweep) */
 int  render_gift_take_cue(void);             /* SND_* the frame it is first seen, else -1 */
@@ -721,6 +755,12 @@ bool render_crab_collect_hit(const tank_t *t, float x, float y);   /* the crab c
 #define MSP_MODAL_W   336
 #define MSP_MODAL_H   156
 #define MSP_PER_ROW   6
+#define MSP_TANK_PER_ROW 7          /* the TANK row: seven badges a page (0.4.1) - slid left into the room its sand dollar left */
+#define MSP_TSLIDE    (PAGE_NARROW || PAGE_BOWL ? 48 : 64)   /* (the watch, the bowl: 48 - TANK stays ~25 px inside the glass) */
+                                     /* (0.4 moved the balance to the shop; Strato 11-05: "slide TANK to the left as well as all the
+                                         tank milestones") - the TANK label, its population strip and its badges, all by this */
+#define MSP_TBADGE_X0 (MSP_BADGE_X0 - MSP_TSLIDE)
+#define MSP_TNAME_X   (92 - MSP_TSLIDE)
 #define MSP_TPG_X     (PAGE_BOWL ? 396 : PAGE_NARROW ? 398 : 412)   /* the arrow's column: right of the sixth badge's slop, out to the glass
                                                                     (the bowl: its "new" ring and the page pips inside the circle) */
 #define MSP_ARROW_W   40             /* the arrow buttons, inset at the modal's top corners */
@@ -751,8 +791,14 @@ bool render_crab_collect_hit(const tank_t *t, float x, float y);   /* the crab c
 #define SHP_EARN_X    32
 #endif
 #define SHP_COIN_Y    10
+#if defined(TANK_ROUND) || defined(TANK_WATCH) || defined(TANK_SQUARE)
 #define SHP_ROW_Y0    98
 #define SHP_ROW_DY    56
+#else                                   /* the 1.8 (0.4.1, Strato 11-04): four rows over the icon foot - the rows start 8 higher (the rule
+                                           6 px under the coin) and close up 2 each, so the fourth row's button ends at 284, 28 above the foot */
+#define SHP_ROW_Y0    90
+#define SHP_ROW_DY    54
+#endif
 #define SHP_ROW_ICON  32
 #define SHP_BTN_X     300
 #define SHP_BTN_W     116
@@ -768,8 +814,7 @@ bool render_crab_collect_hit(const tank_t *t, float x, float y);   /* the crab c
 #define SHP_TWO_GAP 16               /* MOVE and SELL side by side in the modal */
 #define SHP_TWO_X0  (SHP_MODAL_X + (SHP_MODAL_W - 2 * MSP_HOW_W - SHP_TWO_GAP) / 2)
 #define SHP_TWO_X1  (SHP_TWO_X0 + MSP_HOW_W + SHP_TWO_GAP)
-#define SHP_PER_PAGE 4
-#define SHP_PAGES    ((SD_ITEM_COUNT + SHP_PER_PAGE - 1) / SHP_PER_PAGE)   /* without the FRY row (render.c: shp_pages) */
+#define SHP_PER_PAGE 4            /* (0.4.1, Strato 11-04: four a page over the icon foot, working-assets/shop-navigation-v1) */
 #define SHP_FRY_BOX_W  100            /* the fry modal's three boxes */
 #define SHP_FRY_BOX_H  84
 #define SHP_FRY_BOX_GAP 10
@@ -908,6 +953,9 @@ void render_loading(uint16_t *fb, int stride, const char *name, double clock, co
 size_t render_depth_buf_bytes(void);
 void render_set_depth_buf(void *buf);
 void render_debug_crab_stack_old(bool on);   /* (tests: THE CRAB'S STACK off - the crab in its shelter not at the shelter's place among the pieces, as before 0.4) */
+void render_debug_roost_pass_old(bool on);   /* (tests: --selftest-roost-pass's control - a piece behind an animal comes back over the crab in its shelter from the scene, as before 0.4) */
+void render_debug_gl_skip_old(bool on);   /* (tests: the pieces a bed keeps off - its order - out of the grass loop's look, as before 0.4: a re-ranked plant served the old order) */
+void render_debug_gl_ceil_old(bool on);   /* (tests: THE CEILING off - the grass loop's band keeps its room to grow past the tallest the grass grows, as before 0.4.1) */
 void render_depth_off(bool off);
 void render_debug_front_keep_old(bool on);   /* (tests: --selftest-front-keep's control, the 0.3.9.5 restore) */
 void render_debug_seahorse_stack_off(bool on);   /* (tests: --selftest-seahorse-stack's control, the seahorse over the pieces before its bed as 0.3.9.6 drew it) */
@@ -955,7 +1003,9 @@ void render_fade(uint16_t *fb, int stride, int light);   /* the frame at light/2
    0..1) and its places: BACK, HOLD TO SELL (held SHM_HOLD_S), outside it */
 #define SHM_HOLD_S 2.0f
 enum { SHM_TAP_NONE, SHM_TAP_OUTSIDE, SHM_TAP_BACK, SHM_TAP_HOLD };
-void render_shelf_remove(uint16_t *fb, int stride, const shelf_slot_t *s, int refund, float hold, int part);
+/* n: how many pieces, critters and backgrounds the refund is for (shelf_refund_value; NULL: none named) - its line names
+   only those (0.4.1, audit P6) */
+void render_shelf_remove(uint16_t *fb, int stride, const shelf_slot_t *s, int refund, const int n[3], float hold, int part);
 int  render_shelf_remove_hit(float x, float y);
 /* a tank's RENAME (0.3.9.3): the keyboard's state (the name's two lines, the one being typed, the keys' page), its page
  * (part 1 the backdrop - drawn once with the shelves; 2 the rest, every frame; 3 both) and its touch: a key acts when the

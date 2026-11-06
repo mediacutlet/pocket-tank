@@ -42,7 +42,7 @@
 #define GIFT_LEAVE_S  20.0f                 /* a given fish swims out through the door; past this, bubbles carry it */
 #define GIFT_WAIT_S   12.0f                 /* GIVE tapped on a fish in a doorway: it waits this long to be home or over there */
 #define GIFT_HERE_S   2.5f                  /* given where it is (visiting the receiver): the GIVEN stamp shows this long, then it is theirs */
-#define GIFT_HOLD_S   2.0f                  /* the gift card's ACCEPT / NO THANKS ignore taps this long after it comes up (a kid tapping
+#define GIFT_HOLD_S   2.0f                  /* (no longer a tap guard since THE TOUCH RULE, touch_gate.h, 11-06; before: the card ignored taps this long (a kid tapping
                                                the glass as it appears must not answer it; the notices' NOTICE_HOLD_S, 2026-11-02) */
 #define GIFT_HEARD_MS 3000                  /* the receiver silent this long while the gift swims out: it stays ours (its note is
                                                saved only as it leaves, 2026-11-02 - a gift lost with its link waited for a relink) */
@@ -53,8 +53,9 @@
 #define GIFT_COMMIT_MS 1000                 /* ... and it leaves only with the receiver heard this lately (its TAKE comes every 0.5 s):
                                                at the door it waits a moment for the next one */
 
-typedef struct { uint32_t uid, nonce, peer; passport_t pp; float held; } gift_note_t;   /* held: ARRIVING, seconds of this tank's
-                                                                                      running time it has held a place (saved) */
+typedef struct { uint32_t uid, nonce, peer; passport_t pp; float held; bool back; } gift_note_t;   /* held: ARRIVING, seconds of this
+                                                                                      tank's running time it has held a place (saved).
+                                                                                      back: GIVEN, the fish lives HERE again (saved) */
 
 /* the door a gift goes through (want_door): the keeper's pick in the GIVE modal, or GIFT_DOOR_ANY (`link give`
    without a side: the open door nearest the fish) - tank_link's gift_door, the one place the door is chosen */
@@ -73,6 +74,8 @@ typedef struct gift_book {
     uint32_t wait_uid; double wait_since;    /* ... a fish in a doorway: offered once it is home or over there (the card says ASKING) */
     uint8_t  wait_door; uint32_t wait_peer;
     double   asking_since;                  /* offered at this clock (the modal's bar: the other keeper's LINK_GIVE_ASK_MS) */
+    struct { uint32_t uid, nonce; } unsaved[LINK_GIVE_MAX];   /* gifts come alive whose save the flash refused: RECEIVED once one lands */
+    double   resumed_at;                    /* the notes last handed to the engine (tank_link, once a second while linked) */
     uint32_t door_peer[LINK_EDGES];         /* who is at each door now (0: none) and its badge - the GIVE modal's names */
     int8_t   door_badge[LINK_EDGES];
     uint32_t cancel_uid;                    /* a tap on ASKING: tank_link takes it back */
@@ -88,12 +91,13 @@ typedef struct gift_book {
     struct {                                /* a gift offered to us: the question on our glass */
         bool on; uint32_t uid, nonce, peer; passport_t pp; int8_t badge; double since;
         int8_t answer;                      /* the keeper's tap: 0 = none yet, 1 = ACCEPT, -1 = NO THANKS */
-        bool shown; double seen;            /* first drawn at this clock (render_gift): its hold counts from here, not from the ask -
+        bool shown; double seen;            /* first drawn at this clock (render_gift): a press from before it is no answer (THE TOUCH RULE), not from the ask -
                                                a card that waited under a page is not half spent when it comes up (the 11-02 sweep) */
     } ask;
 } gift_book_t;
 
 void gift_attach(const void *tank, gift_book_t *b);   /* a tank_t and its book (the boards: once, at boot) */
+bool gift_saved_received(uint32_t uid);   /* a fish this tank took in as a gift, by its RECEIVED note on the flash (the receipts fold) */
 gift_book_t *gift_of(const void *tank);               /* NULL: this tank cannot give or take */
 void gift_load(gift_book_t *b);                    /* at boot (a persisting book) */
 void gift_clear(gift_book_t *b);                   /* the keeper's reset */
@@ -105,6 +109,15 @@ void gift_arriving_drop(gift_book_t *b, uint32_t uid, uint32_t nonce);
 bool gift_arriving_age(gift_book_t *b, float dt);   /* the ARRIVING notes held dt longer (saved every few minutes): true = one is past GIFT_ARRIVING_TTL_S */
 void gift_received(gift_book_t *b, uint32_t uid, uint32_t nonce);   /* RECEIVED, its ARRIVING note dropped: one save */
 bool gift_given_has(const gift_book_t *b, uint32_t uid);   /* a GIVEN note for this fish (any gift) */
-bool gift_answer(gift_book_t *b, double clock, bool yes);    /* the keeper's tap on the gift card: false = spent (its hold, or no question) */
+/* A GIVEN FISH THAT COMES BACK (0.4.1): the fish is made here again (GIVEN_LOST, or a gift of it from a third tank) and
+ * its GIVEN notes must go - but a power cut between the fish's save and the notes' drop left both on the flash, and the
+ * boot (the note wins) took the fish out again: alive nowhere until those two tanks met. So the order is: every GIVEN
+ * note of it marked BACK (with its latest passport) and saved, then the fish saved, then the notes dropped. A BACK note
+ * is the fish: the boot keeps the fish it finds, or makes it from the note; the engine never hears of it; it counts no
+ * place beside the fish. false = the mark is not on the flash (nothing changed): the fish must not be made yet */
+bool gift_given_back(gift_book_t *b, uint32_t uid, const passport_t *pp);
+bool gift_note_live(const gift_note_t *n);                 /* a GIVEN note still out (not BACK) */
+bool gift_answer(gift_book_t *b, double press, double clock, bool yes);   /* the keeper's tap on the gift card, pressed at `press`, lifted
+                                                           at `clock` (touch_gate.h READ AT THE PRESS): false = spent (a press from before the card, or no question) */
 
 #endif

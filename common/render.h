@@ -546,8 +546,9 @@ enum { SET_TAP_NONE = 0, SET_TAP_CLOSE = 1, SET_TAP_BRIGHT = 2, SET_TAP_VOLUME =
                                       show now; SET_TAP_BRIGHT follows with the last one when the finger lifts */
        SET_TAP_TANKS = 11,         /* MY TANKS (0.3.9.3): the platform opens the tank switcher (docs/tank-switcher.md) */
        SET_TAP_LINK = 12,          /* LINK (0.4, the tank link): the platform closes settings and opens link mode on the live tank */
-       SET_TAP_VOLUME_LIVE = 13 }; /* the VOLUME slider under a finger (0.4): *value = the percent, the mixer's to use now;
+       SET_TAP_VOLUME_LIVE = 13,  /* the VOLUME slider under a finger (0.4): *value = the percent, the mixer's to use now;
                                       SET_TAP_VOLUME follows with the last one when the finger lifts */
+       SET_TAP_LANG = 14 };        /* the language chip (lang.h): *value = the language; applied and marked for the save */
 void render_settings(const tank_t *t, uint16_t *fb, int stride, int bright_pct, int volume);   /* volume: the percent, 0 = OFF */
 /* THE ADVANCED PAGE's pictures and hit tests (0.3.9.2; the page itself is
  * common/advanced.c, hidden behind a BOOT chord on the settings page). The
@@ -586,6 +587,9 @@ void render_settings_cancel(void);              /* forget the press in hand (the
  * pixel size of one font dot (2 = caption, 3 = button). */
 int  render_text_w(const char *s, int scale);
 void render_text(uint16_t *fb, int stride, int x, int y, int scale, uint32_t rgb, const char *s);
+/* as render_text, untranslated: for fish names (lang.h) */
+int  render_name_w(const char *s, int scale);
+void render_name(uint16_t *fb, int stride, int x, int y, int scale, uint32_t rgb, const char *s);
 void render_rect(uint16_t *fb, int stride, int x, int y, int w, int h, uint32_t rgb);
 void render_rect_blend(uint16_t *fb, int stride, int x, int y, int w, int h, uint32_t rgb, int alpha);   /* alpha 0..255 */
 void render_rect_edge(uint16_t *fb, int stride, int x, int y, int w, int h, uint32_t rgb);
@@ -889,6 +893,8 @@ bool render_crab_collect_hit(const tank_t *t, float x, float y);   /* the crab c
 #define SET_LINK_Y    SET_FOOT_Y
 #endif
 #define SET_UPD_W     112
+#define SET_LANG_W    56             /* the language chip after the title */
+#define SET_LANG_H    36
 #if TANK_WORN                        /* the watch: UPDATES 114..226 and CLOSE 242..334, clear of the lower corners */
 #define SET_UPD_X     114
 #undef  SET_CLOSE_X

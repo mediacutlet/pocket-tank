@@ -35,11 +35,11 @@ OUT     := fishsim
 ROUNDF  :=
 endif
 
-CFLAGS  := $(ROUNDF) $(EXTRA_CFLAGS) -O2 -std=c11 $(ARCH) -I. -I../common -I../common/llm -DLV_CONF_INCLUDE_SIMPLE -DSOUNDS_BIN='"../assets/sounds/sounds.bin"' -DPT_VERSION='"$(shell git describe --always --dirty --exclude='*' 2>/dev/null || echo sim)"' $(SDL_CFLAGS) \
+CFLAGS  := $(ROUNDF) $(EXTRA_CFLAGS) -O2 -std=c11 $(ARCH) -I. -I../common -I../common/llm -DLV_CONF_INCLUDE_SIMPLE -DLANG_AUDIT -DSOUNDS_BIN='"../assets/sounds/sounds.bin"' -DPT_VERSION='"$(shell git describe --always --dirty --exclude='*' 2>/dev/null || echo sim)"' $(SDL_CFLAGS) \
            -Wall -Wextra -Wno-unused-parameter -MMD -MP
 LDFLAGS := $(ARCH) $(SDL_LIBS) -lm
 
-APP_SRCS  := main.c selftest_link.c advisor_llm.c persist_port_sim.c net_port_sim.c ../common/tank.c ../common/update.c ../common/advanced.c ../common/shelf.c ../common/boot_show.c ../common/advisor.c ../common/render.c ../common/backgrounds.c ../common/icons.c ../common/progression.c ../common/setup.c ../common/audio.c ../common/notice.c ../common/sounds.c ../common/battery.c ../common/passport.c ../common/link.c ../common/tank_link.c ../common/collection.c ../common/gift.c ../common/llm/q4_model.c ../common/llm/word_tok.c ../common/llm/advisor_core.c
+APP_SRCS  := main.c selftest_link.c advisor_llm.c persist_port_sim.c net_port_sim.c ../common/tank.c ../common/update.c ../common/advanced.c ../common/shelf.c ../common/boot_show.c ../common/advisor.c ../common/render.c ../common/backgrounds.c ../common/icons.c ../common/progression.c ../common/setup.c ../common/audio.c ../common/notice.c ../common/sounds.c ../common/battery.c ../common/passport.c ../common/link.c ../common/tank_link.c ../common/collection.c ../common/gift.c ../common/lang.c ../common/lang_de.c ../common/llm/q4_model.c ../common/llm/word_tok.c ../common/llm/advisor_core.c
 
 APP_SRCS  += selftest_coll.c   # the visitor collection's pages (0.4)
 APP_SRCS  += selftest_clock_gate.c   # the boot's TIME CHECK gate (0.4.1, common/clock_gate.h)
@@ -53,7 +53,7 @@ $(OUT): $(OBJS)
 
 SELFTESTS := --selftest --selftest-hunger --selftest-shop --selftest-battery \
              --selftest-pop --selftest-card --selftest-keeper --selftest-fry --selftest-sleep --selftest-tend --selftest-llm \
-             --selftest-saves --selftest-update --selftest-genes --selftest-passport --selftest-link --selftest-doors --selftest-fry-cap --selftest-visitors --selftest-r2soak --selftest-seam --selftest-give --selftest-advanced --selftest-model --selftest-restore --selftest-grasscache --selftest-floor --selftest-stack --selftest-shelf --selftest-shelf-safe --selftest-power-swap-noclock --selftest-shelf-away --selftest-temper --selftest-board --selftest-critter-nav --selftest-pumpkin-light --selftest-breather --selftest-hold --selftest-grassloop --selftest-grasspatch --selftest-touch-lock --selftest-shelf-rename --selftest-depth --selftest-footprint --selftest-bake-order --selftest-place --selftest-order-squares --square-boot --selftest-cave --selftest-roost --selftest-boot-show --selftest-front-keep --selftest-seahorse-stack --selftest-depth-pop --selftest-castle-keep --selftest-hold-emerge --selftest-seahorse-post --selftest-clock --selftest-under-card --selftest-fish-pair
+             --selftest-saves --selftest-update --selftest-genes --selftest-passport --selftest-link --selftest-doors --selftest-fry-cap --selftest-visitors --selftest-r2soak --selftest-seam --selftest-give --selftest-advanced --selftest-model --selftest-restore --selftest-grasscache --selftest-floor --selftest-stack --selftest-shelf --selftest-shelf-safe --selftest-power-swap-noclock --selftest-shelf-away --selftest-temper --selftest-board --selftest-critter-nav --selftest-pumpkin-light --selftest-breather --selftest-hold --selftest-grassloop --selftest-grasspatch --selftest-touch-lock --selftest-shelf-rename --selftest-depth --selftest-footprint --selftest-bake-order --selftest-place --selftest-order-squares --square-boot --selftest-cave --selftest-roost --selftest-boot-show --selftest-front-keep --selftest-seahorse-stack --selftest-depth-pop --selftest-castle-keep --selftest-hold-emerge --selftest-seahorse-post --selftest-clock --selftest-under-card --selftest-fish-pair --selftest-lang
 SELFTESTS += --selftest-coll-pages
 SELFTESTS += --selftest-backgrounds   # THE BACKGROUNDS (0.4.1): each bakes the same twice, draws, has its layers, survives a save
 SELFTESTS += --selftest-double-tap   # a double tap never buys: the shop, MY TANKS, a card's SELL (0.4 rc)

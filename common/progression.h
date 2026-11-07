@@ -90,7 +90,7 @@ float progression_wake(tank_t *t, int64_t now_unix);
 typedef struct {
     int32_t  sd_balance;
     uint16_t light_idle_s;
-    uint8_t  light_auto, light_tip_seen, screen_turned, orient_lock, orient_q, pad;
+    uint8_t  light_auto, light_tip_seen, screen_turned, orient_lock, orient_q, lang1;   /* lang1: the language + 1 (lang.h), 0 none */
     uint32_t mark;                 /* the swap's: a fresh marker; the save that applies the carry carries it, and a carry whose
                                     * marker the loaded save already has is not given again (0.4.1 audit round 2, "Marker now") */
 } progression_carry_t;

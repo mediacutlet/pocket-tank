@@ -29,6 +29,7 @@ void display_port_deep_sleep_bus(void) { }
 bool board_has_expander(void) { return true; }
 bool board_is_watch(void) { return false; }
 bool board_is_square(void) { return false; }
+bool board_is_146c(void) { return false; }
 const char *board_port_hw(void) { return NULL; }   /* no chips to ask */
 bool board_port_probed(void) { return true; }
 void display_port_set_madctl(uint8_t v) { (void)v; }

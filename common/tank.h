@@ -21,7 +21,10 @@
 #include <stdint.h>
 #include <math.h>
 
-#ifdef TANK_ROUND               /* the round 466 px glass (Waveshare 1.75C, 2026-10-01): the frame is the square around a bowl */
+#ifdef TANK_ROUND_146           /* the round 412 px glass (Waveshare 1.46C): same bowl geometry at its own size */
+#define TANK_W 412
+#define TANK_H 412
+#elif defined(TANK_ROUND)       /* the round 466 px glass (Waveshare 1.75C, 2026-10-01): the frame is the square around a bowl */
 #define TANK_W 466
 #define TANK_H 466
 #endif
@@ -58,10 +61,17 @@
  * TANK_FX1 on both builds - in the rectangle those ARE TANK_H / 0 / TANK_W.
  * Swimmers meet the glass itself: tank_glass_* (tank.c). */
 #ifdef TANK_ROUND
+#ifdef TANK_ROUND_146
+#define TANK_RAD  206.0f
+#define TANK_BOT  350
+#define TANK_FX0  48
+#define TANK_FX1  364
+#else
 #define TANK_RAD  233.0f        /* the circle: centre (TANK_RAD, TANK_RAD) */
 #define TANK_BOT  396           /* sand line y 380: the glass is 180.8 px either side of the centre there */
 #define TANK_FX0  54
 #define TANK_FX1  412
+#endif
 #elif defined(TANK_WATCH)       /* the watch's glass is the rectangle with ROUND CORNERS: ~8 mm of radius on the
                                  * maker's drawing, 100 px. The bottom stays flat (TANK_BOT is TANK_H); the two
                                  * lower corners take the ends of the floor - the sand line (y 486) meets the
@@ -205,9 +215,15 @@ typedef enum { VEG_KIND_GRASS, VEG_KIND_SWORD } veg_kind_t;
                                                 * VEG_SEG_DY 3.2 px pitch from y=352) */
 #ifdef TANK_ROUND                              /* the bowl: 26 x 22 cells of 18 px over the circle down to TANK_BOT -
                                                 * 572, inside the 644 the save keeps (progression.c) */
+#ifdef TANK_ROUND_146
+#define ALGAE_CELL 18
+#define ALGAE_COLS 23
+#define ALGAE_ROWS 23
+#else
 #define ALGAE_CELL 18
 #define ALGAE_COLS 26
 #define ALGAE_ROWS 22
+#endif
 #elif defined(TANK_WATCH)                      /* the watch: 23 x 28 cells of 18 px (414 x 504: the last column and row hang
                                                 * 4 / 2 px off the glass) - 644 cells, what the save keeps */
 #define ALGAE_CELL 18
@@ -233,6 +249,8 @@ typedef enum { VEG_KIND_GRASS, VEG_KIND_SWORD } veg_kind_t;
 #define VEG_SEG_PX 4.3f
 #elif defined(TANK_SQUARE)                     /* ... and the square's 112 px taller: 107 x 4.2 from y 464, the tip at 14 */
 #define VEG_SEG_PX 4.2f
+#elif defined(TANK_ROUND_146)
+#define VEG_SEG_PX 2.8f
 #else
 #define VEG_SEG_PX 3.2f
 #endif

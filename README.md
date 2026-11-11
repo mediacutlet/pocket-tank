@@ -35,11 +35,11 @@ The current release is **v0.4.1** (alpha); the settings page shows the one
 on your tank. What changed in each release:
 **[pocketank.com/updates](https://pocketank.com/updates/)**.
 
-It runs on four Waveshare boards: the 1.8-inch original, the round
-1.75-inch **pendant**, where the tank fills the whole circle like a little
+It runs on five Waveshare boards: the 1.8-inch original, the compact
+1.46-inch round LCD, the round 1.75-inch **pendant**, where the tank fills the whole circle like a little
 fishbowl, the 2.06-inch **watch**, a tall tank you can wear, and the
-2.16-inch **square**, the biggest screen of the four in a little white box.
-Same fish, same shop, same saves on all four. From 0.3 on a tank updates
+2.16-inch **square**, the biggest screen in a little white box.
+Same fish, same shop, same saves on all five. From 0.3 on a tank updates
 itself over Wi-Fi, so the cable is only for the first install. Each board
 charges at a current sized for its own battery (0.3.4).
 
@@ -726,13 +726,14 @@ idf.py -p /dev/cu.usbmodem* flash
 esptool.py --chip esp32s3 -p /dev/cu.usbmodem* write_flash 0x290000 ../model/out/model_q4.bin
 ```
 
-The other three boards build from the same tree on top of their own fragment,
+The other four boards build from the same tree on top of their own fragment,
 each in its own build directory:
 
 ```bash
 idf.py -B build-round -DSDKCONFIG=build-round/sdkconfig "-DSDKCONFIG_DEFAULTS=sdkconfig.defaults;sdkconfig.round" build
 idf.py -B build-watch -DSDKCONFIG=build-watch/sdkconfig "-DSDKCONFIG_DEFAULTS=sdkconfig.defaults;sdkconfig.watch" build
 idf.py -B build-square -DSDKCONFIG=build-square/sdkconfig "-DSDKCONFIG_DEFAULTS=sdkconfig.defaults;sdkconfig.square" build
+idf.py -B build-round146 -DSDKCONFIG=build-round146/sdkconfig "-DSDKCONFIG_DEFAULTS=sdkconfig.defaults;sdkconfig.146c" build
 ```
 
 Every build is signed, so the first build needs a key: `tools/ota_key.sh`
@@ -748,7 +749,7 @@ explains where every kilobyte goes. The boot log prints a per-stage frame
 profile and per-decision inference timings, so performance work is
 measurable without instruments.
 
-**Other boards.** This repo supports those four boards, to keep the project small
+**Other boards.** This repo supports those five boards, to keep the project small
 while it is young. Two community ports run the tank elsewhere. They are not
 built or tested here, and they may lag behind this repo:
 
@@ -821,7 +822,8 @@ seven-minute prompt check before an overnight run is always worth it.
 - [docs/retrain-v3.md](docs/retrain-v3.md) — the schema v3 retrain runbook
 - [docs/retrain-v4.md](docs/retrain-v4.md) — the schema v4 (boredom) retrain runbook and its numbers
 - [docs/DEVICE.md](docs/DEVICE.md) — what is in flight on the device, and the flash rule
-- [docs/BOARDS.md](docs/BOARDS.md) — the four boards: what is shared, where one may differ, how a release keeps each to its own image
+- [docs/BOARDS.md](docs/BOARDS.md) — the five boards: what is shared, where one may differ, how a release keeps each to its own image
+- [docs/board-amoled-1.46c.md](docs/board-amoled-1.46c.md) — the 1.46C LCD bring-up notes
 - [docs/board-amoled-1.75c.md](docs/board-amoled-1.75c.md) — the pendant's bring-up notes
 - [docs/board-amoled-2.06-watch.md](docs/board-amoled-2.06-watch.md) — the watch's bring-up notes
 - [docs/board-amoled-2.16.md](docs/board-amoled-2.16.md) — the square's bring-up notes

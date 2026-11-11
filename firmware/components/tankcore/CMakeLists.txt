@@ -15,8 +15,11 @@ idf_component_register(
 target_compile_options(${COMPONENT_LIB} PRIVATE -O2 -ffast-math)
 # the world's shape is compiled in (common/tank.h): the bowl for the round board.
 # PUBLIC: every component that sees tank.h must see the same world.
-if(CONFIG_POCKET_TANK_ROUND)
+if(CONFIG_POCKET_TANK_ROUND OR CONFIG_POCKET_TANK_ROUND_146)
     target_compile_definitions(${COMPONENT_LIB} PUBLIC TANK_ROUND)
+endif()
+if(CONFIG_POCKET_TANK_ROUND_146)
+    target_compile_definitions(${COMPONENT_LIB} PUBLIC TANK_ROUND_146)
 endif()
 # the frame in the panel's byte order on every board (2026-10-23, render.h PT_FB_SWAP): the SPI DMA
 # sends it straight from PSRAM on the flush task; the sim builds without it (its pixel tests)

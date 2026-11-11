@@ -1,4 +1,4 @@
-/* audio_port_es8311.c - I2S -> ES8311 -> NS4150B -> the 12 mm speaker.
+/* audio_port_es8311.c - I2S sound bank -> ES8311/NS4150B or 1.46C PCM5101.
  * See audio_port.h. Pins from resources/ESP32-S3-Touch-AMOLED-1.8.pdf.
  * The WATCH (2.06) wires its bit clock and data elsewhere (41 / 40): GPIO 9
  * and 8, the 1.8's, are its touch and panel RESET lines - never driven here
@@ -21,10 +21,10 @@
 
 static const char *TAG = "audio";
 
-#define PIN_I2S_MCLK  (board_is_square() ? S_PIN_I2S_MCLK : board_is_175() ? B_PIN_I2S_MCLK : 16)   /* the square: 16 is its PWR key sense; the 1.75: 42 */
-#define PIN_I2S_BCLK  (board_is_watch() ? W_PIN_I2S_BCLK : 9)
-#define PIN_I2S_WS    45
-#define PIN_I2S_DOUT  (board_is_watch() ? W_PIN_I2S_DOUT : 8)        /* ESP -> codec DSDIN */
+#define PIN_I2S_MCLK  (board_is_146c() ? GPIO_NUM_NC : board_is_square() ? S_PIN_I2S_MCLK : board_is_175() ? B_PIN_I2S_MCLK : 16)
+#define PIN_I2S_BCLK  (board_is_146c() ? 48 : board_is_watch() ? W_PIN_I2S_BCLK : 9)
+#define PIN_I2S_WS    (board_is_146c() ? 38 : 45)
+#define PIN_I2S_DOUT  (board_is_146c() ? 47 : board_is_watch() ? W_PIN_I2S_DOUT : 8)
 #define PIN_AMP_EN    46       /* NS4150B CTRL, 10k pulldown on the board */
 #define BLOCK         160      /* 10 ms at 16 kHz */
 #define IDLE_US       (2 * 1000000LL)
@@ -55,7 +55,7 @@ static int64_t s_idle_us = 5 * 1000000LL;
 
 static uint32_t now_ms(void) { return (uint32_t)(esp_timer_get_time() / 1000); }
 
-static void amp(bool on) { gpio_set_level(PIN_AMP_EN, on); }
+static void amp(bool on) { if (!board_is_146c()) gpio_set_level(PIN_AMP_EN, on); }
 
 /* Deep sleep (2026-09-16, the night the tank died): the I2S lines and the
  * amp's CTRL are the ESP's outputs into ICs that stay powered on VCC3V3 all
@@ -70,12 +70,13 @@ static void amp(bool on) { gpio_set_level(PIN_AMP_EN, on); }
  * pins again. */
 #define QUIET_N 5
 static void quiet_pins(gpio_num_t p[QUIET_N]) {    /* per board: known once the display port has probed the bus */
-    p[0] = PIN_I2S_MCLK; p[1] = PIN_I2S_BCLK; p[2] = PIN_I2S_WS; p[3] = PIN_I2S_DOUT; p[4] = PIN_AMP_EN;
+    p[0] = PIN_I2S_MCLK; p[1] = PIN_I2S_BCLK; p[2] = PIN_I2S_WS; p[3] = PIN_I2S_DOUT; p[4] = board_is_146c() ? GPIO_NUM_NC : PIN_AMP_EN;
 }
 void audio_port_deep_sleep_pins(void) {
     gpio_num_t QUIET_PINS[QUIET_N]; quiet_pins(QUIET_PINS);
     for (size_t i = 0; i < QUIET_N; i++) {
         gpio_num_t p = QUIET_PINS[i];
+        if (p == GPIO_NUM_NC) continue;
         gpio_reset_pin(p);                        /* off the I2S matrix routing, a GPIO again */
         gpio_set_direction(p, GPIO_MODE_OUTPUT);
         gpio_set_level(p, 0);
@@ -84,7 +85,7 @@ void audio_port_deep_sleep_pins(void) {
 }
 static void release_pins(void) {
     gpio_num_t QUIET_PINS[QUIET_N]; quiet_pins(QUIET_PINS);
-    for (size_t i = 0; i < QUIET_N; i++) gpio_hold_dis(QUIET_PINS[i]);
+    for (size_t i = 0; i < QUIET_N; i++) if (QUIET_PINS[i] != GPIO_NUM_NC) gpio_hold_dis(QUIET_PINS[i]);
 }
 
 static void write_silence(int ms) {
@@ -96,12 +97,12 @@ static void write_silence(int ms) {
 /* power up: rail -> clocks -> codec -> zeros -> amp (pops stay inside) */
 static void bring_up(void) {
     int64_t t0 = esp_timer_get_time();
-    battery_port_set_rail(CODEC_RAIL, true);
+    if (!board_is_146c()) battery_port_set_rail(CODEC_RAIL, true);
     vTaskDelay(pdMS_TO_TICKS(5));
     i2s_channel_enable(s_tx);                 /* MCLK/BCLK/LRCK running before the CSM starts */
-    bool ok = codec_port_up();
+    bool ok = board_is_146c() || codec_port_up();
     write_silence(s_settle_codec_ms);         /* the DAC's vmid / reference settle (fast charge, then normal) */
-    codec_port_settled();
+    if (!board_is_146c()) codec_port_settled();
     amp(true);
     write_silence(s_settle_amp_ms);           /* the NS4150B's own start-up (pop suppression): an 80 ms card
                                                  cue landed inside it at 30 ms, and mostly still at 30+40 */
@@ -116,8 +117,10 @@ static void bring_down(void) {
     amp(false);
     write_silence(10);
     i2s_channel_disable(s_tx);
-    codec_port_down();
-    battery_port_set_rail(CODEC_RAIL, false);
+    if (!board_is_146c()) {
+        codec_port_down();
+        battery_port_set_rail(CODEC_RAIL, false);
+    }
     s_up = false;
     ESP_LOGI(TAG, "down (idle)");
 }
@@ -169,9 +172,11 @@ bool audio_port_init(i2c_master_bus_handle_t bus) {
     release_pins();                            /* a deep-sleep wake is a boot: drop the holds first */
     size_t bank_bytes = (size_t)(_binary_sounds_bin_end - _binary_sounds_bin_start);
     if (bank_bytes != SND_BANK_BYTES) { ESP_LOGW(TAG, "bank is %u bytes, sounds.h says %u: rebuild (tools/make_sounds.py build) - silent", (unsigned)bank_bytes, (unsigned)SND_BANK_BYTES); return false; }
-    if (!codec_port_present()) { ESP_LOGW(TAG, "no ES8311: silent"); return false; }
-    gpio_config_t io = { .pin_bit_mask = 1ULL << PIN_AMP_EN, .mode = GPIO_MODE_OUTPUT, .pull_down_en = GPIO_PULLDOWN_ENABLE };
-    gpio_config(&io); amp(false);
+    if (!board_is_146c() && !codec_port_present()) { ESP_LOGW(TAG, "no ES8311: silent"); return false; }
+    if (!board_is_146c()) {
+        gpio_config_t io = { .pin_bit_mask = 1ULL << PIN_AMP_EN, .mode = GPIO_MODE_OUTPUT, .pull_down_en = GPIO_PULLDOWN_ENABLE };
+        gpio_config(&io); amp(false);
+    }
     i2s_chan_config_t cc = I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_AUTO, I2S_ROLE_MASTER);
     cc.dma_desc_num = 4; cc.dma_frame_num = BLOCK;
     if (i2s_new_channel(&cc, &s_tx, NULL) != ESP_OK) { ESP_LOGE(TAG, "no I2S channel"); return false; }

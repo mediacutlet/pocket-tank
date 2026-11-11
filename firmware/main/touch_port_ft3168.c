@@ -111,6 +111,12 @@ extern bool board_is_v2(void);
  * x = b1:b3.hi, y = b2:b3.lo, 12 bits each, in panel px - mirrored on both
  * axes against the picture (Waveshare's BSP sets mirror_x and mirror_y). */
 static i2c_master_dev_handle_t s_cst;
+static i2c_master_dev_handle_t s_spd;
+static bool s_spd_down;
+static int64_t s_spd_seen_us;
+static uint16_t s_spd_x, s_spd_y;
+static int64_t s_seen_us;
+#define SPD_LIFT_US 60000
 static gpio_num_t cst_rst(void) { return board_is_square() ? S_PIN_TP_RST : board_is_175() ? B_PIN_TP_RST : R_PIN_TP_RST; }
 static int cst_panel(void) { return board_is_square() ? S_PANEL : R_PANEL; }
 /* how the chip's report runs against the picture: bit 0 = x mirrored, bit 1 = y
@@ -136,6 +142,109 @@ static bool cst9217_init(void) {
     if (i2c_master_bus_add_device(board_i2c_bus(), &cfg, &s_cst) != ESP_OK) { s_cst = NULL; return false; }
     ESP_LOGI(TAG, "CST92%s ready", board_is_square() ? "20 (the square)" : "17");
     return true;
+}
+
+static esp_err_t spd_read(uint16_t reg, uint8_t *data, size_t len) {
+    uint8_t address[2] = { (uint8_t)(reg >> 8), (uint8_t)reg };
+    esp_err_t err = i2c_master_transmit(s_spd, address, sizeof address, 20);
+    if (err != ESP_OK) return err;
+    return i2c_master_receive(s_spd, data, len, 20);
+}
+
+static esp_err_t spd_write(uint16_t reg, uint8_t first, uint8_t second) {
+    uint8_t data[4] = { (uint8_t)(reg >> 8), (uint8_t)reg, first, second };
+    return i2c_master_transmit(s_spd, data, sizeof data, 20);
+}
+
+static bool spd2010_init(void) {
+    i2c_device_config_t expander_cfg = { .dev_addr_length = I2C_ADDR_BIT_LEN_7, .device_address = I2C_ADDR_EXPANDER,
+                                         .scl_speed_hz = 400000 };
+    i2c_master_dev_handle_t expander;
+    esp_err_t err = i2c_master_bus_add_device(board_i2c_bus(), &expander_cfg, &expander);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "SPD2010 touch reset: cannot open expander: %s", esp_err_to_name(err));
+        return false;
+    }
+    uint8_t output_reg = 0x01, config_reg = 0x03, output = 0, config = 0;
+    err = i2c_master_transmit_receive(expander, &output_reg, 1, &output, 1, 100);
+    if (err == ESP_OK) err = i2c_master_transmit_receive(expander, &config_reg, 1, &config, 1, 100);
+    uint8_t reset_low[2] = { output_reg, (uint8_t)(output & ~P_EXIO_TP_RST) };
+    uint8_t direction[2] = { config_reg, (uint8_t)(config & ~P_EXIO_TP_RST) };
+    uint8_t reset_high[2] = { output_reg, (uint8_t)(output | P_EXIO_TP_RST) };
+    if (err == ESP_OK) err = i2c_master_transmit(expander, reset_low, 2, 100);
+    if (err == ESP_OK) err = i2c_master_transmit(expander, direction, 2, 100);
+    if (err == ESP_OK) {
+        vTaskDelay(pdMS_TO_TICKS(50));
+        err = i2c_master_transmit(expander, reset_high, 2, 100);
+        vTaskDelay(pdMS_TO_TICKS(50));
+    }
+    i2c_master_bus_rm_device(expander);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "SPD2010 touch reset failed: %s", esp_err_to_name(err));
+        return false;
+    }
+    for (int attempt = 0; attempt < 5; attempt++) {
+        err = i2c_master_probe(board_i2c_bus(), I2C_ADDR_SPD2010, 50);
+        if (err == ESP_OK) break;
+        vTaskDelay(pdMS_TO_TICKS(50));
+    }
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "SPD2010 touch at 0x53 unavailable after EXIO1 reset: %s", esp_err_to_name(err));
+        return false;
+    }
+    i2c_device_config_t cfg = { .dev_addr_length = I2C_ADDR_BIT_LEN_7, .device_address = I2C_ADDR_SPD2010,
+                                .scl_speed_hz = 400000, .flags.disable_ack_check = 1 };
+    if (i2c_master_bus_add_device(board_i2c_bus(), &cfg, &s_spd) != ESP_OK) { s_spd = NULL; return false; }
+    vTaskDelay(pdMS_TO_TICKS(50));
+    ESP_LOGI(TAG, "SPD2010 touch ready");
+    return true;
+}
+
+static bool spd2010_read(uint16_t *x, uint16_t *y) {
+    uint8_t status[4] = { 0 };
+    int64_t now = esp_timer_get_time();
+    bool finger = false, report = false;
+    if (spd_read(0x2000, status, sizeof status) == ESP_OK) {
+        uint16_t length = (uint16_t)status[2] | ((uint16_t)status[3] << 8);
+        if (status[1] & 0x40) {
+            spd_write(0x0200, 0x01, 0x00);
+            spd_write(0x0400, 0x01, 0x00);
+        } else if (status[1] & 0x20) {
+            spd_write(0x5000, 0x00, 0x00);
+            spd_write(0x4600, 0x00, 0x00);
+            spd_write(0x0200, 0x01, 0x00);
+        } else if ((status[1] & 0x08) && length == 0) {
+            spd_write(0x0200, 0x01, 0x00);
+        } else if ((status[0] & 0x03) && length >= 4 && length <= 64) {
+            uint8_t packet[64] = { 0 };
+            if (spd_read(0x0003, packet, length) == ESP_OK && packet[4] <= 0x0A) {
+                unsigned count = (length - 4) / 6;
+                report = true;
+                if (count) {
+                    int px = ((packet[7] & 0xF0) << 4) | packet[5];
+                    int py = ((packet[7] & 0x0F) << 8) | packet[6];
+                    if (px >= P_PANEL) px = P_PANEL - 1;
+                    if (py >= P_PANEL) py = P_PANEL - 1;
+                    s_spd_x = (uint16_t)px; s_spd_y = (uint16_t)py;
+                    finger = true;
+                }
+            }
+            uint8_t hdp[8] = { 0 };
+            if (spd_read(0xFC02, hdp, sizeof hdp) == ESP_OK) {
+                for (int i = 0; i < 4 && hdp[5] == 0x00; i++) {
+                    uint16_t remain = (uint16_t)hdp[2] | ((uint16_t)hdp[3] << 8);
+                    if (!remain || remain > 32) break;
+                    uint8_t more[32];
+                    if (spd_read(0x0003, more, remain) != ESP_OK || spd_read(0xFC02, hdp, sizeof hdp) != ESP_OK) break;
+                }
+                if (hdp[5] == 0x82) spd_write(0x0200, 0x01, 0x00);
+            }
+        }
+    }
+    if (finger) { s_spd_down = true; s_spd_seen_us = s_seen_us = now; }
+    else if (report || (s_spd_down && now - s_spd_seen_us > SPD_LIFT_US)) s_spd_down = false;
+    *x = s_spd_x; *y = s_spd_y;
+    return s_spd_down;
 }
 /* the night (2026-10-02): the chip's own sleep instead of its reset held low
  * all night - SensorLib's sequence: D1 1E twice opens command mode (0002
@@ -179,7 +288,6 @@ static bool s_lift_said = true;                   /* a report that says "no fing
 static int s_cst_gaps;                            /* reads inside a press that showed no finger (the stroke log) */
 static int s_cst_said, s_cst_back, s_cst_maxgap_ms, s_cst_again_ms = -1;   /* ... "no finger" reports, a finger after one, the longest silence, ms since the last lift at the press */
 static bool s_cst_by_said;                        /* ... and how the press ended */
-static int64_t s_seen_us;                         /* the last read that showed a finger, any chip: a press is timed to it, not to the lift's bridge */
 void touch_port_set_lift(int ms, int said) { if (ms > 0) s_lift_us = ms * 1000; if (said >= 0) s_lift_said = said; }
 int  touch_port_lift_ms(void) { return s_lift_us / 1000; }
 bool touch_port_lift_said(void) { return s_lift_said; }
@@ -268,6 +376,7 @@ static bool ft3168_read(uint16_t *x, uint16_t *y) {
 }
 /* one read of the glass, whichever chip: true while a finger is down, in panel px */
 static bool panel_read(uint16_t *x, uint16_t *y) {
+    if (s_spd) return spd2010_read(x, y);
     if (s_cst) return cst9217_read(x, y);
     if (s_ft) return ft3168_read(x, y);
     if (!s_tp) return false;
@@ -279,6 +388,7 @@ static bool panel_read(uint16_t *x, uint16_t *y) {
 }
 
 bool touch_port_init(void) {
+    if (board_is_146c()) return spd2010_init();
     if (board_is_round() || board_is_square()) return cst9217_init();
     if (board_is_watch()) return ft3168_init();
     esp_lcd_panel_io_handle_t io;
@@ -410,11 +520,11 @@ static void cal_point(float rx, float ry, float *tx, float *ty) {               
     /* the viewer's "down" and "right" on the upright glass: turned over they are its up and left, on a side
        (0.3.9.3) its left / right and down / up (tank_quarter_from_upright) */
     static const int8_t DOWN[4][2] = { { 0, 1 }, { -1, 0 }, { 0, -1 }, { 1, 0 } }, RIGHT[4][2] = { { 1, 0 }, { 0, 1 }, { -1, 0 }, { 0, -1 } };
-    float land = (float)s_bias_y + (board_is_round() || board_is_v2() || board_is_square() ? CAL_LAND : 0);
+    float land = (float)s_bias_y + ((board_is_round() && !board_is_146c()) || board_is_v2() || board_is_square() ? CAL_LAND : 0);
     float side = board_is_watch() ? CAL_W_LAND_X : board_is_square() ? CAL_S_LAND_X : 0;
     rx -= land * DOWN[s_q][0] + side * RIGHT[s_q][0];   /* the finger's own low landing is the viewer's "down"; on a wrist, and the */
     ry -= land * DOWN[s_q][1] + side * RIGHT[s_q][1];   /* square in a hand, it lands toward the tapping hand too: the viewer's right */
-    if (board_is_round()) ry = (ry + CAL_R_Y_OFF) / CAL_R_Y_GAIN;
+    if (board_is_round() && !board_is_146c()) ry = (ry + CAL_R_Y_OFF) / CAL_R_Y_GAIN;
     else if (board_is_watch()) { rx = (rx + CAL_W_X_OFF) / CAL_W_X_GAIN; ry = (ry + CAL_W_Y_OFF) / CAL_W_Y_GAIN; }
     else if (board_is_v2()) { rx = (rx + CAL_X_OFF) / CAL_X_GAIN; ry = (ry + CAL_Y_OFF) / CAL_Y_GAIN; }
     else if (board_is_square()) { rx = (rx + CAL_S_X_OFF) / CAL_S_X_GAIN; ry = (ry + CAL_S_Y_OFF) / CAL_S_Y_GAIN; }
@@ -582,7 +692,7 @@ void touch_port_poll(tank_t *t) {
         }
         gen = t->roster_shift; seen = true;
     }
-    if (!s_tp && !s_cst && !s_ft) return;
+    if (!s_tp && !s_cst && !s_ft && !s_spd) return;
     uint16_t x[1], y[1];
     bool touched = panel_read(x, y);
     /* portrait panel (px,py) -> landscape tank (tx,ty): tx = TANK_W-1-py, ty = px;

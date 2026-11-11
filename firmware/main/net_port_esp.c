@@ -20,7 +20,7 @@
  *   the board     every image carries a board marker right after its app
  *                 descriptor (pt_board_marker below, PT_BOARD_MARKER_OFFSET):
  *                 the download reads it back from the slot at the first
- *                 sector and stops on another board's - all three boards
+ *                 sector and stops on another board's - all five boards
  *                 share the signing key, so the signature alone would let a
  *                 bowl install the 1.8's image (2026-10-02)
  *   the download  esp_https_ota into the other slot; the image must carry

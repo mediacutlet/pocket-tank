@@ -4,6 +4,10 @@ menu "pocket-tank"
         default n
         help
             Enable for the real board. Off = stub display port (QEMU / compile-only).
+    config POCKET_TANK_DISPLAY_SPD2010
+        bool "Drive the Waveshare 1.46C SPD2010 round LCD over QSPI"
+        default n
+        depends on POCKET_TANK_ROUND_146
     config POCKET_TANK_ROUND
         bool "The ROUND build: a 466 px bowl for the Waveshare ESP32-S3-Touch-AMOLED-1.75C"
         default n
@@ -34,14 +38,30 @@ menu "pocket-tank"
             image shows nothing on the other boards. Build it with
             SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.square" into its
             own build directory and sdkconfig (docs/board-amoled-2.16.md).
+    config POCKET_TANK_ROUND_146
+        bool "The 1.46C build: a 412 px bowl for the Waveshare ESP32-S3-Touch-LCD-1.46C"
+        default n
+        depends on !POCKET_TANK_ROUND && !POCKET_TANK_WATCH && !POCKET_TANK_SQUARE
+        help
+            On = TANK_ROUND and TANK_ROUND_146: a 412x412 bowl for the SPD2010
+            display/touch controller. Build it with
+            SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.146c".
     config POCKET_TANK_TOUCH_FT3168
         bool "Read the FT3168 capacitive touch (taps / holds)"
         default n
+    config POCKET_TANK_TOUCH_SPD2010
+        bool "Read the SPD2010 capacitive touch on the 1.46C"
+        default n
+        depends on POCKET_TANK_ROUND_146
     config POCKET_TANK_AUDIO_ES8311
         bool "Play the sound bank through the ES8311 codec + NS4150B amp (I2S)"
         default n
         help
             Enable for the real board (docs/AUDIO.md). Off = stub audio port: cues compile, nothing plays.
+    config POCKET_TANK_AUDIO_PCM5101
+        bool "Play the sound bank through the 1.46C PCM5101 DAC (I2S)"
+        default n
+        depends on POCKET_TANK_ROUND_146
     config POCKET_TANK_NO_PIE
         bool "Disable the PIE SIMD inference kernel (scalar dot products)"
         default n

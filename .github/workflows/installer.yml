@@ -66,6 +66,13 @@ jobs:
           target: esp32s3
           path: firmware
           command: idf.py -B build-round -DSDKCONFIG=build-round/sdkconfig "-DSDKCONFIG_DEFAULTS=sdkconfig.defaults;sdkconfig.round" build
+      - name: Build the firmware - the 1.46C round LCD
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: v5.4.1
+          target: esp32s3
+          path: firmware
+          command: idf.py -B build-round146 -DSDKCONFIG=build-round146/sdkconfig "-DSDKCONFIG_DEFAULTS=sdkconfig.defaults;sdkconfig.146c" build
       - name: Build the firmware - the watch (2.06)
         uses: espressif/esp-idf-ci-action@v1
         with:
@@ -87,7 +94,7 @@ jobs:
         if: github.repository == 'mediacutlet/pocket-tank'
         run: |
           python3 tools/make_installer.py --build-dir firmware/build \
-            --board-build firmware/build-round --board-build firmware/build-watch --board-build firmware/build-square --out installer/dist
+            --board-build firmware/build-round146 --board-build firmware/build-round --board-build firmware/build-watch --board-build firmware/build-square --out installer/dist
           touch installer/dist/.nojekyll
           ls -la installer/dist installer/dist/firmware
       - uses: actions/upload-pages-artifact@v3

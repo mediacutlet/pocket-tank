@@ -44,7 +44,7 @@
  *   ./fishsim --selftest-temper      headless: eight generations of fry keep a tank's tempers varied
  *   ./fishsim --selftest-model [pfx] a damaged AI model tells the keeper (pfx: also the card as a PPM)
  *   ./fishsim --selftest-board [pfx] another board's version: the layout in proportion, the card, this board's update
- *   ./fishsim --hw <board id>  pretend the sim runs on that board (amoled18 / round175c / watch206 / square216)
+ *   ./fishsim --hw <board id>  pretend the sim runs on that board (amoled18 / round146c / round175c / watch206 / square216)
  *   ./fishsim --selftest-pop         headless population/arrival/save check
  *   ./fishsim --selftest-advanced    headless ADVANCED page (0.3.9.2): battery sizes + the warning gate, touch calibration + its check
  *   ./fishsim --selftest-card [pfx]  headless fish card: RENAME and SELL (pfx: also writes its pages as PPMs)
@@ -133,8 +133,8 @@ static void print_roster(const tank_t *t) {
 }
 
 /* ---------- the selftests' geometry (2026-10-01) ----------
- * Three boards run these tests - the rectangle, the round bowl (TANK_ROUND),
- * the portrait watch (TANK_WATCH) - so a test never carries one board's
+ * Five boards run these tests - the rectangle, the two round bowls, the portrait
+ * watch and the square - so a test never carries one board's
  * pixels: it asks the code. The pages are laid out in PAGE space (render.h)
  * and sit centered on each glass, and a tap is the frame's: PG_X / PG_Y put a
  * page point on this board's glass; the spots under them are where a finger
@@ -4869,7 +4869,7 @@ static int urchin_frond_shot(const char *prefix) {
     printf("urchin-frond: worst %d wrong px\n", worst);
     return 0;
 }
-/* --selftest-depth (SWIM DEPTH, 0.3.9.4; in make check, all four worlds): a fish in a bed of back grass drawn at each
+/* --selftest-depth (SWIM DEPTH, 0.3.9.4; in make check, all five worlds): a fish in a bed of back grass drawn at each
  * depth by the real path, checked against the tank without the fish (A), without the grass (G) and - the grass drawn
  * live - with the even fronds alone (E). IN FRONT: today's frame. BEHIND: every grass pixel under the fish is the
  * grass's. THROUGH: the odd fronds' are the grass's, the even fronds' the fish's (live: exactly; the loop's odd mask is
@@ -9438,7 +9438,7 @@ static int selftest_grassloop(void) {
     #undef GLFAIL
 }
 
-/* --selftest-grasspatch (0.3.9.4, THE PATCH in render.c; in make check, all four worlds): a loop whole, then a change that is
+/* --selftest-grasspatch (0.3.9.4, THE PATCH in render.c; in make check, all five worlds): a loop whole, then a change that is
  * BOXES - the pumpkin hidden and shown (director `pumpkin off|on`), a piece IN FRONT moved, one sent BEHIND and moved there, the
  * coral grown, two moves on top of each other, the sword plant moved three times (one depth since 0.4), a frond grown past the wait,
  * a trim, the castle bought, moved and sold - keeps its bands and differences. Checked: the loop goes stale inside boxes (not

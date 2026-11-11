@@ -9229,7 +9229,11 @@ void render_milestones_leave(void) { ms_close(); g_ms_tpage = 0; g_ms_tshown = 0
    if you tap one it shows their passport and whatever additional info you
    think would be nice") ---- */
 #define COLL_COLS 4
+#ifdef TANK_ROUND_146
+#define COLL_CW   76
+#else
 #define COLL_CW   92
+#endif
 #define COLL_CH   80
 #define COLL_X0   ((PAGE_W - COLL_COLS * COLL_CW) / 2)
 #define COLL_Y0   60
@@ -9239,7 +9243,10 @@ static int g_coll_sel = -1;
    the page in words and a pip per page in the foot - the page's pip a filled block, the others hollow (shape and
    words, never hue); it opens on page 1 */
 static int g_coll_page;
-#ifdef TANK_ROUND
+#ifdef TANK_ROUND_146
+#define COLL_NAV_X 102
+#define COLL_NAV_Y 48
+#elif defined(TANK_ROUND)
 #define COLL_NAV_X 76                  /* the bowl: the arrows' top corners 6 px inside the circle */
 #define COLL_NAV_Y 14
 #else
@@ -10714,7 +10721,16 @@ void render_touch_check(uint16_t *fb, int stride, int tx, int ty, float secs_lef
  * shapes, never hue alone. An empty slot is a dashed outline and a +. The
  * frame's own coordinates (not the 448 x 368 page): the shelves are as wide
  * as each glass lets them be (BOARDS.md rule 5). */
-#if PAGE_BOWL                    /* the bowl: a square picture from the circle's middle; the footer on two lines */
+#if defined(TANK_ROUND_146)      /* the smaller bowl: compact shelves leave room for a footer inside the circle */
+#define SH_TW      60
+#define SH_IH      60
+#define SH_GAP     8
+#define SH_TITLE_Y 24
+#define SH_ROW1_Y  68
+#define SH_PAGER_Y 314
+#define SH_FOOT_Y  344
+#define SH_LIB_X0  60
+#elif PAGE_BOWL                  /* the bowl: a square picture from the circle's middle; the footer on two lines */
 #define SH_TW      80
 #define SH_IH      80
 #define SH_GAP     10

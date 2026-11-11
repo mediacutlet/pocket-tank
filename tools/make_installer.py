@@ -32,7 +32,7 @@ layout change can't silently ship a stale offset.
     tools/make_installer.py                      # default build dir
     tools/make_installer.py --build-dir path     # another idf.py -B dir
     tools/make_installer.py --version 1.2.0      # instead of git describe
-    tools/make_installer.py --build-dir B18 --board-build BROUND --board-build BWATCH   # all three boards
+    tools/make_installer.py --build-dir B18 --board-build B146 --board-build BROUND --board-build BWATCH --board-build BSQUARE   # all five boards
 
 Each build's board is read from its app image's marker (tools/pt_boards.py),
 so a build dir in the wrong slot can never ship under another board's name.

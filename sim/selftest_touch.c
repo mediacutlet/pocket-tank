@@ -56,6 +56,21 @@ esp_err_t i2c_master_transmit(i2c_master_dev_handle_t d, const uint8_t *w, size_
 esp_err_t i2c_master_transmit_receive(i2c_master_dev_handle_t d, const uint8_t *w, size_t wn, uint8_t *r, size_t rn, int t) {
     (void)w; (void)wn; (void)t;
     memset(r, 0, rn);
+    if (d->addr == I2C_ADDR_SPD2010) {
+        uint16_t reg = (uint16_t)((w[0] << 8) | w[1]);
+        if (reg == 0x2000 && rn >= 4) {
+            if (g_down) { r[0] = 1; r[2] = 10; }
+            return ESP_OK;
+        }
+        if (reg == 0x0003 && rn >= 10 && g_down) {
+            r[4] = 0;
+            r[5] = (uint8_t)g_rx; r[6] = (uint8_t)g_ry;
+            r[7] = (uint8_t)(((g_rx >> 4) & 0xF0) | ((g_ry >> 8) & 0x0F));
+            return ESP_OK;
+        }
+        if (reg == 0x02FC && rn >= 8) { r[5] = 0x82; return ESP_OK; }
+        return ESP_FAIL;
+    }
     if (d->addr == I2C_ADDR_CST9217 && rn >= 10) {          /* a report: AB in byte 6; a finger = 06 in byte 0's low nibble, a count in 5 */
         r[6] = 0xAB;
         if (g_down) { r[0] = 0x06; r[5] = 1; r[1] = (uint8_t)(g_rx >> 4); r[2] = (uint8_t)(g_ry >> 4); r[3] = (uint8_t)(((g_rx & 15) << 4) | (g_ry & 15)); }
@@ -81,7 +96,10 @@ bool esp_lcd_touch_get_coordinates(esp_lcd_touch_handle_t tp, uint16_t *x, uint1
     x[0] = (uint16_t)g_rx; y[0] = (uint16_t)g_ry; *n = 1; return true;
 }
 /* ---- the board: this world's ---- */
-#if defined(TANK_ROUND)
+#if defined(TANK_ROUND_146)
+#define HB_ROUND 1
+#define HB_146 1
+#elif defined(TANK_ROUND)
 #define HB_ROUND 1
 #elif defined(TANK_WATCH)
 #define HB_WATCH 1
@@ -99,12 +117,16 @@ bool esp_lcd_touch_get_coordinates(esp_lcd_touch_handle_t tp, uint16_t *x, uint1
 #ifndef HB_SQUARE
 #define HB_SQUARE 0
 #endif
+#ifndef HB_146
+#define HB_146 0
+#endif
 #ifndef HB_V2
 #define HB_V2 0
 #endif
 bool board_is_round(void) { return HB_ROUND; }
 bool board_is_watch(void) { return HB_WATCH; }
 bool board_is_square(void) { return HB_SQUARE; }
+bool board_is_146c(void) { return HB_146; }
 bool board_is_v2(void) { return HB_V2; }
 bool board_is_175(void) { return false; }
 void display_port_frame_origin(int *px, int *py) { *px = 0; *py = 0; }
@@ -127,8 +149,8 @@ bool link_dev_drift_hit(float x, float y) { (void)x; (void)y; return false; }
 static tank_t T;
 static int64_t g_shelf_press;                              /* touch_port_take_shelf_tap's press time (main.c's waits read it) */
 #define FRAME_MS 40
-static int panel_w(void) { return HB_ROUND ? R_PANEL : HB_SQUARE ? S_PANEL : HB_WATCH ? W_PANEL_W : PANEL_W; }
-static int panel_h(void) { return HB_ROUND ? R_PANEL : HB_SQUARE ? S_PANEL : HB_WATCH ? W_PANEL_H : PANEL_H; }
+static int panel_w(void) { return HB_146 ? P_PANEL : HB_ROUND ? R_PANEL : HB_SQUARE ? S_PANEL : HB_WATCH ? W_PANEL_W : PANEL_W; }
+static int panel_h(void) { return HB_146 ? P_PANEL : HB_ROUND ? R_PANEL : HB_SQUARE ? S_PANEL : HB_WATCH ? W_PANEL_H : PANEL_H; }
 static void chip_from_panel(int px, int py, int *rx, int *ry) {   /* the CST92xx's mirror bits undone (cst9217_read) */
     if (HB_ROUND || HB_SQUARE) {
         int m = s_cst_mirror, pn = cst_panel();
@@ -953,6 +975,9 @@ static void reach_all(void) {
     reach_check("gift ACCEPT", hp_gift, GIFT_HIT_ACCEPT); reach_check("gift NO THANKS", hp_gift, GIFT_HIT_NO);
     reach_check("passport DEPORT", hp_pp, PASSPORT_HIT_DEPORT); reach_check("passport COLLECT", hp_pp, PASSPORT_HIT_COLLECT);
     reach_check("MY TANKS CLOSE", hp_shelf, SHELF_TAP_CLOSE); reach_check("MY TANKS LIBRARY", hp_shelf, SHELF_TAP_LIBRARY); reach_check("MY TANKS padlock", hp_shelf, SHELF_TAP_TOUCH_LOCK);
+#if defined(TANK_ROUND_146)
+    if (!hp_shelf(TANK_W - 100, TANK_H - 50, SHELF_TAP_CLOSE)) TFAIL("MY TANKS CLOSE is not tappable at a visible lower-right point on the 1.46C");
+#endif
     reach_check("MY TANKS PREV", hp_shelf, SHELF_TAP_PREV); reach_check("MY TANKS NEXT", hp_shelf, SHELF_TAP_NEXT);
     for (int i = 0; i < 8; i++) { snprintf(nm, sizeof nm, "MY TANKS place %d", i); reach_check(nm, hp_shelf, SHELF_TAP_SLOT0 + i); }
     reach_check("card DORMANT", hp_shc, SHC_TAP_DORMANT); reach_check("card PAUSED", hp_shc, SHC_TAP_PAUSED); reach_check("card SWAP IN", hp_shc, SHC_TAP_SWAP);

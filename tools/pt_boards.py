@@ -12,6 +12,7 @@ import os, sys
 # sdkconfig.defaults (None = the 1.8, the default build)
 BOARDS = [
     ("amoled18",  "Waveshare ESP32-S3-Touch-AMOLED-1.8",  None),
+    ("round146c", "Waveshare ESP32-S3-Touch-LCD-1.46C", "sdkconfig.146c"),
     ("round175c", "Waveshare ESP32-S3-Touch-AMOLED-1.75C", "sdkconfig.round"),
     ("watch206",  "Waveshare ESP32-S3-Touch-AMOLED-2.06",  "sdkconfig.watch"),
     ("square216", "Waveshare ESP32-S3-Touch-AMOLED-2.16",  "sdkconfig.square"),

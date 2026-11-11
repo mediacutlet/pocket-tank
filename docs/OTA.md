@@ -90,7 +90,8 @@ What changed against the plan while building:
   page and on the watch with a scripted client (never asked / wrong
   passphrase / quiet).
 - **One manifest per board** (2026-10-02, docs/BOARDS.md "Releases"):
-  `latest-amoled18.json`, `latest-round175c.json`, `latest-watch206.json`,
+  `latest-amoled18.json`, `latest-round146c.json`, `latest-round175c.json`, `latest-watch206.json`,
+  `latest-square216.json`,
   each with a `board` field; the tank refuses another board's manifest and
   another board's image (its marker, read back at the first 4 KB).
 - **The test channel** is a private folder on the project's site

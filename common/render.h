@@ -257,7 +257,10 @@ bool render_tool_chip_hit(const tank_t *t, float x, float y);
  * below and to the left) opens the battery page - while the pill shows. */
 #define RENDER_BAT_W 32
 #define RENDER_BAT_H 15
-#ifdef TANK_ROUND               /* the bowl: in the NEXT arrow's lane, to the right - its right end 48 px in from the circle at its top
+#ifdef TANK_ROUND_146
+#define RENDER_BAT_X 264
+#define RENDER_BAT_Y (RENDER_NEXT_Y + (RENDER_NEXT_H - RENDER_BAT_H) / 2)
+#elif defined(TANK_ROUND)       /* the bowl: in the NEXT arrow's lane, to the right - its right end 48 px in from the circle at its top
                                    line (the glass is at x 400 there), the bolt left of it (0.3.9.1, Strato's mockup: a keeper tapping
                                    the arrow to step through the fish opened the battery page - the pill sat top centre and its slop
                                    reached over the arrow, and the pill's tap is tested first). Its slop now starts 18 px right of the
@@ -693,7 +696,14 @@ bool render_crab_collect_hit(const tank_t *t, float x, float y);   /* the crab c
 #define MSP_CLOSE_W   92
 #define MSP_CLOSE_H   30
 #define MSP_SET_W     116
-#ifdef TANK_ROUND                       /* (page coordinates: the cap above the page is y < 0) */
+#ifdef TANK_ROUND_146
+#define MSP_CLOSE_X   238
+#define MSP_CLOSE_Y   318
+#define MSP_SET_X     ((PAGE_W - MSP_SET_W) / 2)
+#define MSP_SET_Y     (-PAGE_Y + 18)
+#define SHP_CLOSE_X   238
+#define SET_CLOSE_X   238
+#elif defined(TANK_ROUND)               /* (page coordinates: the cap above the page is y < 0) */
 #define MSP_CLOSE_X   242               /* UPGRADES 114..230 and CLOSE 242..334: the pair centred */
 #define MSP_CLOSE_Y   318
 #define MSP_SET_X     ((PAGE_W - MSP_SET_W) / 2)
@@ -717,7 +727,9 @@ bool render_crab_collect_hit(const tank_t *t, float x, float y);   /* the crab c
  * the settings keep their own feet (MSP_CLOSE_Y, SET_FOOT_Y). */
 #define MSP_FOOT_GAP  12
 #define MSP_FOOT_IN   6
-#ifdef TANK_ROUND
+#ifdef TANK_ROUND_146
+#define MSP_FOOT_Y    330
+#elif defined(TANK_ROUND)
 #define MSP_FOOT_Y    353               /* the circle: UPGRADES' and CLOSE's outer corners (frame x 123, 342) at 6 px in; 35 px off the bottom at the middle */
 #elif defined(TANK_WATCH)
 #define MSP_FOOT_Y    371               /* the arcs: the outer corners (frame x 33, 376) at 6 px in; 35 px off the bottom at the middle */
@@ -744,10 +756,14 @@ bool render_crab_collect_hit(const tank_t *t, float x, float y);   /* the crab c
 #define MSP_FOOT_SET_X   MSP_SET_X
 #define MSP_FOOT_CLOSE_X MSP_CLOSE_X
 #endif
+#ifdef TANK_ROUND_146
+#define MSP_UPG_X     118
+#else
 #ifdef TANK_ROUND
 #define MSP_UPG_X     114
 #else
 #define MSP_UPG_X     32                /* the UPGRADES button, bottom left where the brightness row was: the shop (centred between the others until 2026-10-24) */
+#endif
 #endif
 #define MSP_UPG_W     116
 #define MSP_MODAL_X   56
@@ -781,7 +797,11 @@ bool render_crab_collect_hit(const tank_t *t, float x, float y);   /* the crab c
 #define MSP_HOW_SLOP_UP 12
 #define MSP_HOW_SLOP_DN 28
 /* the shop */
-#ifdef TANK_ROUND                       /* the bowl: the header and the foot drawn in from the glass */
+#ifdef TANK_ROUND_146
+#define SHP_COIN_X    120
+#define SHP_HEAD_X    180
+#define SHP_EARN_X    120
+#elif defined(TANK_ROUND)               /* the bowl: the header and the foot drawn in from the glass */
 #define SHP_COIN_X    62
 #define SHP_HEAD_X    140               /* "SAND DOLLARS" and the balance */
 #define SHP_EARN_X    97
@@ -800,12 +820,21 @@ bool render_crab_collect_hit(const tank_t *t, float x, float y);   /* the crab c
 #define SHP_ROW_DY    54
 #endif
 #define SHP_ROW_ICON  32
+#ifdef TANK_ROUND_146
+#define SHP_BTN_X     260
+#else
 #define SHP_BTN_X     300
+#endif
 #define SHP_BTN_W     116
 #define SHP_BTN_H     32
 #define SHP_EARN_W    150
+#ifdef TANK_ROUND_146
+#define SHP_MODAL_X   74
+#define SHP_MODAL_W   296
+#else
 #define SHP_MODAL_X   48             /* wider than the milestones modal (56 / 336): an item's second line runs to 28 chars = 334 px */
 #define SHP_MODAL_W   352
+#endif
 #define SHP_MODAL_Y   48
 #define SHP_MODAL_H   244
 #define SHP_EARN_MODAL_Y 40
@@ -823,7 +852,11 @@ bool render_crab_collect_hit(const tank_t *t, float x, float y);   /* the crab c
 #define SHP_ARROW_W  36
 #define SHP_ARROW_H  32
 #define SHP_ARROW_Y  (SHP_COIN_Y + 16)
+#ifdef TANK_ROUND_146
+#define SHP_ARROW_X1 264
+#else
 #define SHP_ARROW_X1 (PAGE_W - (PAGE_BOWL ? 66 : 28) - SHP_ARROW_W)   /* next (further in on the bowl) */
+#endif
 #define SHP_ARROW_X0 (SHP_ARROW_X1 - SHP_ARROW_W - 8)     /* previous */
 /* the settings page */
 #if TANK_WORN                        /* the watch (2026-10-02): the page uses the glass above and below the PAGE
@@ -847,11 +880,18 @@ bool render_crab_collect_hit(const tank_t *t, float x, float y);   /* the crab c
 #define SET_ROW5_Y    268            /* ROTATION */
 #define SET_FOOT_Y    MSP_CLOSE_Y    /* UPDATES and CLOSE: the milestones page's foot */
 #endif
+#ifdef TANK_ROUND_146
+#define SET_LABEL_X   64
+#define SET_SEG_X     120
+#define SET_SEG_W     64
+#define SET_SEG_DX    68
+#else
 #define SET_LABEL_X   32
 #define SET_SEG_X     (PAGE_BOWL ? 172 : PAGE_NARROW ? 178 : 190)   /* first segment (the watch and the bowl: the third one inside the glass -
                                                                     the bowl's circle is narrowest at the BRIGHTNESS row) */
 #define SET_SEG_W     76
 #define SET_SEG_DX    (PAGE_NARROW || PAGE_BOWL ? 80 : 82)
+#endif
 #define SET_SEG_H     40
 #define SET_SEG_Y(row) ((row) - 10)  /* the segment sits on the label's line */
 /* LIGHTS OUT (0.3.2): one value between two arrow buttons, across the three
@@ -889,7 +929,11 @@ bool render_crab_collect_hit(const tank_t *t, float x, float y);   /* the crab c
 #define SET_LINK_Y    SET_FOOT_Y
 #endif
 #define SET_UPD_W     112
-#if TANK_WORN                        /* the watch: UPDATES 114..226 and CLOSE 242..334, clear of the lower corners */
+#if defined(TANK_ROUND_146)
+#define SET_UPD_X     118
+#undef  SET_CLOSE_X
+#define SET_CLOSE_X   238
+#elif TANK_WORN                        /* the watch: UPDATES 114..226 and CLOSE 242..334, clear of the lower corners */
 #define SET_UPD_X     114
 #undef  SET_CLOSE_X
 #define SET_CLOSE_X   242

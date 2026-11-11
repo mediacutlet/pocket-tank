@@ -20,7 +20,7 @@ jobs:
           git clone --depth 1 --branch v9.2.2 https://github.com/lvgl/lvgl.git sim/lvgl
       - name: Build and test the simulator
         run: |
-          # all four boards' worlds (docs/BOARDS.md): the rectangle, the bowl, the watch, the square.
+          # all five boards' worlds (docs/BOARDS.md): rectangle, two bowls, watch, square.
           # the dev repo does not track model/out; the public one does (the LLM selftest needs it)
           if [ -f model/out/model_q4.bin ]; then make -C sim -j"$(nproc)" check-all
           else echo "no model in this checkout: the LLM selftest is skipped"; make -C sim -j"$(nproc)" NOMODEL=1 check-all; fi

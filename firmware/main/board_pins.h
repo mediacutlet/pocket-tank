@@ -51,6 +51,21 @@
  * reset never driven, and the 1.8's rail trim cut ALDO1 - a dark glass. */
 #ifndef BOARD_PINS_H
 #define BOARD_PINS_H
+#define I2C_ADDR_EXPANDER 0x20     /* TCA9554: bit0 LCD_RST, bit1 DSI_PWR_EN, bit2 TOUCH_RST, bit7 SD_CS */
+#define V2_PANEL_X_GAP    0x10
+#if defined(TANK_ROUND_146)
+#define PIN_LCD_CS        21
+#define PIN_LCD_PCLK      40
+#define PIN_LCD_DATA0     46
+#define PIN_LCD_DATA1     45
+#define PIN_LCD_DATA2     42
+#define PIN_LCD_DATA3     41
+#define PIN_I2C_SDA       11
+#define PIN_I2C_SCL       10
+#define PIN_TP_INT        4
+#define PANEL_W           412
+#define PANEL_H           412
+#else
 #define PIN_LCD_CS        12
 #define PIN_LCD_PCLK      11
 #define PIN_LCD_DATA0     4
@@ -60,12 +75,26 @@
 #define PIN_I2C_SDA       15
 #define PIN_I2C_SCL       14
 #define PIN_TP_INT        21
-#define I2C_ADDR_EXPANDER 0x20     /* TCA9554: bit0 LCD_RST, bit1 DSI_PWR_EN, bit2 TOUCH_RST, bit7 SD_CS */
-#define I2C_ADDR_FT3168   0x38     /* V1 touch */
-#define I2C_ADDR_CST816   0x15     /* V2 touch (probe => V2 board) */
 #define PANEL_W           368      /* native portrait */
 #define PANEL_H           448
-#define V2_PANEL_X_GAP    0x10
+#endif
+
+#define I2C_ADDR_FT3168   0x38     /* V1 touch */
+#define I2C_ADDR_CST816   0x15     /* V2 touch (probe => V2 board) */
+
+/* ---- the 1.46C round LCD ---- */
+#define P_PIN_LCD_PCLK    40
+#define P_PIN_LCD_RST     1             /* TCA9554 EXIO2, zero-based bit index */
+#define P_PIN_TP_RST      0             /* TCA9554 EXIO1, zero-based bit index */
+#define P_PIN_TP_INT      4
+#define P_PIN_LCD_BL      5
+#define P_PIN_PWR_SENSE   6
+#define P_PIN_PWR_CONTROL 7
+#define P_PANEL           412
+#define P_EXIO_LCD_RST    (1u << P_PIN_LCD_RST)
+#define P_EXIO_TP_RST     (1u << P_PIN_TP_RST)
+#define P_EXIO_SD_CS      (1u << 3)
+#define I2C_ADDR_SPD2010  0x53
 
 /* ---- the 1.75C ---- */
 #define R_PIN_LCD_PCLK    38

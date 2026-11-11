@@ -236,8 +236,8 @@
      manifest per board). With more than one, a picker comes first and points
      both buttons at the chosen board's manifests; the choice is remembered. */
   const BOARDS = {{BOARDS}};
-  const LABEL = { amoled18: '1.8 inch', round175c: '1.75 inch round', watch206: '2.06 inch watch', square216: '2.16 inch square' };
-  const NOTE = { amoled18: 'version V1 or V2. About $35 with the screen and a battery', round175c: 'the pendant: a round tank that fills the whole circle', watch206: 'the watch: a tall tank you can wear', square216: 'the square: the biggest screen, in a little white box' };
+  const LABEL = { amoled18: '1.8 inch', round146c: '1.46C round', round175c: '1.75 inch round', watch206: '2.06 inch watch', square216: '2.16 inch square' };
+  const NOTE = { amoled18: 'version V1 or V2. About $35 with the screen and a battery', round146c: 'the compact 412 px round tank with an LCD', round175c: 'the pendant: a round tank that fills the whole circle', watch206: 'the watch: a tall tank you can wear', square216: 'the square: the biggest screen, in a little white box' };
   const installBtn = document.querySelector('esp-web-install-button:not(.fresh)');
   const freshBtn = document.querySelector('esp-web-install-button.fresh');
   /* The page may live on a different host than the firmware it installs (the
@@ -274,7 +274,7 @@
        install at all - the pop-up says which board it is, and the picker
        moves to it. A tank before 0.3.9.3 tells neither: the version decides,
        as before. */
-  const WORDS = { amoled18: 'the 1.8 inch', round175c: 'the 1.75 inch round', watch206: 'the 2.06 inch watch', square216: 'the 2.16 inch square' };
+  const WORDS = { amoled18: 'the 1.8 inch', round146c: 'the 1.46C round LCD', round175c: 'the 1.75 inch round', watch206: 'the 2.06 inch watch', square216: 'the 2.16 inch square' };
   const boardsOf = info => { const p = String(info && info.name || '').split('|'); return { hw: p[1] || null, fw: p[2] || null }; };
   const overrides = {
     checkSameFirmware(manifest, info) {

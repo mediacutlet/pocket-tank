@@ -110,6 +110,12 @@ void  tank_glass_clamp(float *x, float *y, float m);   /* (x,y) brought to at le
 #define TANK_FRY_HOLDS 2        /* places held at home for fry courting next door: one per neighbor (tank_t.fry_hold) */
 #define N_FISH_START 2          /* a new tank: two contrasting adults */
 #define N_TRAINED_NAMES 4       /* name tokens the v2 model was trained on */
+enum { CRIT_NAME_SNAIL, CRIT_NAME_URCHIN, CRIT_NAME_CRAB, CRIT_NAME_SEAHORSE, CRIT_NAME_N };   /* tank_t.crit_name (0.4.2) */
+/* SAND DOLLAR GIFTS (0.4.2, sdgift.h): a gift's line in the book - the giver's OUT note (peer = the receiving tank) or a
+   receiver's SEEN line (peer = the giving tank); saved (save_t.sdg, 88 bytes) */
+#define SDG_SEEN_N 6
+typedef struct { uint32_t peer, nonce; uint16_t amount; uint8_t verdict, age; } sdg_entry_t;
+typedef struct { sdg_entry_t out; uint32_t seq; sdg_entry_t seen[SDG_SEEN_N]; } sdg_book_t;
 #define FISH_NAME_MAX 7         /* the keeper's name for a fish (first-run setup) */
 #define LOOK_N 9                /* the colors the keeper picks a body and markings from (one palette, 0.4) */
 /* the genes of form (0.4, docs/genetics-0.4.md): a body shape, a fin
@@ -590,8 +596,6 @@ typedef struct tank {
      * light, no placement page. */
     uint8_t  tool;
     float    tool_idle;            /* seconds since the tool last touched the glass */
-    bool     tools_locked;         /* the toolbox's LOCK (0.3.5, saved): bare fingers never wipe or
-                                    * cut - only a tool from the box does (tank_lock_tools) */
     /* upkeep state (persisted by progression.c) */
     float    veg_h[VEG_BEDS_MAX][VEG_FRONDS_MAX]; /* per-frond height, VEG_NUB..1 (fraction
                                                * of the way from the floor to the surface) */
@@ -616,8 +620,10 @@ typedef struct tank {
      * All saved. */
     int32_t  sd_balance, sd_earned;
     uint32_t sd_unlocks;
+    uint32_t breed_a, breed_b;     /* SELECTIVE BREEDING (0.4.2): the pair the keeper picked for the next fry (fish uids; 0 = none) */
+    uint16_t breed_paid;           /* ... and what they paid for it (the refund, exact if the price moves in an update). Saved */
     uint32_t sd_shelved;           /* the decoration shelf (0.3.9): owned pieces put away for later -
-                                    * a subset of sd_unlocks, placeable bits only. A shelved piece keeps
+                                    * a subset of sd_unlocks, placeable bits (and, 0.4.2, the critters: SD_CRIT_BITS). A shelved piece keeps
                                     * its spot / depth / color / growth and keeps GROWING, but is not in
                                     * the water: tank_decor_in says what is. Saved. */
     uint32_t sd_locked;            /* LOCKED pieces (0.3.9, Strato: "the ability to 'lock' decorations
@@ -641,6 +647,9 @@ typedef struct tank {
     /* the snail (SD_ITEM_SNAIL): crawls the glass toward the nearest film and
      * grazes it - the one creature in the tank that is not the model's. Its
      * position is saved; heading / target are not. */
+    /* the critters' names (0.4.2): the keeper's, "" = none (the card reads the species); the shrimp school has none */
+    char     crit_name[CRIT_NAME_N][FISH_NAME_MAX + 1];
+    sdg_book_t sdg;                /* SAND DOLLAR GIFTS (0.4.2, sdgift.h): the gift in flight, the count of ours, the gifts taken */
     float    snail_x, snail_y, snail_heading;
     int16_t  snail_cell;           /* the algae cell it is heading for, -1 = wandering */
     float    snail_dy;             /* px DOWN from SNAIL_FLOOR_Y on its floor walk: in its front lane inside a piece IN FRONT's footprint it eases
@@ -852,6 +861,14 @@ typedef struct tank {
     uint8_t  shrimp_taps;          /* quick taps on the school in a row (the third scares them; not saved) */
     float    shrimp_tap_t;         /* seconds since the last one */
     float    shrimp_flee;          /* seconds left of the school's flight from the crab (0.3.9.1): SHRIMP_FLEE_X its cruise, food ignored (not saved) */
+    float    cr_glo, cr_ghi;       /* THE HELD FRONDS (0.4.2, tank.c crab_vdepth_tick): held (cr_ghi > cr_glo), the crab is at the volcano's depth
+                                   against every frond but those rooted between the two - they stay as cr_gdepth has them until it walks
+                                   clear of each. Not saved */
+    uint8_t  cr_vclimb;            /* (climbing a volcano that was BEHIND at its last tick. Not saved) */
+    uint8_t  cr_vmode;             /* THE VOLCANO'S DEPTH (0.4.2, tank.c crab_vdepth_tick): heading for a volcano BEHIND, on it, and back from it
+                                   while a leaf it would change against is in reach - under the fronds painted over the volcano, over a
+                                   plant ranked below it. Not saved */
+    uint8_t  cr_foot_tries;        /* (run-ups taken at the foot this climb. Not saved) */
     uint8_t  cr_gdepth, cr_gdepth_want, snail_gdepth, snail_gdepth_want, urchin_gdepth, urchin_gdepth_want;   /* SWIM DEPTH phase 3c (0.3.9.4): the
                                    floor critters against the back grass, wanted with each lane's roll, taken up clear of every bed (their LANES
                                    stay their choice against the pieces; the sword plant IN FRONT stays over them). Not saved */
@@ -977,6 +994,8 @@ typedef struct tank {
                                     a cross-tank fry made a sixth): its count, which THE CAP's guard allows until it falls
                                     to the cap (fish leave on their own: a sale, a gift); 0 = none. Nobody is taken away */
     double   link_restore_at;      /* > 0: at this clock, fish still away come home from bubbles (a boot found them away) */
+    bool     link_home_save;       /* one of ours came home (a visit, a fry born next door): tank_link_tick saves at once, one
+                                      save however many came this tick (0.4.2, T1-F1). Not saved */
     uint32_t uid_n;                /* IDs this tank has handed out (mixed into the next when no entropy hook is set) */
 } tank_t;
 
@@ -1101,6 +1120,10 @@ void  tank_light_choice_set(tank_t *t, int choice);  /* (clamped; the light come
 void  tank_handled(tank_t *t);
 void  tank_toggle_light(tank_t *t);
 void  tank_light_auto(tank_t *t);
+/* the light is off (0.4.2, Bananna's 5 am fry; the dark holds notices): t->night, and at a boot - where no tick has
+ * computed it yet (tank_init leaves it false) - the keeper's double-tap state the save brought back. The one notion of
+ * dark for breeding (progression.c), a fry's welcome (setup.c) and the notices (notice.c). */
+bool  tank_light_off(const tank_t *t);
 
 /* The picture's way up on a WORN tank (TANK_WORN, 2026-10-02). A watch can
  * go on either wrist, buttons toward the hand or the elbow: the second way
@@ -1172,16 +1195,14 @@ void  tank_touch_drag(tank_t *t, float x, float y);
  * SCISSORS: a stroke cuts and never wipes, and it need not begin on a frond -
  * any mostly-sideways stroke cuts every frond it crosses, at the height it
  * crosses it. A tap still selects, feeds, flips the light. */
-enum { TOOL_HAND = 0, TOOL_SPONGE, TOOL_SCISSORS };
+enum { TOOL_HAND = 0, TOOL_SPONGE, TOOL_SCISSORS, TOOL_BREED };   /* TOOL_BREED (0.4.2, SELECTIVE BREEDING): no stroke wipes or
+                                                                     cuts; a tap on a fish of ours marks it a parent (render.c) */
 #define TOOL_IDLE_S 120.0f
 void  tank_set_tool(tank_t *t, int tool);
-/* the LOCK beside the toolbox (0.3.5, 2026-10-14, Strato: "people only want
- * to be able to trim or clean algae when they are selected"): locked, a
- * bare-finger stroke neither wipes nor cuts - the guessing stroke is off and
- * only the SPONGE and the SCISSORS tend the glass. Taps, the drag-down feed
- * and the hold are untouched. Unlocked (the default, and every older save)
- * is the guessing stroke as before. Saved. */
-void  tank_lock_tools(tank_t *t, bool lock);
+/* ONLY A TOOL TENDS (0.4.2, Strato 2026-11-08: the LOCK sunset): a bare-finger stroke neither wipes nor cuts - only the
+ * SPONGE wipes and only the SCISSORS cut, each picked up from the toolbox. Taps, the drag-down feed and the hold are
+ * untouched. (0.3.5..0.4.1 had a LOCK beside the toolbox to choose this; the save's byte 1685 is now always written 1,
+ * so a tank rolled back to an older build keeps the same rule.) */
 /* a finger on the glass that has travelled like a stroke, not a press that
  * may yet be a tap (WIPE_ENGAGE_PX): the DONE chip steps aside for it */
 bool  tank_stroking(const tank_t *t);
@@ -1250,6 +1271,11 @@ extern const uint32_t LOOK_COLORS[LOOK_N];
 #define LOOK_BODY   LOOK_COLORS
 #define LOOK_ACCENT LOOK_COLORS
 void  tank_set_name(tank_t *t, int slot, const char *name);
+/* the critters' names (0.4.2, tank_t.crit_name): k = CRIT_NAME_*. The name as the wheel tidies one - letters only, lowercase,
+   at most FISH_NAME_MAX; "" or NULL = no name (the card reads the species). Display only: never the model's */
+void  tank_set_crit_name(tank_t *t, int k, const char *name);
+uint32_t tank_crit_name_item(int k);                  /* the critter's SD_ITEM_* bit (0 = not a nameable critter) */
+void  tank_crit_names_owned(tank_t *t);               /* a name goes with its critter: none for one the tank does not own (a sale) */
 /* a gene's shown value (GENE_*: the colours as their palette index) and
  * setting it (the colours through tank_set_look: the fin follows the body,
  * the markings never match it) */
@@ -1284,10 +1310,24 @@ void  tank_set_bubble_x(tank_t *t, float x);
 enum { SD_ITEM_PLANT = 1u << 0, SD_ITEM_SNAIL = 1u << 1, SD_ITEM_CASTLE = 1u << 2, SD_ITEM_CORAL = 1u << 3, SD_ITEM_CLUSTER = 1u << 4, SD_ITEM_SHRIMP = 1u << 5,
        SD_ITEM_URCHIN = 1u << 6, SD_ITEM_SEAHORSE = 1u << 7, SD_ITEM_PUMPKIN = 1u << 8, SD_ITEM_VOLCANO = 1u << 9, SD_ITEM_CRAB = 1u << 10,
        SD_ITEM_COUNT = 11 };
-/* THE BACKGROUNDS in the shop (0.4.1): owned per tank, as decorations are - a bit each past the items (bg 1..7; Open Water,
-   0, is everyone's). Not SD_ITEMS rows: the shop's BACKGROUNDS area lists them (backgrounds.h). */
-#define SD_ITEM_BG(bg) (1u << (10 + (bg)))
-#define SD_BG_BITS     (0x7Fu << 11)
+/* THE BACKGROUNDS in the shop (0.4.1): owned per tank, as decorations are - a bit each past the items (bg 1..7: bits
+   11..17; Open Water, 0, is everyone's). Not SD_ITEMS rows: the shop's BACKGROUNDS area lists them (backgrounds.h).
+   0.4.2's three (bg 8..10: Sunken Ship, Volcanic Vent, Mangroves) take bits 19..21 - bit 18 was SELECTIVE BREEDING's
+   by then. A 0.4.1 build masks them off a 0.4.2 save and reads their bg_now as Open Water. */
+#define SD_ITEM_BG(bg) (1u << ((bg) < 8 ? 10 + (bg) : 11 + (bg)))
+#define SD_BG_BITS     ((0x7Fu << 11) | (0x7u << 19))
+/* SELECTIVE BREEDING (0.4.2): a tool, not a piece - its own CRITTERS row (render.c SHOP_ROW_BREED), never sold or
+   shelved; owned, the toolbox's wheel holds the BREEDING tool */
+#define SD_ITEM_BREED  (1u << 18)
+/* THE CRITTER SHELF (0.4.2, Strato 11-06 / 11-09; docs/critter-shelf.md): the critters a keeper can SHELVE - each in its own
+   little jar on the shelf, still theirs, RESTING (nothing it does runs: no grazing, no finds, no pay, its counts and days
+   held) until PUT BACK returns it where it was. The shrimp school is ONE critter. The jelly is its own tank, not one of
+   these. At most CRIT_CAP of them are in the water at once: a buy or a PUT BACK past it waits for one to be shelved. */
+#define SD_CRIT_BITS (SD_ITEM_SNAIL | SD_ITEM_SHRIMP | SD_ITEM_URCHIN | SD_ITEM_SEAHORSE | SD_ITEM_CRAB)
+#ifdef CRIT_CAP
+#error "CRIT_CAP is the keeper's critter cap, 5 on every build: tank.h defines it, nothing else"
+#endif
+#define CRIT_CAP 5
 /* per-fish paid bits (sd_paid_fish) */
 enum { SD_PAID_JUV = 1u << 0, SD_PAID_ADULT = 1u << 1, SD_PAID_ELDER = 1u << 2, SD_PAID_TRUST = 1u << 3 };
 #define PX_PER_INCH 24.0f          /* the tank reads as ~15 in tall; a fish ~1.7 in */
@@ -1482,6 +1522,17 @@ bool  tank_decor_owned(const tank_t *t, int item);                /* bought (in 
 bool  tank_decor_in(const tank_t *t, int item);                   /* bought and in the water (0.3.9: not on the shelf) - the word
                                                                    * every "is the piece here" test reads; the shop reads owned */
 bool  tank_decor_locked(const tank_t *t, int item);               /* owned and LOCKED in place (0.3.9): a hold on it opens nothing */
+/* the critter shelf (0.4.2, SD_CRIT_BITS above): a critter IN the water is bought and not on the shelf - the word every "is
+   the critter here" test reads (its tick, its sleep, its draw, its card, its taps); the shop and the save read owned */
+static inline bool tank_crit_in(const tank_t *t, uint32_t bit) { return (bit & SD_CRIT_BITS) && (t->sd_unlocks & bit) && !(t->sd_shelved & bit); }
+int   tank_crit_count_in(const tank_t *t);            /* the critters in the water now (the school counts once) */
+int   tank_crit_cap(void);                            /* CRIT_CAP (the sim's tests may lower it: tank_debug_crit_cap) */
+bool  tank_crit_room(const tank_t *t);                /* room for one more critter in the water */
+void  tank_debug_crit_cap(int n);                     /* (tests: a cap of n, 1..CRIT_CAP, to reach the full tank with five
+                                                         kinds; 0 = CRIT_CAP again) */
+void  tank_crit_poof(tank_t *t, uint32_t bit);        /* the bubbles where the critter is: it pops away (or back) */
+void  tank_crit_settle(tank_t *t, uint32_t bit);      /* back from the shelf: where it was, at rest (its spot kept, what it
+                                                         was in the middle of let go), its counts and tallies as they were */
 /* a poof (0.4's tank link, brought to 0.3.9): a burst of the free bubbles
  * where something was - a fish's spot, or a piece's whole footprint as it
  * goes on the shelf (Strato 2026-10-19: "pop away into a plume of bubbles") */
@@ -1613,6 +1664,7 @@ bool  tank_floor_clear(const tank_t *t, float x, float half);   /* no piece IN F
 bool  tank_crab_hit(const tank_t *t, float x, float y);
 bool  tank_crab_find_hit(const tank_t *t, float x, float y);   /* a sand dollar held up: its tap first (0.3.9.4) */
 bool  tank_crab_climb(tank_t *t);                                  /* the director, the sim: the rare climb now - to the volcano's near foot, then up (false = no crab / no volcano / climbing already) */
+void  tank_debug_climb_depth_old(bool on);                         /* (tests: the walk to the foot and the climb on a volcano BEHIND keep the crab's own lane and depth against the grass, as before the 0.4.2 fix) */
 bool  tank_crab_pellet_race(tank_t *t, float gap, int n);   /* the director's / the sim's stage (0.3.9.1): n pellets (1..4, a cluster) gap px off
                                                               the crab, the school huddled on the first, the crab going for it - near enough it shoos them */
 void  tank_crab_scare(tank_t *t, float fx); /* run for cover now (the tank's triple-tap startle calls it: a knock anywhere on the glass) */
@@ -1627,6 +1679,7 @@ enum { POP_OLD_LANE = 1, POP_OLD_HOME = 2, POP_OLD_SH = 4 };
 void  tank_debug_pop_old(uint32_t m);       /* (tests, the layer hunt's pops as before 0.4: LANE a floor critter's lane changes clear of the pieces alone, HOME the walk
                                                home keeps its lane, SH the seahorse changes its stack as it settles, wherever it was) */
 void  tank_debug_exit_lane_old(bool on);   /* (tests: out of a shelter IN FRONT the crab keeps the lane it came in with, as before 0.4 - the back lane walks out behind the volcano) */
+void  tank_debug_climb_foot_old(bool on);   /* (tests: the climb always from the near foot, as before 0.4.2 - even inside another piece's footprint, where the crab's stack changes in sight) */
 /* the volcano's cone, half its width in sprite cells (2 px) at height y
  * (cells up from the sprite's bottom row, which sits on tank_decor_fy) on
  * side s (-1 left, 1 right): the same rock render.c vo_half draws; the crab

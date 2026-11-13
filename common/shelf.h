@@ -65,6 +65,9 @@
 #define SHELF_NAME_MAX    15                     /* two plate lines of 7 and the break between them (0.3.9.3) */
 #define SHELF_NEW_PRICE   300                     /* D4: another tank of a type you have */
 enum { SHELF_TIME_DORMANT = 0, SHELF_TIME_PAUSED = 1 };
+enum { SHELF_TYPE_FISH = 0, SHELF_TYPE_JELLY = 1, SHELF_TYPE_PIRANHA = 2, SHELF_TYPE_MINNOWS = 3 };   /* (0.4.2: the piranha tank, the schooling minnows - experimental, as the jelly tank) */
+/* an EXPERIMENTAL tank: any type but the fish tank - no fish tank's code under it, its save an empty tank, it buys and earns nothing */
+#define SHELF_TYPE_EXPERIMENTAL(t) ((t) != SHELF_TYPE_FISH)       /* the jelly tank: the crew's experimental tank (docs/jelly-tank-0.6.md) */
 
 /* a tank on the shelf (or on the glass: shelf_now) - the slot header's own fields, appended only */
 typedef struct {
@@ -73,7 +76,8 @@ typedef struct {
     uint16_t save_len;                            /* 0 = a fresh tank: never on the glass yet */
     uint32_t seq;                                 /* one tank in two slots (a cut mid-rewrite): the higher wins */
     uint32_t id;                                  /* the shelf's own; 0.4's tank_uid is the save's */
-    uint8_t  type, pos, time_mode, pad0;          /* type 0 = the fish tank */
+    uint8_t  type, pos, time_mode, variant;       /* type SHELF_TYPE_*; variant = the type's own (the jelly tank's theme, JELLY_THEMES;
+                                                     was pad0, always 0: 2026-11-07) */
     char     name[16];
     int64_t  shelved_unix;                        /* when it went on the shelf */
     int64_t  clock_unix;                          /* when its DORMANT clock last started */
@@ -94,6 +98,10 @@ bool   shelf_port_frame_get(const char *key, void *buf, size_t max, size_t *got)
 bool   shelf_port_frame_set(const char *key, const void *buf, size_t n);
 bool   shelf_port_frame_del(const char *key);
 bool   persist_port_forget(void);                 /* the save on the glass only (a fresh tank comes in) */
+/* the NVS RESCUE COPY (main.c nvs_start): a raw image of the whole NVS partition - the saves, the Wi-Fi password - written
+   to the first 64 KB of `storage` if NVS ever came up with no free pages, and never read by the tank again. ERASE EVERYTHING
+   erases it (0.4.2). true = blank now (there was none, or it is erased) */
+bool   persist_port_rescue_erase(void);
 
 /* boot: read the slots, finish a journaled swap, drop leftover copies.
  * Before progression_boot (it moves the save the boot will load). */
@@ -108,6 +116,8 @@ int  shelf_count_type(int type);                  /* tanks of a type, the one on
 
 /* a fresh tank of `type` in the first empty place; its index, or -1 (full) */
 int  shelf_new(int type, int64_t now_unix);
+/* ... with the type's variant (the jelly tank's theme, fixed for good: J2); a jelly tank is named JELLIES (then JELLIES 2 ...) */
+int  shelf_new_kind(int type, int variant, int64_t now_unix);
 /* NEW TANK, BOUGHT (0.4.1): the slot and the wallet are two writes, and a power cut between them gave a tank for nothing
  * (slot first) or took the price for none (wallet first). A journal (`buy` in the frame: the price, the new tank's ID and
  * `mark`, a fresh marker) is written first, then the slot, then pay(ctx) takes the price and saves the wallet WITH the
@@ -139,8 +149,57 @@ bool shelf_remove(int i);
  * the tank stays (round 2, "Marker now") */
 bool shelf_remove_paid(int i, int refund, uint32_t mark, bool (*pay)(void *ctx), void *ctx);
 void shelf_remove_settle(uint32_t save_mark, int32_t wallet);
+/* ERASE EVERYTHING (0.4.2, progression_erase_all): the shelf of a board never used, and an honest erase - afterwards
+ * every byte of the shelf's area reads blank. The slots that show a mark of the shelf's go first (tanks, visitor books
+ * - the director's parked ones too -, a slot a write was cut in), then every other sector that is not blank (a removed
+ * tank's snapshot, a book cut before its head, whatever the flash held before the tank). The shelf's own records in the
+ * frame go (`swap`, `carry`, `buy`, `rm`), and the tank on the glass is back at the first place as MY TANK, tank 1, a
+ * fish tank. A stuck swap goes with it (both its tanks are erased).
+ * false = something is still there or a write was refused: the erase is owed - shelf_tidy tries it again (before every
+ * save), and no MY TANKS action is taken until it is clear. shelf_busy (NULL: none) is called after each sector erased.
+ * THE JOURNAL (`wipe` in the frame, written by progression before anything is erased): shelf_boot finds it at stage 1 and
+ * wipes the shelf before anything reads it, so a power cut anywhere ends in the fresh board, never a shelf that kept a
+ * tank; progression's boot finishes the rest. It is deleted only at stage 2 with the fresh tank saved */
+#define SHELF_WIPE_MAGIC 0x45504957u              /* "WIPE" */
+typedef struct {
+    uint32_t magic, new_uid;                      /* new_uid: the fresh tank's ID - a save that loads with it is the wipe's own */
+    uint8_t  stage;                               /* 1 = the shelf, the rescue copy, the Wi-Fi (if asked) still to do; 2 = all done */
+    uint8_t  wifi;                                /* ALSO FORGET WI-FI was ticked */
+    uint8_t  turned, olock, oq;                   /* how the board is worn (SCREEN, the way up): kept, as the touch map is */
+    uint8_t  light_auto;                          /* LIGHTS OUT's setting and time: the board's (the carry's), kept */
+    uint16_t light_idle_s;
+} shelf_wipe_j_t;
+extern void (*shelf_busy)(void);
+bool shelf_erase_all(void);
+/* AN EXPERIMENTAL TANK, BOUGHT ONCE (0.4.2, the piranha tank and the minnows; Strato 11-11: "they can only get one tank at a
+ * time; if they remove it they can get it back for free once the 500 SD is paid out the first time"). The board's record
+ * of the kinds it has paid for: the frame's `xbuy`, a bit a type. It is the board's, not a tank's - a tank's RESET keeps
+ * it, ERASE EVERYTHING clears it with the wallet and the shelf. note: at every boot a kind that has a tank on the board is
+ * written as paid (a power cut between the purchase's last write and the record's leaves no kind to pay for twice).
+ * price: what GET costs now - SHELF_XT_PRICE until it is paid, then 0; -1 = one is on the board already (one a kind) */
+#define SHELF_XT_PRICE 500
+bool shelf_type_paid(int type);
+bool shelf_type_paid_set(int type);
+void shelf_paid_note(void);
+int  shelf_xt_price(int type);
+/* THE MAIN TANK (0.4.2, a hard boot's way out of an experimental tank: main.c hard_boot_home). note: at every boot, a fish
+ * tank on the glass is written as the board's main tank (the frame's `home`, its shelf ID; nothing written when it already
+ * is). pick: the shelf index of the tank a hard boot brings back - the `home` tank if it is on the shelves, else the fish
+ * tank at the lowest place, else (the keeper removed them all) a new fish tank, free; -1 = none and no room for one */
+void shelf_home_note(void);
+int  shelf_home_pick(int64_t now_unix);
 /* DORMANT <-> PAUSED; banks what a DORMANT stretch lived (rewritten to a free slot, the old erased) */
 bool shelf_set_time(int i, int mode, int64_t now_unix);
+/* THE CLOCK WAS MOVED by `delta` seconds, to `now_unix` (the first time sync: progression_clock_rebase; 0.4.2 audit r2, PW2-4):
+ * every shelved tank's stamps (shelved_unix, clock_unix) move with it, so a DORMANT tank's next SWAP IN lives the time it
+ * was really on the shelf and not the jump (it lived up to 7 days at once), and its card counts its real days. banked_s is
+ * never touched (a PAUSED tank lives what it had banked, as before); a stamp of 0 (shelved with no clock) stays 0; a moved
+ * stamp is never after `now_unix` (the rebase cut short and done again: the stretch reads 0, never the jump) nor below 1.
+ * A gift in flight in a shelved save starts its day over (progression_blob_sd_restamp). Each tank is rewritten to a free
+ * slot (as shelf_set_time; shelf_busy after each); one that cannot be (no free slot, a swap stuck, shelf_tidy not clear) keeps its old stamps.
+ * A jump under SHELF_REBASE_MIN_S moves nothing (not worth a rewrite of every slot). Returns the tanks moved */
+#define SHELF_REBASE_MIN_S 60
+int  shelf_rebase(int64_t delta, int64_t now_unix);
 /* the tank on the glass onto the shelf (its snapshot `thumb`, w x h), shelf tank i onto the glass.
  * `carry` (what the board shares) is kept for the boot that follows: the caller restarts. */
 bool shelf_swap(int i, const uint16_t *thumb, int w, int h, const void *carry, size_t carry_len, int64_t now_unix);

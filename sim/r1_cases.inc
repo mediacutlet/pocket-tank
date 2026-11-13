@@ -98,7 +98,7 @@ static int sa_carry_stale(void) {
    for the stamp, the release and the 0.4.1 fields */
 static bool sa_read(const char *p, uint8_t *b, size_t *n) { FILE *f = fopen(p, "rb"); if (!f) return false; *n = fread(b, 1, 8192, f); fclose(f); return true; }
 static bool sa_write(const char *p, const uint8_t *b, size_t n) { FILE *f = fopen(p, "wb"); if (!f) return false; fwrite(b, 1, n, f); fclose(f); return true; }
-static int sa_fixture_040(void) {
+static int sa_fixture_040_run(void) {
     int fails = 0;
     sim_shelf_board(); sa_fw_boot(); progression_setup_done(&tank);
     while (tank.n_fish < 4) tank_add_fish(&tank, 0, 1);
@@ -109,7 +109,7 @@ static int sa_fixture_040(void) {
     tank_init(&tank, 5); shelf_boot(clock_port_now_unix()); progression_boot(&tank); progression_save(&tank);   /* (settled: what a load derives) */
     char sp[700]; snprintf(sp, sizeof sp, "%s/tank.sav", sim_shelf_dir());
     static uint8_t a[8192], b[8192]; size_t na = 0, nb = 0;
-    if (!sa_read(sp, a, &na) || na != 1976) { SA_FAIL("H4: the save is %u B (want 1976)", (unsigned)na); return fails; }
+    if (!sa_read(sp, a, &na) || na != 2200) { SA_FAIL("H4: the save is %u B (want 2200)", (unsigned)na); return fails; }
     na = 1960;                                                             /* (0.4.0 wrote 1960 B: the shelf's markers came in 0.4.1 round 2) */
     a[1609] = 0; a[1687] = 0; a[1861] = 0; a[1956] = 0;                  /* 0.4.0 wrote zeros there */
     uint32_t r040 = 0x00040000u; memcpy(a + 1664, &r040, 4);
@@ -125,11 +125,17 @@ static int sa_fixture_040(void) {
         if (i == 1687 && b[i] == (a[i] | SD_RCPT_KNOWN)) continue;   /* (the receipts: folded once, marked known - round 2 FOLD) */
         if (diffs++ < 12) printf("saves-audit: H4: byte %u: 0.4.0 %02x, saved back %02x\n", (unsigned)i, a[i], b[i]);
     }
-    if (nb != 1976) SA_FAIL("H4: saved back %u B (want 1976)", (unsigned)nb);
-    for (size_t i = 1960; i < nb; i++) if (b[i]) { SA_FAIL("H4: byte %u of the new tail is %02x (want zeros)", (unsigned)i, b[i]); break; }
+    if (nb != 2200) SA_FAIL("H4: saved back %u B (want 2200)", (unsigned)nb);
+    for (size_t i = 2176; i < 2200 && i < nb; i++) if (b[i]) { SA_FAIL("H4: byte %u of OWED CARDS is %02x (want zeros: an older save owes nothing)", (unsigned)i, b[i]); break; }   /* (0.4.2, audit PW2-2) */
+    for (size_t i = 1960; i < 2104 && i < nb; i++) if (b[i]) { SA_FAIL("H4: byte %u of the new tail is %02x (want zeros)", (unsigned)i, b[i]); break; }   /* (2104..2175: ITS STORY, 0.4.2 - written from the grown age) */
     if (diffs) SA_FAIL("H4: %d bytes changed through a 0.4.1 load and save", diffs);
     else printf("saves-audit: H4: a 0.4.0 save (1960 B, every item, a shelved piece, a lock) loads and saves back unchanged\n");
     return fails;
+}
+void sim_clock_freeze(int on);
+static int sa_fixture_040(void) {   /* the clock held (11-08: a second's tick between the save and the reload moved each fish's
+                                       age_s - bytes 44/112/180/248 - and H4 failed once on the square; the seam copy holds it too) */
+    sim_clock_freeze(1); int fails = sa_fixture_040_run(); sim_clock_freeze(0); return fails;
 }
 /* H1b: the same window, the tank coming in fresh (a NEW TANK never on the glass): no save to fall back on */
 static int sa_swap_carry_fresh(void) {

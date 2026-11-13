@@ -64,18 +64,18 @@ static int fm_decor(void) {
 /* B: the seven backgrounds */
 static int fm_backgrounds(void) {
     fm_fresh(302);
-    tank.sd_balance = 1000;
+    tank.sd_balance = (BG_N - 1) * SD_PRICE_BG + 300;                    /* (every one of them and 300 over: 0.4.2 has ten) */
     int bought = 0;
     for (int r = 0; r < 1000; r++) for (int bg = 0; bg <= BG_N; bg++) bought += progression_bg_buy(&tank, bg);
     int used_unowned = 0;
     tank.sd_unlocks &= ~SD_ITEM_BG(3);
     used_unowned = progression_bg_use(&tank, 3);
-    FM_SAY("B: 1000 rounds of BUY over every background: %d bought, wallet %d (want 7 and %d); USE of an unowned one: %d",
-           bought, (int)tank.sd_balance, 1000 - 7 * SD_PRICE_BG, used_unowned);
+    FM_SAY("B: 1000 rounds of BUY over every background: %d bought, wallet %d (want %d and %d); USE of an unowned one: %d",
+           bought, (int)tank.sd_balance, BG_N - 1, 300, used_unowned);
     /* do the background bits ever collide with a shop item's? */
     for (int bg = 1; bg < BG_N; bg++) for (int it = 0; it < SD_ITEM_COUNT; it++)
         if (SD_ITEM_BG(bg) & SD_ITEMS[it].bit) FM_SAY("B: FAIL background %d's bit is item %d's", bg, it);
-    return bought != 7 || tank.sd_balance != 1000 - 7 * SD_PRICE_BG || used_unowned;
+    return bought != BG_N - 1 || tank.sd_balance != 300 || used_unowned;
 }
 /* C: buy a shop fry, welcome it, sell it - 300 times */
 static int fm_fry_loop(void) {

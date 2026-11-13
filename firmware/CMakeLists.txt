@@ -1,5 +1,21 @@
 # pocket-tank firmware — ESP32-S3 (Waveshare ESP32-S3-Touch-AMOLED-1.8)
 cmake_minimum_required(VERSION 3.16)
+# THE APP'S ROOM (0.4.2): sdkconfig.defaults only fills keys an sdkconfig lacks, so a build folder (or the checkout's
+# own sdkconfig, tools/flash.sh) made before 0.4.2 would keep the Wi-Fi/TLS parts the app left out (11-08 review).
+# Their lines are taken out of an existing sdkconfig at every configure, and the defaults put them back as 0.4.2 has them.
+if(DEFINED SDKCONFIG)
+    set(PT_SDKCONFIG ${SDKCONFIG})
+else()
+    set(PT_SDKCONFIG ${CMAKE_CURRENT_LIST_DIR}/sdkconfig)
+endif()
+if(EXISTS ${PT_SDKCONFIG})
+    file(READ ${PT_SDKCONFIG} PT_SDK_OLD)
+    string(REGEX REPLACE "\n(# )?CONFIG_(ESP_WIFI_SOFTAP_SUPPORT|ESP_WIFI_ENTERPRISE_SUPPORT|LWIP_IPV6|MBEDTLS_TLS_SERVER_AND_CLIENT|MBEDTLS_TLS_SERVER_ONLY|MBEDTLS_TLS_CLIENT_ONLY|MBEDTLS_TLS_SERVER|MBEDTLS_TLS_CLIENT)[= ][^\n]*" "" PT_SDK_NEW "${PT_SDK_OLD}")
+    if(NOT PT_SDK_NEW STREQUAL PT_SDK_OLD)
+        file(WRITE ${PT_SDKCONFIG} "${PT_SDK_NEW}")
+        message(STATUS "pocket-tank: the 0.4.2 Wi-Fi/TLS trims applied to ${PT_SDKCONFIG}")
+    endif()
+endif()
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 # the build id: the commit's short hash (+ "-dirty"), never a tag - the
 # release number lives in common/version.h and is shown beside it (ESP-IDF's

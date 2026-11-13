@@ -328,6 +328,8 @@ static void kin_load(void) {
     }
     free(b);
 }
+static bool (*s_kin_keep)(uint32_t uid);
+void kin_set_keep(bool (*keep)(uint32_t uid)) { s_kin_keep = keep; }
 void kin_learn(uint32_t uid, const char *name, uint32_t color, float bold, float sociable) {
     if (!uid || !name || !name[0]) return;
     if (!s_kin_loaded) kin_load();
@@ -336,7 +338,12 @@ void kin_learn(uint32_t uid, const char *name, uint32_t color, float bold, float
     bool changed = false;
     if (!k) {                                          /* new to us: the next place, the oldest when full */
         if (s_kin_n < KIN_MAX) k = &s_kin[s_kin_n++];
-        else { k = &s_kin[s_kin_next]; s_kin_next = (s_kin_next + 1) % KIN_MAX; }
+        else {                                         /* the oldest - past any a fry here still names (0.4.2: kin_set_keep), unless all are */
+            int j = s_kin_next;
+            for (int n = 0; n < KIN_MAX && s_kin_keep && s_kin_keep(s_kin[j].uid); n++) j = (j + 1) % KIN_MAX;
+            if (s_kin_keep && s_kin_keep(s_kin[j].uid)) j = s_kin_next;
+            k = &s_kin[j]; s_kin_next = (j + 1) % KIN_MAX;
+        }
         memset(k, 0, sizeof *k); k->uid = uid; changed = true;
     }
     if (strncmp(k->name, name, FISH_NAME_MAX)) { memset(k->name, 0, sizeof k->name); strncpy(k->name, name, FISH_NAME_MAX); changed = true; }

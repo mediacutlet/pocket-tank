@@ -39,6 +39,7 @@
 #define PASSPORT_V2_BYTES  110       /* v2 (0.4, 2026-11-01): + its home tank's keeper-given name */
 #define PASSPORT_TANK_NAME 16        /* that name's room: 15 characters and the end */
 #define PASSPORT_MAX_BYTES 240       /* what a reader accepts from a later version (one ESP-NOW frame is 250) */
+#define PASSPORT_KIND_FISH 0         /* passport_t.kind: a reef fish */
 #define PASSPORT_GENES     5         /* shape, fins, pattern, body, accent (GENE_N, checked in passport.c) */
 
 typedef struct {
@@ -49,6 +50,9 @@ typedef struct {
     uint8_t  shape, fins, pattern;        /* the form it shows (SHAPE_* / FINS_* / PATTERN_*) */
     uint8_t  carried[PASSPORT_GENES];     /* the copies it carries and does not show (GENE_* order; colors as LOOK_COLORS indexes) */
     uint8_t  mutated, from_b, from_carried;
+    uint8_t  kind;                        /* the creature's KIND (0.4.2, the travel bowl): 0 = a reef fish, the only kind there is
+                                             yet. The wire's spare byte (OFF_PAD, always written 0 before); read as it comes,
+                                             refused nowhere over the radio in this release - the travel bowl's LET IN checks it */
     float    hunger, energy, stress, curiosity, bored, trust;   /* 0..10 */
     float    sociable, bold, lazy, bold0, sociable0;           /* 0..1 */
     float    drift_acc;                   /* 0..655 */

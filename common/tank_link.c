@@ -7,6 +7,8 @@
 #include "collection.h"
 #include "gift.h"
 #include "shelf.h"
+#include "sdgift.h"
+#include "tank_events.h"
 
 static float clampf_(float v, float lo, float hi) { return v < lo ? lo : v > hi ? hi : v; }
 static float glass_x(int e) { return e == LINK_LEFT ? tank_glass_x0(DOOR_Y) : tank_glass_x1(DOOR_Y); }
@@ -96,8 +98,12 @@ static int fry_hold(void *ctx, uint32_t peer, uint32_t parent, bool on) {
     t->fry_hold[h].peer = peer; t->fry_hold[h].parent = parent; t->fry_hold[h].until = t->clock + TANK_LINK_FRY_HOLD_S;
     return 1;
 }
+/* link_host_t.ours (0.4.2, LK-2): one of our own fish, home or away - a visitor's slot never counts (a gift of a fish
+   visiting here is not ours until its GIVEN). Not a GIVEN note: a live one is a fish that LEFT here, maybe the very
+   fish the late GIVEN brings back (given A -> B -> A): "we have it" then would leave it nowhere */
+static bool ours(void *ctx, uint32_t uid) { return uid && home_slot((const tank_t *)ctx, uid) >= 0; }
 link_host_t tank_link_host(tank_t *t, void (*send)(void *ctx, uint32_t to, const uint8_t *buf, int len)) {
-    link_host_t h = { t, send, tank_link_room, tank_link_visitor, fry_room, give_state, fry_hold };
+    link_host_t h = { t, send, tank_link_room, tank_link_visitor, fry_room, give_state, fry_hold, ours };
     return h;
 }
 
@@ -111,12 +117,16 @@ static void welcome_home(tank_t *t, int i, const passport_t *pp) {
         f->hunger = pp->hunger; f->energy = pp->energy; f->stress = pp->stress; f->curiosity = pp->curiosity; f->bored = pp->bored;
         f->sociable = pp->sociable; f->bold = pp->bold; f->drift_acc = pp->drift_acc;
         if (pp->eaten > f->eaten) f->eaten = pp->eaten;
-        f->ms_bits |= pp->ms_bits;
+        f->ms_bits |= pp->ms_bits & ~(uint32_t)(MS_REACHED_JUV | MS_REACHED_ADULT | MS_REACHED_ELDER | MS_CROSSBRED | MS_BOUGHT);
+                                                     /* (0.4.2, LK-1) its badges from next door, never its stages (the age below
+                                                        gives those, and pays them) nor where it came from: this tank knows */
         progression_came_in(f);                      /* (drift gained next door: no THE TANK CHANGED SOMEONE here - R-progression F1) */
-        progression_age_from_passport(t, i, pp->age_s);   /* (its stage kept: a visit never demotes - an elder grown
-                                                             under 0.3.4's shorter times came home an adult, 11-03 rc) */
+        progression_age_from_visit(t, i, pp->age_s);   /* (its stage kept: a visit never demotes - an elder grown
+                                                          under 0.3.4's shorter times came home an adult, 11-03 rc;
+                                                          never older than the time it has lived: 0.4.2, LK-1) */
     }
     f->away = false; f->homeward = false; f->door_sent = false;
+    t->link_home_save = true;                        /* (0.4.2, T1-F1) saved at once, as a fry home: tank_link_tick */
     f->door_seen = t->clock;
     f->sig = 0xffffffffu; f->ask_age = 99;           /* the advisor asks about it soon */
 }
@@ -275,7 +285,10 @@ static void gift_tick(tank_t *t, link_t *L, gift_book_t *g) {
     }
 }
 
+static void sd_expire_tick(tank_t *t, link_t *L);
+static bool sd_save(tank_t *t);
 void tank_link_tick(tank_t *t, link_t *L) {
+    sd_expire_tick(t, L);                               /* sand dollars nobody answered for a day: back (0.4.2) */
     gift_book_t *gb = gift_of(t);
     progression_cap_check(t, "tank_link_tick");      /* (the link's paths, once a tick: every tank here, host or home) */
     if (gb) gift_tick(t, L, gb);
@@ -289,9 +302,15 @@ void tank_link_tick(tank_t *t, link_t *L) {
             f->x = TANK_W * 0.5f; f->y = DOOR_Y; tank_glass_clamp(&f->x, &f->y, 30);
             welcome_home(t, i, NULL);
             tank_poof(t, f->x, f->y);
-            progression_fry_home(t, i);              /* (a fry born next door: its birth flow now - its born_away saved, audit P5) */
+            (void)progression_fry_welcome(t, i);              /* (a fry born next door: its birth flow now - its born_away saved, audit P5) */
         }
     }
+    /* (0.4.2, audit T1-F1) one of ours home from a visit - by the door, from bubbles, the boot's restore above - is saved
+       at once, as a fry of ours home always was (N1-fry): a cut inside the 30 s coalesce found it next door again, its
+       badges and its time there taken back. The events of this tick came before it (link_dev_poll: events, then this), so
+       however many came home, fry or grown and in whatever order, it is ONE save (a fry's welcome leaves its save to this
+       too: progression_fry_welcome). A save refused leaves the dirty mark welcome_home set: the coalesce tries again */
+    if (t->link_home_save) { t->link_home_save = false; (void)sd_save(t); }
     /* home: a held place ends when its time runs out, the engine is gone, or that fish of ours is no longer next
        door (home again: the fry it was held for cannot come any more). A drift's paused door keeps it */
     for (int h = 0; h < TANK_FRY_HOLDS; h++)
@@ -390,6 +409,57 @@ void tank_link_deport(tank_t *t, int vis_slot) {
     f->homeward = true; f->deported = true; f->hesitate = 0;
     t->deport_uid = f->uid;
 }
+/* ---- SAND DOLLAR GIFTS (0.4.2, tank_link.h) ---- */
+bool (*tank_link_sd_save)(tank_t *t);   /* NULL = progression_save (the selftest's two tanks keep their own saves) */
+static bool sd_save(tank_t *t) { return tank_link_sd_save ? tank_link_sd_save(t) : progression_save(t); }
+static struct { int kind, edge, amount, verdict; } s_sd_news;
+static void sd_news(int kind, int edge, int amount, int verdict) { s_sd_news.kind = kind; s_sd_news.edge = edge; s_sd_news.amount = amount; s_sd_news.verdict = verdict; }
+int tank_link_sd_news(int *edge, int *amount, int *verdict) {
+    int k = s_sd_news.kind;
+    if (edge) *edge = s_sd_news.edge;
+    if (amount) *amount = s_sd_news.amount;
+    if (verdict) *verdict = s_sd_news.verdict;
+    s_sd_news.kind = TL_SD_NONE;
+    return k;
+}
+uint32_t (*tank_link_sd_clock)(void);
+static uint32_t sd_clock(void) {
+    if (tank_link_sd_clock) return tank_link_sd_clock();
+    int64_t u = clock_port_now_unix();
+    return u > 1600000000 && u < 4000000000ll ? (uint32_t)u : 0;   /* (a clock that is set; none = the count alone) */
+}
+int tank_link_sd_send(tank_t *t, link_t *L, int edge, uint32_t want_peer, int amount) {
+    uint32_t peer = L && edge >= 0 && edge < LINK_EDGES ? link_neighbor(L, (link_edge_t)edge) : 0;
+    if (!peer || !link_peer_sd(L, peer) || (want_peer && peer != want_peer)) return TL_SD_NO_DOOR;   /* (the door shut, or opened to another
+                                                                       tank while the dial was up: the review's 5) */
+    sdg_book_t b0 = t->sdg; int32_t bal0 = t->sd_balance; uint32_t nonce = 0;
+    int r = sdg_out_begin(&t->sdg, &t->sd_balance, peer, amount, sd_clock(), &nonce);
+    if (r == SDG_E_BUSY) return TL_SD_BUSY;
+    if (r != SDG_SENT) return TL_SD_NO_FUNDS;
+    if (!sd_save(t)) { t->sdg = b0; t->sd_balance = bal0; return TL_SD_NO_SAVE; }   /* (nothing taken, nothing sent) */
+    link_sd_send(L, peer, nonce, amount);
+    return TL_SD_SENDING;
+}
+bool tank_link_sd_pending(const tank_t *t) { return sdg_out_pending(&t->sdg); }
+/* a gift nobody answered for a day comes back (sdg_out_expire) - looked at once a minute of tank time, never while the
+   door to that tank is open */
+static struct { const tank_t *t; double at; } s_sd_look[2];   /* one gate a tank (the selftest ticks two in one process) */
+static void sd_expire_tick(tank_t *t, link_t *L) {
+    if (!sdg_out_pending(&t->sdg)) return;
+    int k = s_sd_look[0].t == t ? 0 : s_sd_look[1].t == t ? 1 : !s_sd_look[0].t ? 0 : 1;
+    if (s_sd_look[k].t == t && t->clock >= s_sd_look[k].at && t->clock < s_sd_look[k].at + 60) return;
+    s_sd_look[k].t = t; s_sd_look[k].at = t->clock;
+    if (L && (link_neighbor(L, LINK_LEFT) == t->sdg.out.peer || link_neighbor(L, LINK_RIGHT) == t->sdg.out.peer)) return;
+    sdg_book_t b0 = t->sdg; int32_t bal0 = t->sd_balance; uint32_t nonce = t->sdg.out.nonce;
+    int back = sdg_out_expire(&t->sdg, &t->sd_balance, sd_clock());
+    if (!memcmp(&b0, &t->sdg, sizeof b0)) return;
+    if (!sd_save(t)) { t->sdg = b0; t->sd_balance = bal0; return; }   /* (a stamp or a give-back not kept: the next look again) */
+    if (back > 0) {
+        if (L) link_sd_forget(L, nonce);
+        sd_news(TL_SD_BACK_LATE, -1, back, SDG_V_NONE);
+        progression_sd_toast(back);
+    }
+}
 bool tank_link_event(tank_t *t, link_t *L, const link_ev_t *e) {
     (void)L;
     int i;
@@ -443,7 +513,7 @@ bool tank_link_event(tank_t *t, link_t *L, const link_ev_t *e) {
         if (!t->fish[i].away) return true;
         welcome_home(t, i, &e->pp);
         arrive_at(&t->fish[i], e->edge, e->depth, e->speed);
-        progression_fry_home(t, i);                      /* (a fry born next door: its birth flow now) */
+        (void)progression_fry_welcome(t, i);                      /* (a fry born next door: its birth flow now) */
         swim_check(t, "LEV_FISH_BACK");                  /* (no room asked, ever: ours has its place - POP_CAP + the visitor places) */
         return true;
     case LEV_FISH_RESTORE:
@@ -456,7 +526,7 @@ bool tank_link_event(tank_t *t, link_t *L, const link_ev_t *e) {
           welcome_home(t, i, &e->pp);
           f->door = DOOR_NONE;
           tank_poof(t, f->x, f->y);
-          progression_fry_home(t, i); }
+          (void)progression_fry_welcome(t, i); }
         swim_check(t, "LEV_FISH_RESTORE");
         return true;
     /* cross-tank fry (phase 5) */
@@ -490,7 +560,34 @@ bool tank_link_event(tank_t *t, link_t *L, const link_ev_t *e) {
         for (int j = 0; j < t->n_fish; j++) if (!t->fish[j].away) t->fish[j].curiosity = clampf_(t->fish[j].curiosity + TANK_LINK_CURIOUS, 0, 10);
         gift_book_t *g = gift_of(t);                     /* a gift we were in the middle of with that tank */
         if (g && L) gift_resume(L, g, e->peer);
+        if (L && sdg_out_pending(&t->sdg) && t->sdg.out.peer == e->peer)   /* sand dollars still on their way to it (0.4.2): again */
+            link_sd_send(L, e->peer, t->sdg.out.nonce, t->sdg.out.amount);
         return false; }
+    /* SAND DOLLAR GIFTS (0.4.2, sdgift.h): decided once, saved with the money, then answered */
+    case LEV_SD_IN: {
+        sdg_book_t b0 = t->sdg; int32_t bal0 = t->sd_balance; bool fresh;
+        int v = sdg_in(&t->sdg, &t->sd_balance, e->peer, e->nonce, e->amount, &fresh);
+        if (v == SDG_V_NONE) return true;
+        if (v == SDG_V_OLD) { if (L) link_sd_answer(L, e->peer, e->nonce, v); return true; }   /* (nothing kept, nothing saved) */
+        if (fresh && !sd_save(t)) { t->sdg = b0; t->sd_balance = bal0; return true; }   /* (not kept: no answer - it comes again) */
+        if (fresh) {
+            sd_news(v == SDG_V_OK ? TL_SD_GOT : TL_SD_REFUSED, e->edge, e->amount, v);
+            if (v == SDG_V_OK) { progression_sd_toast(e->amount); tank_emit(TEV_CRAB_COIN, -1); }
+        }
+        if (L) link_sd_answer(L, e->peer, e->nonce, v);
+        return true; }
+    case LEV_SD_DONE: {
+        sdg_book_t b0 = t->sdg; int32_t bal0 = t->sd_balance;
+        int back = sdg_out_settle(&t->sdg, &t->sd_balance, e->peer, e->nonce, e->reason);
+        if (back < 0) return true;                       /* (not our note's: a stale answer) */
+        if (!sd_save(t)) {                               /* (not kept: the note stays, and the engine asks again - the same answer comes) */
+            t->sdg = b0; t->sd_balance = bal0;
+            if (L) link_sd_send(L, e->peer, e->nonce, e->amount);
+            return true;
+        }
+        sd_news(back ? TL_SD_BACK : TL_SD_SENT, e->edge, e->amount, e->reason);
+        if (back) progression_sd_toast(back); else tank_emit(TEV_CRAB_COIN, -1);
+        return true; }
     /* GIVE (phase 6) */
     case LEV_GIVE_ASK: {                                 /* a gift offered to us: the question on our glass (one at a time) */
         gift_book_t *g = gift_of(t);

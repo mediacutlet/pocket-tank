@@ -21,6 +21,11 @@ void display_port_flush_async_prof(int64_t *task_us, int *frames, int64_t *copy_
 /* power the panel down for device sleep; display_port_wake (or a boot's
  * display_port_init) re-sequences it */
 void display_port_sleep(void);
+/* the watch's panel power (0.4.2 item 7): ALDO2 found off while awake -> on again, the panel re-inited, a W line; true
+   when it healed. Asked by the tank task every 10 s while awake. Other boards: false */
+bool display_port_panel_power_check(void);
+uint32_t display_port_panel_heals(void);
+void display_port_panel_rail_test_off(void);   /* director `panelrail off`: the test */
 /* re-power and re-init the panel after display_port_sleep, without reboot */
 void display_port_wake(void);
 /* true = present the frame rotated 180 degrees (device held upside down) */
@@ -59,6 +64,7 @@ void display_port_deep_sleep_pins(bool tp_awake_high);   /* tp_awake_high: the t
 void display_port_deep_sleep_bus(void);   /* the round board: the QSPI clock + data lines driven low and held - a powered panel's inputs never float */
 void display_port_deep_standby(void);   /* the CO5300's 4Fh deep standby (~3 uA vs sleep-in's ~135); only a reset ends it */
 bool board_has_expander(void);                  /* the 1.8, positively: its IO expander answered (and no ES7210 - the 1.75 has both) */
+uint8_t board_es7210_addr(void);                /* the address the ES7210 mic ADC answered at (0x40..0x43, board_probe.h), 0 = none (0.4.2) */
 void board_sd_select(bool on);                  /* the 1.8's TF card select (EXIO7), for sd_spike.c; nothing on the other boards */
 /* the 1.75 / 1.75-B (BETA, 2026-10-17): the round board with an expander, an
  * RTC and its resets on 39 / 40. board_is_round() is true on it too. */

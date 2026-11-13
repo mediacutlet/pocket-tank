@@ -14,7 +14,7 @@ enum {
     OFF_COLOR = 28, OFF_FIN = 32, OFF_ACCENT = 36,
     OFF_PRESET = 40, OFF_STAGE = 41, OFF_SHAPE = 42, OFF_FINS = 43, OFF_PATTERN = 44,
     OFF_CARRIED = 45,                                  /* PASSPORT_GENES bytes */
-    OFF_MUTATED = 50, OFF_FROM_B = 51, OFF_FROM_CARRIED = 52, OFF_PAD = 53,
+    OFF_MUTATED = 50, OFF_FROM_B = 51, OFF_FROM_CARRIED = 52, OFF_PAD = 53,   /* OFF_PAD: the creature's KIND since 0.4.2 (0 = a reef fish; always 0 before) */
     OFF_HUNGER = 54, OFF_ENERGY = 56, OFF_STRESS = 58, OFF_CURIOSITY = 60, OFF_BORED = 62, OFF_TRUST = 64,
     OFF_SOCIABLE = 66, OFF_BOLD = 68, OFF_LAZY = 70, OFF_BOLD0 = 72, OFF_SOCIABLE0 = 74,
     OFF_DRIFT = 76, OFF_SIZE = 78, OFF_AGE = 80, OFF_EATEN = 84, OFF_EATEN_PLAYER = 86,
@@ -148,6 +148,7 @@ int passport_write(const passport_t *p, uint8_t *b, int cap) {
     b[OFF_SHAPE] = p->shape; b[OFF_FINS] = p->fins; b[OFF_PATTERN] = p->pattern;
     memcpy(b + OFF_CARRIED, p->carried, PASSPORT_GENES);
     b[OFF_MUTATED] = p->mutated; b[OFF_FROM_B] = p->from_b; b[OFF_FROM_CARRIED] = p->from_carried;
+    b[OFF_PAD] = p->kind;                                /* (0.4.2: its kind - 0, a reef fish, as the byte always was) */
     put16(b, OFF_HUNGER, q16(p->hunger, DRIVE_MAX)); put16(b, OFF_ENERGY, q16(p->energy, DRIVE_MAX));
     put16(b, OFF_STRESS, q16(p->stress, DRIVE_MAX)); put16(b, OFF_CURIOSITY, q16(p->curiosity, DRIVE_MAX));
     put16(b, OFF_BORED, q16(p->bored, DRIVE_MAX)); put16(b, OFF_TRUST, q16(p->trust, DRIVE_MAX));
@@ -193,6 +194,7 @@ bool passport_read(passport_t *p, const uint8_t *b, int len) {
     p->mutated = b[OFF_MUTATED] <= PASSPORT_GENES ? b[OFF_MUTATED] : 0;
     p->from_b = b[OFF_FROM_B] & ((1u << PASSPORT_GENES) - 1);
     p->from_carried = b[OFF_FROM_CARRIED] & ((1u << PASSPORT_GENES) - 1);
+    p->kind = b[OFF_PAD];                                /* (0.4.2) read as it comes: nothing is refused by it here */
     p->hunger = dq16(get16(b, OFF_HUNGER), DRIVE_MAX); p->energy = dq16(get16(b, OFF_ENERGY), DRIVE_MAX);
     p->stress = dq16(get16(b, OFF_STRESS), DRIVE_MAX); p->curiosity = dq16(get16(b, OFF_CURIOSITY), DRIVE_MAX);
     p->bored = dq16(get16(b, OFF_BORED), DRIVE_MAX); p->trust = dq16(get16(b, OFF_TRUST), DRIVE_MAX);

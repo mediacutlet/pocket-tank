@@ -56,7 +56,8 @@ static int f2_fry_home_ways(void) {
         fm_ticks(3);
         int32_t paid = tank.sd_balance - w0;
         F2_CHECK(!tank.fish[s].away && !tank.fish[s].born_away, "L(%s): not home (away %d born_away %d)", how[w], tank.fish[s].away, tank.fish[s].born_away);
-        int want = SD_BIRTH + (w ? SD_STAGE_JUV : 0);   /* (by the door its passport says 2 h: a juvenile, its +5 too) */
+        int want = SD_BIRTH;   /* (by the door its passport says 2 h, but it has lived seconds: home as old as it lived, a fry -
+                                  no +5 for a juvenile it never was. Was SD_BIRTH + SD_STAGE_JUV until 0.4.2, LK-1) */
         F2_CHECK(paid == want, "L(%s, mutated %d): home paid %d (want %d)", how[w], mut, (int)paid, want);
         F2_CHECK(nb == s, "L(%s): the welcome owed is slot %d (want %d)", how[w], nb, s);
         F2_CHECK(!!(tank.tank_ms_bits & TMS_FIRST_MUTATION) == mut, "L(%s): FIRST MUTATION %d for a fry mutated %d", how[w], !!(tank.tank_ms_bits & TMS_FIRST_MUTATION), mut);

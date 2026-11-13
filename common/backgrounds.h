@@ -21,7 +21,9 @@
 #include <stddef.h>
 
 /* the ids, as saved (tank_t.bg_now) - Strato's order of preference, 11-04 */
-enum { BG_OPEN = 0, BG_RUINS, BG_KELP, BG_TWILIGHT, BG_LAGOON, BG_RIDGES, BG_REEF, BG_GROTTO, BG_N };
+enum { BG_OPEN = 0, BG_RUINS, BG_KELP, BG_TWILIGHT, BG_LAGOON, BG_RIDGES, BG_REEF, BG_GROTTO,
+       BG_SHIP, BG_VENT, BG_MANGROVE,                       /* 0.4.2 (docs/backgrounds-0.4.2.md) */
+       BG_N };
 #define BG_LAYERS_MAX 6                          /* the most layers any background has (the boot show's budget) */
 
 const char *bg_name(int bg);                    /* the shop's name (Strato named them 11-05) */
@@ -52,11 +54,25 @@ const bg_glow_t *bg_begin(int bg, void *scratch);
 /* during the water pass, row y: the row's colors (RGB888, TANK_W of them; the glow already in) and in *lay the
  * row's layers (0 = the water) - or NULL: nothing of the background on this row but the water and its glow. */
 const uint32_t *bg_row(int bg, int y, void *scratch, const uint8_t **lay);
+/* after bg_row: how far each of the row's pixels lights itself (0: not at all; 255: the night does not dim it - the
+ * vent's mouths, 0.4.2), or NULL: none on this row */
+const uint8_t *bg_row_lit(void *scratch);
 
-/* THE DRIFT (Twilight Deep): specks in the water, drawn every frame by render.c (it marks them). Each is a
- * function of the clock alone - nothing kept between frames. */
+/* THE DRIFT: specks in the water, drawn every frame by render.c (it marks them) - Twilight Deep's marine snow, and
+ * (0.4.2) the Volcanic Vent's embers and the Mangroves' silt and leaves. Each is a function of the clock alone -
+ * nothing kept between frames. *rgb: its color; *lit: it lights itself (an ember: the night does not dim it). */
 int  bg_specks(int bg);
-void bg_speck(int bg, int i, float T, float *x, float *y, int *alpha, bool *big);
+/* the drift's own time for this frame, from the tank's lifelong clock (a double): the T bg_speck takes. The 0.4.2
+ * drifts take tank_anim's lap (tank.h: a float of the raw clock steps half a second on a tank weeks old - every
+ * period of theirs divides the lap, so nothing jumps where it wraps). Twilight's snow still takes the raw clock as
+ * a float, as 0.4.1 shipped it: its periods do not divide the lap, and its frames are held byte for byte. */
+float bg_speck_clock(int bg, double clock);
+void bg_speck(int bg, int i, float T, float *x, float *y, int *alpha, bool *big, uint32_t *rgb, bool *lit);
 #define BG_SPECK_RGB 0xc8d8ffu
+
+/* for the tests only: the Volcanic Vent's mouths (k from 0; false past the last) and, after a bg_begin(BG_VENT, scratch),
+ * its tube worms' tips (i from 0; false past the last) */
+bool bg_debug_vent_mouth(int k, int *x, int *y);
+bool bg_debug_vent_worm(const void *scratch, int i, int *x, int *y0);
 
 #endif

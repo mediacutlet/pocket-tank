@@ -149,6 +149,18 @@ bool shelf_port_frame_del(const char *key) {
     nvs_close(h);
     return e == ESP_OK || e == ESP_ERR_NVS_NOT_FOUND;
 }
+bool persist_port_rescue_erase(void) {            /* storage's first SHELF_BASE: main.c's raw NVS copy, if one was ever made (shelf.h) */
+    const esp_partition_t *p = shelf_part();
+    if (!p) return true;                          /* (no storage partition: no copy) */
+    uint8_t b[256]; bool blank = true;
+    for (uint32_t o = 0; o < SHELF_BASE && blank; o += sizeof b) {
+        if (esp_partition_read(p, o, b, sizeof b) != ESP_OK) return false;
+        for (size_t k = 0; k < sizeof b && blank; k++) blank = b[k] == 0xff;
+    }
+    if (blank) return true;
+    ESP_LOGW(TAG, "the NVS rescue copy at storage+0 erased");
+    return esp_partition_erase_range(p, 0, SHELF_BASE) == ESP_OK;
+}
 bool persist_port_forget(void) {                  /* the save on the glass only: a fresh tank comes in */
     if (s_save_blocked) return false;             /* (a save we could not load is never thrown away for a fresh one) */
     nvs_handle_t h; if (nvs_open(SAVE_NVS_NS, NVS_READWRITE, &h) != ESP_OK) return false;

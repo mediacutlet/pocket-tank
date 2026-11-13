@@ -64,8 +64,11 @@ void setup_begin_birth(tank_t *t, int slot);   /* the birth flow for the fry in 
 int  setup_poll_birth(tank_t *t);
 /* a fry's welcome is up, or owed and about to open (it is born mid-frame,
  * the flow opens after): the notices wait for it (2026-09-29). A welcome the
- * director dropped is not due - it returns at the next boot. */
-bool setup_birth_due(void);
+ * director dropped is not due - it returns at the next boot. Nor is one
+ * waiting for the light (0.4.2: setup_poll_birth opens no welcome in a dark
+ * tank, tank_light_off - a bought fry's apart): the notices the dark still
+ * shows are not held all night behind it. */
+bool setup_birth_due(const tank_t *t);
 void setup_begin_place(tank_t *t, int item);   /* the placement page for SD item `item` (placeable ones only) */
 /* RENAME A FISH (2026-10-01, Strato: "when you tap a fish and see its card
  * there should be a change name button"): the letter wheel again, one page
@@ -77,7 +80,40 @@ void setup_begin_place(tank_t *t, int item);   /* the placement page for SD item
  * the platform the fish once (else -1) so it can put that card back up. */
 void setup_begin_rename(tank_t *t, int fish);
 bool setup_is_rename(void);
+/* A FISH'S STORY (0.4.2, Discord #ideas: "a little stat sheet" with its age, size, parents and original owner; "these
+ * are perfect already" of the welcome's FAMILY and NATURE pages): MORE on the fish's card (MS_TAP_ABOUT) opens three
+ * pages about it - ITS STORY (AGE, FROM, PARENTS, MEALS, SIZE, TRUST), then the FAMILY page and the NATURE page as its
+ * welcome had them. BACK / NEXT at the foot, DONE on the last; BACK on the first or DONE hands the card back the way a
+ * rename does (setup_take_renamed); dropped from outside (setup_cancel), there is no card to go back to. */
+void setup_begin_about(tank_t *t, int fish);
+bool setup_is_about(void);
+void setup_debug_stamp(const char *l1, const char *l2, float deg);   /* the starter fish's stamp words and turn (l1 NULL: none - a test) */
+bool setup_about_band(const tank_t *t, int box[4]);          /* THE PANEL KEPT (0.4.2): MORE's moving strip, page coords incl. (false: none) */
+void setup_about_band_draw(const tank_t *t, uint16_t *fb, int stride, double clock);   /* ... cleared and its fish drawn again */
+uint32_t setup_about_key(const tank_t *t);                   /* ... all the still page is drawn from */
+#define SETUP_STAMP_IN_X 68             /* its centre from the panel's top left */
+#define SETUP_STAMP_IN_Y 62
 int  setup_take_renamed(void);
+/* NAME A CRITTER (0.4.2): the same page for the snail, urchin, crab or seahorse (k = CRIT_NAME_*; one the tank owns),
+ * opened by its card's NAME / RENAME (render_critter_name_hit) - "NAME YOUR SNAIL" the first time, "RENAME YOUR SNAIL"
+ * after. The critter stays where it is, ringed; its card's art sits on a plate where a fish would stand. DONE keeps the
+ * name, tidied (nothing left = no name) and saves it; CANCEL, or a flow dropped from outside, puts the old one back.
+ * setup_crit is the critter the page is about (-1 = none); when it closes, setup_take_crit_renamed gives the platform
+ * the critter once (else -1) so it can put that critter's card back up (render_card_of_crit_name). setup_fish is -1 */
+void setup_begin_crit_rename(tank_t *t, int k);
+/* SAND DOLLAR GIFTS (0.4.2, docs/release-0.4.2.md): the link HUD's coin by an open door brings this up - the letter wheel's
+ * page with three digits on it (SEND SAND DOLLARS, CANCEL | NEXT, the balance and the neighbor's badge above the dial),
+ * then a confirm page (SEND N SAND DOLLARS? BACK | SEND). NEXT is lit only for 1..the balance. SEND closes it and leaves the
+ * amount for the platform (setup_take_sdgift: once; 0 = nothing sent - CANCEL, a page taken away). `edge` is the door's
+ * (LINK_LEFT / LINK_RIGHT), `badge` the neighbor's */
+void setup_begin_sdgift(tank_t *t, int edge, int badge);
+bool setup_is_sdgift(void);
+int  setup_take_sdgift(int *edge);
+int  setup_sdgift_amount(void);              /* the dial now (tests, the director) */
+void setup_sdgift_set(int amount);           /* ... set it (tests, the director, the sim's shots) */
+bool setup_sdgift_confirming(void);          /* the confirm page is up */
+int  setup_crit(void);
+int  setup_take_crit_renamed(void);
 bool setup_active(void);
 bool setup_is_birth(void);               /* the birth flow, not the first run */
 bool setup_is_place(void);               /* the placement page */
@@ -97,9 +133,15 @@ void setup_set_keyboard(int mode);
 int  setup_keyboard(void);
 int  setup_page(void);                   /* SETUP_PG_* while active */
 /* the finger, every frame (or poll): x,y in tank coordinates, down = touching.
- * A press then release on one element taps it; a press on a letter slot and
- * a vertical drag spins that letter (SETUP_SPIN_PX of travel per step). */
+ * A press then release on one element taps it; a press anywhere on the letter
+ * wheel and a vertical drag spins the focused letter (SETUP_SPIN_PX of travel
+ * per step; a press on a letter picks it first, unless THE LETTER HOLD keeps it). */
 void setup_touch(tank_t *t, float x, float y, bool down);
+/* THE WHEEL'S FEEL (0.4.2, setup.c): a drag from anywhere on the dial turns the focused letter once it has moved
+ * slop_px up or down; for hold_ms after the finger last changed a letter, a press on the row stays on that letter if it
+ * lands within reach_px of it (999 = the whole row). -1 = keep. Not saved (director `wheel`). */
+void setup_wheel_tune(int hold_ms, int reach_px, int slop_px);
+void setup_wheel_tuning(int *hold_ms, int *reach_px, int *slop_px);
 /* the pieces, for tests and the touch log: the element under (x,y) on the
  * current page (0 = none) and a tap on it */
 int  setup_hit(float x, float y);
@@ -121,6 +163,9 @@ enum { SETUP_PG_BORN = SETUP_PG_N, SETUP_PG_NAME_NEW, SETUP_PG_FAMILY, SETUP_PG_
 enum { SETUP_PG_PLACE = SETUP_PG_BIRTH_END };
 /* the rename page (one page too) */
 enum { SETUP_PG_RENAME = SETUP_PG_PLACE + 1 };
+/* a fish's story (0.4.2): its own first page, then the birth flow's FAMILY and NATURE */
+enum { SETUP_PG_ABOUT = SETUP_PG_RENAME + 1 };
+#define SETUP_ABOUT_PAGES 3
 /* element ids (setup_hit / setup_activate) */
 #define SETUP_HIT_NEXT  1
 #define SETUP_HIT_BACK  2
@@ -249,7 +294,7 @@ enum { SETUP_PG_RENAME = SETUP_PG_PLACE + 1 };
  * (a swatch) - and, under FROM, where it came from: a parent's name in its
  * body color, a * when it was that parent's hidden copy (a footnote says
  * so), or NEW! for a mutation. The nature page after it (DONE): BOLD /
- * SOCIAL - the fry's bar, the parents' ticks in their body colors - and the
+ * SOCIAL - the fry's bar, the parents' ticks (heads above / below, TP2-9) - and the
  * PARENTS legend. BACK + NEXT / DONE at the foot of both. */
 #define SETUP_FAM_PORTRAIT_Y (SETUP_Y + 82)
 #define SETUP_FAM_NOW_X      (SETUP_X + SETUP_W / 2 - 90)
@@ -262,7 +307,14 @@ enum { SETUP_PG_RENAME = SETUP_PG_PLACE + 1 };
 #define SETUP_FAM_FROM_X     (SETUP_X + 248)
 #define SETUP_FAM_NOTE_Y     (SETUP_FAM_ROW_Y + 5 * SETUP_FAM_ROW_DY + 2)
 #define SETUP_NAT_ROW_Y      (SETUP_Y + 100)   /* the nature page's rows */
+#define SETUP_AB_PORTRAIT_Y  (SETUP_Y + 84)    /* ITS STORY (0.4.2): the fish as it is, under its name ... */
+#define SETUP_AB_ROW_Y       (SETUP_Y + 128)   /* ... then a row each: AGE, FROM, PARENTS, MEALS, SIZE, TRUST */
+#define SETUP_AB_ROW_DY      24
 #define SETUP_NAT_ROW_DY     34
+#define SETUP_NAT_HEAD_H     7                 /* a parent's mark's head (TP2-9): 7 rows, 13 px at its widest ... */
+#define SETUP_NAT_KEY_W      13                /* ... (the key before a name under PARENTS: the same head) */
+#define SETUP_NAT_HEAD_A_Y(by) ((by) - 11)     /* the first parent's head above the bar (by = its top), widest row first */
+#define SETUP_NAT_HEAD_B_Y(by) ((by) + SETUP_FAM_BAR_H + 4)   /* the other's below it, widest row last */
 #define SETUP_FAM_BAR_W      200
 #define SETUP_FAM_BAR_H      8
 /* the placement page's DEPTH control (second design, 2026-09-16 - Strato:

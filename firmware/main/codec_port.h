@@ -18,8 +18,10 @@ bool codec_port_up(void);
 void codec_port_settled(void);
 void codec_port_down(void);
 void codec_port_dump(void);
-/* the round 1.75C's ES7210 microphone ADC (I2C 0x40), which the tank never
- * uses: its suspend register set, once at boot. Its rail has to stay on
- * (battery_port_pin_rail), so this is what keeps it from drawing. */
-bool codec_port_mic_adc_down(i2c_master_bus_handle_t bus);
+/* the round 1.75C's ES7210 microphone ADC (I2C 0x40..0x43: the address the
+ * board probe found, board_es7210_addr()), which the tank never uses: its
+ * suspend register set, once at boot. Its rail has to stay on
+ * (battery_port_pin_rail), so this is what keeps it from drawing. addr 0 (no
+ * ES7210 found) does nothing. */
+bool codec_port_mic_adc_down(i2c_master_bus_handle_t bus, uint8_t addr);
 #endif

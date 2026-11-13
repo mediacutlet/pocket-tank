@@ -104,7 +104,7 @@ static void deliver(void) {
 
 /* ---- the pretend tanks ---- */
 static void boot(mtank_t *t, bool first) {
-    link_host_t h = { t, h_send, h_room, h_visitor, NULL, NULL, NULL };
+    link_host_t h = { t, h_send, h_room, h_visitor, NULL, NULL, NULL, NULL };
     link_init(t->L, t->uid, &h, rnd(), now);
     t->alive = true; t->radio = true; t->moving = false; t->arm_at[0] = t->arm_at[1] = 0;
     memset(t->v, 0, sizeof t->v);
@@ -277,7 +277,7 @@ static int run(int n, uint32_t seed, uint32_t chaos_ms, bool quiet) {
 
 static void fuzz(link_t *L) {
     static uint8_t b[LINK_FRAME_MAX + 8];
-    link_host_t h = { &T[0], h_send, h_room, h_visitor, NULL, NULL, NULL };
+    link_host_t h = { &T[0], h_send, h_room, h_visitor, NULL, NULL, NULL, NULL };
     T[0].alive = false;                                   /* its sends go nowhere */
     link_init(L, 0x12345679u, &h, 7, 1000);
     link_mode(L, true);
@@ -442,7 +442,7 @@ static void scenarios(void) {
     scene(3);
     LCHECK(join(0, LINK_RIGHT, 1, 500), "8: the first pair did not join");
     link_mode(T[0].L, false); link_mode(T[1].L, false); step_ms(3000);
-    { link_host_t h = { &T[2], h_send, h_room, h_visitor, NULL, NULL, NULL };            /* as on the glass: its radio was off, it has heard nobody, */
+    { link_host_t h = { &T[2], h_send, h_room, h_visitor, NULL, NULL, NULL, NULL };            /* as on the glass: its radio was off, it has heard nobody, */
       link_init(T[2].L, T[2].uid, &h, 9, now); link_mode(T[2].L, true); }   /* so it picks before the first beacon arrives */
     step_ms(3000);
     int b0 = link_badge(T[0].L), b1 = link_badge(T[1].L), b2 = link_badge(T[2].L);
@@ -560,6 +560,46 @@ static int d_bake_diff(tank_t *t, bool gift) {
     }
     render_set_modal_cache(NULL, NULL);
     return n;
+}
+/* THE CARDS LENT (0.4.2): the device takes a card's bake when the card is drawn and gives it back ~3 s after. With an
+   allocator set: drawn from a lent bake = drawn whole, pixel for pixel (painted, then copied); given back once the card is
+   not drawn for BAKE_IDLE_FRAMES; taken again and still the same; with no memory, drawn whole and asked again only after
+   BAKE_RETRY_FRAMES. Returns the failures (each printed) */
+static int dl_allocs, dl_frees, dl_fail;
+static void *dl_alloc(size_t n) { dl_allocs++; return dl_fail ? NULL : malloc(n); }
+static void dl_free(void *p) { dl_frees++; free(p); }
+static int d_bake_lent(tank_t *t) {
+    static uint16_t whole[TANK_W * TANK_H], lent[TANK_W * TANK_H];
+    int bad = 0, held;
+    #define DL_DRAW(o) do { render_frame_begin(); render_tank(t, o, TANK_W); render_tank(t, o, TANK_W); render_give_modal(t, o, TANK_W); } while (0)
+    #define DL_SAME(what) do { int nd = 0; for (int q = 0; q < TANK_W * TANK_H; q++) nd += lent[q] != whole[q]; \
+                               if (nd) { printf("FAIL: doors: 7k lent: %s - %d pixels differ from the card drawn whole\n", what, nd); bad++; } } while (0)
+    render_set_modal_cache(NULL, NULL); DL_DRAW(whole);                       /* the card drawn whole */
+    dl_allocs = dl_frees = dl_fail = 0; render_set_modal_alloc(dl_alloc, dl_free);
+    DL_DRAW(lent); DL_SAME("painted into a lent bake");
+    DL_DRAW(lent); DL_SAME("copied from the lent bake");
+    if (dl_allocs != 1 || !render_modal_bakes_held(&held) || held != 1) { printf("FAIL: doors: 7k lent: %d takes, %d held after two frames (want 1, 1)\n", dl_allocs, held); bad++; }
+    for (int q = 0; q < 70; q++) render_frame_begin();                         /* closed under 3 s: still held */
+    if (dl_frees) { printf("FAIL: doors: 7k lent: given back after 70 frames (want held to 75)\n"); bad++; }
+    for (int q = 0; q < 10; q++) render_frame_begin();
+    if (dl_frees != 1 || render_modal_bakes_held(NULL)) { printf("FAIL: doors: 7k lent: %d given back after 80 frames unseen (want 1)\n", dl_frees); bad++; }
+    DL_DRAW(lent); DL_SAME("taken again");
+    if (dl_allocs != 2) { printf("FAIL: doors: 7k lent: %d takes after it came back (want 2)\n", dl_allocs); bad++; }
+    for (int q = 0; q < 80; q++) render_frame_begin();
+    dl_fail = 1; dl_allocs = 0;
+    for (int f = 0; f < 10; f++) { DL_DRAW(lent); DL_SAME("no memory: drawn whole"); }
+    if (dl_allocs != 1) { printf("FAIL: doors: 7k lent: no memory asked %d times in 10 frames (want 1, then a wait)\n", dl_allocs); bad++; }
+    for (int f = 0; f < 20; f++) DL_DRAW(lent);
+    if (dl_allocs != 2) { printf("FAIL: doors: 7k lent: no memory asked %d times in 30 frames (want 2)\n", dl_allocs); bad++; }
+    dl_fail = 0; for (int f = 0; f < 30; f++) DL_DRAW(lent);
+    DL_SAME("memory back: the bake again"); 
+    if (!render_modal_bakes_held(NULL)) { printf("FAIL: doors: 7k lent: memory back but no bake taken\n"); bad++; }
+    for (int q = 0; q < 80; q++) render_frame_begin();
+    render_set_modal_alloc(NULL, NULL); render_set_modal_cache(NULL, NULL);
+    if (dl_frees != 3) { printf("FAIL: doors: 7k lent: %d given back in all (want 3, one a take: nothing leaks)\n", dl_frees); bad++; }
+    #undef DL_DRAW
+    #undef DL_SAME
+    return bad;
 }
 /* GIVE_SHOT=<path prefix>: a card the doors cases draw, saved as <prefix>_<name>.ppm (for looking at the words) */
 static void d_shot(const uint16_t *fb, const char *name) {
@@ -1371,9 +1411,10 @@ int selftest_doors(void) {
         }
         DCHECK(si >= 0, "7g: no fish of B's to give from its card (%d fish, newborn %d)", DB.n_fish, progression_newborn());
         if (si >= 0) {
-            uint32_t su = DB.fish[si].uid; const float bx = RENDER_GIVE_X + RENDER_GIVE_W / 2.0f, by = RENDER_GIVE_Y + RENDER_GIVE_H / 2.0f;
+            uint32_t su = DB.fish[si].uid; int gx = -100, gy = -100, gw = 0, gh = 0; render_tool_tile(&DB, si, RENDER_TOOLS_GIVE, &gx, &gy, &gw, &gh);
+            const float bx = gx + gw / 2.0f, by = gy + gh / 2.0f;   /* GIVE's tile in the toolbox (0.4.2) */
             DB.fish[si].door_refused = DB.clock + 120;                      /* (home for this test: no visit of its own) */
-            DCHECK(render_give_hit(&DB, si, bx, by), "7g: no GIVE box on a linked tank's stat card");
+            DCHECK(gw > 0 && render_give_hit(&DB, si, bx, by) && render_tools_hit(&DB, si, bx, by) < 0, "7g: no GIVE tile in a linked tank's toolbox (or a tool answered it)");
             static uint16_t gfb[TANK_W * TANK_H];
             render_give_tap(&DB, si);
             DCHECK(render_give_modal_step(&DB) == RENDER_GM_CONFIRM, "7g: the stat card's GIVE did not open the modal (step %d)", render_give_modal_step(&DB));
@@ -1435,7 +1476,8 @@ int selftest_doors(void) {
         UG.door_badge[LINK_LEFT] = 1; UG.door_badge[LINK_RIGHT] = 2;
         int f0 = 0; for (int i = 0; i < U.n_fish; i++) if (progression_fish_givable(&U, i)) { f0 = i; break; }
         uint32_t uu = U.fish[f0].uid; int x = 0, y = 0;
-        DCHECK(render_give_hit(&U, f0, RENDER_GIVE_X + RENDER_GIVE_W / 2.0f, RENDER_GIVE_Y + RENDER_GIVE_H / 2.0f), "7k: no GIVE box between two doors");
+        { int gx = -100, gy = -100, gw = 0, gh = 0; render_tool_tile(&U, f0, RENDER_TOOLS_GIVE, &gx, &gy, &gw, &gh);
+          DCHECK(gw > 0 && render_give_hit(&U, f0, gx + gw / 2.0f, gy + gh / 2.0f), "7k: no GIVE tile between two doors"); }
         render_give_tap(&U, f0);
         DCHECK(render_give_modal_step(&U) == RENDER_GM_PICK, "7k: both doors open and no pick (step %d)", render_give_modal_step(&U));
         render_tank(&U, ufb, TANK_W); render_tank(&U, ufb, TANK_W); render_stats_card(&U, f0, ufb, TANK_W); render_give_modal(&U, ufb, TANK_W); d_shot(ufb, "g3_pick");
@@ -1495,6 +1537,7 @@ int selftest_doors(void) {
         render_milestones_show_fish(&U, f0); render_milestones(&U, ufb, TANK_W);
         render_milestones_give(&U, &gx, &gy); render_milestones_tap(&U, (float)gx, (float)gy); render_milestones(&U, ufb, TANK_W); d_shot(ufb, "g2_confirm_page");
         DCHECK(!d_bake_diff(&U, false), "7k: CONFIRM from its bake is not CONFIRM drawn whole");
+        DCHECK(!d_bake_lent(&U), "7k: CONFIRM from a lent bake (THE CARDS LENT, 0.4.2)");
         DCHECK(render_give_modal_step(&U) == RENDER_GM_CONFIRM, "7k: the keeper card's GIVE did not open CONFIRM");
         render_give_modal_button(&U, RENDER_GM_TAP_BACK, &x, &y);
         DCHECK(render_milestones_tap(&U, (float)x, (float)y) == MS_TAP_KEPT && render_give_modal_step(&U) == RENDER_GM_OFF, "7k: BACK (in the hold, too) did not close it");
@@ -2039,10 +2082,11 @@ static int gt_of(void *ctx) { return (int)((mtank_t *)ctx - T); }
 static int gf_find(gtank_t *g, uint32_t uid) { for (int i = 0; i < g->nf; i++) if (g->f[i].uid == uid) return i; return -1; }
 static int gn_find(gnote_t *n, int k, uint32_t uid, uint32_t nonce) { for (int i = 0; i < k; i++) if (n[i].uid == uid && (!nonce || n[i].nonce == nonce)) return i; return -1; }
 static void gn_drop(gnote_t *n, int *k, int i) { if (i >= 0) n[i] = n[--*k]; }
+static int g_recv_cap = 32;                       /* the RECEIVED ring's length (0.4.2, LK-2: 1 in selftest-give's short-ring runs) */
 static bool g_recv_has(gtank_t *g, uint32_t uid, uint32_t nonce) { for (int i = 0; i < g->nrecv; i++) if (g->recv[i].uid == uid && g->recv[i].nonce == nonce) return true; return false; }
 static void g_recv_add(gtank_t *g, uint32_t uid, uint32_t nonce) {
     if (g_recv_has(g, uid, nonce)) return;
-    if (g->nrecv == 32) { memmove(g->recv, g->recv + 1, 31 * sizeof g->recv[0]); g->nrecv = 31; }
+    if (g->nrecv >= g_recv_cap) { memmove(g->recv, g->recv + 1, (size_t)(g_recv_cap - 1) * sizeof g->recv[0]); g->nrecv = g_recv_cap - 1; }
     g->recv[g->nrecv].uid = uid; g->recv[g->nrecv].nonce = nonce; g->nrecv++;
 }
 static void gf_remove(gtank_t *g, uint32_t uid) { int i = gf_find(g, uid); if (i >= 0) { g->f[i] = g->f[g->nf - 1]; g->giving[i] = g->giving[g->nf - 1]; g->nf--; } }
@@ -2057,6 +2101,7 @@ static int g_give_state(void *ctx, uint32_t uid, uint32_t nonce, passport_t *pp)
     if (g_recv_has(g, uid, nonce)) return LINK_GS_ALIVE;
     return LINK_GS_NONE;
 }
+static bool g_ours(void *ctx, uint32_t uid) { return gf_find(&GT[gt_of(ctx)], uid) >= 0; }   /* (link_host_t.ours: alive here, saved) */
 static int g_room(void *ctx) { gtank_t *g = &GT[gt_of(ctx)]; return GV_FISH - g->nf - g->narr; }
 static void g_job(gtank_t *g, int type, uint32_t at, const link_ev_t *e, bool yes) {
     LCHECK(g->njob < 24, "too much work queued");
@@ -2065,7 +2110,7 @@ static void g_job(gtank_t *g, int type, uint32_t at, const link_ev_t *e, bool ye
 }
 static void g_boot(int i) {                       /* a boot: the engine knows nothing; the saved notes settle what they can */
     mtank_t *t = &T[i]; gtank_t *g = &GT[i];
-    link_host_t h = { t, h_send, g_room, NULL, g_room, g_give_state, NULL };
+    link_host_t h = { t, h_send, g_room, NULL, g_room, g_give_state, NULL, g_ours };
     link_init(t->L, t->uid, &h, rnd(), now);
     t->alive = true; t->radio = true;
     g->njob = 0; for (int k = 0; k < g->nf; k++) g->giving[k] = false;
@@ -2249,7 +2294,7 @@ static void vg_add(vgtank_t *g, const passport_t *pp) {
 static bool vg_recv_has(vgtank_t *g, uint32_t uid, uint32_t nonce) { for (int i = 0; i < g->nrecv; i++) if (g->recv[i].uid == uid && g->recv[i].nonce == nonce) return true; return false; }
 static void vg_recv_add(vgtank_t *g, uint32_t uid, uint32_t nonce) {
     if (vg_recv_has(g, uid, nonce)) return;
-    if (g->nrecv == 32) { memmove(g->recv, g->recv + 1, 31 * sizeof g->recv[0]); g->nrecv = 31; }
+    if (g->nrecv >= g_recv_cap) { memmove(g->recv, g->recv + 1, (size_t)(g_recv_cap - 1) * sizeof g->recv[0]); g->nrecv = g_recv_cap - 1; }
     g->recv[g->nrecv].uid = uid; g->recv[g->nrecv].nonce = nonce; g->nrecv++;
 }
 static int vg_of(void *ctx) { return (int)((mtank_t *)ctx - T); }
@@ -2266,10 +2311,11 @@ static int vg_state(void *ctx, uint32_t uid, uint32_t nonce, passport_t *pp) {
 }
 static int vg_room_v(void *ctx) { vgtank_t *g = &VG[vg_of(ctx)]; int n = 0; for (int i = 0; i <= LINK_VISIT_MAX; i++) n += g->v[i].used; return LINK_VISIT_MAX - n; }
 static int vg_room_f(void *ctx) { vgtank_t *g = &VG[vg_of(ctx)]; return VG_FISH - vg_n(g) - g->narr; }
+static bool vg_ours(void *ctx, uint32_t uid) { return vg_f(&VG[vg_of(ctx)], uid) != NULL; }   /* (on our roster, home or away: never a visitor) */
 static bool vg_visitor(void *ctx, uint32_t uid, passport_t *pp) { vgv_t *v = vg_v(&VG[vg_of(ctx)], uid); if (!v) return false; *pp = v->pp; return true; }
 static void vg_boot(int i) {
     mtank_t *t = &T[i]; vgtank_t *g = &VG[i];
-    link_host_t h = { t, h_send, vg_room_v, vg_visitor, vg_room_f, vg_state, NULL };
+    link_host_t h = { t, h_send, vg_room_v, vg_visitor, vg_room_f, vg_state, NULL, vg_ours };
     link_init(t->L, t->uid, &h, rnd(), now);
     t->alive = true; t->radio = true;
     g->njob = 0; memset(g->v, 0, sizeof g->v);                           /* visitors are never saved */
@@ -2514,6 +2560,16 @@ int selftest_give(void) {
         for (int r = 0; r < soak2; r++) here += give_here_run(9000 + (uint32_t)r * 7919u, 10 * 60000, true);
         printf("selftest-give: WHERE IT IS: + %d more runs of 10 min; %d fish given next door where they were, checked after every 10 ms step\n", soak2, here);
         LCHECK(here > 20, "only %d fish given next door: the path is not tested", here);
+    }
+    {   /* A RING OF ONE (0.4.2, LK-2): RECEIVED keeps one gift, so nearly every lost GIVEN_OK is answered past it - by the
+           receiver's own fish alone (link_host_t.ours). The same promises, after every 10 ms step */
+        g_recv_cap = 1;
+        int c1 = 0, h1 = 0;
+        for (int r = 0; r < 8; r++) c1 += give_run(31000 + (uint32_t)r * 7919u, 10 * 60000, true);
+        for (int r = 0; r < 6; r++) h1 += give_here_run(37000 + (uint32_t)r * 7919u, 10 * 60000, true);
+        g_recv_cap = 32;
+        printf("selftest-give: RECEIVED a ring of one: %d gifts through the door and %d where they were, never two, never zero (LK-2)\n", c1, h1);
+        LCHECK(c1 > 40 && h1 > 5, "the ring-of-one runs gave too little (%d, %d)", c1, h1);
     }
     for (int i = 0; i < 2; i++) free(L[i]);
     printf("selftest-give: %s\n", fails ? "FAILED" : "OK");
@@ -3127,4 +3183,225 @@ int selftest_r2link_soak(void) {
     printf("selftest-r2soak: %s (%d; %d cross fry for B's home; %d times one of B's asked at the door while it waited, %d refused)\n",
            fails0 ? "FAILED" : "OK", fails0, home_fry_all, probes_all, refused_all);
     return fails0 ? 1 : 0;
+}
+
+/* --selftest-link-lk (0.4.2 audit, LK-2 + LK-1; from the audit's harness, r-link/linkfuzz.inc cases D and F): ONE real
+   tank A (tank_t, progression, a gift book, tank_link.c, the engine) and a neighbor B whose every frame is written here
+   by hand - an honest tank's (LK-2: one lost GIVEN_OK) or a modified one's (LK-1: a fry nobody asked for, an elder's
+   passport on a fish coming home). 0 = every check held */
+static tank_t KA; static link_t *KL; static gift_book_t KG;
+static uint32_t know = 5000; static int k_fails; static char k_sav[400];
+static const uint32_t KB = 0xB0B0B0B1u;
+#define KCHECK(cond, ...) do { if (!(cond)) { if (k_fails < 12) { printf("FAIL selftest-link-lk: "); printf(__VA_ARGS__); printf("\n"); } k_fails++; } } while (0)
+enum { K_BEACON = 1, K_JOIN = 2, K_LINKED = 3, K_OFFER = 5, K_ACCEPT = 6, K_GO = 8, K_VISIT = 9, K_RETURN = 11, K_FRY_ASK = 16,
+       K_FRY = 18, K_FRY_OK = 19, K_FRY_NO = 20, K_GIVE = 21, K_GIVEN = 25, K_GIVEN_OK = 26, K_GIVEN_LOST = 27 };   /* (link.c's FR_* order) */
+typedef struct { int len; uint8_t b[LINK_FRAME_MAX]; } kfr_t;
+static kfr_t kout[512]; static int koutn;                 /* what A sent since the last look */
+static void k_send(void *ctx, uint32_t to, const uint8_t *buf, int len) {
+    (void)ctx; (void)to;
+    if (koutn < 512 && len <= LINK_FRAME_MAX) { kout[koutn].len = len; memcpy(kout[koutn].b, buf, (size_t)len); koutn++; }
+}
+static int k_sent(int type) { int n = 0; for (int q = 0; q < koutn; q++) n += kout[q].b[3] == type; return n; }
+static uint32_t k_u16(const kfr_t *f, int o) { return f->b[o] | (uint32_t)f->b[o + 1] << 8; }
+typedef struct { uint8_t b[LINK_FRAME_MAX]; int n; } kw_t;
+static void k8(kw_t *w, uint32_t v) { if (w->n < LINK_FRAME_MAX) w->b[w->n++] = (uint8_t)v; }
+static void k16(kw_t *w, uint32_t v) { k8(w, v); k8(w, v >> 8); }
+static void k32(kw_t *w, uint32_t v) { k16(w, v & 0xffff); k16(w, v >> 16); }
+static void khdr(kw_t *w, int type) { w->n = 0; k16(w, 0x4b4c); k8(w, LINK_PROTO); k8(w, (uint32_t)type); k32(w, KB); k32(w, KA.uid); }
+static void kpp(kw_t *w, const passport_t *pp) { uint8_t b[PASSPORT_MAX_BYTES]; int n = passport_write(pp, b, sizeof b); k8(w, (uint32_t)n); for (int i = 0; i < n; i++) k8(w, b[i]); }
+static void krx(kw_t *w) { link_rx(KL, w->b, w->n, -40, know); }
+static void k_beacon(void) {                              /* B: link mode, linked LEFT to A once it is */
+    bool linked = link_neighbor(KL, LINK_RIGHT) == KB;
+    kw_t w; khdr(&w, K_BEACON); w.b[8] = w.b[9] = w.b[10] = w.b[11] = 0;   /* (to everyone) */
+    k8(&w, 1); k8(&w, 1); k8(&w, linked ? 0 : 1); k8(&w, 2); k8(&w, 0); k32(&w, linked ? KA.uid : 0); k32(&w, 0); krx(&w);
+}
+static void k_fish(int type, uint32_t uid, uint32_t trip) { kw_t w; khdr(&w, type); k32(&w, uid); k16(&w, trip); krx(&w); }
+static void k_visit(uint32_t uid, uint32_t trip, const passport_t *pp) { kw_t w; khdr(&w, K_VISIT); k32(&w, uid); k16(&w, trip); kpp(&w, pp); krx(&w); }
+static void k_return(uint32_t uid, uint32_t trip, const passport_t *pp) {   /* home through the door, swimming */
+    kw_t w; khdr(&w, K_RETURN); k32(&w, uid); k16(&w, trip); k8(&w, 0); k8(&w, LINK_LEFT); k16(&w, 32000); k16(&w, 0); k16(&w, 300); kpp(&w, pp); krx(&w);
+}
+static void k_step(void) {
+    know += 33;
+    tank_tick(&KA, 0.033f, NULL);
+    progression_tick(&KA, 0.033f);
+    link_tick(KL, know);
+    tank_link_tick(&KA, KL);
+    link_ev_t e; while (link_poll(KL, &e)) tank_link_event(&KA, KL, &e);
+    if (know % 990 < 33) k_beacon();
+    if (progression_newborn() >= 0) progression_newborn_done(&KA);
+}
+static void k_steps(int n) { for (int k = 0; k < n; k++) k_step(); }
+static bool k_setup(uint32_t seed) {
+    (void)remove(k_sav);                                   /* (a fresh tank: progression_boot reads the save) */
+    collection_reset();
+    tank_init(&KA, seed); progression_boot(&KA); progression_setup_done(&KA); progression_tick(&KA, 0.1f); notice_sync(&KA);
+    tank_ensure_ids(&KA);
+    memset(&KG, 0, sizeof KG); gift_attach(&KA, &KG);
+    if (!KL) KL = calloc(1, (size_t)link_size());
+    link_host_t h = tank_link_host(&KA, k_send);
+    link_init(KL, KA.uid, &h, seed, know);
+    link_mode(KL, true); link_arm(KL, LINK_RIGHT);        /* A's RIGHT to B's LEFT */
+    for (int k = 0; k < 40 && link_neighbor(KL, LINK_RIGHT) != KB; k++) {
+        k_beacon(); koutn = 0; k_step();
+        if (k_sent(K_JOIN)) { kw_t w; khdr(&w, K_LINKED); k8(&w, LINK_LEFT); k8(&w, 0); krx(&w); }
+    }
+    link_mode(KL, false); k_steps(30); koutn = 0;
+    return link_neighbor(KL, LINK_RIGHT) == KB && KA.door_open[LINK_RIGHT];
+}
+static int k_slot(uint32_t uid) { for (int i = 0; i < KA.n_fish; i++) if (KA.fish[i].uid == uid) return i; return -1; }
+static int k_cross(int i, uint32_t *trip) {               /* A's fish i across to B: OFFER answered ACCEPT, GO; the trip */
+    fish_t *f = &KA.fish[i];
+    f->door = DOOR_ASKED; f->door_edge = LINK_RIGHT; f->door_sent = false; f->door_refused = 0;
+    koutn = 0; k_step();
+    int t = -1;
+    for (int q = 0; q < koutn; q++) if (kout[q].b[3] == K_OFFER) t = (int)k_u16(&kout[q], 16);
+    if (t < 0) return -1;
+    k_fish(K_ACCEPT, f->uid, (uint32_t)t); k_step();
+    for (int k = 0; k < 30 && !f->away; k++) { f->door = DOOR_PASSING; f->door_edge = LINK_RIGHT; f->x = TANK_W + 200; k_step(); }
+    if (!f->away) return -2;
+    *trip = (uint32_t)t;
+    return 0;
+}
+static passport_t k_stranger(uint32_t seed) {             /* a fish of another tank */
+    static tank_t fr; tank_init(&fr, seed); tank_new_population(&fr); tank_ensure_ids(&fr);
+    passport_t pp; passport_from_fish(&pp, &fr.fish[0], KB, 3600);
+    return pp;
+}
+/* B gives A one fish through the engine, A's keeper says yes; GIVEN; A's slot of it or -1. A's GIVEN_OK goes nowhere */
+static int k_gift_in(uint32_t uid, uint32_t nonce, uint32_t seed) {
+    passport_t pp = k_stranger(seed); pp.uid = uid;
+    kw_t w; khdr(&w, K_GIVE); k32(&w, uid); k32(&w, nonce); kpp(&w, &pp); krx(&w);
+    for (int s = 0; s < 60; s++) { k_step(); if (KG.ask.on && !KG.ask.answer) { KG.ask.shown = true; KG.ask.answer = 1; } }
+    khdr(&w, K_GIVEN); k32(&w, uid); k32(&w, nonce); kpp(&w, &pp); koutn = 0; krx(&w);
+    k_steps(30);
+    return k_slot(uid);
+}
+static int k_late_given(uint32_t uid, uint32_t nonce) {   /* B's GIVEN again: +1 = GIVEN_OK, -1 = GIVEN_LOST, 0 = neither */
+    kw_t w; khdr(&w, K_GIVEN); k32(&w, uid); k32(&w, nonce); koutn = 0; krx(&w);
+    return k_sent(K_GIVEN_OK) ? 1 : k_sent(K_GIVEN_LOST) ? -1 : 0;
+}
+
+int selftest_link_lk(void) {
+    const char *d = getenv("PT_SHELF_DIR");
+    snprintf(k_sav, sizeof k_sav, "%s/pocket-tank-selftest-link-lk.sav", d && *d ? d : "/tmp");
+    setenv("POCKET_TANK_SAVE", k_sav, 1);
+    k_fails = 0;
+
+    /* ---- LK-2: B gives Z to A; A's GIVEN_OK is lost; A takes 16 more gifts (each sold); B's resent GIVEN(Z) ---- */
+    if (!k_setup(4205)) { KCHECK(0, "LK-2: no link"); return 1; }
+    const uint32_t Z = 0x2a2a0001u, ZN = 0x77770001u;
+    KCHECK(k_gift_in(Z, ZN, 501) >= 0, "LK-2: Z never came");
+    KCHECK(k_late_given(Z, ZN) == 1, "LK-2: a resent GIVEN for Z just taken in was not answered GIVEN_OK");
+    int more = 0;
+    for (int k = 0; k < GIFT_RECEIVED; k++) {
+        int i = k_gift_in(0x2b2b0000u + (uint32_t)k + 1, 0x88880000u + (uint32_t)k + 1, 600 + (uint32_t)k);
+        if (i < 0) continue;
+        more++;
+        KCHECK(progression_sell_fish(&KA, i), "LK-2: could not sell gift %d", k);
+        k_steps(10);
+    }
+    KCHECK(more == GIFT_RECEIVED && k_slot(Z) >= 0 && gift_state(&KG, Z, ZN, NULL) == LINK_GS_NONE,
+           "LK-2: the setup did not roll RECEIVED past Z (%d gifts, Z %s, its RECEIVED %s)", more, k_slot(Z) >= 0 ? "here" : "GONE",
+           gift_state(&KG, Z, ZN, NULL) == LINK_GS_NONE ? "gone" : "still kept");
+    int z = k_late_given(Z, ZN);
+    KCHECK(z == 1, "LK-2: Z swims here, B's late GIVEN was answered %s (B's note brings Z back there: two Zs)", z < 0 ? "GIVEN_LOST" : "nothing");
+    printf("selftest-link-lk: LK-2: Z alive here, RECEIVED rolled past it by %d more gifts: B's late GIVEN answered %s\n", more,
+           z == 1 ? "GIVEN_OK (one Z)" : z < 0 ? "GIVEN_LOST (TWO Zs)" : "nothing");
+    /* ... and what must still be GIVEN_LOST (never "we have it" for a fish that is not ours here: the giver's note is the
+       only copy - zero): never given, a visitor of B's here, one of OURS given to B whose OK we lost (given A -> B -> A) */
+    KCHECK(k_late_given(0x2c2c0001u, 0x99990001u) == -1, "LK-2: a GIVEN for a fish never seen here was not answered GIVEN_LOST");
+    {   passport_t vp = k_stranger(777); vp.uid = 0x2d2d0001u;   /* B's fish V visits A (OFFER, GO): a visitor here */
+        kw_t w; khdr(&w, K_OFFER); k32(&w, vp.uid); k16(&w, 77); k8(&w, LINK_LEFT); k16(&w, 32000); k16(&w, 0); k16(&w, 300); kpp(&w, &vp); krx(&w);
+        k_step(); k_fish(K_GO, vp.uid, 77); k_steps(5);
+        KCHECK(link_hosting(KL, vp.uid), "LK-2: B's visitor V never came");
+        KCHECK(k_late_given(vp.uid, 0x99990002u) == -1, "LK-2: a GIVEN for B's visitor V (no gift asked) was not answered GIVEN_LOST");
+        int w0 = -1; for (int i = 0; i < KA.n_fish && w0 < 0; i++) if (!KA.fish[i].away && KA.fish[i].uid != Z) w0 = i;
+        uint32_t W = KA.fish[w0].uid; passport_t wp; passport_from_fish(&wp, &KA.fish[w0], KA.uid, progression_age_s(&KA, w0));
+        KCHECK(gift_given_add(&KG, W, 0x55550001u, KB, &wp) && progression_give_out(&KA, w0), "LK-2: could not give W out");
+        KCHECK(k_late_given(W, 0x55550002u) == -1, "LK-2: W, given from here (our note out), came back late as B's gift: not GIVEN_LOST (W nowhere)");
+        gift_given_drop(&KG, W, 0x55550001u);
+    }
+    printf("selftest-link-lk: LK-2: still GIVEN_LOST: a fish never seen here, B's visitor here, one of ours given out whose gift back came late\n");
+
+    /* ---- LK-1: a modified B pushes FRY nobody asked for (even rounds: it sends a FRY_ASK first, as a modified tank can),
+       with an elder's passport, and brings each home through the door with that passport ---- */
+    if (!k_setup(4201)) { KCHECK(0, "LK-1: no link"); return 1; }
+    uint32_t trip; int r = k_cross(0, &trip);
+    KCHECK(!r, "LK-1: fish 0 did not cross (%d)", r);
+    if (r) return 1;
+    const uint32_t X = KA.fish[0].uid;
+    passport_t xp; passport_from_fish(&xp, &KA.fish[0], KA.uid, 100);
+    const int32_t sd0 = KA.sd_balance; int made = 0, rounds = 0;
+    for (int round = 0; round < 6 && KA.n_fish < POP_CAP; round++) {
+        k_visit(X, trip, &xp);                             /* (X is still there: its lease) */
+        if (round % 2 == 0) { kw_t w; khdr(&w, K_FRY_ASK); k32(&w, X); k16(&w, trip); k8(&w, 0); krx(&w); }
+        passport_t fp = k_stranger(4300 + (uint32_t)round);
+        fp.uid = 0xF0000000u + (uint32_t)round * 7919u + 1; fp.home_tank = KA.uid; fp.parent_uid[0] = X; fp.parent_uid[1] = 0x1234;
+        fp.stage = STAGE_ELDER; fp.size = 4.0f; fp.age_s = 4.0e9f; fp.trust = 10; fp.eaten = 65535; fp.eaten_player = 60;
+        fp.ms_bits = MS_REACHED_JUV | MS_REACHED_ADULT | MS_REACHED_ELDER | MS_CROSSBRED | MS_BOUGHT | MS_FIRST_MEAL_FROM_YOU;
+        kw_t w; khdr(&w, K_FRY); k32(&w, X); k8(&w, LINK_LEFT); kpp(&w, &fp); koutn = 0; krx(&w);
+        k_step();
+        int ftrip = -1; for (int q = 0; q < koutn; q++) if (kout[q].b[3] == K_FRY_OK) ftrip = (int)k_u16(&kout[q], 16);
+        rounds++;
+        if (ftrip < 0) { k_steps(30); continue; }
+        int s = k_slot(fp.uid);
+        if (s >= 0) {
+            const fish_t *f = &KA.fish[s];
+            KCHECK(f->stage == STAGE_FRY && f->trust <= 4.0f && f->eaten == 0 && !(f->ms_bits & (MS_REACHED_JUV | MS_REACHED_ADULT | MS_REACHED_ELDER | MS_BOUGHT))
+                   && progression_age_s(&KA, s) == 0, "LK-1: fry %d taken in as its passport said: stage %d trust %.1f eaten %d bits %04x age %.0f",
+                   round, f->stage, f->trust, f->eaten, (unsigned)f->ms_bits, progression_age_s(&KA, s));
+        }
+        for (int k = 0; k < 3; k++) { k_visit(fp.uid, (uint32_t)ftrip, &fp); k_visit(X, trip, &xp); k_steps(30); }
+        k_return(fp.uid, (uint32_t)ftrip, &fp);         /* home through the door, an elder's passport */
+        k_steps(60);
+        if ((s = k_slot(fp.uid)) < 0) continue;
+        made++;
+        const fish_t *f = &KA.fish[s];
+        KCHECK(!f->away && f->stage == STAGE_FRY && progression_age_s(&KA, s) < STAGE_JUV_AGE
+               && !(f->ms_bits & (MS_REACHED_JUV | MS_REACHED_ADULT | MS_REACHED_ELDER | MS_BOUGHT)) && (f->ms_bits & MS_CROSSBRED),
+               "LK-1: fry %d came home as its passport said: away %d stage %d age %.0f bits %04x", round, f->away, f->stage, progression_age_s(&KA, s), (unsigned)f->ms_bits);
+    }
+    k_steps(60);
+    const int32_t paid = KA.sd_balance - sd0;
+    KCHECK(paid <= made * SD_BIRTH, "LK-1: %d fry from B paid %d sand dollars (a birth each is %d)", made, paid, made * SD_BIRTH);
+    printf("selftest-link-lk: LK-1: B pushed %d FRY with elder passports (%d after a FRY_ASK of its own): %d came in, each a newborn; +%d sand dollars (births only)\n",
+           rounds, (rounds + 1) / 2, made, paid);
+
+    /* ---- LK-1's sibling: one of ours home from a visit (welcome_home). A modified host's passport: 4e9 s old, every stage,
+       CROSSBRED and BOUGHT - it comes home as old as it has lived, its stages its own; an honest host's: the stage it
+       reached next door counts ---- */
+    if (!k_setup(4206)) { KCHECK(0, "LK-1 visit: no link"); return 1; }
+    int a = KA.n_fish - 1;
+    progression_set_age(&KA, a, STAGE_ADULT_AGE + 60);
+    const uint32_t Y = KA.fish[a].uid; const uint32_t ybits = KA.fish[a].ms_bits;
+    r = k_cross(a, &trip); KCHECK(!r, "LK-1 visit: Y did not cross (%d)", r);
+    if (!r) {
+        passport_t yp; passport_from_fish(&yp, &KA.fish[k_slot(Y)], KA.uid, 4.0e9f);
+        yp.ms_bits |= MS_REACHED_ELDER | MS_CROSSBRED | MS_BOUGHT | MS_FIRST_DART;
+        const int32_t s0 = KA.sd_balance;
+        k_visit(Y, trip, &yp); k_steps(30); k_return(Y, trip, &yp); k_steps(60);
+        int s = k_slot(Y); const fish_t *f = &KA.fish[s];
+        KCHECK(!f->away && f->stage == STAGE_ADULT && progression_age_s(&KA, s) < STAGE_ADULT_AGE + 60 + 200
+               && !(f->ms_bits & (MS_REACHED_ELDER | MS_CROSSBRED | MS_BOUGHT)) && (f->ms_bits & MS_FIRST_DART) && KA.sd_balance == s0,
+               "LK-1 visit: Y came home as the passport said: away %d stage %d age %.0f bits %04x (left %04x) sand dollars +%d",
+               f->away, f->stage, progression_age_s(&KA, s), (unsigned)f->ms_bits, (unsigned)ybits, KA.sd_balance - s0);
+    }
+    int j = 0;                                            /* honest: J leaves 10 s short of JUV, comes home 15 s past it */
+    for (int i = 0; i < KA.n_fish; i++) if (!KA.fish[i].away && KA.fish[i].uid != Y) j = i;
+    progression_set_age(&KA, j, STAGE_JUV_AGE - 10); KA.fish[j].stage = STAGE_FRY; KA.fish[j].ms_bits &= ~(uint32_t)(MS_REACHED_JUV | MS_REACHED_ADULT | MS_REACHED_ELDER);
+    const uint32_t J = KA.fish[j].uid;
+    r = k_cross(j, &trip); KCHECK(!r, "LK-1 visit: J did not cross (%d)", r);
+    if (!r) {
+        passport_t jp; passport_from_fish(&jp, &KA.fish[k_slot(J)], KA.uid, STAGE_JUV_AGE + 15);
+        for (int k = 0; k < 30; k++) { k_visit(J, trip, &jp); k_steps(30); }   /* (30 s next door) */
+        k_return(J, trip, &jp); k_steps(60);
+        int s = k_slot(J); const fish_t *f = &KA.fish[s];
+        KCHECK(!f->away && f->stage == STAGE_JUV && (f->ms_bits & MS_REACHED_JUV) && progression_age_s(&KA, s) >= STAGE_JUV_AGE + 15,
+               "LK-1 visit: an honest host's age was not taken: away %d stage %d age %.0f bits %04x", f->away, f->stage, progression_age_s(&KA, s), (unsigned)f->ms_bits);
+    }
+    printf("selftest-link-lk: LK-1: home from a visit, a modified host's passport (4e9 s, every stage, CROSSBRED, BOUGHT): as old as it lived, its own stages, no pay; an honest host's JUV counts\n");
+
+    gift_attach(&KA, NULL); (void)remove(k_sav);
+    printf("selftest-link-lk: %s\n", k_fails ? "FAILED" : "OK");
+    return k_fails ? 1 : 0;
 }

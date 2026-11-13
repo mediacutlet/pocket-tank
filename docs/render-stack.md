@@ -20,7 +20,7 @@ pass.
 | rank | painted | notes |
 |---|---|---|
 | 0 | the SCENE: the water, the sand, the pieces BEHIND (baked, with their contact shadows and the night glow), then the back grass - every frond of the seagrass (0.3.9.3: no weave; the seagrass always BEHIND) and the sword plant (one depth among the pieces since 0.4; against the seagrass, since 0.4.1 (Strato 11-05), the keeper's pick on its page: IN FRONT OF THE SEAGRASS - bed 3 painted last, 0.4's one look and every older plant's - or BEHIND THE SEAGRASS - bed 3 painted FIRST (render.c bed_ord, THE BED ORDER) in every back pass: the loop's bake and its box patch, the live grass, the crab's weave, the grass cache. Either way it is back grass: a fish IN FRONT is over both, one BEHIND under both, one THROUGH (and the seahorse coiled on a blade) under the odd fronds of both. `--selftest-plant-under`, its stack cells in `--selftest-stack`), laid from THE GRASS LOOP's band and fine moment for the frame (render.c) | the scene rebuilt only on a bake; the loop rebaked when the grass's look changes, drawn live meanwhile |
-| 0b | TWILIGHT DEEP's drift (0.4.1): the far water's specks | painted late (render_tank, after the frame's own layers) but only on a pixel the frame still shows as the scene AND no piece covers (pc_covers: the castle's mask, every baked or live piece's) - so it lands on the water, the backdrop and the pieces' contact shadows only: under every frond, piece, critter and fish, never in the critters' sand lane. Before the 0.4.1 audit (P9, Strato: "only in the background") the scene test alone let ~5-7% of the specks onto the pieces, which are baked into the scene. `--selftest-backgrounds` (each frame against the same frame without the drift, over the castle, the coral and the cluster) |
+| 0b | THE DRIFT: the far water's specks - TWILIGHT DEEP's marine snow (0.4.1); EMBERS' (the volcanic vent's) embers off each chimney's mouth and MANGROVES' silt and falling leaves (0.4.2; an ember lights itself: the night does not dim it) | painted late (render_tank, after the frame's own layers) but only on a pixel the frame still shows as the scene AND no piece covers (pc_covers: the castle's mask, every baked or live piece's) - so it lands on the water, the backdrop and the pieces' contact shadows only: under every frond, piece, critter and fish, never in the critters' sand lane. Before the 0.4.1 audit (P9, Strato: "only in the background") the scene test alone let ~5-7% of the specks onto the pieces, which are baked into the scene. `--selftest-backgrounds` (each frame against the same frame without the drift, over the castle, the coral and the cluster; 0.4.2: the same for the vent and the mangroves, and a frame after the drift is the frame that never had it - nothing left behind). The vent's glowing mouths, rims and cracks are NOT this row: they are baked into rank 0's scene with a self-lit weight (backgrounds.h bg_row_lit), so the night dims them less |
 | 1 | the DEEP crab in a shelter BEHIND (ROOST / SHELTER, backed in or not) | under every frond. With the frame primed from THE GRASS LOOP (every board since 0.3.9.3) it is drawn through dep_draw at depth BEHIND inside its shelter (DEP_NOBED): the loop's grass comes back over it from the frame's mask, every row, the shelter's rock stays as it is; with the grass live, drawn plain and the back fronds of every bed crossing its rect painted over it again. (0.3.9.4: the loop path was missing - the crab sat on the fronds, C1704 on Discord; `--selftest-cave`, loop on) |
 | 2 | (gone in 0.3.9.3: the early arch pass drew a MIDDLE bed's late fronds inside a castle IN FRONT's opening; a bed BEHIND shows through the open arch from rank 0) | a bed placed IN FRONT takes no part (it stands before the castle) |
 | 3 | the DEEP crab in a castle IN FRONT's arch | over the fronds seen through the opening |
@@ -28,9 +28,9 @@ pass.
 | 4 | the shrimp | at the school's own SWIM DEPTH against the grass and the pieces (0.3.9.4, dep_draw); the school at its layer in the pass |
 | 5 | the seahorse's back lane | at its SWIM DEPTH against the grass (its lane: the pieces). Coiled on a frond, THE BED'S STACK (0.3.9.7): every piece that stands before that frond's bed (veg_skip_for) is put back WHOLE over it from what was under it - the castle's keep and towers too, a piece BEHIND ranked above the sword plant too; in its front lane (13) the same, for the pieces IN FRONT ranked above the plant. Taken up only clear of every piece, or as it settles. `--selftest-seahorse-stack` (PT_SH_STACK_OFF=1 the control) |
 | 6 | the fish | each at its own SWIM DEPTH against the back grass (0.3.9.4, docs/swim-depth.md): IN FRONT as before; BEHIND - the grass's own pixels back over it inside its box, every row down to the sand (0.3.9.6: no cut at the roots); THROUGH - the odd fronds' only. Chosen by its goal and temperament, changed only clear of every bed. `--selftest-depth`, all four worlds. At its layer in the pass (0.4, the pendant); a visitor too - its depth counts toward the frame's grass masks like a home fish's (render.c dep_any: until 0.4 only the home fish's did, so a visitor behind the grass with every home fish in front was drawn over the fronds) |
-| 7 | the floor critters in their BACK lane: the crab (walk / rest / a climb on a piece BEHIND), then the snail, then the urchin | each at its SWIM DEPTH against the back grass (0.3.9.4), at its layer in the pass (L1-L3: the back lane is behind the pieces IN FRONT); at one layer the crab lowest. A fish or the school before the grass and the pieces (L4) passes OVER a critter in its back lane (until 0.4 the critter was drawn over it); in the front slot (9) the critters stay over every fish |
+| 7 | the floor critters in their BACK lane: the crab (walk / rest / a climb on a piece BEHIND), then the snail, then the urchin | each at its SWIM DEPTH against the back grass (0.3.9.4), at its layer in the pass (L1-L3: the back lane is behind the pieces IN FRONT); at one layer the crab lowest. A fish or the school before the grass and the pieces (L4) passes OVER a critter in its back lane (until 0.4 the critter was drawn over it); in the front slot (9) the critters stay over every fish. The crab CLIMBING a volcano BEHIND is at the VOLCANO'S DEPTH against everything (0.4.2, below): against the PIECES in the volcano's stack (every piece ranked above the volcano whole before it - a castle IN FRONT's keep too - never only the front row of rank 8); against the GRASS behind every frond painted over the volcano, whatever its own swim depth - the seagrass, and the sword plant unless the volcano is ranked above the plant; in the pass the FIRST of L1, so every animal before the pieces BEHIND is over it |
 | 8 | the pieces IN FRONT restored over all of the above (the castle: its front row only - the arch stays open) | SWIM DEPTH phase 2 (0.3.9.4): a fish's own depth against the pieces decides - one passing BEHIND any piece (whatever its depth) has its body put back over it at rank 6 (pc_body_covers: the castle's front row, any other piece whole); one IN FRONT of a piece IN FRONT marks its pixels (g_keep) and this restore, the overlays (rank 12), the arch's shade (14) and a crab in a front volcano's cave (9) keep off them - and so does the put-back of a later animal passing BEHIND the piece (0.3.9.6: there the earlier fish's own pixels come back, not the scene's; `--selftest-front-keep`) |
-| 9 | the FRONT SLOT: the crab (in a volcano IN FRONT's cave or on its flank; its front lane on the sand; a dig, always), then the snail, then the urchin in their front lane | the crab lowest here too |
+| 9 | the FRONT SLOT: the crab (in a volcano IN FRONT's cave or on its flank; its front lane on the sand; a dig, always), then the snail, then the urchin in their front lane | the crab lowest here too. On the flank (the climb) as in the cave: in the volcano's stack (0.4.2) - not painted under a piece IN FRONT ranked above the volcano, whose overlay (12) goes over it; the volcano's lava and the pieces below keep off it |
 | 10 | RETIRED 0.4 (the sword plant has one depth, BEHIND - no bed IN FRONT is left; the matrix skips its cells). Was: the front grass: the sword plant placed IN FRONT with its every frond, WHOLE - across the arch too, unshaded (drawn live every frame, at the loop's moment) | a bed IN FRONT keeps off only the pieces ranked above it - and (SWIM DEPTH, 0.3.9.4) off any animal IN FRONT of it (every leaf) or THROUGH it (the even leaves): the fish, the shrimp, the seahorse, the crab, the snail, the urchin by their own choice; a crab in a shelter (cave, arch) stays under it. A live piece (11) ranked UNDER it is drawn just before it, so its leaves fall over that piece too |
 | 11 | a placement page's LIVE piece - the page's own, once it has been changed on the page (dragged, re-ranked, re-depthed, recolored; until then it stays baked like the rest) | at its rank: a piece IN FRONT ranked above the sword plant IN FRONT comes here, after the leaves; one ranked under the plant was drawn before the leaves (10); one BEHIND right over the scene (0) - under the grass, so the sword plant (over the seagrass since 0.4) keeps its leaves off it where it is ranked above the plant, by the live piece's own mask (pm_live: never its baked slot, so a CANCEL leaves the scene's masks as they were; `--selftest-place`, the pumpkin BEHIND dragged). The baked pieces ranked above it come back from the scene inside its box (pc_cover_live: a piece whole, the castle's keep and wall), keeping off a fish IN FRONT of the pieces and the leaves of a bed ranked over the covering piece. The front slot is off while a piece IN FRONT is live - a critter in its front lane goes to the TOP lane instead, so it stays before the live piece as it was before the baked one |
 | 12 | the pieces IN FRONT's overlays: crowns, the candle, the volcano's lava and embers, the pumpkin's face and flame | the lava and the pumpkin's face keep off every critter in the front slot - the crab, the snail, the urchin (g_guard / slot_covers in vo_store and pk_store) |
@@ -40,7 +40,8 @@ pass.
 ## What the matrix enumerates (2026-10-24, the second pass)
 
 - Subjects: the CRAB in nine states (walk in either lane, rest, dig, the
-  walk into a shelter, roost, backed in, climb, holding a find); the
+  walk into a shelter, roost, backed in, climb, holding a find - the climb
+  with a second piece beside the volcano: `--selftest-crab-climb`); the
   URCHIN and the SNAIL in either lane, at a piece's flank and at its
   middle (a cave mouth, the arch, the lantern's face).
 - Pieces: none; the castle, the volcano, the coral, the cluster and the
@@ -170,6 +171,98 @@ pass.
   the castle its front row stays exact and behind the whole castle the crab
   stays exact; PT_ROOST_PASS_OLD=1 the control), director
   `rpasstest [old|new|off] [front|through|behind] [pfront|pbehind]`.
+- THE CLIMB IS IN THE VOLCANO'S STACK (0.4.2, Strato's pendant: back to front
+  the volcano, the castle raised over it, the fronds - the crab climbing the
+  volcano drawn over the castle's stonework on its way down; the 0.4.2 audit's
+  RN-1). On the flank the crab is ON the volcano, so THE CRAB'S STACK takes the
+  volcano for its shelter (render.c crab_stack, crab_shelter): the climb clears
+  cr_cave, so until 0.4.2 it had no stack - over every piece IN FRONT in the
+  front slot, over every piece BEHIND in the back lane, over a castle IN
+  FRONT's keep (rank 8 restores its front row only). The cells, for a climbing
+  crab against a second piece:
+
+  | volcano | the piece | ranked | the crab against the piece |
+  |---|---|---|---|
+  | BEHIND | BEHIND | above the volcano | behind it, whole (not painted under its mask) |
+  | BEHIND | BEHIND | below | over it |
+  | BEHIND | IN FRONT (always above) | above | behind it, whole - the castle's keep and towers too |
+  | IN FRONT | IN FRONT | above | behind it, whole; its overlay (crown, face, flame) over the crab |
+  | IN FRONT | IN FRONT | below | over it; its overlay keeps off the crab |
+  | IN FRONT | BEHIND (always below) | below | over it |
+
+  Against the GRASS the same rule (0.4.2, Strato's square: "the crab is
+  climbing the volcano. it is being drawn OVER the sword plant incorrectly.
+  The sword plant is in front of the volcano" - "ANYTHING that is layered
+  above the volcano"). The first cut of the stack was a list of PIECES; the
+  sword plant is grass (bed 3, ranked among the pieces) and the climb kept
+  the crab's own swim depth against every frond - in front of them more
+  often than not. ON A VOLCANO BEHIND THE CRAB IS AT THE VOLCANO'S DEPTH:
+  the volcano is baked under the back grass, so every frond painted over it
+  is over the crab on its flank (render.c crab_on_back_volcano, drawn at
+  depth BEHIND whatever cr_gdepth says):
+
+  | on a volcano BEHIND, against | the crab |
+  |---|---|
+  | the seagrass (always painted over a piece BEHIND) | behind every frond (on the approach, but one it still holds: below) |
+  | the sword plant ranked above the volcano (IN FRONT OF / BEHIND THE SEAGRASS) | behind every leaf |
+  | the sword plant ranked below the volcano (its leaves cut round the rock) | over the leaves, as the rock is - still behind the seagrass (crab_grass_part: the put-back takes the seagrass's pixels only; with the plant IN FRONT OF THE SEAGRASS and below the volcano the order is a loop, and the crab is over every leaf) |
+  | a fish, the school, the seahorse, the snail, the urchin before the pieces BEHIND (L1-L4) | under them: first of L1 in the animal pass |
+  | an animal behind the grass and the pieces BEHIND (L0) | over it |
+
+  On a volcano IN FRONT it is in the front slot, over every frond (the
+  volcano stands before them all), as before. `--selftest-crab-depth` (in
+  `make check`: judged against frames with the grass taken out, never the
+  renderer's masks - the five plant cases, either side, sent up FRONT /
+  THROUGH / BEHIND, the grass live and from the loop; with each piece above
+  the volcano, the plant above and below; a fish at each of the five layers
+  and behind / through tall fronds; NO POP frame by frame from the first step
+  to after it steps off, from the foot and across the sand, the plant above
+  and below, a fish over it as it sets out, and never a frond held on the
+  flank; the loop by the clock and LOCKED; the volcano moved IN FRONT
+  mid-climb and mid-run-up; the climb on a
+  volcano IN FRONT and the crab on the sand pixel for pixel as the control,
+  PT_CLIMB_GRASS_OLD=1, which `make check` runs and requires to FAIL).
+  Where the stack meets the lanes - the foot, the frame it starts up
+  and the frame it steps back onto the sand - the change shows only if another
+  piece stands over the crab, so the climb starts from the near foot unless
+  another piece's footprint is over it and none over the far foot: then the
+  far one (tank.c crab_climb_side; the lanes' own rule, a depth changes only
+  where nothing shows it). Both feet covered (a castle centred over the
+  volcano): the near one, and the crab goes behind the piece above the frame
+  it starts up, as at a shelter's opening. Against the GRASS the change is
+  never seen at all. THE VOLCANO'S DEPTH (tank.c crab_vdepth_tick, cr_vmode)
+  is one answer from the approach through the climb and back down: under
+  every frond painted over the volcano, over the leaves of a plant ranked
+  below it. It is taken up as the walk to the foot begins and kept, back on
+  the sand, while a leaf of a plant below the volcano is still in reach.
+  And A FROND CHANGES SIDES ONLY WHILE THE CRAB IS NOT TOUCHING IT - THE HELD
+  FRONDS (the first cut waited for sand clear of every bed, and a lush tank
+  has none: the crab snapped behind the fronds the frame it started up; the
+  second let the plant below flip twice): the fronds rooted within its reach
+  as it takes the volcano's depth (cr_glo..cr_ghi) stay as its own depth had
+  them - in front of the grass, under it; through, the odd ones over it;
+  behind, over it, the plant below's leaves too - and each is let go as the
+  crab walks clear of it (render.c crab_grass_mask: frond by frond). A crab's
+  width of fronds takes ~96 px of walking to let go, so one nearer the foot
+  than that walks a run-up first - out from the volcano, or along its foot
+  where the glass is near (the bowl, the watch) - and comes back. THE CLIMB
+  NEVER STARTS WITH A FROND HELD, nor in the front lane: at the foot it turns
+  for another run-up (a fish was over it; a piece IN FRONT stood over its
+  sand), four at most, then gives the climb up for ten minutes. After a
+  climb on a volcano BEHIND it rests (a dig is the front lane's). The keeper
+  moving the volcano IN FRONT under an approaching or climbing crab (a
+  placement page: no animal is drawn while it is up) sends it on to the foot
+  and leaves it in the front lane, before the rock.
+  `--selftest-crab-climb` (in
+  `make check`: the castle, the coral, the cluster and the pumpkin beside the
+  volcano in every depth order and rank, either side, from the foot it takes
+  and from the near foot - never over a piece above, never hidden by one
+  below, the frame against the control's the same outside the pieces above
+  (so the volcano, the lava as before; tall grass with the crab sent up
+  FRONT / THROUGH / BEHIND its own leg); no jump onto or off the flank that
+  the piece adds; the roosting, walking and passing siblings pixel for pixel
+  as before; PT_CLIMB_STACK_OLD=1 the render's control, PT_CLIMB_FOOT_OLD=1
+  the foot's), `--climb-bench` the frame cost.
 - OUT OF ITS SHELTER, IN FRONT, THE FRONT LANE (0.4, Strato on the square
   11-04: "i absolutely saw volcano clipping over the crab"). In its shelter the
   crab is inside that piece, in no lane; leaving it, it kept the lane it came

@@ -75,7 +75,8 @@
 #define R_PIN_TP_INT      11
 #define R_PIN_IMU_INT1    21       /* unused */
 #define R_PIN_PWR_SENSE   3        /* SYS_OUT: high while the PWR key is down (unused: the PMIC is asked, as on the 1.8) */
-#define I2C_ADDR_ES7210   0x40     /* the microphone ADC (probe, with no expander => the 1.75C) */
+#define I2C_ADDR_ES7210   0x40     /* the microphone ADC (probe, with no expander => the 1.75C). Its BASE: AD0 / AD1 put it at 0x40 + 0..3
+                                      (a 1.75C rev 1.1 answers at 0x42) - the probe tries all four (board_probe.h), board_es7210_addr() says which */
 #define I2C_ADDR_CST9217  0x5A
 #define R_PANEL           466      /* round: 466 across, the corners of the square are not there */
 #define R_PANEL_X_GAP     6

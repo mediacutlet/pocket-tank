@@ -24,6 +24,9 @@ idf_component_register(
              esp_wifi esp_netif esp_event esp_http_client esp_https_ota app_update json mbedtls bootloader_support fatfs sdmmc esp_driver_sdspi
     EMBED_FILES "tokenizer.bin" "../../assets/sounds/sounds.bin"
 )
+# THE APP'S ROOM (0.4.2): the serial console, the battery log, the update page's mode, the Wi-Fi port and the tank
+# link's device side never draw a frame or run the model: compiled for size (tankcore's CMakeLists has the shared ones)
+set_source_files_properties(director.c batlog.c update_mode.c net_port_esp.c link_dev.c PROPERTIES COMPILE_OPTIONS "-Os")
 # the board marker (net_port_esp.c, version.h PT_BOARD_MARKER_OFFSET): nothing
 # references it - the download reads it back from flash - so it is kept by name
 # or --gc-sections drops it (ESP-IDF's "custom structure" recipe, app_image_format)

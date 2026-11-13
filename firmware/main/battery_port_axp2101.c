@@ -5,6 +5,7 @@
  * ~1 s (the pill answers a plug-in within a second); any I2C error or
  * absent battery hides the meter. */
 #include "battery_port.h"
+#include "axp2101_reason.h"
 #include "advanced.h"
 #include "display_port.h"      /* board_is_square */
 #include "driver/i2c_master.h"
@@ -14,6 +15,7 @@
 #include "esp_log.h"
 #include <strings.h>
 #include <string.h>
+#include <stdio.h>
 
 #define AXP2101_ADDR      0x34
 #define REG_STATUS1       0x00
@@ -26,6 +28,7 @@ static int64_t s_last_us = -1;
 static float s_frac; static bool s_charging, s_valid;
 static uint8_t s_st1, s_st2;                     /* the last good STATUS1 / STATUS2 */
 static bool rd(uint8_t reg, uint8_t *val);
+static uint8_t s_boot_irq0, s_boot_irq2;           /* REG 48 / 4A as the boot found them, before key_init cleared them (axp2101_reason.h) */
 /* the charge current table (REG 62 bits 4:0): 25 mA steps to 200 mA (code 8),
  * then 100 mA steps from 300 (code 9) to 1000 (code 16) */
 static int icc_ma(int code) { return code <= 8 ? code * 25 : code <= 16 ? (code - 6) * 100 : 1000; }
@@ -137,7 +140,8 @@ void battery_port_key_init(void) {
     { uint8_t r20 = 0, r21 = 0, r48 = 0, r49 = 0, r4a = 0, r10 = 0;   /* what the PMIC saw before this boot: power-on / power-off source, the pending IRQ flags */
       rd(0x20, &r20); rd(0x21, &r21); rd(0x48, &r48); rd(0x49, &r49); rd(0x4A, &r4a); rd(0x10, &r10);
       ESP_LOGI("battery", "PMIC at boot: power-on source %02x, power-off source %02x, common cfg %02x | IRQ status %02x %02x %02x (49: bit3 short press, bit2 long, bit1 key down, bit0 key up)",
-               r20, r21, r10, r48, r49, r4a); }
+               r20, r21, r10, r48, r49, r4a);
+      s_boot_irq0 = r48; s_boot_irq2 = r4a; }         /* kept: the reason a charge stopped before this boot (0.4.2) */
     bool ok = rd(0x27, &v27) && wr(0x27, (uint8_t)((v27 & ~0x0F) | 0x0C));   /* OFFLEVEL 10 s (the firmware's 1.5 s long press saves + cuts first), ONLEVEL 128 ms */
     ok = rd(0x41, &v) && wr(0x41, (uint8_t)(v | 0x0E)) && ok;           /* short + long press IRQs on (the defaults, made sure of), and the
                                                                             key-down edge: a press must come after one (key_poll) */
@@ -303,6 +307,35 @@ bool battery_port_set_charge_ma(int ma) {
     return wr(0x62, (uint8_t)((v & 0xE0) | icc_code(ma)));
 }
 static int adc14(uint8_t reg) { uint8_t h = 0, l = 0; return rd(reg, &h) && rd(reg + 1, &l) ? ((h & 0x3F) << 8) | l : 0; }
+/* why the charger is stopped, said (0.4.2; Hugo's pendant: PLUGGED at 2.9 V, "not charging", and no word why).
+   Reads only: nothing is cleared or written, the ADC's TS channel is read as it is found. The decision and every
+   register bit: axp2101_reason.h */
+static void charge_stop_line(void) {
+    axp_chg_regs_t r = { 0 };
+    bool ok = rd(REG_STATUS1, &r.st1) && rd(REG_STATUS2, &r.st2) && rd(0x18, &r.chg_en) && rd(0x30, &r.adc_en) &&
+              rd(0x48, &r.irq0) && rd(0x4A, &r.irq2) && rd(0x50, &r.ts_ctl) && rd(0x54, &r.vltf) && rd(0x55, &r.vhtf) && rd(0x67, &r.timer);
+    if (!ok) { ESP_LOGW("battery", "charge stop: a register read FAILED"); return; }
+    r.boot_irq0 = s_boot_irq0; r.boot_irq2 = s_boot_irq2;
+    { uint8_t h = 0, l = 0; r.ts_raw = (r.adc_en & 0x02) && rd(0x36, &h) && rd(0x37, &l) ? ((h & 0x3F) << 8) | l : -1; }   /* (36 b7 / b6 are not data) */
+    static const char *const SRC[4] = { "OFF", "on with the TS channel", "on while TS is sampled", "always on" };
+    static const int UA[4] = { 20, 40, 50, 60 };
+    char ts[72];
+    if (axp_ts_live(&r)) snprintf(ts, sizeof ts, "TS %d mV (charges between %d and %d mV)", axp_ts_mv(&r), axp_ts_hot_mv(&r), axp_ts_cold_mv(&r));
+    else snprintf(ts, sizeof ts, "TS not read (%s)", !(r.adc_en & 0x02) ? "its ADC channel is off" : !(r.ts_ctl & 0x0C) ? "its current source is off" : "no reading yet");
+    axp_stop_t why = axp_charge_stop(&r);
+    ESP_LOGI("battery", "charge stop: %s%s", why == AXP_STOP_NA ? "not stopped" : axp_charge_stop_text(why),
+             why == AXP_STOP_NA && (r.st1 & 0x20) && ((r.irq2 | r.boot_irq2) & 0x02) ? " - but the SAFETY TIMER flag is set (REG 4A b1)" : "");
+    ESP_LOGI("battery", "  raw: 18=%02x | IRQ 48=%02x 4A=%02x, at boot 48=%02x 4A=%02x | 50=%02x: TS %s, source %s %d uA | %s | 67=%02x: pre-charge timer %s %d min, charge timer %s %d h",
+             r.chg_en, r.irq0, r.irq2, r.boot_irq0, r.boot_irq2, r.ts_ctl, axp_ts_gates(&r) ? "STOPS the charger out of its window" : "does not affect the charger",
+             SRC[(r.ts_ctl >> 2) & 3], UA[r.ts_ctl & 3], ts, r.timer, r.timer & 0x04 ? "on" : "OFF", axp_pre_timer_min(r.timer), r.timer & 0x40 ? "on" : "OFF", axp_chg_timer_h(r.timer));
+}
+/* the charger's enable (REG 18 b1), for the director's proof of the line above: off shows CHARGER DISABLED, on brings
+   the charge back. A restart of the ESP does NOT put it back (its reset is the PMIC's own), so `charge on` always
+   follows `charge off`. Writing 1 is also one of the chip's ways out of battery safe mode (6.7.4.2): by hand only */
+bool battery_port_set_charger(bool on) {
+    uint8_t v; if (!s_dev || !rd(0x18, &v)) return false;
+    return wr(0x18, (uint8_t)(on ? v | 0x02 : v & ~0x02));
+}
 void battery_port_charge_report(void) {
     if (!s_dev) { ESP_LOGW("battery", "no AXP2101"); return; }
     uint8_t adc = 0, st1 = 0, st2 = 0, icc = 0, dpm = 0, iin = 0, pre = 0, term = 0, cv = 0, pct = 0;
@@ -329,6 +362,7 @@ void battery_port_charge_report(void) {
              st1 & 1 ? ", at the input current limit" : "", (st1 >> 1) & 1 ? ", THERMAL regulation" : "",
              vbus, IIN[iin & 7], 3880 + (dpm & 0x0F) * 80, vsys, battery_port_vbat_mv(), pct, traw ? 22.0 + (7274 - traw) / 20.0 : 0.0, traw ? "" : " (NO READING: ask again)",
              (pre & 0x0F) * 25, (term & 0x0F) * 25, cv & 7);
+    charge_stop_line();
 }
 
 void battery_port_dump(void) {
@@ -362,6 +396,7 @@ void battery_port_dump(void) {
              (st1 >> 5) & 1 ? "present" : "absent", (st1 >> 3) & 1 ? "present" : "absent",
              battery_port_vbat_mv(), pct,
              ((st2 >> 5) & 0x07) == 0x01 ? "charging" : ((st2 >> 5) & 0x07) == 0x02 ? "discharging" : "standby");
+    charge_stop_line();
 }
 
 bool battery_port_read(float *frac, bool *charging) {
@@ -373,6 +408,7 @@ bool battery_port_read(float *frac, bool *charging) {
         s_valid = rd(REG_STATUS1, &st1) && rd(REG_STATUS2, &st2) && rd(REG_BAT_PERCENT, &pct)
                   && (st1 & 0x08) && pct <= 100;          /* battery present, sane SoC */
         if (s_valid) { s_frac = pct / 100.0f; s_charging = ((st2 >> 5) & 0x07) == 0x01; s_st1 = st1; s_st2 = st2; }
+        if (s_valid && s_charging) { s_boot_irq0 = 0; s_boot_irq2 = 0; }   /* a charge since: what the boot found is over (the stop reason, 0.4.2) */
     }
     if (!s_valid) return false;
     *frac = s_frac; *charging = s_charging;

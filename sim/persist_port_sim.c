@@ -1,5 +1,6 @@
 /* persist_port_sim.c — sim implementation of the progression ports:
  * ~/.cache/pocket-tank/tank.sav + wall clock. */
+#include <stdlib.h>
 #include "progression.h"
 #include "version.h"
 #include <stdio.h>
@@ -44,8 +45,10 @@ static bool ensure_parent_dir(const char *file) {
 static bool alive(void);
 static bool s_blocked;                             /* the device port's s_save_blocked (or NVS full): the tank's own keys refuse writes */
 void persist_port_sim_block(bool on) { s_blocked = on; }
+int g_sim_tank_saves;                             /* the tank's save written, counted (--selftest-dark-notices: one save a tick, T1-F1) */
 bool persist_port_save(const void *buf, size_t len) {
     if (s_blocked || !alive()) return false;
+    g_sim_tank_saves++;
     const char *save = path();
     if (!ensure_parent_dir(save)) return false;
     FILE *f = fopen(save, "wb"); if (!f) return false;
@@ -80,7 +83,8 @@ bool persist_port_blob_forget(const char *key) { if (s_blocked || !alive()) retu
 #ifndef PT_VERSION
 #define PT_VERSION "sim"
 #endif
-const char *version_port_string(void) { return PT_VERSION; }   /* the Makefile's git describe */
+const char *version_port_string(void) { const char *e = getenv("POCKET_TANK_BUILD_ID"); return e && e[0] ? e : PT_VERSION; }   /* the Makefile's git describe
+                                                                  (POCKET_TANK_BUILD_ID: a test's or a picture's own, e.g. an early build's) */
 const char *g_sim_hw;                                              /* --hw <id>: the board the sim pretends to run on */
 const char *board_port_hw(void) { return g_sim_hw ? g_sim_hw : PT_BOARD; }
 static int64_t s_clock_shift;                     /* selftests move the wall clock (time on the shelf) */
@@ -137,8 +141,10 @@ bool shelf_port_write(uint32_t off, const void *buf, size_t n) {
     bool ok = off + n <= SIM_SHELF_SIZE && !fseek(f, off, SEEK_SET) && fwrite(buf, 1, n, f) == n;
     fclose(f); return ok;
 }
+int g_sim_shelf_erased;                           /* sectors of the shelf's area erased, counted (--selftest-full-reset: an empty shelf erases none) */
 bool shelf_port_erase(uint32_t off, size_t n) {
     if (!alive()) return false;
+    g_sim_shelf_erased += (int)(n / 4096);
     if (off % 4096 || n % 4096 || off + n > SIM_SHELF_SIZE) return false;
     FILE *f = store(); if (!f) return false;
     static uint8_t ff[4096]; memset(ff, 0xff, sizeof ff);
@@ -171,4 +177,12 @@ bool shelf_port_frame_set(const char *key, const void *buf, size_t n) {
     return ok && rename(tmp, p) == 0;
 }
 bool shelf_port_frame_del(const char *key) { if (!alive()) return false; return remove(frame_path(key)) == 0 || errno == ENOENT; }
+/* the NVS rescue copy (shelf.h): here a file beside the storage, <storage>.rescue - there is one only if a test makes it */
+bool persist_port_rescue_erase(void) {
+    char p[600]; snprintf(p, sizeof p, "%s.rescue", store_path());
+    FILE *f = fopen(p, "rb"); if (!f) return true;
+    fclose(f);
+    if (!alive()) return false;
+    return remove(p) == 0 || errno == ENOENT;
+}
 bool persist_port_forget(void) { if (s_blocked || !alive()) return false; return remove(path()) == 0 || errno == ENOENT; }

@@ -650,8 +650,12 @@ static bool ensure_batch(q4_model_t *m, int n) {
     const q4_config_t *c = &m->c; int gs = m->gs;
     float *bx = m->alloc((size_t)n * c->dim * 4), *bxb = m->alloc((size_t)n * c->dim * 4), *bq = m->alloc((size_t)n * c->dim * 4);
     float *bhb = m->alloc((size_t)n * c->hidden_dim * 4), *bhb2 = m->alloc((size_t)n * c->hidden_dim * 4);
-    int8_t *bxq_q = alloc16_fast(m, (size_t)n * c->dim); float *bxq_s = alloc16_fast(m, (size_t)n * (c->dim / gs) * 4);
-    int8_t *bhq_q = alloc16_fast(m, (size_t)n * c->hidden_dim); float *bhq_s = alloc16_fast(m, (size_t)n * (c->hidden_dim / gs) * 4);
+    /* ONE quantized-activation buffer for both (RAM move 2, 0.4.2): bxq (the layer input, [n][dim]) is last read by the
+       FFN's w1 / w3 matmuls, and only after both is bhq ([n][hidden]) written for w2; the next layer writes bxq anew.
+       So bxq lives in bhq's (larger) memory: ~18 KB of internal RAM at 44 tokens, the same bits out (host_test/prefill_hash) */
+    size_t qa_q = (size_t)n * (c->hidden_dim > c->dim ? c->hidden_dim : c->dim), qa_s = (size_t)n * ((c->hidden_dim > c->dim ? c->hidden_dim : c->dim) / gs) * 4;
+    int8_t *bhq_q = alloc16_fast(m, qa_q); float *bhq_s = alloc16_fast(m, qa_s);
+    int8_t *bxq_q = bhq_q; float *bxq_s = bhq_s;
     float *btile = alloc16_fast(m, (size_t)n * Q4_TILE_D * 4);
     if (!(bx && bxb && bq && bhb && bhb2 && bxq_q && bxq_s && bhq_q && bhq_s && btile)) { m->bfail = n; return false; }
     m->bx = bx; m->bxb = bxb; m->bq = bq; m->bhb = bhb; m->bhb2 = bhb2;

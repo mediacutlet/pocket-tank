@@ -4,16 +4,26 @@
 #define POCKET_TANK_ICONS_H
 #include <stdint.h>
 
-typedef struct { uint8_t w, h; const uint16_t *rgb; const uint8_t *a; } icon_t;
+/* bits 1/2/4/8: px holds each pixel's index into pal (RGB565) / pa (alpha), packed LSB first;
+ * bits 0: a raw icon, pal = w*h RGB565 pixels, pa = w*h alphas (more than 256 pairs). */
+typedef struct { uint8_t w, h, bits; const uint16_t *pal; const uint8_t *pa; const uint8_t *px; } icon_t;
+static inline void icon_at(const icon_t *ic, int k, uint16_t *rgb, uint8_t *a) {   /* pixel k (row-major) */
+    unsigned v = (unsigned)k;
+    if (ic->bits) { unsigned b = ic->bits, bit = (unsigned)k * b; v = (ic->px[bit >> 3] >> (bit & 7)) & ((1u << b) - 1); }
+    *rgb = ic->pal[v]; *a = ic->pa[v];
+}
 
 extern const icon_t icon_bg_thumb_0;
 extern const icon_t icon_bg_thumb_1;
+extern const icon_t icon_bg_thumb_10;
 extern const icon_t icon_bg_thumb_2;
 extern const icon_t icon_bg_thumb_3;
 extern const icon_t icon_bg_thumb_4;
 extern const icon_t icon_bg_thumb_5;
 extern const icon_t icon_bg_thumb_6;
 extern const icon_t icon_bg_thumb_7;
+extern const icon_t icon_bg_thumb_8;
+extern const icon_t icon_bg_thumb_9;
 extern const icon_t icon_foot_close;
 extern const icon_t icon_foot_my_tanks;
 extern const icon_t icon_foot_passport;
@@ -51,6 +61,9 @@ extern const icon_t icon_ms_full_school;
 extern const icon_t icon_ms_sand_dollar;
 extern const icon_t icon_ms_seahorse_fed;
 extern const icon_t icon_ms_tank_changed_someone;
+extern const icon_t icon_settings_link;
+extern const icon_t icon_settings_updates;
+extern const icon_t icon_shop_breed;
 extern const icon_t icon_shop_castle;
 extern const icon_t icon_shop_cluster;
 extern const icon_t icon_shop_coral;
@@ -69,9 +82,13 @@ extern const icon_t icon_shop_urchin;
 extern const icon_t icon_shop_volcano;
 extern const icon_t icon_snail_glass;
 extern const icon_t icon_snail_upright;
-extern const icon_t icon_tool_lock_closed;
-extern const icon_t icon_tool_lock_open;
+extern const icon_t icon_tool_breed;
+extern const icon_t icon_tool_give;
 extern const icon_t icon_tool_scissors;
 extern const icon_t icon_tool_sponge;
+
+#define ICONS_N 73
+#define ICONS_PIXEL_HASH 0xfa969183u
+extern const icon_t *const icons_all[ICONS_N];   /* every icon, for the sim's check (the firmware's linker drops it) */
 
 #endif

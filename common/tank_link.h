@@ -65,5 +65,17 @@ void tank_link_doors_shut(tank_t *t);
 /* the keeper's DEPORT on a visitor's passport: home it swims, briskly; the
  * door refuses it for LINK_DEPORT_MS */
 void tank_link_deport(tank_t *t, int vis_slot);
+/* SAND DOLLAR GIFTS (0.4.2, sdgift.h): send `amount` through the door at `edge` - the money leaves, saved with its OUT note,
+   then the engine sends it (TL_SD_SENDING); or nothing happens and why: no open door / its tank takes none, a gift still in
+   flight, not that much money, the save failed. The news the platform shows (the HUD's line, the coin's spin) comes from
+   tank_link_sd_news, once each: what happened last, at which door, how much */
+enum { TL_SD_NONE, TL_SD_SENDING, TL_SD_NO_DOOR, TL_SD_BUSY, TL_SD_NO_FUNDS, TL_SD_NO_SAVE,
+       TL_SD_SENT, TL_SD_BACK, TL_SD_GOT, TL_SD_REFUSED, TL_SD_BACK_LATE };   /* BACK_LATE: no answer in a day, it came back */
+int  tank_link_sd_send(tank_t *t, link_t *L, int edge, uint32_t want_peer, int amount);   /* want_peer: the tank the dial was opened
+                                                                       for (0 = whoever is there): another tank at that door now = TL_SD_NO_DOOR */
+extern uint32_t (*tank_link_sd_clock)(void);   /* the nonce's floor in seconds (NULL = the clock port's; the selftest's own) */
+int  tank_link_sd_news(int *edge, int *amount, int *verdict);
+bool tank_link_sd_pending(const tank_t *t);
+extern bool (*tank_link_sd_save)(tank_t *t);   /* the save after a gift's change (NULL = progression_save; the selftest's own) */
 
 #endif

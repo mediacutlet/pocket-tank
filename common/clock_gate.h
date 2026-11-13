@@ -50,7 +50,7 @@ typedef struct {
     bool ok_before;  /* NVS "netok": the last try worked */
     int lag;         /* clock_lag_of(NVS "netlag") */
     int gave;        /* NVS "netgave": failed first-sync mornings */
-    int missed;      /* boot asks in a row that never saw the router (Wi-Fi namespace "miss") */
+    int missed;      /* boot asks in a row that never saw the router (Wi-Fi namespace "miss"; 0.4.2, several saved networks: that saw NONE of them) */
 } clock_gate_in_t;
 
 static inline clock_gate_t clock_gate(const clock_gate_in_t *g) {

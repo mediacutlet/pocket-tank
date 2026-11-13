@@ -80,6 +80,7 @@ int      collection_visits(uint32_t uid);
 typedef struct { uint32_t uid; char name[FISH_NAME_MAX + 1]; uint32_t color; float bold, sociable; } kin_t;
 void kin_learn(uint32_t uid, const char *name, uint32_t color, float bold, float sociable);
 const kin_t *kin_find(uint32_t uid);
+void kin_set_keep(bool (*keep)(uint32_t uid));             /* who the book never makes room by (a parent a fry here names, 0.4.2) */
 void kin_flush(void);                                      /* a change still waiting for its minute, written now */
 
 #endif

@@ -134,14 +134,17 @@ static struct {
     int erase1[OPEN_ERASE_N]; char erase_for[OPEN_ERASE_N];  /* slots to erase, + 1 (0 none: the zeroed state is empty) - 'r'
                                                                  REMOVE's tank, 'b' NEW TANK's */
     bool del_rm, del_buy, del_carry;
+    bool wipe;                                               /* ERASE EVERYTHING's shelf erase is owed (shelf_erase_all) */
 } s_open;
 static void open_clear(void) { memset(&s_open, 0, sizeof s_open); }
 static bool open_erasing(char owner) { for (int e = 0; e < OPEN_ERASE_N; e++) if (s_open.erase1[e] && s_open.erase_for[e] == owner) return true; return false; }
 static void open_erase(int slot, char owner) {
     for (int e = 0; e < OPEN_ERASE_N; e++) if (!s_open.erase1[e] || s_open.erase1[e] == slot + 1) { s_open.erase1[e] = slot + 1; s_open.erase_for[e] = owner; return; }
 }
+static void scan(void);
 bool shelf_tidy(void) {
     bool clear = true;
+    if (s_open.wipe) return shelf_erase_all();        /* (ERASE EVERYTHING, not finished: again - nothing else until it is) */
     for (int e = 0; e < OPEN_ERASE_N; e++)
         if (s_open.erase1[e]) { if (shelf_port_erase(slot_off(s_open.erase1[e] - 1), 4096)) s_open.erase1[e] = 0; else clear = false; }
     if (s_open.del_rm) { if (!open_erasing('r') && shelf_port_frame_del("rm")) s_open.del_rm = false; else clear = false; }
@@ -228,6 +231,14 @@ void shelf_boot(int64_t now_unix) {
     if (!shelf_port_frame_get("next", &s_next, sizeof s_next, &got) || got != sizeof s_next || !s_next) s_next = 2;
     bool have_now = shelf_port_frame_get("now", &s_now, sizeof s_now, &got) && got == sizeof s_now && s_now.magic == NOW_MAGIC;
     scan();
+    {   /* ERASE EVERYTHING cut short before the shelf was wiped (shelf.h): wiped now, before anything reads it */
+        shelf_wipe_j_t w;
+        if (shelf_port_frame_get("wipe", &w, sizeof w, &got) && got == sizeof w && w.magic == SHELF_WIPE_MAGIC && w.stage < 2) {
+            printf("shelf: ERASE EVERYTHING was not finished - the shelf wiped (%d tanks, %d books)\n", s_n, s_nb);
+            if (!shelf_erase_all()) printf("shelf: ... the flash refused part of it - tried again at every save, and at the next boot\n");
+            return;
+        }
+    }
     if (!have_now) {
         /* the first boot with shelves: the tank on the glass is tank 1. Slots but no `now` (a frame that would not read):
            an ID no shelved tank wears and a free place - the leftover pass below erases a slot wearing the glass's ID */
@@ -330,7 +341,8 @@ bool shelf_thumb(int i, uint16_t *out, size_t max_px) {
     return crc32(out, px * 2) == h->thumb_crc;
 }
 
-int shelf_new(int type, int64_t now_unix) {
+int shelf_new(int type, int64_t now_unix) { return shelf_new_kind(type, 0, now_unix); }
+int shelf_new_kind(int type, int variant, int64_t now_unix) {
     if (s_stuck || !shelf_tidy() || shelf_free_places() < 1) return -1;
     int pos = 0;
     while (pos < SHELF_POS_MAX && shelf_at_pos(pos) != -2) pos++;
@@ -339,11 +351,13 @@ int shelf_new(int type, int64_t now_unix) {
     if (k < 0) return -1;
     shelf_tank_t h; memset(&h, 0, sizeof h);
     h.id = s_next++; save_next();
-    h.seq = 1; h.type = (uint8_t)type; h.pos = (uint8_t)pos; h.time_mode = SHELF_TIME_DORMANT;
+    h.seq = 1; h.type = (uint8_t)type; h.variant = (uint8_t)variant; h.pos = (uint8_t)pos; h.time_mode = SHELF_TIME_DORMANT;
     h.shelved_unix = h.clock_unix = now_unix;
-    /* the lowest TANK n no tank wears (a count repeats a name once a tank is removed) */
+    /* the lowest TANK n no tank wears (a count repeats a name once a tank is removed); a jelly tank: JELLIES */
     for (unsigned n = 2; n < 1024; n++) {
-        snprintf(h.name, sizeof h.name, "TANK %u", n);
+        const char *kind = type == SHELF_TYPE_JELLY ? "JELLIES" : type == SHELF_TYPE_PIRANHA ? "PIRANHA" : type == SHELF_TYPE_MINNOWS ? "MINNOWS" : NULL;   /* (7 letters: a plate line) */
+        if (kind) { if (n == 2) snprintf(h.name, sizeof h.name, "%s", kind); else snprintf(h.name, sizeof h.name, "%s %u", kind, n - 1); }
+        else snprintf(h.name, sizeof h.name, "TANK %u", n);
         bool used = !strcmp(s_now.name, h.name);
         for (int i = 0; i < s_n && !used; i++) used = !strcmp(s_t[i].h.name, h.name);
         if (!used) break;
@@ -406,12 +420,14 @@ int shelf_buy_settle(uint32_t save_mark, int32_t wallet) {
 }
 
 /* a tank's whole slot rewritten to a free one with seq + 1 (a header change never erases the only copy) */
+static bool s_rw_restamp;                              /* shelf_rebase's rewrite: the save's gift in flight starts its day over */
 static bool rewrite(int i, const shelf_tank_t *nh) {
     uint8_t *save = s_x->a; uint16_t *thumb = s_x->thumb;
     int k = s_stuck ? -1 : free_slot(s_t[i].slot);
     if (k < 0) return false;
     shelf_tank_t h = *nh;
     if (h.save_len && !read_hdr(s_t[i].slot, &(shelf_tank_t){0}, save)) return false;
+    if (s_rw_restamp && h.save_len) (void)progression_blob_sd_restamp(save, h.save_len);
     size_t tb = (size_t)h.thumb_w * h.thumb_h * 2;
     if (tb > SHELF_THUMB_MAX) { h.thumb_w = h.thumb_h = 0; tb = 0; }   /* (as write_slot: never past the buffer) */
     if (tb && !shelf_port_read(slot_off(s_t[i].slot) + SHELF_THUMB_OFF, thumb, tb)) return false;
@@ -440,12 +456,17 @@ int shelf_refund_value(int i, int n[3]) {
     if (i < 0 || i >= s_n || !s_t[i].h.save_len) return 0;
     shelf_tank_t h;
     if (!read_hdr(s_t[i].slot, &h, s_x->a)) return 0;
+    if (SHELF_TYPE_EXPERIMENTAL(s_t[i].h.type)) return progression_blob_sd_out(s_x->a, h.save_len);   /* J4: a jelly tank sells back for nothing (it
+                                                                       buys nothing: J1) - but sand dollars it had on their way come back (0.4.2) */
     uint32_t u = progression_blob_unlocks(s_x->a, h.save_len);
     int v = 0, k[3] = { 0, 0, 0 };
     for (int item = 0; item < SD_ITEM_COUNT; item++)
         if (u & SD_ITEMS[item].bit) { v += progression_sell_value(item); k[tank_decor_placeable(item) ? 0 : 1]++; }
     for (int bg = 1; bg < BG_N; bg++) if (u & SD_ITEM_BG(bg)) { v += SD_PRICE_BG * SD_SELL_PCT / 100; k[2]++; }
+    v += progression_blob_breed_paid(s_x->a, h.save_len);   /* SELECTIVE BREEDING: a paid pair comes back whole (its parents go with the tank) */
     if (n) { n[0] = k[0]; n[1] = k[1]; n[2] = k[2]; }
+    v += progression_blob_sd_out(s_x->a, h.save_len);   /* sand dollars it had on their way (0.4.2): back with the rest (the review: a
+                                                           jelly tank's, above, too) */
     return v;
 }
 /* REMOVE, PAID (0.4.1; shelf.h): a journal `rm` - the tank's ID, the tank on the glass, the wallet before, the refund,
@@ -487,6 +508,105 @@ bool shelf_remove(int i) {
     return true;
 }
 
+/* ERASE EVERYTHING (shelf.h): the shelf of a board never used, and AN HONEST ERASE - when it is done every byte of the
+   shelf's area reads blank. BY THE FLASH, never the list, in two passes:
+     1. every slot that shows a mark of the shelf's (slot_ours: a tank's header, a visitor book's sector, a save at its
+        place, a tank's blobs at theirs) - the real tanks and books FIRST, so a power cut leaves the least;
+     2. THE SWEEP: every other sector of the area that is not blank - each slot is read WHOLE (never just a sector's head). What has no mark
+        is the keeper's all the same - the snapshot a swapped-in or removed tank left (forget_slot erases only the
+        header's sector), a new visitor book cut between its payload and its head (book_put) - and a board handed on
+        must not hold it. So is whatever the flash held before the tank; that is erased once (13 s on the first watch,
+        under ERASING), and afterwards a sweep is reads alone.
+   One sector an erase, the watchdog fed after each (shelf_busy): no stretch between feeds is longer than one sector.
+   Then the list is read again from the flash, the records go, and `now` / `next` are as a first boot makes them (written
+   only if they differ).
+   false = something is still there, or a write was refused: the erase is OWED (s_open.wipe) - shelf_tidy tries it again
+   before every save, and until it is clear no MY TANKS action is taken (a new tank would be erased with the old). The
+   journal (`wipe`) goes to stage 2 only on true: a cut in the sweep is a sweep again at the next boot */
+void (*shelf_busy)(void);                             /* after each sector of a long erase: the platform's watchdog (main.c) */
+/* a slot read whole (two reads, into the scratch's snapshot buffer: 16 KB, then 8): which of its six sectors are not
+   blank (bits 0..5), and bit 7 = it shows a mark of the shelf's. A read refused: every sector taken as not blank */
+#define SLOT_OURS 0x80u
+static uint8_t slot_look(int k) {
+    uint8_t *b = (uint8_t *)s_x->thumb, bits = 0;
+    _Static_assert(sizeof s_x->thumb >= 4 * 4096, "the scratch's snapshot buffer holds four sectors");
+    for (int part = 0; part < 2; part++) {
+        const uint32_t o0 = part ? 4 * 4096 : 0, n = part ? 2 * 4096 : 4 * 4096;
+        if (!shelf_port_read(slot_off(k) + o0, b, n)) return 0x3f | SLOT_OURS;
+        for (uint32_t s = 0; s < n / 4096; s++) {
+            const uint8_t *sec = b + s * 4096; const uint32_t idx = o0 / 4096 + s, v = get32(sec);
+            for (uint32_t i = 0; i < 4096; i++) if (sec[i] != 0xff) { bits |= (uint8_t)(1u << idx); break; }
+            if (v == SHELF_BOOK_MAGIC || (idx == 0 && v == SHELF_MAGIC)) bits |= SLOT_OURS;
+            if (idx == 0 && progression_blob_is_save(sec + SHELF_SAVE_OFF, 4)) bits |= SLOT_OURS;
+            if (idx == SHELF_EXTRA_OFF / 4096 && get32(sec + SHELF_EXTRA_OFF % 4096) == EXTRA_MAGIC) bits |= SLOT_OURS;
+        }
+    }
+    return bits;
+}
+static bool erase_marked(uint32_t off, uint8_t bits) {    /* the sectors a look found not blank, the watchdog fed after each */
+    bool ok = true;
+    for (int s = 0; s < 6; s++) {
+        if (!(bits & 1u << s)) continue;
+        if (!shelf_port_erase(off + (uint32_t)s * 4096, 4096)) ok = false;
+        if (shelf_busy) shelf_busy();
+    }
+    return ok;
+}
+bool shelf_erase_all(void) {
+    bool ok = true;
+    s_stuck = false;                                  /* (a swap that stuck: both of its tanks go) */
+    if (!buffers()) { s_open.wipe = true; return false; }   /* (no scratch to read the flash with: owed - never called done unread) */
+    const uint32_t area = (uint32_t)shelf_port_size() & ~4095u;
+    int slots = (int)(area / SHELF_SLOT_SIZE); if (slots > SHELF_SLOTS_MAX) slots = SHELF_SLOTS_MAX;
+    uint8_t look[SHELF_SLOTS_MAX];                    /* (the stack's: 120 bytes) */
+    for (int k = 0; k < slots; k++) { look[k] = slot_look(k); if (shelf_busy && !(k & 15)) shelf_busy(); }
+    for (int k = 0; k < slots; k++)                   /* 1. the shelf's own, first */
+        if ((look[k] & SLOT_OURS) && !erase_marked(slot_off(k), look[k])) ok = false;
+    for (int k = 0; k < slots; k++)                   /* 2. the sweep: every other sector that is not blank */
+        if (!(look[k] & SLOT_OURS) && !erase_marked(slot_off(k), look[k])) ok = false;
+    for (uint32_t o = slot_off(slots); o + 4096 <= area; o += 4096) {   /* ... and the area's tail past the last slot */
+        uint8_t *b = s_x->sec; bool blank = shelf_port_read(o, b, 4096);
+        for (uint32_t i = 0; blank && i < 4096; i++) blank = b[i] == 0xff;
+        if (!blank) { if (!shelf_port_erase(o, 4096)) ok = false; if (shelf_busy) shelf_busy(); }
+    }
+    open_clear();                                     /* (every slot was walked: nothing else is owed an erase) */
+    s_slots = slots; scan();                          /* the list, from the flash */
+    if (s_n || s_nb) ok = false;
+    static const char *const REC[7] = { "swap", "carry", "buy", "rm", "move", "home", "xbuy" };   /* (`move`: the travel bowl, progression.c - the board's, 0.4.2; `home`: the main tank, below) */
+    for (int k = 0; k < 7; k++) if (!shelf_port_frame_del(REC[k])) ok = false;
+    shelf_tank_t was; size_t got = 0; uint32_t next = 0;
+    memset(&s_now, 0, sizeof s_now);
+    s_now.magic = NOW_MAGIC; s_now.layout = SHELF_LAYOUT; s_now.id = 1;
+    snprintf(s_now.name, sizeof s_now.name, "MY TANK");
+    s_next = 2; s_lived_h = -1;
+    if (!(shelf_port_frame_get("now", &was, sizeof was, &got) && got == sizeof was && !memcmp(&was, &s_now, sizeof was)) && !save_now()) ok = false;
+    if (!(shelf_port_frame_get("next", &next, sizeof next, &got) && got == sizeof next && next == s_next) && !shelf_port_frame_set("next", &s_next, sizeof s_next)) ok = false;
+    s_open.wipe = !ok;
+    return ok;
+}
+static int64_t rebased(int64_t stamp, int64_t delta, int64_t now_unix) {
+    if (stamp <= 0) return stamp;                 /* (shelved with no clock: not on the old clock) */
+    stamp += delta;
+    return stamp > now_unix ? now_unix : stamp < 1 ? 1 : stamp;
+}
+int shelf_rebase(int64_t delta, int64_t now_unix) {
+    if ((delta > -SHELF_REBASE_MIN_S && delta < SHELF_REBASE_MIN_S) || now_unix <= 0 || !s_n) return 0;
+    if (!shelf_tidy()) { printf("shelf: the clock moved, the shelf has work a refused write left - its stamps kept as they were\n"); return 0; }   /* (as any MY TANKS action) */
+    int n = 0;
+    for (int i = 0; i < s_n; i++) {               /* (rewrite keeps a tank at its index) */
+        shelf_tank_t h = s_t[i].h;
+        h.shelved_unix = rebased(h.shelved_unix, delta, now_unix);
+        h.clock_unix = rebased(h.clock_unix, delta, now_unix);
+        if (h.shelved_unix == s_t[i].h.shelved_unix && h.clock_unix == s_t[i].h.clock_unix) continue;
+        s_rw_restamp = true;
+        bool ok = rewrite(i, &h);
+        s_rw_restamp = false;
+        if (ok) n++; else printf("shelf: the clock moved, tank %u's stamps could not be rewritten - kept as they were\n", (unsigned)s_t[i].h.id);
+        if (shelf_busy) shelf_busy();
+    }
+    if (n) printf("shelf: the clock moved %lld s - %d shelved tank%s moved with it\n", (long long)delta, n, n == 1 ? "" : "s");
+    return n;
+}
 bool shelf_set_time(int i, int mode, int64_t now_unix) {
     if (i < 0 || i >= s_n || s_t[i].h.time_mode == mode) return i >= 0 && i < s_n;
     shelf_tank_t h = s_t[i].h;
@@ -705,3 +825,36 @@ int shelf_book_rekey(uint32_t from, uint32_t to) {
     }
     return n;
 }
+
+/* THE MAIN TANK (shelf.h) */
+void shelf_home_note(void) {
+    uint32_t id = 0; size_t got = 0;
+    if (s_now.type != SHELF_TYPE_FISH) return;
+    if (shelf_port_frame_get("home", &id, sizeof id, &got) && got == sizeof id && id == s_now.id) return;
+    id = s_now.id; shelf_port_frame_set("home", &id, sizeof id);
+}
+int shelf_home_pick(int64_t now_unix) {
+    uint32_t home = 0; size_t got = 0; int pick = -1;
+    if (!shelf_port_frame_get("home", &home, sizeof home, &got) || got != sizeof home) home = 0;
+    for (int k = 0; k < s_n; k++) {
+        if (s_t[k].h.type != SHELF_TYPE_FISH) continue;
+        if (home && s_t[k].h.id == home) return k;
+        if (pick < 0 || s_t[k].h.pos < s_t[pick].h.pos) pick = k;
+    }
+    return pick >= 0 ? pick : shelf_new(SHELF_TYPE_FISH, now_unix);
+}
+
+/* AN EXPERIMENTAL TANK, BOUGHT ONCE (shelf.h) */
+static uint8_t paid_mask(void) { uint8_t m = 0; size_t got = 0; return shelf_port_frame_get("xbuy", &m, sizeof m, &got) && got == sizeof m ? m : 0; }
+bool shelf_type_paid(int type) { return type > 0 && type < 8 && (paid_mask() >> type & 1); }
+bool shelf_type_paid_set(int type) {
+    if (type <= 0 || type >= 8) return false;
+    uint8_t m = paid_mask();
+    if (m >> type & 1) return true;
+    m |= (uint8_t)(1u << type);
+    return shelf_port_frame_set("xbuy", &m, sizeof m);
+}
+void shelf_paid_note(void) {
+    for (int ty = SHELF_TYPE_PIRANHA; ty <= SHELF_TYPE_MINNOWS; ty++) if (shelf_count_type(ty) > 0) shelf_type_paid_set(ty);
+}
+int shelf_xt_price(int type) { return shelf_count_type(type) > 0 ? -1 : shelf_type_paid(type) ? 0 : SHELF_XT_PRICE; }

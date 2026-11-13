@@ -29,6 +29,7 @@ int  battery_port_vbat_mv(void);
 int  battery_port_charge_ma(void);
 bool battery_port_set_charge_ma(int ma);
 void battery_port_charge_report(void);
+bool battery_port_set_charger(bool on);   /* REG 18 b1, the director's `charge off|on` (0.4.2: the proof of the stop reason) */
 /* the cell's size (0.3.9.2, the hidden ADVANCED page): the charge, precharge and end-of-charge currents for a
  * cell of mah (common/advanced.c adv_charge_ma / adv_trickle_ma; the board's own cell keeps the board's own
  * rates below). Called at boot with the saved size and when the keeper SETs one; false = no PMIC */

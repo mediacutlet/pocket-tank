@@ -116,6 +116,9 @@ typedef enum {
     LEV_GIVE_CANCEL,     /* receiver: uid + peer + nonce: the giver kept it - drop the ARRIVING note (or close the question) */
     LEV_GIVE_CLOSED,     /* giver: uid + nonce: the neighbor has it alive - the GIVEN note can go */
     LEV_GIVE_RESTORE,    /* giver: uid + nonce + pp: the neighbor never had it - it lives here again from the GIVEN note */
+    /* SAND DOLLAR GIFTS (0.4.2, sdgift.h): money, not fish - see link_sd_send below */
+    LEV_SD_IN,           /* receiver: peer + edge + nonce + amount: a gift from that tank - decide it (sdg_in), save, link_sd_answer */
+    LEV_SD_DONE,         /* giver: peer + edge + nonce + amount + reason (SDG_V_*): the answer to our gift - settle the OUT note */
     LEV_COUNT
 } link_ev_type_t;
 
@@ -128,7 +131,8 @@ typedef struct {
     link_edge_t    edge;
     uint8_t        reason;
     uint32_t       peer, uid, ms_left;
-    uint32_t       nonce;                     /* GIVE: which gift (the notes keep it) */
+    uint32_t       nonce;                     /* GIVE: which gift (the notes keep it); SD: which sand dollar gift */
+    int32_t        amount;                    /* SD: sand dollars */
     float          depth, heading, speed;     /* depth: 0 = the surface .. 1 = the floor */
     passport_t     pp;
     link_kin_t     kin;                       /* LEV_FRY_IN: its parent in the tank it was born in (uid 0 = not sent) */
@@ -147,6 +151,10 @@ typedef struct {
        held (asked again: still held, its time renewed). The engine asks it for FRY_ASK and FRY; the tank lets go when
        the fry comes (LEV_FRY_IN). NULL = fry_room alone, nothing held (2026-11-03, the five-fish cap) */
     int  (*fry_hold)(void *ctx, uint32_t peer, uint32_t parent, bool on);
+    /* GIVE: this fish lives here as one of OURS (home, or next door on a trip - never a visitor here). A late GIVEN for
+       it is answered "we have it" whatever RECEIVED says: that list keeps the last 16, the fish stays (0.4.2, LK-2: the
+       giver's GIVEN_LOST brought it back there, two copies). NULL = RECEIVED alone */
+    bool (*ours)(void *ctx, uint32_t uid);
 } link_host_t;
 
 /* what the NEARBY row and the arrows draw */
@@ -240,11 +248,25 @@ uint32_t link_give_nonce(const link_t *L, uint32_t uid);              /* ... tha
 int     link_away_edge(const link_t *L, uint32_t uid);                /* one of ours visiting a linked neighbor: that edge (-1: home, or not there) -
                                                                          GIVE offers it to the tank it is visiting, where it is (2026-11-01) */
 
+/* SAND DOLLAR GIFTS (0.4.2, sdgift.h). A tank of this build says so in its beacon (an older one's beacon does not, and
+ * drops the frames: its door shows no coin). The engine keeps one gift of ours in flight and sends it while the door to
+ * its tank is open, until that tank answers (LEV_SD_DONE) - nothing times out: the tank's saved OUT note is the truth,
+ * and after a boot or a closed door the tank hands it back at that tank's LINKED (link_sd_send again). A gift to us comes
+ * as LEV_SD_IN, once per frame heard (copies too); the tank decides and answers every one. */
+bool    link_peer_sd(const link_t *L, uint32_t tank);      /* that tank takes sand dollar gifts (its beacon says so) */
+bool    link_sd_send(link_t *L, uint32_t peer, uint32_t nonce, int amount);   /* giver: after the OUT note is saved; false = not linked
+                                                                                 to that tank now (the note waits for its LINKED) */
+void    link_sd_answer(link_t *L, uint32_t peer, uint32_t nonce, int verdict); /* receiver: after the save */
+bool    link_sd_busy(const link_t *L);                     /* a gift of ours in flight in the engine */
+void    link_sd_forget(link_t *L, uint32_t nonce);         /* stop sending that gift (it came back to us after a day) */
+void    link_test_as_041(link_t *L, bool on);              /* the selftest: this engine acts as a 0.4.1 tank's (no gifts) */
+
 /* what link mode's page draws (render_link_mode), read off the engine */
 enum { LV_FREE, LV_ARMED, LV_ASKED, LV_TWO, LV_OPEN };   /* an edge: glass / our arrow asking / one tank asks here / two do / the door is open */
 typedef struct {
     uint8_t badge;                                       /* ours */
-    struct { uint8_t state, badge, badge2; } edge[LINK_EDGES];   /* badge: the asker or the neighbor; badge2: the second asker */
+    struct { uint8_t state, badge, badge2, sd; } edge[LINK_EDGES];   /* badge: the asker or the neighbor; badge2: the second asker;
+                                                                         sd: an open door's neighbor takes sand dollar gifts (0.4.2) */
     uint8_t n_near, near_badge[LINK_PEERS_MAX];          /* tanks heard in link mode */
     bool    drifting; uint32_t drift_ms_left;             /* the DRIFTED notice, and its phase's time left */
     bool    drift_homeward;                               /* ... past the grace: the visitors swim home, then the door closes */

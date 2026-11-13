@@ -40,6 +40,7 @@
 #include "link_port_espnow.h"
 #include "imu_port.h"
 #include "render.h"
+#include "setup.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
@@ -50,6 +51,8 @@ static link_t *L;
 static bool s_on;                              /* the radio is up and the engine runs */
 static bool s_page;                            /* link mode's page is up (settings -> LINK) */
 static uint32_t s_page_quiet;
+static uint32_t s_sd_peer;                     /* the tank at the door the sand dollar dial was opened for (0.4.2) */
+static bool     s_sd_dial;                     /* ... SEND comes from the dial (false: the director's `link sd <edge> <n>`, any tank there) */
 static uint32_t s_fry_at;                      /* `link fry`: born when its home's room is known (or at this time) */                  /* the last touch on the page, or the last door to open */
 #define LINK_PAGE_DONE_MS 20000                /* linked and left alone this long: back to the tank by itself (2026-10-05, a keeper who never finds DONE) */
 static bool s_dir;                             /* the director's `link on`: the radio stays up until `link off` */
@@ -164,9 +167,17 @@ static void events(void) {
         case LEV_GIVE_CANCEL:  ESP_LOGI(TAG, "gift: %08lx kept its fish (the question closes)", (unsigned long)e.peer); break;
         case LEV_GIVE_CLOSED:  ESP_LOGI(TAG, "gift: delivered - the other tank has it alive; our note goes"); break;
         case LEV_GIVE_RESTORE: ESP_LOGI(TAG, "gift: %s - the other tank never had it: back here from our note", e.pp.name); break;
+        case LEV_SD_IN:   ESP_LOGI(TAG, "sand dollars: %ld from %08lx (gift %lu) at the %s door", (long)e.amount, (unsigned long)e.peer, (unsigned long)e.nonce, EDGE[e.edge]); break;
+        case LEV_SD_DONE: ESP_LOGI(TAG, "sand dollars: our %ld to %08lx (gift %lu): %s", (long)e.amount, (unsigned long)e.peer, (unsigned long)e.nonce,
+                                   e.reason == 1 ? "TAKEN" : e.reason == 2 ? "refused - their tank has too many" : "refused"); break;
         default: break;
         }
         if (s_tank) tank_link_event(s_tank, L, &e);
+        if (s_tank) {                              /* a sand dollar gift's news (0.4.2): the HUD's line, the coin's spin */
+            int ne, na, nv, nk = tank_link_sd_news(&ne, &na, &nv);
+            if (nk) { render_link_sd_news(nk, ne, na, nv, s_tank->clock); s_page_quiet = now;
+                      ESP_LOGI(TAG, "sand dollars: news %d (%d at the %s door), balance %ld", nk, na, ne == LINK_LEFT ? "left" : "right", (long)s_tank->sd_balance); }
+        }
         if (s_tank && e.type == LEV_FRY_OUT) {         /* (the parent that should follow it) */
             int p = -1; for (int k = 0; k < N_VISIT_MAX; k++) if (s_tank->vis_used[k] && s_tank->fish[N_FISH_MAX + k].follow_uid == e.uid) p = N_FISH_MAX + k;
             if (p >= 0) ESP_LOGI(TAG, "fry: %s follows it (homeward %d)", s_tank->fish[p].name, s_tank->fish[p].homeward);
@@ -187,6 +198,7 @@ void link_dev_poll(tank_t *t) {
         ESP_LOGI(TAG, "fry: its home %s - born now", t->fry_home_room == 1 ? "has room" : t->fry_home_room == 0 ? "is full" : "did not answer");
         s_fry_at = 0; progression_force_arrival(t);
     }
+    if (s_page && setup_is_sdgift()) { s_page_quiet = now; link_mode(L, true); }   /* the dial is up over link mode: it stays (0.4.2) */
     if (s_page && any_door() && (int32_t)(now - s_page_quiet) > LINK_PAGE_DONE_MS) {
         link_view_t v; link_view(L, &v);
         bool pending = false;
@@ -329,8 +341,25 @@ int link_dev_touch(float x, float y, bool down, float dt) {
         ESP_LOGI(TAG, "%s door held: closing", EDGE[e]); link_close(L, e); events(); break; }
     case LINK_UI_DONE: link_dev_page_close(); break;
     case LINK_UI_DISCONNECT: link_dev_disconnect(); break;
+    case LINK_UI_SD_LEFT: case LINK_UI_SD_RIGHT: {    /* a door's coin (0.4.2): the dial - or why not */
+        int e = r == LINK_UI_SD_LEFT ? LINK_LEFT : LINK_RIGHT;
+        if (!s_tank) break;
+        if (tank_link_sd_pending(s_tank)) { render_link_sd_news(TL_SD_BUSY, e, 0, 0, s_tank->clock); ESP_LOGI(TAG, "sand dollars: a gift still in flight"); break; }
+        setup_begin_sdgift(s_tank, e, v.edge[e].badge); s_sd_peer = link_neighbor(L, (link_edge_t)e); s_sd_dial = true;
+        ESP_LOGI(TAG, "sand dollars: the dial for the %s door (balance %ld)", EDGE[e], (long)s_tank->sd_balance);
+        break; }
     }
     return r;
+}
+/* the dial's SEND (0.4.2): the money leaves, saved with its note, and goes */
+void link_dev_sd_send(tank_t *t, int edge, int amount) {
+    if (!t) return;
+    int k = L && s_on && !(s_sd_dial && !s_sd_peer) ? tank_link_sd_send(t, L, edge, s_sd_peer, amount) : TL_SD_NO_DOOR;   /* (to the tank the dial was
+                                                                       opened for; a dial opened at no tank sends nothing - the review's 4) */
+    s_sd_dial = false;
+    ESP_LOGI(TAG, "sand dollars: SEND %d through the %s door -> %d (balance %ld)", amount, edge == LINK_LEFT ? "left" : "right", k, (long)t->sd_balance);
+    render_link_sd_news(k, edge, amount, 0, t->clock);
+    s_page_quiet = now_ms();
 }
 /* DISCONNECT (the DRIFTED notice's button, link mode's chip): every door of
    this tank shuts now - visitors poof home, ours are called back */
@@ -374,6 +403,19 @@ void link_dev_cmd(tank_t *t, int argc, char **argv) {
     int e = argc > 2 && !strcmp(argv[2], "left") ? LINK_LEFT : argc > 2 && !strcmp(argv[2], "right") ? LINK_RIGHT : -1;
     if (!strcmp(c, "page")) {                 /* link mode's page, as the settings LINK button opens it (DONE / `link page` closes) */
         if (link_dev_page_up()) link_dev_page_close(); else link_dev_page_open(t);
+        return;
+    }
+    if (!strcmp(c, "sd")) {                   /* link sd [left|right [n | dial]]: sand dollar gifts (0.4.2) - status, send n, or open the dial */
+        if (e >= 0 && argc > 3 && !strcmp(argv[3], "dial")) { if (link_dev_page_up() && !setup_active()) { setup_begin_sdgift(t, e, L ? link_peer_badge(L, link_neighbor(L, (link_edge_t)e)) : 0); s_sd_peer = L ? link_neighbor(L, (link_edge_t)e) : 0; s_sd_dial = true; } else ESP_LOGW(TAG, "link sd: link mode first (`link page`), no page up"); return; }
+        if (e >= 0 && argc > 3) { s_sd_peer = 0; s_sd_dial = false; link_dev_sd_send(t, e, atoi(argv[3])); return; }
+        const sdg_book_t *b = &t->sdg;
+        ESP_LOGI(TAG, "sand dollars: balance %ld, gifts given %lu; in flight %s", (long)t->sd_balance, (unsigned long)b->seq, b->out.nonce ? "yes" : "none");
+        if (b->out.nonce) ESP_LOGI(TAG, "  out: %u to %08lx (gift %lu), engine %s, door %s", b->out.amount, (unsigned long)b->out.peer, (unsigned long)b->out.nonce,
+                                   L && link_sd_busy(L) ? "sending" : "idle", L && (link_neighbor(L, LINK_LEFT) == b->out.peer || link_neighbor(L, LINK_RIGHT) == b->out.peer) ? "open" : "closed");
+        for (int i = 0; i < SDG_SEEN_N; i++) if (b->seen[i].peer)
+            ESP_LOGI(TAG, "  seen: %08lx gift %lu: %u, verdict %u, age %u", (unsigned long)b->seen[i].peer, (unsigned long)b->seen[i].nonce, b->seen[i].amount, b->seen[i].verdict, b->seen[i].age);
+        for (int k = 0; k < LINK_EDGES; k++) if (L && link_neighbor(L, (link_edge_t)k))
+            ESP_LOGI(TAG, "  %s door: %08lx takes gifts: %s", EDGE[k], (unsigned long)link_neighbor(L, (link_edge_t)k), link_peer_sd(L, link_neighbor(L, (link_edge_t)k)) ? "yes" : "no");
         return;
     }
     if (!strcmp(c, "chan")) {                 /* link chan [n]: the ESP-NOW channel (the test of 2026-10-12: a row on a channel that is not 1) */

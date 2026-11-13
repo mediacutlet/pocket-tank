@@ -32,9 +32,13 @@ static const bg_water_t BG_W[BG_N] = {
     [BG_RIDGES]   = { 0x0b3b49, 0x082733, 0x030f16, 0.45f, 0.55f },
     [BG_REEF]     = { 0x0d4b54, 0x0a3138, 0x041417, 0.50f, 0.50f },
     [BG_GROTTO]   = { 0x0b3d48, 0x08272f, 0x031015, 0.45f, 0.55f },
+    [BG_SHIP]     = { 0x16443f, 0x0c2a2a, 0x040f10, 0.45f, 0.55f },   /* (0.4.2) a murkier green-grey */
+    [BG_VENT]     = { 0x1a3442, 0x10202a, 0x0e0c0a, 0.40f, 0.60f },   /* dark, warm at the floor */
+    [BG_MANGROVE] = { 0x5e7448, 0x2c3e2c, 0x0d150d, 0.38f, 0.62f },   /* olive and silty, bright under the canopy, gone dark by the floor */
 };
-static const char *const BG_NAME[BG_N] = { "OPEN WATER", "ATLANTIS", "KELP FOREST", "TWILIGHT DEEP", "LAGOON", "ROCK RIDGES", "REEF WALLS", "GROTTO" };
-static const uint8_t BG_LAYERS[BG_N] = { 0, 5, 2, 0, 1, 5, 5, 2 };
+static const char *const BG_NAME[BG_N] = { "OPEN WATER", "ATLANTIS", "KELP FOREST", "TWILIGHT DEEP", "LAGOON", "ROCK RIDGES", "REEF WALLS", "GROTTO",
+                                             "SUNKEN SHIP", "EMBERS", "MANGROVES" };   /* (EMBERS: Strato's title, 11-11, for the volcanic vent - BG_VENT in the code) */
+static const uint8_t BG_LAYERS[BG_N] = { 0, 5, 2, 0, 1, 5, 5, 2, 4, 4, 3 };
 const char *bg_name(int bg) { return (unsigned)bg < BG_N ? BG_NAME[bg] : BG_NAME[0]; }
 static const char *const BG_WORDS[BG_N][2] = {     /* (approved by Strato 11-05) */
     { "THE TANK AS IT STARTED,", "CLEAR OPEN WATER" },
@@ -45,6 +49,9 @@ static const char *const BG_WORDS[BG_N][2] = {     /* (approved by Strato 11-05)
     { "RIDGE AFTER RIDGE OF ROCK", "FADING INTO THE DEEP" },
     { "CORAL ON ROCKY WALLS,", "OPEN WATER BETWEEN" },
     { "LOOK OUT OF A CAVE", "INTO THE OPEN SEA" },
+    { "AN OLD WOODEN SHIP", "RESTING ON THE SEABED" },          /* (0.4.2: Strato approved these three 2026-11-13) */
+    { "HOT VENTS IN THE DARK,", "GLOWING CHIMNEYS" },
+    { "TANGLED ROOTS REACHING", "DOWN INTO MURKY WATER" },
 };
 void bg_words(int bg, const char **l1, const char **l2) { if ((unsigned)bg >= BG_N) bg = 0; *l1 = BG_WORDS[bg][0]; *l2 = BG_WORDS[bg][1]; }
 int bg_layers(int bg) { return (unsigned)bg < BG_N ? BG_LAYERS[bg] : 0; }
@@ -85,6 +92,13 @@ static inline uint32_t mix8(uint32_t a, uint32_t b, int t) {   /* t 0..256 */
 #define RL_MAX 48
 #define KELP_MAX 18
 #define CRUST_MAX 96
+#define SH_LN 12                                  /* (0.4.2) the ship's lines, weed, gunports; the vent's chimneys and worms; the mangroves' roots */
+#define SH_WD 28
+#define SH_PT 8
+#define VE_N 10
+#define VE_WMAX 64
+#define MG_MAX 80
+#define MG_DMAX 24
 typedef struct { float x0, amp, lean, wbase, haze, inv_h; int ytop, layer, s; uint8_t ph; uint32_t stalk, blade; } kelp_t;
 typedef struct { int j, side; float tip, root; } ledge_t;
 typedef struct { float x, y, r; uint32_t rgb; uint8_t lay; } disc_t;
@@ -97,7 +111,10 @@ typedef struct {
     uint32_t wrow[TANK_H];                        /* the water of each row */
     uint8_t  grow[TANK_H], gcol[TANK_W];          /* the glow's tables */
     bg_glow_t glow; bool has_glow;
+    bool     glow_q;                              /* (0.4.2's three) the glow in steps of 4: a quarter of the mixes a row, and runs of one color for the water pass */
     uint32_t row[TANK_W]; uint8_t lay[TANK_W];    /* the row bg_row hands over */
+    uint8_t  lit[TANK_W]; bool any_lit;           /* ... and how far each of its pixels lights itself, 0..255 (0.4.2: the vent) */
+    uint8_t  nz[1024];                            /* (0.4.2) grain: a random byte a pixel by table, not a hash */
     uint32_t lut[256];                            /* a row's colors by weight (the glow's, Grotto's walls): one mix a weight, not a pixel */
     int      ymin;                                /* the first row with anything of the background on it */
     const reef_keep_t *reef;                      /* the reef's layout the rows read: the kept one, or this scratch's own */
@@ -107,6 +124,15 @@ typedef struct {
         struct { int16_t top[5][TANK_W]; int fsc[5]; } ri;
         struct { int16_t edge[TANK_H][2], gtop[TANK_W]; uint8_t ta[TANK_W + TANK_H], tb[TANK_W + 3 * TANK_H + 1]; disc_t d[CRUST_MAX]; int nd; } gr;
         struct { reef_keep_t k; uint8_t ct[RW_CH][RW_CW], rg[RG_GH][RG_GW]; ledge_t L[RL_MAX]; } re;
+        struct { int16_t deck[TANK_W], keel[TANK_W], dep[TANK_W], mnd[TANK_W]; int32_t isd[TANK_W];                 /* (0.4.2) the ship */
+                 uint8_t rail[TANK_W], hn[TANK_W], hz[TANK_W], sail[TANK_W], d7[TANK_H + 8], m7[TANK_H + 8], pk[1024], jag[32]; uint32_t tone[8];
+                 struct { float x0, y0, y1, sl; uint8_t th; } ln[SH_LN]; struct { float x0, y0, x1, y1, w0, w1, inv; } ma[3];
+                 struct { int16_t x, y0, y1; } wd[SH_WD]; struct { int16_t x0, x1, ya, yb; uint8_t at, open; } pt[SH_PT];
+                 int nl, nw, np, xend, hy0, my0, mx0, post, bulw, bx0, bx1, bbeam, rat_a, rat_b, rat_y0, rat_y1, chx, chy0, chy1, plat_y, plat_x0, plat_x1;
+                 float bx, by, ibrx, ibry, yx, yy, yhalf, ysl; } sh;
+        struct { int16_t cx[VE_N][TANK_H], hw[VE_N][TANK_H], mt[TANK_W], wx[VE_WMAX], wy0[VE_WMAX], wy1[VE_WMAX]; int yt[VE_N], ph[VE_N], hr[VE_N], hu[VE_N], hinv[VE_N], nw, wtop, mtop, mlow; int8_t sn[64]; uint8_t ed[256]; } ve;
+        struct { struct { float x0, reach, inv, r0, r1; int16_t y0, y1; uint8_t lay, trunk, ph; } r[MG_MAX]; int n, nd, ybank[2];
+                 int16_t bank[2][TANK_W], dx[MG_DMAX], dl[MG_DMAX]; uint8_t pen[2][TANK_W], dlay[MG_DMAX], dph[MG_DMAX]; int8_t sn[64]; } mg;
     } u;
 } scratch_t;
 size_t bg_scratch_size(void) { return sizeof(scratch_t); }
@@ -122,6 +148,9 @@ size_t bg_scratch_need(int bg) {
         case BG_LAGOON: return base + sizeof(((scratch_t *)0)->u.la);
         case BG_RIDGES: return base + sizeof(((scratch_t *)0)->u.ri);
         case BG_GROTTO: return base + sizeof(((scratch_t *)0)->u.gr);
+        case BG_SHIP:     return base + sizeof(((scratch_t *)0)->u.sh);
+        case BG_VENT:     return base + sizeof(((scratch_t *)0)->u.ve);
+        case BG_MANGROVE: return base + sizeof(((scratch_t *)0)->u.mg);
         case BG_REEF:   return bg_kept_now() == BG_REEF ? base : base + sizeof(((scratch_t *)0)->u.re);
         default:        return bg <= BG_OPEN || bg >= BG_N ? 0 : base;   /* (Atlantis, Twilight: rows and glow only) */
     }
@@ -149,13 +178,19 @@ static inline uint32_t bd_far(uint32_t rgb, int y, float haze) { return mix(rgb,
 static void row_water(int y) {
     const uint32_t w = s_s->wrow[y]; uint32_t *R = s_s->row;
     const int gk = s_s->has_glow ? s_s->grow[y] : 0;
-    if (gk) {                                     /* (the same mix as a pixel's, once per weight the row can reach) */
+    if (gk && s_s->glow_q) {                      /* (0.4.2: by fours - under the 565's own step and the dither's; by eights showed faint rings) */
+        uint32_t *L = s_s->lut; const int qmax = gk * 255 >> 10;
+        L[0] = w; for (int q = 1; q <= qmax; q++) L[q] = mix8(w, s_s->glow.rgb, q << 2);
+        for (int x = 0; x < TANK_W; x++) R[x] = L[gk * s_s->gcol[x] >> 10];
+    }
+    else if (gk) {                                /* (the same mix as a pixel's, once per weight the row can reach) */
         uint32_t *L = s_s->lut; const int kmax = gk * 255 >> 8;
         L[0] = w; for (int k = 1; k <= kmax; k++) L[k] = mix8(w, s_s->glow.rgb, k);
         for (int x = 0; x < TANK_W; x++) R[x] = L[gk * s_s->gcol[x] >> 8];
     }
     else for (int x = 0; x < TANK_W; x++) R[x] = w;
     memset(s_s->lay, 0, TANK_W);
+    if (s_s->any_lit) { memset(s_s->lit, 0, TANK_W); s_s->any_lit = false; }
 }
 static inline void row_span(int x0, int x1, uint32_t c, uint8_t l) {
     if (x0 < 0) x0 = 0;
@@ -171,6 +206,17 @@ static void glow_layout(int bg) {
     memset(s->grow, 0, sizeof s->grow); memset(s->gcol, 0, sizeof s->gcol);
     switch (bg) {
         case BG_TWILIGHT: rgb = 0x3c5a9a; cx = TANK_W * 0.58f; rx = TANK_W * 0.55f; cy0 = 0; ry = TANK_BOT * 0.55f; peak = 115; break;   /* far above, a little right */
+        case BG_VENT:     rgb = 0x863618; cx = TANK_W * 0.60f; rx = TANK_W * 0.44f; cy0 = TANK_BOT * 0.36f; ry = TANK_BOT * 0.44f; peak = 160; break;   /* (0.4.2) round the great chimney */
+        case BG_MANGROVE: {                                                 /* (0.4.2) the light between the trees: soft shafts, gone by the floor */
+            static const struct { float c, w; int k; } SHAFT[4] = { { 0.235f, 0.060f, 235 }, { 0.50f, 0.095f, 255 }, { 0.585f, 0.035f, 150 }, { 0.80f, 0.055f, 215 } };
+            for (int x = 0; x < TANK_W; x++) {
+                int g = 70;
+                for (int i = 0; i < 4; i++) { float dx = (x - SHAFT[i].c * TANK_W) / (SHAFT[i].w * TANK_W), d = 1 - dx * dx; if (d > 0) { int v = 70 + (int)(d * d * (SHAFT[i].k - 70)); if (v > g) g = v; } }
+                s->gcol[x] = (uint8_t)g;
+            }
+            for (int y = 0; y < TANK_BOT && y < TANK_H; y++) { float v = 1 - (float)y / (TANK_BOT * 0.82f); s->grow[y] = v > 0 ? (uint8_t)(v * v * 150) : 0; }
+            s->glow = (bg_glow_t){ 0xb8cc94, s->grow, s->gcol }; s->has_glow = true; return;
+        }
         case BG_GROTTO:   rgb = 0x2f8a96; cx = TANK_W * 0.52f; rx = TANK_W * 0.42f; cy0 = TANK_BOT * 0.40f; ry = TANK_W * 0.35f; peak = 120; break;   /* beyond the mouth */
         case BG_REEF:                                                       /* the light down the channel, strongest near the surface */
             for (int x = 0; x < TANK_W; x++) { float dx = (x - TANK_W * 0.5f) / (TANK_W * 0.32f), d = 1 - dx * dx; s->gcol[x] = d > 0 ? (uint8_t)(d * 255) : 0; }
@@ -713,13 +759,16 @@ static const uint32_t *reef_row(int y) {
 }
 
 /* ---- the entries ---- */
+#include "bg_more.inc"                            /* (the 0.4.2 three: Sunken Ship, Volcanic Vent, Mangroves) */
+
 const bg_glow_t *bg_begin(int bg, void *scratch) {
     if (s_keep && bg != s_keep_bg) bg_keep_drop();                       /* another background: the kept layout goes */
     s_s = scratch;
     if (!scratch || bg <= BG_OPEN || bg >= BG_N) return NULL;
     for (int y = 0; y < TANK_H; y++) s_s->wrow[y] = bg_water_rgb(bg, y);
     glow_layout(bg);
-    s_s->ymin = TANK_BOT;
+    s_s->ymin = TANK_BOT; s_s->any_lit = true;       /* (the first row clears the lit marks) */
+    s_s->glow_q = bg >= BG_SHIP;
     switch (bg) {
         case BG_RUINS:  ruins_begin(); break;
         case BG_KELP:   kelp_begin(); break;
@@ -727,6 +776,9 @@ const bg_glow_t *bg_begin(int bg, void *scratch) {
         case BG_RIDGES: ridges_begin(); break;
         case BG_REEF:   reef_begin(); break;
         case BG_GROTTO: grotto_begin(); break;
+        case BG_SHIP:     nz_fill(); ship_begin(); break;
+        case BG_VENT:     nz_fill(); vent_begin(); break;
+        case BG_MANGROVE: nz_fill(); mangrove_begin(); break;
         default: break;
     }
     return s_s->has_glow ? &s_s->glow : NULL;
@@ -742,16 +794,29 @@ const uint32_t *bg_row(int bg, int y, void *scratch, const uint8_t **lay) {
         case BG_RIDGES: r = ridges_row(y); break;
         case BG_REEF:   r = reef_row(y); break;
         case BG_GROTTO: r = grotto_row(y); break;
+        case BG_SHIP:     r = ship_row(y); break;
+        case BG_VENT:     r = vent_row(y); break;
+        case BG_MANGROVE: r = mangrove_row(y); break;
         default: r = NULL; break;
     }
     if (lay) *lay = r ? s_s->lay : NULL;
     return r;
 }
+const uint8_t *bg_row_lit(void *scratch) { scratch_t *s = scratch; return s && s->any_lit ? s->lit : NULL; }
 
-/* ---- THE DRIFT (Twilight Deep): sinking, wandering specks, a function of the clock ---- */
-int bg_specks(int bg) { return bg == BG_TWILIGHT ? TANK_W * TANK_H / 2400 : 0; }
-void bg_speck(int bg, int i, float T, float *x, float *y, int *alpha, bool *big) {
-    (void)bg;
+/* ---- THE DRIFT: specks in the water, each a function of the clock (Twilight Deep's marine snow; 0.4.2: the vent's
+   embers, the mangroves' silt and leaves) ---- */
+int bg_specks(int bg) { return bg == BG_TWILIGHT ? TANK_W * TANK_H / 2400 : bg == BG_VENT ? VE_EMBERS : bg == BG_MANGROVE ? TANK_W * TANK_H / 4200 : 0; }
+float bg_speck_clock(int bg, double clock) { return bg == BG_TWILIGHT ? (float)clock : tank_anim(clock); }
+bool bg_debug_vent_mouth(int k, int *x, int *y) { if (k < 0 || k >= VE_N) return false; float mx; ve_mouth(k, &mx, y); *x = (int)mx; return true; }
+bool bg_debug_vent_worm(const void *scratch, int i, int *x, int *y0) {
+    const scratch_t *s = scratch; if (!s || i < 0 || i >= s->u.ve.nw) return false;
+    *x = s->u.ve.wx[i]; *y0 = s->u.ve.wy0[i]; return true;
+}
+void bg_speck(int bg, int i, float T, float *x, float *y, int *alpha, bool *big, uint32_t *rgb, bool *lit) {
+    if (bg == BG_VENT) { vent_speck(i, T, x, y, alpha, big, rgb, lit); return; }
+    if (bg == BG_MANGROVE) { mangrove_speck(i, T, x, y, alpha, big, rgb, lit); return; }
+    *rgb = BG_SPECK_RGB; *lit = false;
     uint32_t h = bd_h(i, 91);
     float vy = 1.2f + (h >> 20 & 7) * 0.35f;                                          /* px/s, sinking */
     *y = fmodf((h >> 10 & 1023) * (TANK_BOT / 1024.0f) + vy * T, (float)TANK_BOT - 24);

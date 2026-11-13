@@ -11,6 +11,9 @@ static int64_t last_report = 0;
 bool display_port_init(void) { ESP_LOGI(TAG, "stub display port (no panel)"); return true; }
 void display_port_sleep(void) {}
 void display_port_wake(void) {}
+bool display_port_panel_power_check(void) { return false; }
+uint32_t display_port_panel_heals(void) { return 0; }
+void display_port_panel_rail_test_off(void) {}
 void display_port_set_inverted(bool inverted) { (void)inverted; }
 void display_port_set_quarter(int q) { (void)q; }
 bool display_port_quarters(void) { return false; }
@@ -27,6 +30,7 @@ void display_port_deep_sleep_pins(bool tp_awake_high) { (void)tp_awake_high; }
 void display_port_deep_standby(void) { }
 void display_port_deep_sleep_bus(void) { }
 bool board_has_expander(void) { return true; }
+uint8_t board_es7210_addr(void) { return 0; }
 bool board_is_watch(void) { return false; }
 bool board_is_square(void) { return false; }
 const char *board_port_hw(void) { return NULL; }   /* no chips to ask */

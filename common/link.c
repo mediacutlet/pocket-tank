@@ -11,10 +11,12 @@ enum {
     FR_VISIT, FR_LEASE, FR_RETURN, FR_HOME, FR_RECALL, FR_DROP, FR_GOHOME,
     FR_FRY_ASK, FR_FRY_ROOM, FR_FRY, FR_FRY_OK, FR_FRY_NO,
     FR_GIVE, FR_GIVE_TAKE, FR_GIVE_NO, FR_GIVE_CANCEL, FR_GIVEN, FR_GIVEN_OK, FR_GIVEN_LOST,   /* phase 6 (an older tank drops them: NO ANSWER) */
+    FR_SD_GIFT, FR_SD_ANSWER,          /* sand dollar gifts, 0.4.2 (a 0.4.1 tank drops them: type >= its FR_TYPES; and it never
+                                          sets BF_SD, so no gift is ever sent to it) */
     FR_TYPES
 };
 #define HDR 12
-enum { BF_MODE = 1, BF_DRIFT = 2 };          /* beacon flags */
+enum { BF_MODE = 1, BF_DRIFT = 2, BF_SD = 4 };   /* beacon flags (BF_SD: takes sand dollar gifts, 0.4.2 - a 0.4.1 tank masks it off) */
 enum { RF_POOF = 1 };                        /* return flags */
 
 typedef struct {
@@ -68,6 +70,8 @@ struct link {
     } fry;
     give_out_t gout[LINK_GIVE_MAX];          /* GIVE: ours, going */
     give_in_t  gin[LINK_GIVE_MAX];           /* ... theirs, coming */
+    struct { bool on; uint32_t peer, nonce, sent; int amount; } sd;   /* SAND DOLLAR GIFTS (0.4.2): ours in flight */
+    bool old_041;                            /* the selftest's 0.4.1 tank: no BF_SD, the SD frames dropped as its FR_TYPES did */
     link_ev_t evq[LINK_EVQ]; int ev_head, ev_n;
     uint32_t ev_lost;
 };
@@ -191,7 +195,7 @@ static void send_beacon(link_t *L) {
     int room = L->host.room ? room_left(L) : 0;
     room = room > 255 ? 255 : room;
     uint32_t ds = L->drifting ? (L->now - L->drift_since) / 1000 : 0;
-    w8(&w, L->badge); w8(&w, (L->mode ? BF_MODE : 0) | (L->drifting ? BF_DRIFT : 0)); w8(&w, armed);
+    w8(&w, L->badge); w8(&w, (L->mode ? BF_MODE : 0) | (L->drifting ? BF_DRIFT : 0) | (L->old_041 ? 0 : BF_SD)); w8(&w, armed);
     w8(&w, (uint32_t)room); w8(&w, ds > 255 ? 255 : ds);
     w32(&w, L->edge_peer[LINK_LEFT]); w32(&w, L->edge_peer[LINK_RIGHT]);
     tx(L, &w, 0);
@@ -424,7 +428,7 @@ void link_view(const link_t *L, link_view_t *v) {
         if (L->edge_peer[e]) {
             const peer_t *p = NULL;
             for (int i = 0; i < LINK_PEERS_MAX && !p; i++) if (L->peer[i].used && L->peer[i].tank == L->edge_peer[e]) p = &L->peer[i];
-            v->edge[e].state = LV_OPEN; v->edge[e].badge = p ? p->badge : 0;
+            v->edge[e].state = LV_OPEN; v->edge[e].badge = p ? p->badge : 0; v->edge[e].sd = p && (p->flags & BF_SD) ? 1 : 0;
             continue;
         }
         /* who asks here: the tanks armed at the facing edge (link.c candidates) */
@@ -476,7 +480,7 @@ static void rx_beacon(link_t *L, peer_t *p, rd_t *r) {
        second, 2026-10-05) */
     bool was_mode = (p->flags & BF_MODE) != 0, was_new = !p->announced;
     p->announced = true;
-    p->badge = badge < LINK_BADGES ? badge : 0; p->flags = flags & (BF_MODE | BF_DRIFT); p->armed = arm & 3;
+    p->badge = badge < LINK_BADGES ? badge : 0; p->flags = flags & (BF_MODE | BF_DRIFT | BF_SD); p->armed = arm & 3;
     p->room = room; p->drift_s = ds; p->edge_peer[LINK_LEFT] = le; p->edge_peer[LINK_RIGHT] = re;
     /* two tanks the same badge: the one in link mode picks again - always, when
        the other is not in link mode (it is showing its badge as somebody's
@@ -813,7 +817,9 @@ static void rx_given(link_t *L, uint32_t from, uint32_t uid, uint32_t nonce, rd_
         link_give_resume_in(L, from, uid, nonce, &held);
         g = gin_find(L, uid);
         if (g && g->nonce == nonce) { if (has) g->pp = left; g->st = GI_ALIVE; visit_settle(L, uid, from); give_ev(L, LEV_GIVE_ALIVE, uid, from, nonce, &g->pp, -1); }
-    } else send_give(L, FR_GIVEN_LOST, from, uid, nonce, -1, NULL);   /* we never held it: the giver's note brings it back */
+    } else if (L->host.ours && L->host.ours(L->host.ctx, uid))
+        send_give(L, FR_GIVEN_OK, from, uid, nonce, -1, NULL);     /* (0.4.2, LK-2) it swims here, ours: RECEIVED moved on past it */
+    else send_give(L, FR_GIVEN_LOST, from, uid, nonce, -1, NULL);   /* we never held it: the giver's note brings it back */
 }
 /* the receiver lets go of a gift it said yes to, the giver gone for good (tank_link: an ARRIVING note past its time):
    the engine's waiting copy goes too, so a GIVEN that comes after all is answered GIVEN_LOST - the giver's own note
@@ -858,6 +864,46 @@ static void rx_give_reply(link_t *L, int type, uint32_t from, uint32_t uid, uint
         give_ev(L, LEV_GIVE_RESTORE, uid, from, nonce, &g->pp, -1);
         g->st = GO_FREE;
     }
+}
+/* ---- SAND DOLLAR GIFTS (0.4.2, link.h) ---- */
+static int edge_of(const link_t *L, uint32_t tank) { for (int e = 0; e < LINK_EDGES; e++) if (tank && L->edge_peer[e] == tank) return e; return -1; }
+bool link_peer_sd(const link_t *L, uint32_t tank) {
+    for (int i = 0; i < LINK_PEERS_MAX; i++) if (L->peer[i].used && L->peer[i].tank == tank) return (L->peer[i].flags & BF_SD) != 0;
+    return false;
+}
+bool link_sd_busy(const link_t *L) { return L->sd.on; }
+void link_sd_forget(link_t *L, uint32_t nonce) { if (L->sd.on && L->sd.nonce == nonce) L->sd.on = false; }
+void link_test_as_041(link_t *L, bool on) { L->old_041 = on; }
+static void send_sd(link_t *L) {
+    wr_t w; hdr(L, &w, FR_SD_GIFT, L->sd.peer); w32(&w, L->sd.nonce); w16(&w, (uint32_t)L->sd.amount); tx(L, &w, L->sd.peer);
+}
+bool link_sd_send(link_t *L, uint32_t peer, uint32_t nonce, int amount) {
+    if (!peer || !nonce || amount < 1 || amount > 65535) return false;
+    L->sd.on = true; L->sd.peer = peer; L->sd.nonce = nonce; L->sd.amount = amount; L->sd.sent = L->now;
+    if (!linked_to(L, peer)) return false;                   /* (kept: it goes once that door opens) */
+    send_sd(L);
+    return true;
+}
+void link_sd_answer(link_t *L, uint32_t peer, uint32_t nonce, int verdict) {
+    if (!peer || !nonce || verdict <= 0 || verdict > 255) return;
+    wr_t w; hdr(L, &w, FR_SD_ANSWER, peer); w32(&w, nonce); w8(&w, (uint32_t)verdict); tx(L, &w, peer);
+}
+static void rx_sd(link_t *L, int type, uint32_t from, rd_t *r) {
+    uint32_t nonce = r32(r), v = type == FR_SD_GIFT ? r16(r) : r8(r);
+    if (r->bad || !nonce) return;
+    int e = edge_of(L, from);
+    if (e < 0) return;                                       /* only a tank linked here (a stranger's frame: nothing) */
+    if (type == FR_SD_GIFT) {
+        link_ev_t *ev = ev_push(L, LEV_SD_IN); if (ev) { ev->peer = from; ev->edge = (link_edge_t)e; ev->nonce = nonce; ev->amount = (int32_t)v; }
+    } else if (L->sd.on && L->sd.peer == from && L->sd.nonce == nonce && v) {
+        L->sd.on = false;
+        link_ev_t *ev = ev_push(L, LEV_SD_DONE);
+        if (ev) { ev->peer = from; ev->edge = (link_edge_t)e; ev->nonce = nonce; ev->amount = L->sd.amount; ev->reason = (uint8_t)v; }
+        else L->sd.on = true;                                /* (a full queue: keep asking - the answer comes again) */
+    }
+}
+static void sd_tick(link_t *L, uint32_t now) {
+    if (L->sd.on && linked_to(L, L->sd.peer) && after(now, L->sd.sent + LINK_RESEND_MS)) { send_sd(L); L->sd.sent = now; }
 }
 static void give_tick(link_t *L, uint32_t now) {
     for (int i = 0; i < LINK_GIVE_MAX; i++) {
@@ -925,6 +971,7 @@ void link_rx(link_t *L, const uint8_t *buf, int len, int rssi, uint32_t now_ms) 
     case FR_VISIT: rx_visit(L, from, &r); break;
     case FR_RETURN: rx_return(L, from, &r); break;
     case FR_FRY: rx_fry(L, from, &r); break;
+    case FR_SD_GIFT: case FR_SD_ANSWER: if (!L->old_041) rx_sd(L, (int)type, from, &r); break;
     case FR_GIVE: case FR_GIVE_TAKE: case FR_GIVE_NO: case FR_GIVE_CANCEL: case FR_GIVEN: case FR_GIVEN_OK: case FR_GIVEN_LOST: {
         uint32_t uid = r32(&r), nonce = r32(&r);
         if (r.bad || !uid || !nonce) return;
@@ -1071,6 +1118,7 @@ void link_tick(link_t *L, uint32_t now) {
         } else if (after(now, L->fry.sent + LINK_RESEND_MS)) { send_fry(L); L->fry.sent = now; }
     }
     give_tick(L, now);
+    sd_tick(L, now);
     /* visitors */
     for (int i = 0; i <= LINK_VISIT_MAX; i++) {
         visit_t *v = &L->visit[i];

@@ -35,7 +35,15 @@ static void *psram_alloc(size_t n) {
 
 /* hot activation buffers live in internal SRAM (~70 KB): the dot kernel then
  * streams only flash weights + SRAM activations, off the contended PSRAM bus */
+/* ... with a FLOOR (RAM move 2, 0.4.2): a request that would leave less than SRAM_FLOOR of internal RAM is refused, and
+   q4_model's alloc16_fast takes PSRAM instead (slower decisions, not a starved display or radio). Without it a batch that
+   grew to the longest prompt took whatever internal RAM was left */
+#define SRAM_FLOOR (24 * 1024)
 static void *sram_alloc(size_t n) {
+    if (heap_caps_get_free_size(MALLOC_CAP_INTERNAL) < n + SRAM_FLOOR) {
+        static bool told; if (!told) { told = true; ESP_LOGW(TAG, "fast buffer of %u B refused: internal RAM would fall under the %d KB floor (PSRAM instead)", (unsigned)n, SRAM_FLOOR / 1024); }
+        return NULL;
+    }
     return heap_caps_malloc(n, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
 }
 

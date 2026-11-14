@@ -31,8 +31,21 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build:
+  # one job per board (docs/BOARDS.md), in parallel: the same tree on top of
+  # each board's sdkconfig fragment, each in its own build dir
+  firmware:
+    name: firmware (${{ matrix.name }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - { name: "the 1.8", board: amoled18, dir: build, command: "idf.py build" }
+          - { name: "the round board (1.75C)", board: round175c, dir: build-round, command: "idf.py -B build-round -DSDKCONFIG=build-round/sdkconfig \"-DSDKCONFIG_DEFAULTS=sdkconfig.defaults;sdkconfig.round\" build" }
+          - { name: "the watch (2.06)", board: watch206, dir: build-watch, command: "idf.py -B build-watch -DSDKCONFIG=build-watch/sdkconfig \"-DSDKCONFIG_DEFAULTS=sdkconfig.defaults;sdkconfig.watch\" build" }
+          - { name: "the square (2.16)", board: square216, dir: build-square, command: "idf.py -B build-square -DSDKCONFIG=build-square/sdkconfig \"-DSDKCONFIG_DEFAULTS=sdkconfig.defaults;sdkconfig.square\" build" }
+    env:
+      IDF_VERSION: v5.4.1
     steps:
       - uses: actions/checkout@v5
         with:
@@ -51,47 +64,57 @@ jobs:
             openssl genrsa -out firmware/keys/ota_signing_key.pem 3072 2> /dev/null
             echo "THROWAWAY signing key (no secret here): this image compiles but can never take an update"
           fi
-      - name: Build the firmware - the 1.8
+      # ccache lives inside the workspace: the IDF action's docker mounts only that
+      - uses: actions/cache@v4
+        with:
+          path: .ccache
+          key: ccache-${{ matrix.board }}-idf-${{ env.IDF_VERSION }}-${{ github.sha }}
+          restore-keys: ccache-${{ matrix.board }}-idf-${{ env.IDF_VERSION }}-
+      - name: Build the firmware - ${{ matrix.name }}
         uses: espressif/esp-idf-ci-action@v1
         with:
-          esp_idf_version: v5.4.1
+          esp_idf_version: ${{ env.IDF_VERSION }}
           target: esp32s3
           path: firmware
-      # the other boards (docs/BOARDS.md): the same tree on top of their
-      # sdkconfig fragment, each in its own build dir
-      - name: Build the firmware - the round board (1.75C)
-        uses: espressif/esp-idf-ci-action@v1
+          extra_docker_args: -e IDF_CCACHE_ENABLE=1 -e CCACHE_DIR=/app/${{ github.repository }}/.ccache -e CCACHE_MAXSIZE=400M
+          command: ccache -z && ${{ matrix.command }} && ccache -s
+      - name: Drop the signing key
+        if: always()
+        run: rm -f firmware/keys/ota_signing_key.pem
+      # only what tools/make_installer.py reads: flasher_args.json and the files it names
+      - uses: actions/upload-artifact@v4
         with:
-          esp_idf_version: v5.4.1
-          target: esp32s3
-          path: firmware
-          command: idf.py -B build-round -DSDKCONFIG=build-round/sdkconfig "-DSDKCONFIG_DEFAULTS=sdkconfig.defaults;sdkconfig.round" build
-      - name: Build the firmware - the watch (2.06)
-        uses: espressif/esp-idf-ci-action@v1
+          name: ${{ matrix.dir }}
+          if-no-files-found: error
+          retention-days: 1
+          path: |
+            firmware/${{ matrix.dir }}/flasher_args.json
+            firmware/${{ matrix.dir }}/*.bin
+            firmware/${{ matrix.dir }}/bootloader/bootloader.bin
+            firmware/${{ matrix.dir }}/partition_table/partition-table.bin
+
+  # Only the public repo publishes: it tracks model/out/model_q4.bin and
+  # owns the Pages site. Anywhere else (the dev repo ignores model/out/*)
+  # the run stops after the firmware jobs, a compile check of the firmware.
+  build:
+    needs: firmware
+    if: github.repository == 'mediacutlet/pocket-tank'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
         with:
-          esp_idf_version: v5.4.1
-          target: esp32s3
-          path: firmware
-          command: idf.py -B build-watch -DSDKCONFIG=build-watch/sdkconfig "-DSDKCONFIG_DEFAULTS=sdkconfig.defaults;sdkconfig.watch" build
-      - name: Build the firmware - the square (2.16)
-        uses: espressif/esp-idf-ci-action@v1
+          fetch-depth: 0          # git describe wants the tags
+      - uses: actions/download-artifact@v4
         with:
-          esp_idf_version: v5.4.1
-          target: esp32s3
-          path: firmware
-          command: idf.py -B build-square -DSDKCONFIG=build-square/sdkconfig "-DSDKCONFIG_DEFAULTS=sdkconfig.defaults;sdkconfig.square" build
-      # Only the public repo publishes: it tracks model/out/model_q4.bin and
-      # owns the Pages site. Anywhere else (the dev repo ignores model/out/*)
-      # the job stops here, a compile check of the firmware.
+          pattern: build*
+          path: firmware        # each board's artifact lands in firmware/<its build dir>
       - name: Assemble the installer
-        if: github.repository == 'mediacutlet/pocket-tank'
         run: |
           python3 tools/make_installer.py --build-dir firmware/build \
             --board-build firmware/build-round --board-build firmware/build-watch --board-build firmware/build-square --out installer/dist
           touch installer/dist/.nojekyll
           ls -la installer/dist installer/dist/firmware
       - uses: actions/upload-pages-artifact@v3
-        if: github.repository == 'mediacutlet/pocket-tank'
         with:
           path: installer/dist
 

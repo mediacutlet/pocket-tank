@@ -1,6 +1,7 @@
 /* update.c - over-the-air updates: the UPDATES page, update mode's pages and
  * the flow between them. See update.h and docs/OTA.md. */
 #include "update.h"
+#include "lang.h"
 #include "render.h"
 #include "tank.h"
 #include "version.h"
@@ -204,15 +205,15 @@ static void page_back(uint16_t *fb, int stride) { render_button(fb, stride, UPD_
 int updates_info_fit(const char *label, const char *value, char *out, size_t cap) {
     const int right = UPD_X + UPD_W;
     snprintf(out, cap, "%s", value);
-    if (UPD_VAL_X + render_text_w(out, 2) <= right) return UPD_VAL_X;          /* in the column */
+    if (UPD_VAL_X + render_name_w(out, 2) <= right) return UPD_VAL_X;   /* (values as built: lang.h) */          /* in the column */
     const int min_x = UPD_X + render_text_w(label, 2) + 14;
     wifi_name_fit(out, cap, value, (right - min_x + 2) / 12);                 /* (a size-2 letter: 12 px, the last one 10) */
-    return right - render_text_w(out, 2);
+    return right - render_name_w(out, 2);
 }
 static void info_row(uint16_t *fb, int stride, int row, const char *label, const char *value) {
     char shown[40]; const int x = updates_info_fit(label, value, shown, sizeof shown);
     render_text(fb, stride, UPD_X, UPD_INFO_Y + row * UPD_INFO_DY, 2, C_CAPT, label);
-    render_text(fb, stride, x, UPD_INFO_Y + row * UPD_INFO_DY, 2, C_TEXT, shown);
+    render_name(fb, stride, x, UPD_INFO_Y + row * UPD_INFO_DY, 2, C_TEXT, shown);   /* (the version, the build id, the board code: as built) */
 }
 static void render_nets_face(uint16_t *fb, int stride) {
     page_title(fb, stride, "WI-FI");
@@ -260,7 +261,7 @@ void render_updates_page(uint16_t *fb, int stride) {
         render_button(fb, stride, UPD_X, y, UPD_W, UPD_DOOR_H, C_INNER, C_DIM, "", 2);
         wifi_mark(fb, stride, UPD_X + 25, y + 28, C_EDGE);
         if (!nets) snprintf(line, sizeof line, "NO NETWORK SAVED");
-        else snprintf(line, sizeof line, "%d NETWORK%s SAVED", nets, nets == 1 ? "" : "S");
+        else snprintf(line, sizeof line, lang_tr(nets == 1 ? "%d NETWORK SAVED" : "%d NETWORKS SAVED"), nets);
         render_text(fb, stride, UPD_X + 50, y + 6, 1, C_QUIET, "WI-FI");
         render_text(fb, stride, UPD_X + 50, y + 18, 2, C_TEXT, line);
         for (int i = 0; i < 7; i++) render_rect(fb, stride, UPD_X + UPD_W - 19 + i, y + UPD_DOOR_H / 2 - (6 - i), 1, 2 * (6 - i) + 1, C_EDGE);
@@ -411,7 +412,8 @@ static void draw_keyboard(uint16_t *fb, int stride) {
             const char *lbl = fk == FK_MODE ? (s.kb_mode ? "ABC" : "123") : FK_LABEL[fk];
             bool lit = (fk == FK_SHIFT && s.kb_caps && !s.kb_mode) || fk == FK_JOIN;
             bool dim = (fk == FK_SHIFT && s.kb_mode) || fk == FK_BACK;   /* BACK: rare, and it leaves the page - quieter */
-            render_button(fb, stride, x, y, UPD_KB_W, UPD_KB_H, lit ? C_GO : dim ? C_KEY : C_INNER, dim ? C_DIM : lit ? C_GO_E : C_EDGE, lbl, 2);
+            render_button(fb, stride, x, y, UPD_KB_W, UPD_KB_H, lit ? C_GO : dim ? C_KEY : C_INNER, dim ? C_DIM : lit ? C_GO_E : C_EDGE, fk == FK_BACK ? "" : lbl, 2);
+            if (fk == FK_BACK) render_name(fb, stride, x + (UPD_KB_W - render_name_w(lbl, 2)) / 2, y + (UPD_KB_H - 14) / 2, 2, 0xffffff, lbl);   /* as given: ZURÜCK is too wide for the key */
             if (fk == FK_SPACE) render_rect(fb, stride, x + 10, y + UPD_KB_H / 2 + 4, UPD_KB_W - 20, 3, C_TEXT);   /* the space bar's bar */
             if (fk == FK_MORE) {                      /* the page pips under MORE */
                 int n = kb_pages(), px0 = x + UPD_KB_W / 2 - (n * 8 - 4) / 2;
@@ -786,7 +788,7 @@ static void wrap2(const char *src, char *l1, char *l2, size_t cap) {   /* two li
     if (strlen(rest) > lim) { l2[lim - 3] = '.'; l2[lim - 2] = '.'; l2[lim - 1] = '.'; l2[lim] = 0; }
 }
 void render_clock_sync(uint16_t *fb, int stride, double clock) {   /* the loading screen's look (10-31): the tank's WAKING THE TANK follows on the same water */
-    render_loading(fb, stride, "WAKING UP", clock, "CHECKING THE TIME");
+    render_loading(fb, stride, lang_tr("WAKING UP"), clock, "CHECKING THE TIME");   /* (the name line: drawn as given) */
 }
 void render_update(uint16_t *fb, int stride, double clock) {
     page_bg(fb, stride);
@@ -794,7 +796,7 @@ void render_update(uint16_t *fb, int stride, double clock) {
     switch (s.page) {
     case UPD_PG_POWER:
         text_c(fb, stride, 96, 3, C_TEXT, update_power_title());
-        snprintf(line, sizeof line, "THE BATTERY IS AT %d%%", s.battery_pct);
+        snprintf(line, sizeof line, lang_tr("THE BATTERY IS AT %d%%"), s.battery_pct);
         text_c(fb, stride, 150, 2, C_CAPT, line);
         text_c(fb, stride, 176, 2, C_QUIET, update_power_line());
         render_button(fb, stride, UPD_BTN_MID_X, UPD_BTN_Y, UPD_BTN_W, UPD_BTN_H, C_INNER, C_EDGE, "BACK TO TANK", 2);
@@ -850,13 +852,13 @@ void render_update(uint16_t *fb, int stride, double clock) {
         snprintf(line, sizeof line, "VERSION %s %s, %.1f MB", s.m.release, PT_RELEASE_STAGE, bytes / 1048576.0);
         text_c(fb, stride, 92, 2, C_CAPT, line);
         char l1[32], l2[32];
-        if (own) { snprintf(l1, sizeof l1, "MADE FOR THIS BOARD"); snprintf(l2, sizeof l2, "YOUR FISH STAY"); }
-        else wrap2(s.m.note, l1, l2, sizeof l1);
-        text_c(fb, stride, 138, 2, C_TEXT, l1);
-        if (l2[0]) text_c(fb, stride, 160, 2, C_TEXT, l2);
+        if (own) { text_c(fb, stride, 138, 2, C_TEXT, "MADE FOR THIS BOARD"); text_c(fb, stride, 160, 2, C_TEXT, "YOUR FISH STAY"); }
+        else { wrap2(s.m.note, l1, l2, sizeof l1);
+            render_name(fb, stride, CX - render_name_w(l1, 2) / 2, 138, 2, C_TEXT, l1);   /* the release note: server text, untranslated */
+            if (l2[0]) render_name(fb, stride, CX - render_name_w(l2, 2) / 2, 160, 2, C_TEXT, l2); }
         int secs = (int)(bytes / 120000) + 10;
         if (secs < 90) snprintf(line, sizeof line, "IT TAKES ABOUT A MINUTE");
-        else snprintf(line, sizeof line, "IT TAKES ABOUT %d MINUTES", (secs + 30) / 60);
+        else snprintf(line, sizeof line, lang_tr("IT TAKES ABOUT %d MINUTES"), (secs + 30) / 60);
         text_c(fb, stride, 208, 2, C_QUIET, line);
         text_c(fb, stride, 230, 2, C_QUIET, "THE TANK RESTARTS BY ITSELF");
         {   /* HOLD TO UPDATE (Strato 11-06): the fill grows across the button as the finger stays, as REMOVE's HOLD TO SELL */
@@ -866,8 +868,10 @@ void render_update(uint16_t *fb, int stride, double clock) {
             if (f > 0) render_rect(fb, stride, UPD_BTN_L_X, UPD_BTN_Y, (int)(UPD_BTN_W * f), UPD_BTN_H, C_FILL);
             render_rect_edge(fb, stride, UPD_BTN_L_X, UPD_BTN_Y, UPD_BTN_W, UPD_BTN_H, C_GO_E);
             if (PAGE_BOWL) {                                 /* (the bowl's button is narrower: two lines, Strato 11-06) */
-                render_text(fb, stride, UPD_BTN_L_X + (UPD_BTN_W - render_text_w("HOLD TO", 2)) / 2, UPD_BTN_Y + 3, 2, C_TEXT, "HOLD TO");
-                render_text(fb, stride, UPD_BTN_L_X + (UPD_BTN_W - render_text_w("UPDATE", 2)) / 2, UPD_BTN_Y + UPD_BTN_H - 17, 2, C_TEXT, "UPDATE");
+                const char *tl = lang_tr(lb), *sp = strrchr(tl, ' '); char a[32];   /* (split at the last space, in the shown language) */
+                snprintf(a, sizeof a, "%.*s", sp ? (int)(sp - tl) : (int)strlen(tl), tl); sp = sp ? sp + 1 : "";
+                render_name(fb, stride, UPD_BTN_L_X + (UPD_BTN_W - render_name_w(a, 2)) / 2, UPD_BTN_Y + 3, 2, C_TEXT, a);
+                render_name(fb, stride, UPD_BTN_L_X + (UPD_BTN_W - render_name_w(sp, 2)) / 2, UPD_BTN_Y + UPD_BTN_H - 17, 2, C_TEXT, sp);
             } else render_text(fb, stride, UPD_BTN_L_X + (UPD_BTN_W - render_text_w(lb, 2)) / 2, UPD_BTN_Y + (UPD_BTN_H - 14) / 2, 2, C_TEXT, lb);
         }
         render_button(fb, stride, UPD_BTN_R_X, UPD_BTN_Y, UPD_BTN_W, UPD_BTN_H, C_INNER, C_EDGE, "NOT NOW", 2);
@@ -878,7 +882,7 @@ void render_update(uint16_t *fb, int stride, double clock) {
         tx -= PAGE_X; ty -= PAGE_Y;                      /* drawn on the page */
         render_rect(fb, stride, tx - 24, ty - 1, 49, 3, C_EDGE); render_rect(fb, stride, tx - 1, ty - 24, 3, 49, C_EDGE);
         render_rect(fb, stride, tx - 4, ty - 4, 9, 9, C_TEXT);
-        snprintf(line, sizeof line, "TAP THE CROSS  %d OF 9", i + 1);
+        snprintf(line, sizeof line, lang_tr("TAP THE CROSS  %d OF 9"), i + 1);
         text_c(fb, stride, ty < PAGE_H / 2 ? PAGE_H - 60 : 46, 2, C_CAPT, line);
         break; }
     case UPD_PG_MESSAGE: {

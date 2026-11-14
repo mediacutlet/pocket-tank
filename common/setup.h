@@ -192,6 +192,7 @@ enum { SETUP_PG_ABOUT = SETUP_PG_RENAME + 1 };
 #define SETUP_HIT_ORD0  64               /* + 0 BEHIND / 1 IN FRONT: the sword plant's ORDER SQUARES (0.4) - behind or in front of the piece they show */
 #define SETUP_HIT_SG0   66               /* + 0 BEHIND / 1 IN FRONT: the sword plant's SEAGRASS squares (0.4.1) - behind or in front of the seagrass */
 #define SETUP_HIT_COLOR0 80              /* + 0..CORAL_N-1: the coral's colour swatches (its placement page) */
+#define SETUP_HIT_LANG  200              /* the welcome's language chip (lang.h), past every range: a keeper with no English can pick before the first word */
 
 /* geometry (tank coordinates), shared by the drawing, the hit test and the
  * sim's selftest. The panelled pages (welcome, colours, care) sit inside the
@@ -211,6 +212,8 @@ enum { SETUP_PG_ABOUT = SETUP_PG_RENAME + 1 };
 #define SETUP_TOP_BTN_Y (SETUP_Y + 24)
 #define SETUP_TOP_BACK_X (SETUP_X + 12)
 #define SETUP_TOP_NEXT_X (SETUP_X + SETUP_W - 12 - SETUP_TOP_BTN_W)
+#define SETUP_LANG_X (SETUP_X + SETUP_W - 12 - SET_LANG_W)   /* the welcome's language chip: where the name page's NEXT stands, beside WELCOME */
+#define SETUP_LANG_Y (SETUP_Y + 46 - SET_LANG_H / 2)
 /* the placement page's top row (0.3.9): FOUR buttons - SELL | SHELVE | LOCK |
  * DONE - a little narrower than the other pages' two (78 px at a 16 px gap
  * fills the same 360 px, so SELL and DONE keep their corners and the row

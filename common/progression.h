@@ -110,6 +110,7 @@ typedef struct {
     uint8_t  light_auto, light_tip_seen, screen_turned, orient_lock, orient_q;
     uint8_t  shared;               /* the board's unlocks (0.4.2; was pad, 0 in every older carry): CARRY_BREED = SELECTIVE
                                     * BREEDING, bought once for every tank (Strato 11-08). Given, never taken away */
+    uint8_t  lang1;                /* the language + 1 (lang.h), 0 none */
     uint32_t mark;                 /* the swap's: a fresh marker; the save that applies the carry carries it, and a carry whose
                                     * marker the loaded save already has is not given again (0.4.1 audit round 2, "Marker now") */
 } progression_carry_t;

@@ -122,6 +122,13 @@ int selftest_crit_shelf(void) {
 
     /* ---- B. resting ---- */
     {
+#ifdef CONFIG_POCKET_TANK_320X240
+        /* (this fork) on the 320 px tank the seahorse is near enough a pellet to take one in its 20 s in the water before
+           A (sh_snack_pay 1, sd_snacks_paid 0; on the 1.8's tank it takes none), and the next progression_tick pays it -
+           here, on the shelf, where B read it as a pay earned resting. The snack was eaten in the water: its pay is
+           settled before the rest is measured, and anything a critter earns on the shelf still moves its count */
+        progression_tick(&T, 0.1f);
+#endif
         held_t h0 = held(&T);
         for (int i = 0; i < 600 * 10; i++) tank_tick(&T, 0.1f, advisor_rules);   /* 10 min awake */
         progression_tick(&T, 0.1f);

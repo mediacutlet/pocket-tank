@@ -77,6 +77,14 @@ static bool swap_to(int i) {
 #else
 #define UP_RECT 0
 #endif
+#ifdef CONFIG_POCKET_TANK_320X240   /* (this fork) the 320 x 240 boards are another world: the fixtures' rectangle saves load
+                                       here laid out in proportion, as on the round and the square - the world they were laid
+                                       out in (lay_*), the bubble column, the crab's, snail's and urchin's spots, the 644 algae
+                                       cells on this glass's 20 x 15, the middle bed's growth over its three fronds - so their
+                                       bytes are not the rectangle's; the reads and the 0.4.3 fields are checked as there */
+#undef  UP_RECT
+#define UP_RECT 0
+#endif
 
 /* A: two reads, line by line; a fish's trust and its story's age may move by what a boot lives (a few seconds) */
 static bool num_after(const char *line, const char *key, double *v) {

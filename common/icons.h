@@ -95,6 +95,14 @@ extern const icon_t icon_tool_sponge;
 extern const icon_t *const icons_all[ICONS_N];   /* every icon, for the sim's check (the firmware's linker drops it) */
 
 /* ---- this fork: the ms_* badges' 24 px copies, appended by tools/gen_icons_small.py ---- */
+extern const icon_t icon_card_give_half;
+extern const icon_t icon_card_more_half;
+extern const icon_t icon_card_rename_half;
+extern const icon_t icon_foot_close_half;
+extern const icon_t icon_foot_my_tanks_half;
+extern const icon_t icon_foot_passport_half;
+extern const icon_t icon_foot_sand_dollar_half;
+extern const icon_t icon_foot_settings_half;
 extern const icon_t icon_ms_crab_find_24;
 extern const icon_t icon_ms_first_bubbles_24;
 extern const icon_t icon_ms_first_dart_24;
@@ -114,6 +122,12 @@ extern const icon_t icon_ms_full_school_24;
 extern const icon_t icon_ms_sand_dollar_24;
 extern const icon_t icon_ms_seahorse_fed_24;
 extern const icon_t icon_ms_tank_changed_someone_24;
+extern const icon_t icon_settings_link_half;
+extern const icon_t icon_settings_updates_half;
+extern const icon_t icon_shop_crab_half;
+extern const icon_t icon_shop_tab_bg_half;
+extern const icon_t icon_shop_tab_decor_half;
+extern const icon_t icon_shop_tab_earn_half;
 /* ---- end of the 24 px copies ---- */
 
 #endif

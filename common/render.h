@@ -1914,6 +1914,9 @@ _Static_assert(SET_TAP_FLIP > SET_TAP_TO_TANK && SET_TAP_FLIP > SET_TAP_TO_KEEPE
 #define SET_NAV_X(i)  (MSP_FOOT_UPG_X + (MSP_FOOT_CLOSE_X + MSP_CLOSE_W - SET_NAV_SQ - MSP_FOOT_UPG_X) * ((i) + 2) / 4)   /* render_ms_foot_box's, squares 2..4 */
 #undef  SET_VER_Y
 #define SET_VER_Y     (PAGE_H - 8 - 6)
+/* MY TANKS (0.4.2): its icon foot, THE LIBRARY's rows and notes, the touch lock's note - this
+   board's values for upstream's SH_* and note names */
+
 /* the pages this board scales whose measurements upstream keeps in this file: upstream's
    numbers through UI(), as the pages' own code scales its numbers. The reset prompt's tall
    pages (0.4.2; its TANK page keeps RENDER_CONFIRM_*): upstream's panel runs to y 328 */
@@ -1931,6 +1934,9 @@ _Static_assert(SET_TAP_FLIP > SET_TAP_TO_TANK && SET_TAP_FLIP > SET_TAP_TO_KEEPE
 #define RENDER_CRIT_NAME_W   UI(132)
 #undef  RENDER_CRIT_FOOT_GAP
 #define RENDER_CRIT_FOOT_GAP UI(16)
+/* THE TANK LINK (0.4): link mode's hint and notices, and VISITORS, the collection's pages -
+   this board's values for upstream's LINK_* and COLL_* names */
+
 /* THE PARAGON'S REVEAL (0.4.3): upstream's tiles and buttons stand at y 156 .. 320 */
 #undef  EVP_TILE_W
 #define EVP_TILE_W   UI(120)

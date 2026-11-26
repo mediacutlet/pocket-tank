@@ -13698,6 +13698,25 @@ static const icon_t *badge_art(const icon_t *ic) {
 #endif
     return ic;
 }
+/* (this fork) the icon feet's sprites - the keeper page's foot, the shop's area tabs, settings' LINK and UPDATES (v0.4:
+   32 to 36 px, for upstream's 44 px squares): their half-size copies on a 320 x 240 board, whose 240 px page has room
+   for 22 px squares there (tools/gen_icons_small.py). The art itself otherwise. Only the feet call it: the shop's crab
+   row keeps its full-size sprite. */
+static const icon_t *foot_art(const icon_t *ic) {
+#ifdef CONFIG_POCKET_TANK_320X240
+    static const struct { const icon_t *full, *half; } HALF[] = {
+        { &icon_foot_close, &icon_foot_close_half },               { &icon_foot_my_tanks, &icon_foot_my_tanks_half },
+        { &icon_foot_passport, &icon_foot_passport_half },         { &icon_foot_sand_dollar, &icon_foot_sand_dollar_half },
+        { &icon_foot_settings, &icon_foot_settings_half },         { &icon_settings_link, &icon_settings_link_half },
+        { &icon_settings_updates, &icon_settings_updates_half },   { &icon_shop_tab_bg, &icon_shop_tab_bg_half },
+        { &icon_shop_tab_decor, &icon_shop_tab_decor_half },       { &icon_shop_tab_earn, &icon_shop_tab_earn_half },
+        { &icon_shop_crab, &icon_shop_crab_half },
+    };
+    for (unsigned i = 0; i < sizeof HALF / sizeof HALF[0]; i++)
+        if (HALF[i].full == ic) return HALF[i].half;
+#endif
+    return ic;
+}
 static void badge(ctx_t *c, int x, int y, const icon_t *ic, bool on, bool fresh) {
     ic = badge_art(ic);                          /* (this fork) the 24 px copy on a 320 x 240 board - before it is centred, by its own size */
     const int ix = x + (MSP_ICON - ic->w) / 2, iy = y + (MSP_ICON - ic->h) / 2;   /* an icon under 32 px sits centered in its cell (0.4.1: the
@@ -13849,6 +13868,7 @@ static void ms_foot(const tank_t *t, ctx_t *c) {
            keeper page any more (the shop shows it) */
         const icon_t *ic = b == MSF_UPG ? &icon_foot_sand_dollar : b == MSF_SET ? &icon_foot_settings : b == MSF_TANKS ? &icon_foot_my_tanks
                          : b == MSF_VIS ? &icon_foot_passport : &icon_foot_close;
+        ic = foot_art(ic);   /* (this fork) the half-size copy on a 320 x 240 board */
         blit_icon(c, x + (FS_SQ - ic->w) / 2, y + (FS_SQ - ic->h) / 2, ic, 255);
     }
 }
@@ -15160,6 +15180,7 @@ static void shop_foot(ctx_t *c) {
                          : b == SHF_BG ? &icon_shop_tab_bg : &icon_foot_close;   /* (the crab: our own shop sprite, Strato 11-04 - it fills
                                                                                   *  the square like the 36 px glyphs; the snail read small) */
         const int lift = b == SHF_CRIT ? 5 : 0;                  /* (the crab's sprite stands on rows 11..31 of 32: centered by its body) */
+        ic = foot_art(ic);   /* (this fork) the half-size copy on a 320 x 240 board */
         blit_icon(c, x + (MSP_FOOT_SQ - ic->w) / 2, y + (MSP_FOOT_SQ - ic->h) / 2 - lift, ic, 255);
     }
 }
@@ -16159,7 +16180,8 @@ void render_settings(const tank_t *t, uint16_t *fb, int stride, int bright_pct, 
 #endif
             int x, y, w, h; render_settings_box(SET_BOX_UPDATES + i, &x, &y, &w, &h);
             fs_button(&c, x, y);
-            blit_icon(&c, x + (w - NAV[i]->w) / 2, y + (h - NAV[i]->h) / 2, NAV[i], 255);
+            const icon_t *ic = foot_art(NAV[i]);   /* (this fork) the half-size copy on a 320 x 240 board */
+            blit_icon(&c, x + (w - ic->w) / 2, y + (h - ic->h) / 2, ic, 255);
         }
     }
 }

@@ -2551,7 +2551,18 @@ float tank_octopus_wait_now(const tank_t *t) {
 }
 void tank_octopus_place(tank_t *t) {
     float x0, x1; tank_veg_bed(t, 0, &x0, &x1, NULL, NULL);
+#ifdef CONFIG_POCKET_TANK_320X240
+    /* (this fork) the 320 px floor. Right of the reef bed the critters stand in a row - the urchin set down at x1 + 18
+       (tank_urchin_place), the crab at x1 + 70 (tank_crab_place) - and the octopus 100 px past the crab's spot, x1 + 170. Here
+       that is past the end of its span (x1 is 162..186, OCTO_XHI 274; 170 in proportion to the floor, 121, is past it too), so
+       it stood at 274, 18..42 px from the crab's spot: a crab bought after it was set down on it. And with a crab in the water,
+       the search below took it left of the crab, against the urchin's spot. There is no room past the row here, so it starts
+       at the row's other end: left of the urchin's spot by its own half and the 30 px the search keeps from a crab - x 110..134
+       for the baby - where neither critter is set down on it later */
+    const float want = x1 + 18 - 30 - 40.0f * (1.0f + t->oc_growth / 65535.0f);   /* (its half: as below) */
+#else
     const float want = x1 + 170;                                      /* open sand right of the reef bed, well past the crab's spot */
+#endif
     float x = clampf(want, OCTO_XLO, OCTO_XHI);
     const float half = 40.0f * (1.0f + t->oc_growth / 65535.0f);
     const bool crab = tank_crit_in(t, SD_ITEM_CRAB) && t->cr_x >= 0;

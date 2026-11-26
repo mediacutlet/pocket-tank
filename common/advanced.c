@@ -198,6 +198,11 @@ static bool s_two;                                         /* the crosses / chec
 static bool s_done_turned;                                 /* DONE came from the turned sitting: it stays the way the tank is held */
 static touch_fit_t s_first;                               /* the first sitting as saved: the turned one must join IT */
 static int s_q1 = 0, s_imu = -1, s_imu1 = -1;              /* the first sitting's way up; the IMU now (adv_quarter; -1 none) and at it */
+#ifdef CONFIG_POCKET_TANK_320X240
+static bool s_no_imu;                                      /* (this fork) the platform said no IMU answers (adv_quarter's -1, main.c every
+                                                              frame): the kept check ends the flow (ADV_PG_CHECK). Not s_imu's -1 at start,
+                                                              before any word from the platform: that is upstream's flow, TURN IT OVER */
+#endif
 static float s_tx[ADV_N_CROSS], s_ty[ADV_N_CROSS], s_px[ADV_N_CROSS], s_py[ADV_N_CROSS];
 static uint8_t s_drop[ADV_N_CROSS];                       /* a cross's press read at the panel's reach: bit 0 its x, bit 1 its y */
 #define ADV_REACH_PX 2.0f
@@ -247,6 +252,9 @@ static bool turned_part(void) { return s_pg == ADV_PG_TURN || (s_two && (s_pg ==
 bool adv_turned_sitting(void) { return s_two && (s_pg == ADV_PG_CROSS || s_pg == ADV_PG_CHECK); }
 int adv_quarter(int shown, int live) {
     s_imu = live < 0 ? -1 : TANK_QUARTER(live);
+#ifdef CONFIG_POCKET_TANK_320X240
+    s_no_imu = live < 0;                                   /* (this fork) */
+#endif
     if (!turned_part()) return shown;
     if (s_imu < 0) return turn_target();                  /* the watch: the flow turns the picture itself (GO starts the crosses) */
     if (s_pg == ADV_PG_TURN) { if (s_imu == turn_target() && s_imu1 == s_q1) start_two(s_imu); }   /* (only when the first sitting's
@@ -329,6 +337,15 @@ int adv_touch(float x, float y, bool down, int q) {
         if ((s_dx - cx) * (s_dx - cx) + (s_dy - cy) * (s_dy - cy) > ADV_CHECK_HIT_PX * ADV_CHECK_HIT_PX) return ADV_ACT_NONE;   /* a miss: the clock runs on */
         s_saved = s_new;                                   /* saved now: whatever the turn brings, this one stays */
         if (s_two) done_page(true);
+#ifdef CONFIG_POCKET_TANK_320X240
+        else if (s_no_imu) done_page(false);               /* (this fork) a 320 x 240 board with no IMU answering (the CYD without its
+                                                              breakout: main.c hands adv_quarter -1 then) can never feel the turn, and the
+                                                              watch's way round it - the page drawn the other way up, GO - would ask for a
+                                                              second sitting held the way only SCREEN FLIPPED shows the tank. So the step is
+                                                              left out, as the BATTERY row is (ADV_BATTERY_ROW): DONE at once, the sitting
+                                                              saved for the way up it was taken (a sitting with SCREEN FLIPPED joins it as
+                                                              the other way up: touch_cal_merge) */
+#endif
         else { s_q1 = s_q0; s_first = f_of(&s_saved, s_q0); turn_page(); }
         return ADV_ACT_FIT; }
     case ADV_PG_TURN: {                                    /* TURN IT OVER: the IMU starts the crosses (adv_quarter); the watch's GO */

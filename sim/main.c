@@ -7484,6 +7484,36 @@ static int fish_rename_dump(const char *prefix) {
     printf("fish-rename-dump: %d frames, %s_names.txt\n", shot, prefix);
     return 0;
 }
+#ifdef CONFIG_POCKET_TANK_320X240
+/* (this fork) --selftest-advanced's THE TURN on a 320 x 240 board with no IMU answering (main.c hands adv_quarter -1): nothing can
+ * feel the turn, so the kept check ends the flow - DONE at once, never TURN IT OVER, nothing drawn the flow's way, the sitting saved
+ * for the way up it was taken ('SAVED FOR ONE WAY UP'); with SCREEN FLIPPED (shown at quarter 2) a second sitting joins it as the
+ * other way up. Run after selftest_advanced (the dispatcher), whose own sittings - no word from the platform - are upstream's flow.
+ * Kept out of that function so as not to move the lines after it (the P4 world's shop test prints __LINE__). CONTROL: advanced.c's
+ * 320 x 240 line out - TURN IT OVER comes, waiting for a turn nothing reports */
+static int selftest_advanced_no_imu(void) {
+    #define NFAIL(...) do { printf("FAIL: advanced: "); printf(__VA_ARGS__); printf("\n"); return 1; } while (0)
+    const float G = 1.04f, O = -6.0f;
+    adv_init(ADV_CELL_STOCK, NULL); adv_open(); adv_touch(0, 0, false, 0);
+    for (int q1 = 0; q1 <= 2; q1 += 2) {
+        if (adv_quarter(q1, -1) != q1 || !adv_start(q1)) NFAIL("guided, no IMU (shown at %d): CALIBRATE, START did not bring the crosses", q1);
+        const int a = adv_cross_taps(q1, G, O, 0, ADV_N_CROSS + 1, false);
+        const char *want = q1 ? ADV_MSG_SAVED_BOTH : ADV_MSG_SAVED_ONE;
+        if (a != ADV_ACT_FIT || adv_page() != ADV_PG_DONE || !adv_touch_msg() || strcmp(adv_touch_msg(), want) || adv_touch_cal()->n != 1 + q1 / 2
+            || adv_touch_cal()->q[q1 / 2] != q1)
+            NFAIL("guided, no IMU (shown at %d): the check: act %d, page %d, '%s', %d sittings (want saved, DONE at once, '%s', %d)",
+                  q1, a, adv_page(), adv_touch_msg() ? adv_touch_msg() : "", adv_touch_cal()->n, want, 1 + q1 / 2);
+        if (adv_quarter(q1, -1) != q1 || adv_turned_sitting()) NFAIL("guided, no IMU (shown at %d): DONE is drawn the flow's way, not the tank's", q1);
+        adv_back_main(q1);
+        if (adv_page() != ADV_PG_MAIN || adv_quarter(q1, -1) != q1) NFAIL("guided, no IMU (shown at %d): DONE's OK: page %d", q1, adv_page());
+    }
+    adv_close(); adv_quarter(0, 0); adv_init(ADV_CELL_STOCK, NULL);
+    printf("selftest-advanced: THE TURN with no IMU (a 320 x 240 board): the check ends at DONE ('%s'), the picture the tank's; "
+           "a sitting with SCREEN FLIPPED joins it ('%s')\n", ADV_MSG_SAVED_ONE, ADV_MSG_SAVED_BOTH);
+    return 0;
+    #undef NFAIL
+}
+#endif
 /* --selftest-settings-nav (0.4.2): THE SETTINGS FOOT AND TILES as drawn, on this board (check-all runs all four).
  * Every control is on the glass (4 px in), hit where render_settings_box draws it - its centre and its corners - and does
  * its job at the tap: UPDATES / LINK / CLOSE answer, ROTATION (the watch: SCREEN) turns its setting the other way and back,
@@ -26425,6 +26455,9 @@ int main(int argc, char **argv) {
         if (strcmp(argv[a], "--selftest-fry-cap") == 0) return selftest_fry_cap();
         if (strcmp(argv[a], "--selftest-visitors") == 0) return selftest_visitors();
         if (strcmp(argv[a], "--selftest-r2soak") == 0) return selftest_r2link_soak();
+#ifdef CONFIG_POCKET_TANK_320X240
+        if (strcmp(argv[a], "--selftest-advanced") == 0) { const int r = selftest_advanced(); return r ? r : selftest_advanced_no_imu(); }   /* (this fork) and with no IMU */
+#endif
         if (strcmp(argv[a], "--selftest-advanced") == 0) return selftest_advanced();
         if (strcmp(argv[a], "--selftest-model") == 0)
             return selftest_model(a + 1 < argc && argv[a + 1][0] != '-' ? argv[a + 1] : NULL);

@@ -3143,6 +3143,26 @@ static void calib_guided(void) {
             if (w > 4) TFAIL("guided: %s, the two sittings of the flow: a tap at quarter %d lands %.1f px off (at %.0f,%.0f)", who, qs[k], w, wx, wy); n++; }
         g_live = 0; touch_port_set_quarter(0); bare();
     }
+#if HB_320X240
+    {   /* (this fork) a 320 x 240 board with no IMU answering (main.c hands adv_quarter -1): the kept check ends the flow at DONE, through
+           the port - no TURN IT OVER to wait on a turn nothing reports - and DONE's OK is the ADVANCED page again, the picture the tank's */
+        float x, y;
+        adv_init(ADV_CELL_STOCK, NULL); g_live = -1; way_up(0); bare(); s_adv_act = 0;
+        adv_open(); hold_for(200);
+        if (!find_hit(hp_adv, ADV_HIT_CALIBRATE, &x, &y) || !tap(x, y, 90, 300) || !find_hit(intro_now, ADV_HIT_START, &x, &y) || !tap(x, y, 90, 300))
+            TFAIL("guided, no IMU: CALIBRATE / START not reached");
+        else {
+            for (int i = 0; i < ADV_N_CROSS; i++) { float tx, ty; adv_cross_target(i, &tx, &ty); way_up(0); keeper_tap(&BOTH, 0, tx, ty); }
+            float cx, cy; adv_check_target(&cx, &cy); way_up(0); keeper_tap(&BOTH, 0, cx, cy);
+            if (s_adv_act != ADV_ACT_FIT || adv_page() != ADV_PG_DONE || adv_touch_cal()->n != 1)
+                TFAIL("guided, no IMU: the check: saved %d, page %d, %d sittings (want saved, DONE at once, one)", s_adv_act == ADV_ACT_FIT, adv_page(), adv_touch_cal()->n);
+            s_adv_act = 0; way_up(0);
+            if (!find_hit_read(hp_done, ADV_HIT_OK, &x, &y) || !tap(x, y, 90, 300) || adv_page() != ADV_PG_MAIN) TFAIL("guided, no IMU: DONE's OK (page %d)", adv_page());
+            else n++;
+        }
+        adv_close(); g_live = 0; way_up(0);
+    }
+#endif
     g_v1 = false; g_live = 0; adv_init(ADV_CELL_STOCK, NULL); touch_port_set_quarter(0); bare();
     printf("selftest-touch-port: the guided turn - %d checks: the first sitting upright, TURN IT OVER (%s), the second upside down, through "
            "the port: a panel and a finger landing 4 right / 9 low hold every way up (taps within 4 px)\n", n, TANK_WORN ? "GO on the page drawn turned" : "the IMU's turn");

@@ -2441,6 +2441,9 @@ static void tank_task(void *arg) {
                reading (a ROTATION lock set aside), the watch's turned over from its SCREEN - and the IMU's turn starts it */
 #if TANK_WORN
             int sq = adv_quarter(q, -1);
+#elif CONFIG_POCKET_TANK_320X240
+            int sq = adv_quarter(q, s_imu ? imu_port_quarter() : -1);   /* (this fork) no IMU answering: none to go by (-1), and the
+                                                                           calibration ends at its first sitting (advanced.c) */
 #else
             int sq = adv_quarter(q, imu_port_quarter());
 #endif

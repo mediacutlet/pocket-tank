@@ -17248,12 +17248,16 @@ void render_touch_check(uint16_t *fb, int stride, int tx, int ty, float secs_lef
 #elif defined(TANK_SQUARE)
 #define ADV_ICON_W 72
 #define ADV_ICON_H 72
+#elif defined(CONFIG_POCKET_TANK_320X240)   /* (this fork) the 320 x 240 glass's own 4:3, at UI(84)'s width - the pictures shrink
+                                               with the page here, as everything on it does (they are drawn, not pixel art) */
+#define ADV_ICON_W 56
+#define ADV_ICON_H 42
 #else
 #define ADV_ICON_W 84
 #define ADV_ICON_H 68
 #endif
-#define ADV_TURN_PIC_Y (SET_TITLE_Y + 46)                         /* the pictures' top */
-#define ADV_TURN_TXT_Y (ADV_TURN_PIC_Y + ADV_ICON_H + 26)          /* what to do, under them */
+#define ADV_TURN_PIC_Y (SET_TITLE_Y + UI(46))                     /* the pictures' top */
+#define ADV_TURN_TXT_Y (ADV_TURN_PIC_Y + ADV_ICON_H + UI(26))      /* what to do, under them */
 #define ADV_GO_W       MSP_CLOSE_W
 static void adv_tank_icon(ctx_t *c, int cx, int cy, bool down) {
     const int w = ADV_ICON_W, h = ADV_ICON_H, sd = h / 4, s = down ? -1 : 1;   /* s: which way the floor is */
@@ -17274,24 +17278,24 @@ static void adv_tank_icon(ctx_t *c, int cx, int cy, bool down) {
     const int floor_y = down ? y0 + sd : y0 + h - sd;
 #endif
     for (int b = 0; b < 2; b++) {                          /* two blades from the sand toward the open water: tall, then short */
-        const int bx = cx + (b ? 12 : -8), bh = b ? h / 4 : h * 2 / 5;
+        const int bx = cx + (b ? UI(12) : -UI(8)), bh = b ? h / 4 : h * 2 / 5;
         for (int k = 0; k < bh; k++) {
-            int half = 4 - 4 * k / bh;
+            int half = UI(4) - UI(4) * k / bh;
             rect_fill(c, bx - half, floor_y - s * k, 2 * half + 1, 1, 0xffffff);
         }
     }
 }
 static void adv_turn_arrow(ctx_t *c, int x0, int x1, int cy) {   /* a plain arrow, x0 -> x1 */
-    rect_fill(c, x0, cy - 2, x1 - x0 - 10, 5, 0xffffff);
-    for (int k = 0; k < 12; k++) rect_fill(c, x1 - 12 + k, cy - (11 - k), 1, 2 * (11 - k) + 1, 0xffffff);
+    rect_fill(c, x0, cy - UI(2), x1 - x0 - UI(10), UI(5), 0xffffff);
+    for (int k = 0; k < UI(12); k++) rect_fill(c, x1 - UI(12) + k, cy - (UI(11) - k), 1, 2 * (UI(11) - k) + 1, 0xffffff);
 }
 void render_touch_turn(uint16_t *fb, int stride) {
     ctx_t c = ctx_page(fb, stride);
     rect_fill(&c, -PAGE_X, -PAGE_Y, TANK_W, TANK_H, MSP_INK);
-    text_centre(&c, SET_TITLE_Y, 3, 0xffffff, "TURN IT OVER");
-    const int cy = ADV_TURN_PIC_Y + ADV_ICON_H / 2, gap = ADV_ICON_W / 2 + 54;
+    text_centre(&c, SET_TITLE_Y, UI_TEXT(3), 0xffffff, "TURN IT OVER");
+    const int cy = ADV_TURN_PIC_Y + ADV_ICON_H / 2, gap = ADV_ICON_W / 2 + UI(54);
     adv_tank_icon(&c, PAGE_W / 2 - gap, cy, false);
-    adv_turn_arrow(&c, PAGE_W / 2 - 26, PAGE_W / 2 + 26, cy);
+    adv_turn_arrow(&c, PAGE_W / 2 - UI(26), PAGE_W / 2 + UI(26), cy);
     adv_tank_icon(&c, PAGE_W / 2 + gap, cy, true);
     int y = ADV_TURN_TXT_Y;
 #if TANK_WORN
@@ -17302,45 +17306,52 @@ void render_touch_turn(uint16_t *fb, int stride) {
     button(&c, SET_UPD_X, SET_FOOT_Y, SET_UPD_W, MSP_CLOSE_H, 0x1c2f36, MSP_TEAL, "SKIP", 2);
     lit_button(&c, SET_CLOSE_X, SET_FOOT_Y, ADV_GO_W, MSP_CLOSE_H, "GO");
 #else
-    text_centre(&c, y, 2, MSP_TEAL, "NOW TURN THE TANK UPSIDE DOWN."); y += 22;
-    text_centre(&c, y, 2, MSP_TEAL, "THE CROSSES COME BACK.");
-    text_centre(&c, SET_FOOT_Y - 34, 2, MSP_QUIET, "ONLY USE IT ONE WAY UP?");
-    button(&c, SET_CLOSE_X, SET_FOOT_Y, MSP_CLOSE_W, MSP_CLOSE_H, 0x1c2f36, MSP_TEAL, "SKIP", 2);
+    text_centre(&c, y, UI_TEXT(2), MSP_TEAL, "NOW TURN THE TANK UPSIDE DOWN."); y += UI(22);
+    text_centre(&c, y, UI_TEXT(2), MSP_TEAL, "THE CROSSES COME BACK.");
+    text_centre(&c, SET_FOOT_Y - UI(34), UI_TEXT(2), MSP_QUIET, "ONLY USE IT ONE WAY UP?");
+    button(&c, SET_CLOSE_X, SET_FOOT_Y, MSP_CLOSE_W, MSP_CLOSE_H, 0x1c2f36, MSP_TEAL, "SKIP", UI_TEXT(2));
 #endif
 }
 int render_touch_turn_tap(float x, float y) {
     x -= PAGE_X; y -= PAGE_Y;
-    if (y < SET_FOOT_Y - 8 || y >= SET_FOOT_Y + MSP_CLOSE_H + 16) return ADV_HIT_NONE;
+    if (y < SET_FOOT_Y - UI(8) || y >= SET_FOOT_Y + MSP_CLOSE_H + UI(16)) return ADV_HIT_NONE;
 #if TANK_WORN
     if (x >= SET_UPD_X - 8 && x < SET_UPD_X + SET_UPD_W + 6) return ADV_HIT_SKIP;
     if (x >= SET_CLOSE_X - 6 && x < SET_CLOSE_X + ADV_GO_W + 8) return ADV_HIT_GO;
 #else
-    if (x >= SET_CLOSE_X - 8) return ADV_HIT_SKIP;
+    if (x >= SET_CLOSE_X - UI(8)) return ADV_HIT_SKIP;
 #endif
     return ADV_HIT_NONE;
 }
 
 #define ADV_OK_W   ADV_START_W
-#define ADV_OK_Y   (SET_FOOT_Y - (TANK_WORN ? 24 : 4))      /* (the watch: clear of its lower corners' bezel) */
+#define ADV_OK_Y   (SET_FOOT_Y - UI(TANK_WORN ? 24 : 4))  /* (the watch: clear of its lower corners' bezel) */
 void render_touch_done(uint16_t *fb, int stride) {
     ctx_t c = ctx_page(fb, stride);
     rect_fill(&c, -PAGE_X, -PAGE_Y, TANK_W, TANK_H, MSP_INK);
-    const int cx = PAGE_W / 2, top = SET_TITLE_Y + 8;      /* the check mark in a ring: a short stroke down, a long one up */
-    for (int i = 0; i < 360; i++) { float a = i * (TAU / 360); rect_fill(&c, cx + (int)lroundf(cosf(a) * 40) - 2, top + 42 + (int)lroundf(sinf(a) * 40) - 2, 4, 4, MSP_TEAL); }
-    for (int k = 0; k < 44; k++) {
-        int px = cx - 22 + k, py = k < 14 ? top + 42 + k : top + 56 - (k - 14);
-        rect_fill(&c, px - 1, py - 3, 3, 7, 0xffffff);
+    const int cx = PAGE_W / 2, top = SET_TITLE_Y + UI(8);  /* the check mark in a ring: a short stroke down, a long one up */
+    for (int i = 0; i < 360; i++) { float a = i * (TAU / 360); rect_fill(&c, cx + (int)lroundf(cosf(a) * UI(40)) - UI(2), top + UI(42) + (int)lroundf(sinf(a) * UI(40)) - UI(2), UI(4), UI(4), MSP_TEAL); }
+    for (int k = 0; k < UI(44); k++) {
+        int px = cx - UI(22) + k, py = k < UI(14) ? top + UI(42) + k : top + UI(56) - (k - UI(14));
+        rect_fill(&c, px - UI(1), py - UI(3), UI(3), UI(7), 0xffffff);
     }
-    int y = top + 98;
-    text_centre(&c, y, 3, 0xffffff, "DONE"); y += 40;
-    text_centre(&c, y, 2, MSP_TEAL, "TOUCH CALIBRATION SAVED.");   /* (Strato, 11-09: the same words whatever was saved) */
+    int y = top + UI(98);
+    text_centre(&c, y, UI_TEXT(3), 0xffffff, "DONE"); y += UI(40);
+    text_centre(&c, y, UI_TEXT(2), MSP_TEAL, "TOUCH CALIBRATION SAVED.");   /* (Strato, 11-09: the same words whatever was saved) */
     lit_button(&c, (PAGE_W - ADV_OK_W) / 2, ADV_OK_Y, ADV_OK_W, SET_SEG_H, "OK");
 }
 int render_touch_done_tap(float x, float y) {
     x -= PAGE_X; y -= PAGE_Y;
-    if (fabsf(x - PAGE_W / 2) < ADV_OK_W / 2 + 14 && y >= ADV_OK_Y - 12 && y < ADV_OK_Y + SET_SEG_H + 16) return ADV_HIT_OK;
+    if (fabsf(x - PAGE_W / 2) < ADV_OK_W / 2 + UI(14) && y >= ADV_OK_Y - UI(12) && y < ADV_OK_Y + SET_SEG_H + UI(16)) return ADV_HIT_OK;
     return ADV_HIT_NONE;
 }
+#ifdef CONFIG_POCKET_TANK_320X240
+/* (this fork) both pages on the 240 px page: TURN IT OVER's pictures inside it and its words over its last line and SKIP,
+   DONE's words over OK (TURN IT OVER comes only to a board with an IMU answering: advanced.c) */
+_Static_assert(PAGE_W / 2 + ADV_ICON_W / 2 + UI(54) + ADV_ICON_W / 2 <= PAGE_W && ADV_TURN_TXT_Y + UI(22) + 7 * UI_TEXT(2) < SET_FOOT_Y - UI(34) &&
+               SET_FOOT_Y + MSP_CLOSE_H <= PAGE_H && SET_TITLE_Y + UI(8) + UI(98) + UI(40) + 7 * UI_TEXT(2) < ADV_OK_Y && ADV_OK_Y + SET_SEG_H <= PAGE_H,
+               "TURN IT OVER and DONE on the 320x240 page");
+#endif
 
 /* ---- MY TANKS + THE LIBRARY: the tank switcher (docs/tank-switcher.md) ----
  * ART FOR APPROVAL, 2026-10-29. Two wooden shelves of four little tanks on

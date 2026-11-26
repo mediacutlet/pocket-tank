@@ -393,7 +393,8 @@ void setup_debug_lab_wiggle(bool on);     /* ... and a handle dragged to and fro
 #define SETUP_AB_PORTRAIT_Y  (SETUP_Y + UI(84))  /* ITS STORY (0.4.2): the fish as it is, under its name ... */
 #define SETUP_AB_ROW_Y       (SETUP_Y + UI(128))  /* ... then a row each: AGE, FROM, PARENTS, MEALS, SIZE, TRUST */
 #define SETUP_AB_ROW_DY      UI(24)
-#define SETUP_NAT_ROW_DY     UI(34)
+#define SETUP_NAT_ROW_DY     (UI(34) < 28 ? 28 : UI(34))   /* (this fork: the parents' heads keep their 7 rows, so a 320 x 240 page keeps
+                                                              the design's 4 rows between one bar's lower head and the next bar's upper one) */
 #define SETUP_NAT_HEAD_H     7                 /* a parent's mark's head (TP2-9): 7 rows, 13 px at its widest ... */
 #define SETUP_NAT_KEY_W      13                /* ... (the key before a name under PARENTS: the same head) */
 #define SETUP_NAT_HEAD_A_Y(by) ((by) - UI(4) - SETUP_NAT_HEAD_H)   /* the first parent's head above the bar (by = its top), widest row first */
@@ -492,5 +493,26 @@ void setup_big_traits(const tank_t *t, int fi, uint16_t *fb, int stride, int x, 
 _Static_assert(SETUP_ST_TILE_Y + SETUP_ST_TILE_H <= PAGE_H, "BODY and FINS: the tiles' row must stand on the page");
 _Static_assert(SETUP_COLOR_ACC_Y + SETUP_COLOR_SW_H <= PAGE_H, "COLORS: the MARKINGS row must stand on the page");
 _Static_assert(SETUP_LAB_BTN_Y + SETUP_BTN_H <= PAGE_H, "THE TUBE: POUR IT IN must stand on the page");
+/* the nature page: one bar's lower head and the next bar's upper head, SETUP_NAT_ROW_DY apart, keep the design's 4 rows
+   between them (the heads keep their 7 rows; at UI(34) they overlapped by 2) */
+_Static_assert(SETUP_NAT_HEAD_A_Y(SETUP_NAT_ROW_DY) - (SETUP_NAT_HEAD_B_Y(0) + SETUP_NAT_HEAD_H) >= 4,
+               "ITS NATURE: the parents' heads of two bars must not meet");
+/* a critter's name page (0.4.2): its card's art keeps its size - up to the octopus's 80 x 48 box - and the design's plate
+   under the top buttons (SETUP_STAGE_NAME_Y) ran 9 rows into the letters' band here and touched both buttons. Its plate
+   stands between the two buttons instead, its middle halfway from the title's foot to the band's top (setup.c) */
+#define SETUP_CRIT_PLATE_W 96
+#define SETUP_CRIT_PLATE_H 48
+#define SETUP_NAME_TITLE_END (SETUP_Y + UI(7) + 7 * UI_TEXT(2))                /* (the title's line: setup.c's name page) */
+#define SETUP_NAME_BAND_Y    (SETUP_SLOT_Y - SETUP_ARROW_GAP - 2)             /* (the letters' band: its top) */
+#define SETUP_CRIT_PLATE_Y   ((SETUP_NAME_TITLE_END + SETUP_NAME_BAND_Y) / 2)
+_Static_assert(PAGE_W / 2 - SETUP_CRIT_PLATE_W / 2 > SETUP_TOP_BACK_X + SETUP_TOP_BTN_W && PAGE_W / 2 + SETUP_CRIT_PLATE_W / 2 < SETUP_TOP_NEXT_X &&
+               SETUP_CRIT_PLATE_Y - SETUP_CRIT_PLATE_H / 2 >= SETUP_NAME_TITLE_END && SETUP_CRIT_PLATE_Y + SETUP_CRIT_PLATE_H / 2 <= SETUP_NAME_BAND_Y &&
+               SETUP_STAGE_X - PAGE_X == PAGE_W / 2,
+               "a critter's name page: its plate between the top buttons, under the title, over the letters' band");
+/* the sword plant's page with its second row of squares (a piece beside it): the hint DRAG IT LEFT OR RIGHT takes the drag
+   zone's top, SETUP_PLACE_PLANT2_Y, and the chevron - five UI(4) blocks from its apex down - ends on the sand under it */
+#define SETUP_PLANT2_CHEVRON_Y (TANK_BOT - 16 - PAGE_Y - 5 * UI(4))
+_Static_assert(SETUP_PLACE_PLANT2_Y + 7 * UI_TEXT(2) < SETUP_PLANT2_CHEVRON_Y && SETUP_ORDSQ2_Y + SETUP_DEPTH_H < SETUP_PLACE_PLANT2_Y,
+               "the sword plant's page: its hint under the second row of squares, the chevron under the hint");
 #endif
 #endif

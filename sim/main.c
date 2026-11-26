@@ -7296,16 +7296,18 @@ static bool nat_row(const uint16_t *fb, int cx, int y, int w, uint32_t rgb) {   
         if (FB_SWAP16(fb[(PAGE_Y + y) * TANK_W + PAGE_X + x]) != nat_565(rgb)) return false;
     return true;
 }
+/* (this fork: the page's own offsets are UI(n) and its words UI_TEXT(s), as setup.c draws them - the 1.8's numbers
+   elsewhere; a head keeps its 7 rows and 13 px on every board, so its reach past the bar does not scale) */
 static int nat_heads(const uint16_t *fb, int y) {   /* pixels across a bar's width (and its marks' reach) not the panel's ink */
-    const int vx = SETUP_FAM_VALUE_X + 12; int n = 0;
-    uint16_t ink = FB_SWAP16(fb[(PAGE_Y + y) * TANK_W + PAGE_X + vx - 30]);
+    const int vx = SETUP_FAM_VALUE_X + UI(12); int n = 0;
+    uint16_t ink = FB_SWAP16(fb[(PAGE_Y + y) * TANK_W + PAGE_X + vx - UI(30)]);
     for (int x = vx - 8; x <= vx + SETUP_FAM_BAR_W + 8; x++) n += FB_SWAP16(fb[(PAGE_Y + y) * TANK_W + PAGE_X + x]) != ink;
     return n;
 }
 static int selftest_nature_marks(void) {
 #define NM_FAIL(...) do { printf("FAIL: selftest-nature-marks: %s: ", NAT_CASE[c]); printf(__VA_ARGS__); printf("\n"); return 1; } while (0)
     static uint16_t fb[TANK_W * TANK_H];
-    const int vx = SETUP_FAM_VALUE_X + 12;
+    const int vx = SETUP_FAM_VALUE_X + UI(12);
     for (int c = 0; c < NAT_CASES; c++) {
         int fi = nature_page(c, fb);
         if (fi < 0) { printf("FAIL: selftest-nature-marks: no fry\n"); return 1; }
@@ -7313,7 +7315,7 @@ static int selftest_nature_marks(void) {
         const fish_t *A = &tank.fish[g_nat_a], *B = &tank.fish[g_nat_b];
         uint32_t ca = A->color, cb = B->color;
         for (int k = 0; k < 2; k++) {
-            int by = SETUP_NAT_ROW_Y + k * SETUP_NAT_ROW_DY + 3;
+            int by = SETUP_NAT_ROW_Y + k * SETUP_NAT_ROW_DY + UI(3);
             float va = k ? A->sociable : A->bold, vb = k ? B->sociable : B->bold;
             int ta = vx + (int)(SETUP_FAM_BAR_W * va), tb = vx + (int)(SETUP_FAM_BAR_W * vb);
             int ya = SETUP_NAT_HEAD_A_Y(by), yb = SETUP_NAT_HEAD_B_Y(by) + SETUP_NAT_HEAD_H - 1;
@@ -7324,11 +7326,12 @@ static int selftest_nature_marks(void) {
             if (ka && kb && c != 2 && nat_heads(fb, ya) != 13) NM_FAIL("row %d: %d px above the bar, not the one head", k, nat_heads(fb, ya));
         }
         int py = SETUP_NAT_ROW_Y + 2 * SETUP_NAT_ROW_DY;              /* PARENTS: each known parent's head before its name */
-        if (ka && !nat_row(fb, vx + SETUP_NAT_KEY_W / 2, py + 3, 13, ca)) NM_FAIL("no down head before the first name");
+        const int ky = py + (7 * UI_TEXT(2) - SETUP_NAT_HEAD_H) / 2;   /* (a key's head: centred on its name's line, 3 px down on the 1.8) */
+        if (ka && !nat_row(fb, vx + SETUP_NAT_KEY_W / 2, ky, 13, ca)) NM_FAIL("no down head before the first name");
         if (kb) {
             char na[FISH_NAME_MAX + 1]; snprintf(na, sizeof na, "%s", A->name);
-            int x = vx + SETUP_NAT_KEY_W + 5 + render_text_w(na, 2) + 16;
-            if (!nat_row(fb, x + SETUP_NAT_KEY_W / 2, py + 3 + SETUP_NAT_HEAD_H - 1, 13, cb)) NM_FAIL("no up head before the other name");
+            int x = vx + SETUP_NAT_KEY_W + UI(5) + render_text_w(na, UI_TEXT(2)) + UI(16);
+            if (!nat_row(fb, x + SETUP_NAT_KEY_W / 2, ky + SETUP_NAT_HEAD_H - 1, 13, cb)) NM_FAIL("no up head before the other name");
         }
     }
     printf("selftest-nature-marks: both parents' marks by shape and place (above / below, the key before each name) - one colour, one nature; no mark for a parent not known, none for a gift's or the shop's fry\nselftest-nature-marks: OK\n");

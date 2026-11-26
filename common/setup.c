@@ -2095,8 +2095,17 @@ static void render_setup_in(const tank_t *t, uint16_t *fb, int stride, double cl
         x0 -= PAGE_X; x1 -= PAGE_X; top -= PAGE_Y;                     /* the piece is in the tank; the stripe is drawn on the page */
         int sy = (int)top - UI(8); if (sy < place_y()) sy = place_y();
         render_rect_blend(fb, stride, (int)x0, sy, (int)(x1 - x0), FLOOR - sy + 4, C_EDGE, 46);
+#ifdef CONFIG_POCKET_TANK_320X240
+        /* (this fork) the sword plant's second row of squares ends where the hint stands on the design (their tiles keep 34
+           rows for the glyphs, SETUP_DEPTH_TILE_H): with that row up, the hint takes the drag zone's top and the chevron
+           stands on the sand under it (setup.h SETUP_PLANT2_CHEVRON_Y and its assert) */
+        const bool plant2 = s_item == 0 && s_plant_two;
+        chevron(fb, stride, (int)((x0 + x1) * 0.5f), plant2 ? SETUP_PLANT2_CHEVRON_Y : FLOOR - UI(34), true, C_EDGE);
+        text_c(fb, stride, CX, plant2 ? SETUP_PLACE_PLANT2_Y : UI(296), UI_TEXT(2), C_CAPT, "DRAG IT LEFT OR RIGHT");
+#else
         chevron(fb, stride, (int)((x0 + x1) * 0.5f), FLOOR - UI(34), true, C_EDGE);
         text_c(fb, stride, CX, UI(296), UI_TEXT(2), C_CAPT, "DRAG IT LEFT OR RIGHT");
+#endif
     } else if (page_is_name() && s_kbd) {
         /* the two rejected designs, drawn as they were: a panel over the tank,
            the name as underlined slots (the next free one blinks; an untouched
@@ -2150,8 +2159,15 @@ static void render_setup_in(const tank_t *t, uint16_t *fb, int stride, double cl
                                                                    on a plate where a fish would stand on stage */
             float rx, ry, rr;
             if (render_crit_spot(t, s_crit, &rx, &ry, &rr)) render_ring(fb, stride, rx - PAGE_X, ry - PAGE_Y, rr, C_CRIT);
+#ifdef CONFIG_POCKET_TANK_320X240
+            /* (this fork) the card's art keeps its size - the octopus's box is 80 x 48 - and a 240 px page has no 48 rows
+               for it under the top buttons: its plate stands between them, under the title (setup.h SETUP_CRIT_PLATE_*) */
+            const int px = SETUP_STAGE_X - PAGE_X, py = SETUP_CRIT_PLATE_Y;
+            render_rect_blend(fb, stride, px - SETUP_CRIT_PLATE_W / 2, py - SETUP_CRIT_PLATE_H / 2, SETUP_CRIT_PLATE_W, SETUP_CRIT_PLATE_H, C_PANEL, 150);
+#else
             const int px = SETUP_STAGE_X - PAGE_X, py = SETUP_STAGE_NAME_Y - PAGE_Y;
             render_rect_blend(fb, stride, px - 64, py - 24, 128, 48, C_PANEL, 150);
+#endif
             render_crit_portrait(fb, stride, t, s_crit, px, py);
         }
         if (name_beside(t) && !setup_lab_black()) {             /* the form they chose, in view while they name it (0.4) */

@@ -2013,6 +2013,8 @@ _Static_assert(PP_STAMP_H >= 7 + 6 && PP_HEART_Y + 10 <= PP_M1_Y && UI(36) + UI(
 #define EVP_KEEP_X   (PAGE_W - UI(48) - EVP_KEEP_W)   /* (upstream's formula holds its 48 px margin as a literal) */
 #undef  EVP_FISH_Y0
 #define EVP_FISH_Y0  UI(40)
+#undef  EVP_FISH_Y1
+#define EVP_FISH_Y1  (EVP_TILE_Y - UI(6) - 1)          /* (upstream's - 7: just above the KEEP box, UI(6) over the tiles here) */
 /* THE FISH LAB's grid, stage and tube (0.4.3; the first run's BODY, FINS and COLORS are these
    pages): upstream's bench line stands at y 300. The fish on the stage is drawn at the
    stage's scale, so the plate still holds the longest tail and the tallest sail */
@@ -2059,6 +2061,12 @@ _Static_assert(2 * RENDER_CRIT_NAME_W + RENDER_CRIT_FOOT_GAP <= SNAIL_CARD_W,
 _Static_assert(RESET_PANEL_Y + RESET_PANEL_H <= PAGE_H && EVP_BTN_Y + EVP_BTN_H <= PAGE_H &&
                STG_PLATE_Y + STG_PLATE_H <= LAB_BENCH_Y && LAB_BENCH_Y + LAB_BENCH_H <= PAGE_H,
                "the scaled pages must fit on this page");
+/* the paragon's reveal (render.c render_evo_page): KEEP's question stands UI(6) round the three tiles, on the page; the
+   titles (CHOOSE ONE at UI(16), scale UI_TEXT(3); <NAME> IS READY TO EVOLVE at UI(22)) end over the fish's moving box,
+   which the held page clears every frame (at upstream's 22 and scale 2 the title ran into it); the buttons under the tiles */
+_Static_assert(EVP_TILE_X(0) - UI(6) >= 0 && EVP_TILE_X(2) + EVP_TILE_W + UI(6) <= PAGE_W &&
+               UI(16) + 7 * UI_TEXT(3) <= EVP_FISH_Y0 && UI(22) + 7 * UI_TEXT(2) <= EVP_FISH_Y0 && EVP_TILE_Y + EVP_TILE_H <= EVP_BTN_Y,
+               "the paragon's reveal: its tiles and KEEP's box on the page, the titles over the fish's box, the buttons under the tiles");
 #endif
 
 #endif

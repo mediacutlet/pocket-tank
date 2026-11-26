@@ -132,7 +132,8 @@ static int selftest_evo_kept(void) {
                            snprintf(path, sizeof path, "%s/reveal_yes_held.ppm", dir); write_ppm(path, ek_ref); } }
             {   int x = 0, y = 0, d = ek_diff(ek_fb[ek_n & 1], ek_ref, &x, &y);
                 if (d) EK_FAIL("K9: YES held part way: the held page differs from the page drawn whole (%d px, first at %d,%d)", d, x, y); }
-            {   const int fx = PAGE_X + EVP_KEEP_X + 12, fy = PAGE_Y + EVP_BTN_Y + EVP_BTN_H - 7;   /* (the track's start, inside YES's foot) */
+            {   const int fx = PAGE_X + EVP_KEEP_X + UI(12), fy = PAGE_Y + EVP_BTN_Y + EVP_BTN_H - UI(7);   /* (the track's start, inside YES's foot;
+                                                           this fork: UI(n), as render.c's EVP_YES_* place the track) */
                 if (ek_ref[fy * TANK_W + fx] != 0xffff || empty[fy * TANK_W + fx] == 0xffff) EK_FAIL("K9: YES held 0.27 s: its track did not fill (%04x, empty %04x)", ek_ref[fy * TANK_W + fx], empty[fy * TANK_W + fx]); }
             pg_touch(yx, yy, false); ek_frame(0); ek_frame(0);
             if (f->evo || setup_evo_phase(&tank) != SETUP_EVO_KEEP) EK_FAIL("K9: YES let go at 0.27 s: evo %d, phase %d - want nothing kept, the question up", f->evo, setup_evo_phase(&tank));
@@ -148,8 +149,8 @@ static int selftest_evo_kept(void) {
             render_setup(&tank, ek_ref, TANK_W, tank.clock);
             {   const char *dir = getenv("PT_EVO_SHOTS"); char path[600];   /* (the waiting bar's look, for Strato) */
                 if (dir) { snprintf(path, sizeof path, "%s/reveal_yes_doorway.ppm", dir); write_ppm(path, ek_ref); } }
-            const int fy = PAGE_Y + EVP_BTN_Y + EVP_BTN_H - 7;   /* (the track's row, inside HOLD's foot; its inside runs KEEP_X+11 .. +138) */
-            const uint16_t mid = ek_ref[fy * TANK_W + PAGE_X + EVP_KEEP_X + 100], end = ek_ref[fy * TANK_W + PAGE_X + EVP_KEEP_X + 137];
+            const int fy = PAGE_Y + EVP_BTN_Y + EVP_BTN_H - UI(7);   /* (the track's row, inside HOLD's foot; its inside runs KEEP_X+11 .. +138) */
+            const uint16_t mid = ek_ref[fy * TANK_W + PAGE_X + EVP_KEEP_X + UI(100)], end = ek_ref[fy * TANK_W + PAGE_X + EVP_KEEP_X + UI(137)];
             if (f->evo || !setup_is_evolve()) EK_FAIL("K9b: HOLD held 0.8 s in the doorway: evo %d, page %d - want nothing kept, the page up", f->evo, setup_is_evolve());
             if (mid != 0xffff || end == 0xffff) EK_FAIL("K9b: HOLD held 0.8 s in the doorway: the track at 3/4 %04x, at its end %04x - want filled, then short of the end", mid, end);
             {   int x = 0, y = 0, d = ek_diff(ek_fb[ek_n & 1], ek_ref, &x, &y);   /* (the held frame the S3 boards show: the same) */

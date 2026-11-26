@@ -12180,44 +12180,48 @@ static void evo_tile(ctx_t *page, const fish_t *who, int k, const evo_page_t *pg
     ctx_t c = *page;                                    /* the tile's own window: a long fin or a banner is cut at its edge */
     c.fb = page->fb + (y - page->oy) * page->stride + (x - page->ox); c.ox = x; c.oy = y; c.w = W; c.h = H;
     if (x - page->ox < 0 || y - page->oy < 0 || x - page->ox + W > page->w || y - page->oy + H > page->h) return;   /* (never off the glass) */
-    const float fx = x + 66, fy = y + 46, sz = fminf(who->size, 1.3f);
-    const int BAND = 38;                                /* the name's band at the foot: two lines at scale 2, the lower one 3 px clear of a chosen tile's white edge */
-    if (state == EVP_CLOSED) evo_shell(&c, x + W / 2.0f, y + H / 2.0f - 4, 1.0f);
+    /* (this fork: the tile's inside is drawn, not pixel art - its measures UI(), its fish and its shell at the page's
+       scale, UI_F, its words UI_TEXT() - identities on upstream's boards, the tile's own size on a 320 x 240 one) */
+    const float fx = x + UI(66), fy = y + UI(46), sz = fminf(who->size, 1.3f) * UI_F;
+    const int BAND = UI(38);                            /* the name's band at the foot: two lines at scale 2, the lower one 3 px clear of a chosen tile's white edge */
+    if (state == EVP_CLOSED) evo_shell(&c, x + W / 2.0f, y + H / 2.0f - UI(4), UI_F);
     else {
         if (state == EVP_SPIN) {
             c.dim = 0.32f;
-            evo_fish(&c, who, fx, fy - 40, sz, pg->ghost[k][0], FISH_ROOM_ROW, clock);
-            evo_fish(&c, who, fx, fy + 40, sz, pg->ghost[k][1], FISH_ROOM_ROW, clock);
+            evo_fish(&c, who, fx, fy - UI(40), sz, pg->ghost[k][0], FISH_ROOM_ROW, clock);
+            evo_fish(&c, who, fx, fy + UI(40), sz, pg->ghost[k][1], FISH_ROOM_ROW, clock);
             c.dim = 1.0f;
-            for (int i = 0; i < 4; i++) { static const int TY[4] = { 22, 26, 64, 68 }; rect_fill(&c, x + 4, y + TY[i], 6, 1, EVP_EDGE); rect_fill(&c, x + W - 10, y + TY[i], 6, 1, EVP_EDGE); }
+            for (int i = 0; i < 4; i++) { static const int TY[4] = { 22, 26, 64, 68 }; rect_fill(&c, x + UI(4), y + UI(TY[i]), UI(6), 1, EVP_EDGE); rect_fill(&c, x + W - UI(10), y + UI(TY[i]), UI(6), 1, EVP_EDGE); }
         }
         evo_fish(&c, who, fx, fy, sz, part, FISH_ROOM_ROW, clock);
         if (state == EVP_LANDED && pg->landed_s[k] < 0.7f) {   /* it landed: a few bubbles */
             static const float B[5][3] = { { 14, 30, 4 }, { 22, 16, 2.5f }, { 104, 22, 3.5f }, { 98, 44, 2 }, { 30, 54, 2 } };
-            float up = pg->landed_s[k] * 14;
-            for (int i = 0; i < 5; i++) ring(&c, x + B[i][0], y + B[i][1] - up, B[i][2], 0x9fd8e2);
+            float up = pg->landed_s[k] * 14 * UI_F;
+            for (int i = 0; i < 5; i++) ring(&c, x + B[i][0] * UI_F, y + B[i][1] * UI_F - up, B[i][2] * UI_F, 0x9fd8e2);
         }
         const char *nm = state == EVP_LANDED ? tank_evo_name(part) : "?";
         const char *sp = strchr(nm, ' ');
         rect_fill(&c, x, y + H - BAND, W, BAND, 0x060e1c);
-        if (sp && text_w(nm, 2) > W - 8) {              /* TAIL / THREADS: two lines */
+        if (sp && text_w(nm, UI_TEXT(2)) > W - UI(8)) { /* TAIL / THREADS: two lines */
             char l1[16]; snprintf(l1, sizeof l1, "%.*s", (int)(sp - nm), nm);
-            draw_text(&c, x + (W - text_w(l1, 2)) / 2, y + H - BAND + 2, 2, 0xffffff, l1);
-            draw_text(&c, x + (W - text_w(sp + 1, 2)) / 2, y + H - BAND + 18, 2, 0xffffff, sp + 1);
-        } else draw_text(&c, x + (W - text_w(nm, 2)) / 2, y + H - BAND + 10, 2, state == EVP_LANDED ? 0xffffff : 0x7fa8b0, nm);
+            draw_text(&c, x + (W - text_w(l1, UI_TEXT(2))) / 2, y + H - BAND + UI(2), UI_TEXT(2), 0xffffff, l1);
+            draw_text(&c, x + (W - text_w(sp + 1, UI_TEXT(2))) / 2, y + H - BAND + UI(18), UI_TEXT(2), 0xffffff, sp + 1);
+        } else draw_text(&c, x + (W - text_w(nm, UI_TEXT(2))) / 2, y + H - BAND + UI(10), UI_TEXT(2), state == EVP_LANDED ? 0xffffff : 0x7fa8b0, nm);
         if (state == EVP_LANDED && pg->family[k]) {     /* a parent's part: two small fish and its name - a shape, never a color */
             for (int i = 0; i < 2; i++) {
                 float ex = x + 13 + i * 6, ey = y + 9 + i * 7;        /* (clear of a chosen tile's 3 px white edge) */
                 fill_ellipse(&c, ex, ey, 4.5f, 2.6f, 0xffffff, 255);
                 const float tx[3] = { ex - 4, ex - 8, ex - 8 }, ty[3] = { ey, ey - 3, ey + 3 }; fill_poly(&c, tx, ty, 3, 0xffffff);
             }
-            if (pg->from[k] && pg->from[k][0]) draw_text(&c, x + 30, y + 6, 2, 0xffffff, pg->from[k]);   /* (the two fish say "from"; the name at a size to read) */
+            /* (this fork: the two fish keep their size on every board - at 0.65 they were two bars, no longer a shape - so the
+               name keeps its place after them, centred on them at a 320 x 240 board's smaller text) */
+            if (pg->from[k] && pg->from[k][0]) draw_text(&c, x + 30, y + 6 + (14 - 7 * UI_TEXT(2)) / 2, UI_TEXT(2), 0xffffff, pg->from[k]);   /* (the two fish say "from"; the name at a size to read) */
         }
     }
     if (chosen) {                                       /* the one being tried on: a thick white edge and a tick in the corner */
-        for (int i = 0; i < 3; i++) rect_edge(page, x + i, y + i, W - 2 * i, H - 2 * i, 0xffffff);
-        const float tx[3] = { x + W - 26.0f, x + W, x + W }, ty[3] = { (float)y, (float)y, y + 26.0f }; fill_poly(&c, tx, ty, 3, 0xffffff);
-        evo_line(&c, x + W - 15, y + 6, x + W - 11, y + 10, EVP_BG, 255, 2); evo_line(&c, x + W - 11, y + 10, x + W - 5, y + 2, EVP_BG, 255, 2);
+        for (int i = 0; i < UI(3); i++) rect_edge(page, x + i, y + i, W - 2 * i, H - 2 * i, 0xffffff);
+        const float tx[3] = { x + W - 26.0f * UI_F, x + W, x + W }, ty[3] = { (float)y, (float)y, y + 26.0f * UI_F }; fill_poly(&c, tx, ty, 3, 0xffffff);
+        evo_line(&c, x + W - UI(15), y + UI(6), x + W - UI(11), y + UI(10), EVP_BG, 255, UI(2)); evo_line(&c, x + W - UI(11), y + UI(10), x + W - UI(5), y + UI(2), EVP_BG, 255, UI(2));
     } else rect_edge(page, x, y, W, H, EVP_EDGE);
 }
 /* (0.4.3 audit r1 TP-7) the fish next door: no KEEP THIS / YES - the reason in the button's place, as TAP ONE / TO TRY IT ON
@@ -12226,12 +12230,12 @@ static void evo_tile(ctx_t *page, const fish_t *who, int k, const evo_page_t *pg
 #define EVP_AWAY_L2 "NEXT DOOR"
 /* KEEP?'s YES (0.4.3 audit r2, R2-L32): kept by a short hold - a track along its foot that fills white, left to right, as
    the hold runs (the reset prompt's HOLD TO ERASE); empty, it is the track alone */
-#define EVP_YES_TX (EVP_KEEP_X + 10)
-#define EVP_YES_TW (EVP_KEEP_W - 20)
-#define EVP_YES_TY (EVP_BTN_Y + EVP_BTN_H - 9)
-#define EVP_YES_TH 5
+#define EVP_YES_TX (EVP_KEEP_X + UI(10))
+#define EVP_YES_TW (EVP_KEEP_W - UI(20))
+#define EVP_YES_TY (EVP_BTN_Y + EVP_BTN_H - UI(9))
+#define EVP_YES_TH UI(5)
 static void evo_yes(ctx_t *c, float hold) {
-    button(c, EVP_KEEP_X, EVP_BTN_Y, EVP_KEEP_W, EVP_BTN_H, 0x155e58, EVP_GOLD, "HOLD", 2);   /* (its word HOLD: Strato 11-23) */
+    button(c, EVP_KEEP_X, EVP_BTN_Y, EVP_KEEP_W, EVP_BTN_H, 0x155e58, EVP_GOLD, "HOLD", UI_TEXT(2));   /* (its word HOLD: Strato 11-23) */
     rect_fill(c, EVP_YES_TX, EVP_YES_TY, EVP_YES_TW, EVP_YES_TH, 0x04141a);
     rect_edge(c, EVP_YES_TX, EVP_YES_TY, EVP_YES_TW, EVP_YES_TH, 0x9fd8e2);
     const int fw = (int)((EVP_YES_TW - 2) * (hold < 0 ? 0 : hold > 1 ? 1 : hold));   /* (floor: the last pixel only at 1 - a full bar is a keep, R3b-L11) */
@@ -12239,9 +12243,11 @@ static void evo_yes(ctx_t *c, float hold) {
 }
 static void evo_away(ctx_t *c) {
     const int hx = EVP_KEEP_X + EVP_KEEP_W / 2;
-    draw_text(c, hx - text_w(EVP_AWAY_L1, 2) / 2, EVP_BTN_Y + 4, 2, 0x9fd8e2, EVP_AWAY_L1);
-    draw_text(c, hx - text_w(EVP_AWAY_L2, 2) / 2, EVP_BTN_Y + 24, 2, 0x9fd8e2, EVP_AWAY_L2);
+    draw_text(c, hx - text_w(EVP_AWAY_L1, UI_TEXT(2)) / 2, EVP_BTN_Y + UI(4), UI_TEXT(2), 0x9fd8e2, EVP_AWAY_L1);
+    draw_text(c, hx - text_w(EVP_AWAY_L2, UI_TEXT(2)) / 2, EVP_BTN_Y + UI(24), UI_TEXT(2), 0x9fd8e2, EVP_AWAY_L2);
 }
+/* (this fork: the page's own measures UI(), its words UI_TEXT() and its fish at the page's scale - identities on
+   upstream's boards; render.h's 320 x 240 block gives the tiles and the buttons their places on that page) */
 void render_evo_page(const tank_t *t, uint16_t *fb, int stride, double clock, const evo_page_t *pg) {
     if (pg->fish < 0 || pg->fish >= t->n_fish) return;
     ctx_t c = ctx_page(fb, stride);
@@ -12249,30 +12255,30 @@ void render_evo_page(const tank_t *t, uint16_t *fb, int stride, double clock, co
     const int CX = PAGE_W / 2;
     rect_fill(&c, -PAGE_X, -PAGE_Y, TANK_W, TANK_H, EVP_BG);
     char title[40];
-    if (pg->choosing) { snprintf(title, sizeof title, "CHOOSE ONE"); draw_text(&c, CX - text_w(title, 3) / 2, 16, 3, 0xffffff, title); }
-    else { snprintf(title, sizeof title, "%s IS READY TO EVOLVE", f->name); draw_text(&c, CX - text_w(title, 2) / 2, 22, 2, 0xffffff, title); }
-    evo_fish(&c, f, CX, 104, 2.0f, pg->choosing && pg->sel >= 0 ? pg->part[pg->sel] : 0, FISH_ROOM_ROW, clock);
+    if (pg->choosing) { snprintf(title, sizeof title, "CHOOSE ONE"); draw_text(&c, CX - text_w(title, UI_TEXT(3)) / 2, UI(16), UI_TEXT(3), 0xffffff, title); }
+    else { snprintf(title, sizeof title, "%s IS READY TO EVOLVE", f->name); draw_text(&c, CX - text_w(title, UI_TEXT(2)) / 2, UI(22), UI_TEXT(2), 0xffffff, title); }
+    evo_fish(&c, f, CX, UI(104), 2.0f * UI_F, pg->choosing && pg->sel >= 0 ? pg->part[pg->sel] : 0, FISH_ROOM_ROW, clock);
     for (int k = 0; k < 3; k++) evo_tile(&c, f, k, pg, clock);
     if (pg->confirm && pg->sel >= 0) {                  /* KEEP THIS, asked once more */
-        const int X = EVP_TILE_X(0) - 6, Y = EVP_TILE_Y - 6, W = 3 * EVP_TILE_W + 2 * EVP_TILE_GAP + 12, H = EVP_TILE_H + 12;   /* (over the three tiles, whole) */
+        const int X = EVP_TILE_X(0) - UI(6), Y = EVP_TILE_Y - UI(6), W = 3 * EVP_TILE_W + 2 * EVP_TILE_GAP + UI(12), H = EVP_TILE_H + UI(12);   /* (over the three tiles, whole) */
         char l1[40]; snprintf(l1, sizeof l1, "KEEP THE %s?", tank_evo_name(pg->part[pg->sel]));
         char l2[40]; snprintf(l2, sizeof l2, "%s WILL WEAR IT", f->name);
         rect_fill(&c, X, Y, W, H, 0x04141a); rect_edge(&c, X, Y, W, H, EVP_GOLD); rect_edge(&c, X + 1, Y + 1, W - 2, H - 2, 0x1c2f36);
-        draw_text(&c, CX - text_w(l1, 2) / 2, Y + 24, 2, 0xffffff, l1);
-        draw_text(&c, CX - text_w(l2, 2) / 2, Y + 58, 2, 0x9fd8e2, l2);
-        draw_text(&c, CX - text_w("FOR GOOD", 2) / 2, Y + 80, 2, 0x9fd8e2, "FOR GOOD");
-        button(&c, EVP_BACK_X, EVP_BTN_Y, EVP_BACK_W, EVP_BTN_H, 0x0e2229, 0x2a3f45, "NOT YET", 2);
+        draw_text(&c, CX - text_w(l1, UI_TEXT(2)) / 2, Y + UI(24), UI_TEXT(2), 0xffffff, l1);
+        draw_text(&c, CX - text_w(l2, UI_TEXT(2)) / 2, Y + UI(58), UI_TEXT(2), 0x9fd8e2, l2);
+        draw_text(&c, CX - text_w("FOR GOOD", UI_TEXT(2)) / 2, Y + UI(80), UI_TEXT(2), 0x9fd8e2, "FOR GOOD");
+        button(&c, EVP_BACK_X, EVP_BTN_Y, EVP_BACK_W, EVP_BTN_H, 0x0e2229, 0x2a3f45, "NOT YET", UI_TEXT(2));
         if (pg->away) evo_away(&c);
         else evo_yes(&c, pg->hold);
     } else if (pg->choosing) {
-        button(&c, EVP_BACK_X, EVP_BTN_Y, EVP_BACK_W, EVP_BTN_H, 0x0e2229, 0x2a3f45, "LATER", 2);
+        button(&c, EVP_BACK_X, EVP_BTN_Y, EVP_BACK_W, EVP_BTN_H, 0x0e2229, 0x2a3f45, "LATER", UI_TEXT(2));
         if (pg->away) evo_away(&c);
-        else if (pg->sel >= 0) button(&c, EVP_KEEP_X, EVP_BTN_Y, EVP_KEEP_W, EVP_BTN_H, 0x155e58, EVP_GOLD, "KEEP THIS", 2);
+        else if (pg->sel >= 0) button(&c, EVP_KEEP_X, EVP_BTN_Y, EVP_KEEP_W, EVP_BTN_H, 0x155e58, EVP_GOLD, "KEEP THIS", UI_TEXT(2));
         else { const int hx = EVP_KEEP_X + EVP_KEEP_W / 2;
-               draw_text(&c, hx - text_w("TAP ONE", 2) / 2, EVP_BTN_Y + 4, 2, 0x9fd8e2, "TAP ONE");
-               draw_text(&c, hx - text_w("TO TRY IT ON", 2) / 2, EVP_BTN_Y + 24, 2, 0x9fd8e2, "TO TRY IT ON"); }
+               draw_text(&c, hx - text_w("TAP ONE", UI_TEXT(2)) / 2, EVP_BTN_Y + UI(4), UI_TEXT(2), 0x9fd8e2, "TAP ONE");
+               draw_text(&c, hx - text_w("TO TRY IT ON", UI_TEXT(2)) / 2, EVP_BTN_Y + UI(24), UI_TEXT(2), 0x9fd8e2, "TO TRY IT ON"); }
     } else if (pg->state[0] == EVP_CLOSED)
-        draw_text(&c, CX - text_w("TAP A SHELL", 2) / 2, EVP_BTN_Y + 14, 2, 0x9fd8e2, "TAP A SHELL");
+        draw_text(&c, CX - text_w("TAP A SHELL", UI_TEXT(2)) / 2, EVP_BTN_Y + UI(14), UI_TEXT(2), 0x9fd8e2, "TAP A SHELL");
 }
 #ifdef TANK_P4
 /* THE NOTICE CARDS AT TWICE THEIR SIZE (0.4.3, big screens; Strato 11-22 "yes lets go with double size"): READY TO EVOLVE,
@@ -12332,7 +12338,7 @@ void render_evo_bands(const tank_t *t, uint16_t *fb, int stride, double clock, c
         if (x0 <= x1 && y0 <= y1) {
             ctx_t w = c; w.fb = c.fb + (y0 - c.oy) * c.stride + (x0 - c.ox); w.ox = x0; w.oy = y0; w.w = x1 - x0 + 1; w.h = y1 - y0 + 1;
             rect_fill(&w, x0, y0, w.w, w.h, EVP_BG);
-            evo_fish(&w, f, PAGE_W / 2, 104, 2.0f, pg->choosing && pg->sel >= 0 ? pg->part[pg->sel] : 0, FISH_ROOM_ROW, clock);
+            evo_fish(&w, f, PAGE_W / 2, UI(104), 2.0f * UI_F, pg->choosing && pg->sel >= 0 ? pg->part[pg->sel] : 0, FISH_ROOM_ROW, clock);
         }
     }
     if (!(pg->confirm && pg->sel >= 0))

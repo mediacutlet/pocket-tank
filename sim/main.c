@@ -3790,6 +3790,11 @@ static int selftest_update(void) {
         for (int i = 0; i < 60; i++) EXPECT(render_link_touch(&lv, wx, wy, true, 0.03f) == LINK_UI_NONE, "link mode: a hold on the water did something");
         EXPECT(render_link_touch(&lv, wx, wy, false, 0.03f) == LINK_UI_NONE, "link mode: a tap on the water did something");
         printf("selftest-update: LINK on settings; link mode - an arrow asks at 0.8 s, an open door closes at 1.2 s, DONE, DISCONNECT, the water does nothing; the DRIFTED notice's DISCONNECT\n"); }
+#ifdef CONFIG_POCKET_TANK_320X240   /* (this fork) the UPDATES page's two faces are not laid out on a 320x240 board, which never shows them:
+                                       no update channel, no UPDATES button (above), never a saved network - the Makefile leaves out
+                                       their own tests, --selftest-wifi3 and --selftest-updui, in this world for the same reason */
+      }
+#else
       updates_page_open();
       EXPECT(updates_page_tap(PG_X(UPD_CLOSE_X + 40), PG_Y(UPD_CLOSE_Y + 12)) == UPD_TAP_CLOSE, "updates page: BACK");
       EXPECT(updates_page_tap(PG_X(UPD_X + UPD_W / 2), PG_Y(UPD_DOOR_Y + 20)) == UPD_TAP_NETS, "updates page: the WI-FI door");
@@ -3820,6 +3825,7 @@ static int selftest_update(void) {
       EXPECT(r == UPD_TAP_FORGET && !net_port_creds_get(ssid, pass), "updates page: SURE? 0.7 s after FORGET did not drop the store");
       #undef UPT
       render_updates_page(fb, TANK_W); }
+#endif
     /* the Hatchery Crew (0.4.1): a board code made once in the right shape,
        and the UPDATES page's word follows the last clear crew answer */
     { const char *cf = "/tmp/pocket-tank-selftest-board-code.txt"; remove(cf);

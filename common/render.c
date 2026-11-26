@@ -16562,13 +16562,17 @@ static void link_glyph(ctx_t *c, int x, int y, uint32_t rgb) {
    way) - below the PAGE safe box, so checked per glass: page y 284..348 is on
    the 1.8's sand, inside a 330+ px chord of the bowl's circle (the widest line
    is 312 px) and above the watch's lower corners (page 335 = frame 402) */
-#define LINK_HINT_Y   284
+/* (this fork: the hint, NEARBY and the DRIFTED notice are page measurements, UI() - on a 320 x 240 board page y 284 is
+   under the glass, and the hint's lines at scale 2 are up to 324 px wide. There the hint stands at y 185..226, just
+   over the sand, between the coin buttons under the tabs; the chips, the tabs and the coins are the tank's own, a tool
+   in hand's, and keep their size) */
+#define LINK_HINT_Y   UI(284)
 /* the DRIFTED notice's panel (page y) and its DISCONNECT button; link mode's
    DISCONNECT chip mirrors DONE's at the top right while a door is open */
-#define LINK_DRIFT_Y  70
-#define LINK_DISC_W   156
+#define LINK_DRIFT_Y  UI(70)
+#define LINK_DISC_W   UI(156)
 #define LINK_DISC_X   ((PAGE_W - LINK_DISC_W) / 2)
-#define LINK_DISC_Y   (LINK_DRIFT_Y + 122)
+#define LINK_DISC_Y   (LINK_DRIFT_Y + UI(122))
 static int link_dchip_w(void) { return 10 + text_w("DISCONNECT", 2) + 10; }
 #ifdef TANK_ROUND          /* the bowl's top is a narrow cap: DISCONNECT gets its own row, centred under DONE and the badge */
 static int link_dchip_x(void) { return (TANK_W - link_dchip_w()) / 2; }
@@ -16685,10 +16689,24 @@ static void link_tab(ctx_t *c, const link_view_t *v, int e, float clock) {   /* 
 }
 static void link_line(ctx_t *c, int py, const char *s, uint32_t rgb) {   /* a centred hint line at PAGE y */
     if (!s || !*s) return;
-    int w = text_w(s, 2), x = PAGE_X + (PAGE_W - w) / 2, y = PAGE_Y + py;
-    link_box(c, x - 8, y - 4, w + 16, 22, 0x04141a, 170);
-    draw_text(c, x, y, 2, rgb, s);
+    int w = text_w(s, UI_TEXT(2)), x = PAGE_X + (PAGE_W - w) / 2, y = PAGE_Y + py;
+    link_box(c, x - UI(8), y - UI(4), w + UI(16), UI(22), 0x04141a, 170);
+    draw_text(c, x, y, UI_TEXT(2), rgb, s);
 }
+#ifdef CONFIG_POCKET_TANK_320X240
+/* (this fork) link mode on the 240 px glass: the hint's three boxes (the two lines, NEARBY) under the tabs' foot and on
+   the glass, the widest of the words (27 letters: TAP DONE TO WATCH THEM SWIM and the like) clear of the coin buttons
+   under the tabs; our badge's 44 px box between DONE and DISCONNECT (link_chip_w and link_dchip_w, their words at 2x),
+   12 px from each; the DRIFTED notice on the page, its widest line inside it, DISCONNECT inside it */
+_Static_assert(PAGE_Y + LINK_HINT_Y - UI(4) >= TANK_BOT / 2 - LINK_TAB_H / 2 + LINK_TAB_H && LINK_HINT_Y + UI(46) - UI(4) + UI(22) <= PAGE_H &&
+               TANK_W / 2 - (27 * 6 * UI_TEXT(2) + UI(16)) / 2 > LINK_TAB_GAP + LINK_COIN_W,
+               "link mode's hint: under the tabs, on the glass, clear of the coins");
+_Static_assert((TANK_W - TOOL_CHIP_X - (10 + 10 * 6 * 2 - 2 + 10)) - (TOOL_CHIP_X + 8 + 20 + 8 + 4 * 6 * 2 - 2 + 10) >= 44 + 2 * 12,
+               "link mode: our badge between DONE and DISCONNECT");
+_Static_assert(LINK_DRIFT_Y + UI(164) <= PAGE_H && UI(336) <= PAGE_W && 26 * 6 * UI_TEXT(2) <= UI(336) - 2 * UI(12) &&
+               LINK_DISC_Y + MSP_CLOSE_H + UI(4) <= LINK_DRIFT_Y + UI(164),
+               "the DRIFTED notice: on the page, its words and DISCONNECT inside it");
+#endif
 void render_link_mode(const link_view_t *v, uint16_t *fb, int stride, double tclock) {
     const float clock = tank_anim(tclock);
     ctx_t c = ctx_full(fb, stride, 1.0f);
@@ -16730,6 +16748,12 @@ void render_link_mode(const link_view_t *v, uint16_t *fb, int stride, double tcl
     }
     /* ours: the badge, top centre */
     { int bx = TANK_W / 2, by = CY + CH / 2;
+#ifdef CONFIG_POCKET_TANK_320X240
+      /* (this fork) the middle of the gap between DONE and DISCONNECT (x 98 and 176): at the glass's middle its 44 px
+         box ran 6 px under DISCONNECT's chip, which comes with an open door. It stands there with no door open too, so
+         it never jumps (the static assert by link_line keeps the gap) */
+      bx = (TOOL_CHIP_X + link_chip_w() + link_dchip_x()) / 2;
+#endif
       link_box(&c, bx - 22, by - 22, 44, 44, 0x04141a, 150);
       link_badge_draw(&c, bx, by, 16, v->badge, 255); }
     for (int e = 0; e < LINK_EDGES; e++) link_tab(&c, v, e, clock);
@@ -16756,16 +16780,16 @@ void render_link_mode(const link_view_t *v, uint16_t *fb, int stride, double tcl
     if (open && tclock < g_link_sdl_until && tclock > g_link_sdl_until - 60) { l1 = g_link_sdl[0]; l2 = g_link_sdl[1]; }   /* a gift's news (0.4.2) */
     else if (open && (v->edge[0].sd || v->edge[1].sd) && !asked && !two && !ours) l2 = "THE COIN SENDS SAND DOLLARS";
     link_line(&c, LINK_HINT_Y, l1, 0xffffff);
-    link_line(&c, LINK_HINT_Y + 22, l2, 0x9fd8e2);
+    link_line(&c, LINK_HINT_Y + UI(22), l2, 0x9fd8e2);
     /* NEARBY: every tank in link mode that is heard */
-    { const int py = LINK_HINT_Y + 46, r = 7;
-      int w = text_w("NEARBY", 2) + 10 + (v->n_near ? v->n_near * (2 * r + 8) : text_w("NONE YET", 2));
+    { const int py = LINK_HINT_Y + UI(46), r = UI(7);
+      int w = text_w("NEARBY", UI_TEXT(2)) + UI(10) + (v->n_near ? v->n_near * (2 * r + UI(8)) : text_w("NONE YET", UI_TEXT(2)));
       int x = PAGE_X + (PAGE_W - w) / 2, y = PAGE_Y + py;
-      link_box(&c, x - 8, y - 4, w + 16, 22, 0x04141a, 170);
-      draw_text(&c, x, y, 2, 0x9fd8e2, "NEARBY");
-      x += text_w("NEARBY", 2) + 10;
-      if (!v->n_near) draw_text(&c, x, y, 2, 0x8fb4ba, "NONE YET");
-      for (int i = 0; i < v->n_near; i++) link_badge_draw(&c, x + r + i * (2 * r + 8), y + 7, r, v->near_badge[i], 255); }
+      link_box(&c, x - UI(8), y - UI(4), w + UI(16), UI(22), 0x04141a, 170);
+      draw_text(&c, x, y, UI_TEXT(2), 0x9fd8e2, "NEARBY");
+      x += text_w("NEARBY", UI_TEXT(2)) + UI(10);
+      if (!v->n_near) draw_text(&c, x, y, UI_TEXT(2), 0x8fb4ba, "NONE YET");
+      for (int i = 0; i < v->n_near; i++) link_badge_draw(&c, x + r + i * (2 * r + UI(8)), y + 7 * UI_TEXT(2) / 2, r, v->near_badge[i], 255); }   /* (on the words' middle) */
 }
 int render_link_touch(const link_view_t *v, float x, float y, bool down, float dt) {
     int r = LINK_UI_NONE;
@@ -16839,18 +16863,18 @@ void render_link_drift(const link_view_t *v, uint16_t *fb, int stride, double cl
     (void)clock;
     if (!v->drifting) return;
     ctx_t c = ctx_full(fb, stride, 1.0f);
-    const int W = 336, H = 164, X = PAGE_X + (PAGE_W - W) / 2, Y = PAGE_Y + LINK_DRIFT_Y;
+    const int W = UI(336), H = UI(164), X = PAGE_X + (PAGE_W - W) / 2, Y = PAGE_Y + LINK_DRIFT_Y;
     shade_box(&c, X, Y, W, H);
     rect_edge(&c, X, Y, W, H, 0xffffff); rect_edge(&c, X + 1, Y + 1, W - 2, H - 2, 0x9fd8e2);
     static const char *const GRACE[4] = { "THE TANKS DRIFTED", "PUT THEM BACK SIDE BY SIDE", "AND KEEP THEM STILL", "OR THE FISH WILL SWIM HOME" };
     static const char *const HOME[4]  = { "THE TANKS DRIFTED", "THE FISH ARE SWIMMING HOME", "THEN THE DOOR CLOSES", "" };   /* past the grace */
     const char *const *L = v->drift_homeward ? HOME : GRACE;
-    for (int i = 0; i < 4; i++) draw_text(&c, X + (W - text_w(L[i], 2)) / 2, Y + 12 + i * 22, 2, i ? 0x9fd8e2 : 0xffffff, L[i]);
+    for (int i = 0; i < 4; i++) draw_text(&c, X + (W - text_w(L[i], UI_TEXT(2))) / 2, Y + UI(12) + i * UI(22), UI_TEXT(2), i ? 0x9fd8e2 : 0xffffff, L[i]);
     float left = v->drift_ms_left / (float)(v->drift_homeward ? LINK_HOMEWARD_MS : LINK_DRIFT_GRACE_MS); left = left < 0 ? 0 : left > 1 ? 1 : left;
-    rect_edge(&c, X + 24, Y + 104, W - 48, 8, 0x3f6a72);
-    rect_fill(&c, X + 26, Y + 106, (int)((W - 52) * left), 4, 0xffffff);
+    rect_edge(&c, X + UI(24), Y + UI(104), W - UI(48), UI(8), 0x3f6a72);
+    rect_fill(&c, X + UI(26), Y + UI(106), (int)((W - UI(52)) * left), UI(4), 0xffffff);
     /* DISCONNECT (Strato, 2026-10-05: "an easy way to unlink"): every door of this tank shuts now */
-    button(&c, PAGE_X + LINK_DISC_X, PAGE_Y + LINK_DISC_Y, LINK_DISC_W, MSP_CLOSE_H, 0x1c2f36, MSP_TEAL, "DISCONNECT", 2);
+    button(&c, PAGE_X + LINK_DISC_X, PAGE_Y + LINK_DISC_Y, LINK_DISC_W, MSP_CLOSE_H, 0x1c2f36, MSP_TEAL, "DISCONNECT", UI_TEXT(2));
 }
 /* the DRIFTED notice's DISCONNECT answers a tap only where the notice is seen (the 11-02 sweep: its hit ran under every
    page and card - a neighbor lifting their tank and a tap mid-page closed every door and ate the tap): no page up, and no
@@ -16862,7 +16886,7 @@ bool render_drift_live(const tank_t *t, bool page_up) {
 bool render_link_drift_hit(const link_view_t *v, float x, float y) {
     if (!v->drifting) return false;
     x -= PAGE_X; y -= PAGE_Y;
-    return x >= LINK_DISC_X - 10 && x < LINK_DISC_X + LINK_DISC_W + 10 && y >= LINK_DISC_Y - 8 && y < LINK_DISC_Y + MSP_CLOSE_H + 12;
+    return x >= LINK_DISC_X - UI(10) && x < LINK_DISC_X + LINK_DISC_W + UI(10) && y >= LINK_DISC_Y - UI(8) && y < LINK_DISC_Y + MSP_CLOSE_H + UI(12);
 }
 /* ---- THE ADVANCED PAGE (0.3.9.2) ---------------------------------------
  * Hidden behind a BOOT chord (common/advanced.c). Two rows on the settings

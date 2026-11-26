@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
 # SPDX-FileCopyrightText: 2026 Leonid Moiseichuk
+# SPDX-FileCopyrightText: 2026 MediaCutlet
+# MediaCutlet's are a few lines from upstream's MIT releases (v0.3.9.2 and
+# earlier); LICENSE-MIT-CYD says which.
 """gen_icons_small.py - the small copies of upstream's art a 320 x 240 board
 draws, appended to upstream's generated common/icons.c and common/icons.h.
 

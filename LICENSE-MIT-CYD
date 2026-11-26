@@ -26,7 +26,7 @@ fork's own commits and renamed from no upstream file, with every line LM's
   firmware/sdkconfig.defaults.cyd
   tools/build_cyd.sh
 
-Three more are LM's but for a few lines from upstream's MIT releases
+Four more are LM's but for a few lines from upstream's MIT releases
 (v0.3.9.2 and earlier). Those lines stay copyright MediaCutlet under the MIT
 License in NOTICE, so these files are MIT throughout, and their headers name
 both:
@@ -38,8 +38,10 @@ both:
   firmware/main/orientation.c     the NVS open lines of upstream's
   firmware/main/sleep_setting.c   brightness.c, and three includes from
                                   persist_port_esp.c
+  tools/gen_icons_small.py        the PIL import and the ROOT and SRC paths,
+                                  from upstream's tools/gen_icons.py
 
-Whoever reuses one of these three keeps MediaCutlet's copyright notice,
+Whoever reuses one of these four keeps MediaCutlet's copyright notice,
 "Copyright (c) 2026 MediaCutlet", beside LM's below. The permission notice
 is the same MIT text for both.
 

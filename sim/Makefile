@@ -269,6 +269,11 @@ endif
 # GRAPHICS (0.4.2): the grass loop's own tests again at LOW (one moment of HIGH's plan, still day and night) and MEDIUM (HIGH by day, a night loop by night)
 SELFTESTS += --selftest-den-shade --selftest-crab-walkin   # THE DEN'S SHADE on what is inside only, none with its lamp on; the crab into its shelter whole, its feet on the line (Strato 11-22, 0.4.3)
 SELFTESTS += --selftest-den                # THE CASTLE IN THREE STAGES, A SOLID BACK: no leaf over the crab in the den, the shape by the stage, the baked lights, the den's floor, the shop's upgrades, the save (0.4.3)
+# this fork: the 320 x 240 world leaves out the UPDATES page's two faces, UPDATES and WI-FI - its boards have no update
+# channel, so no UPDATES button, and they never ask for a network (CYD.md)
+ifdef 320X240
+SELFTESTS := $(filter-out --selftest-wifi3 --selftest-updui,$(SELFTESTS))
+endif
 SELFTESTS_LOW := --selftest-grassloop --selftest-grassloop-through --selftest-grassloop-nomask --selftest-grassloop-shrink --selftest-grasspatch
 ifneq ($(PT_BIG_WORLD),)     # (the big screens: the list above alone - no loop for GRAPHICS' levels to act on, no crab-depth legs)
 check: $(OUT)

@@ -46,3 +46,11 @@ tools/boards.local.sh
 sim/build-square/
 sim/fishsim-square
 sim/build-arm*/
+# (this fork) upstream 0.4's P4 and Tab5 worlds, and the 320 x 240 world built
+# in the panel's byte order (CYD.md, "Syncing with upstream", step 4)
+sim/build-p4/
+sim/fishsim-p4
+sim/build-tab5/
+sim/fishsim-tab5
+sim/build-320x240-swap/
+sim/fishsim-320x240-swap

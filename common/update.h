@@ -151,7 +151,13 @@ int  updates_forget_row(void);                              /* the row whose FOR
 #define UPD_W         (PAGE_W - 2 * UPD_X)
 #define UPD_OY        (SET_ROW1_Y - 58)         /* the rows' shift: 0, the watch -44 */
 #define UPD_BTN40     40
+#ifdef CONFIG_POCKET_TANK_320X240
+#define UPD_CLOSE_W   MSP_CLOSE_W               /* (this fork) a 320 x 240 board's MSP_CLOSE_W is its keeper page's 96. Its
+                                                   UPDATES page is never reached (no update channel), but update.c's assert
+                                                   - BACK is the GRAPHICS page's box - holds there as on every board */
+#else
 #define UPD_CLOSE_W   92                        /* BACK (UPD_TAP_CLOSE; on the WI-FI face UPD_TAP_NETS_BACK) */
+#endif
 #define UPD_CLOSE_H   SET_NAV_SQ
 #define UPD_CLOSE_X   ((PAGE_W - UPD_CLOSE_W) / 2)
 #define UPD_CLOSE_Y   SET_NAV_Y

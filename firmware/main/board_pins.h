@@ -51,7 +51,10 @@
  * reset never driven, and the 1.8's rail trim cut ALDO1 - a dark glass. */
 #ifndef BOARD_PINS_H
 #define BOARD_PINS_H
+#ifndef TOUCH_PORT_HOST   /* upstream 0.4.1 builds the touch port on the host too (sim/selftest_touch.c), where there is no
+                             sdkconfig.h: the CONFIG_ symbols come from sim/Makefile's -D there */
 #include "sdkconfig.h"
+#endif
 
 #if CONFIG_POCKET_TANK_CYD_320X240
 /* The 2.8" ESP32-S3 CYD, ES3C28P (lcdwiki.com, ES3C28P_ES2N28P_Specification_V1.0

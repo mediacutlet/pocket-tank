@@ -16180,23 +16180,25 @@ static void set_arrow(ctx_t *c, int x, int y, bool right, bool live) {
  * up is locked, its shackle swung open while the picture follows the tank
  * (the two differ in shape, not in color alone) */
 #ifdef CONFIG_POCKET_TANK_320X240
-/* (this fork) the CYD's segment is 24 px tall: the same picture a size down -
-   a 21 px ring, its arrowhead, an 8 px padlock */
+/* (this fork) the CYD's tile is 24 px tall, 20 inside its double edge (0.4.2: the
+   ROTATION row became a tile): the same picture a size down - a 17 px ring, its
+   arrowhead, a 6 px padlock. The 21 px ring of the old segment row ran over the
+   tile's edge at the top and the bottom */
 static void set_lock_icon(ctx_t *c, int cx, int cy, bool locked, uint32_t rgb) {
-    for (int dy = -11; dy <= 11; dy++)                      /* the ring, open at the top right */
-        for (int dx = -11; dx <= 11; dx++) {
+    for (int dy = -9; dy <= 9; dy++)                        /* the ring, open at the top right */
+        for (int dx = -9; dx <= 9; dx++) {
             float r2 = (float)(dx * dx + dy * dy);
-            if (r2 < 8.0f * 8.0f || r2 > 10.2f * 10.2f) continue;
+            if (r2 < 6.5f * 6.5f || r2 > 8.5f * 8.5f) continue;
             if (dx > 1 && dy < 0 && dy < -dx * 0.45f) continue;
             px_blend(c, cx + dx, cy + dy, rgb, 255);
         }
-    for (int i = 0; i < 4; i++)                             /* its arrowhead, at the top, pointing clockwise */
-        rect_fill(c, cx + 1 + i, cy - 9 - (3 - i), 1, 2 * (3 - i) + 1, rgb);
-    rect_fill(c, cx - 4, cy - 1, 8, 6, rgb);               /* the padlock's body */
-    int top = locked ? cy - 5 : cy - 7;                     /* the shackle: down in the body, or lifted with one leg free */
-    rect_fill(c, cx - 3, top, 6, 1, rgb);
-    rect_fill(c, cx - 3, top, 1, cy - 1 - top, rgb);
-    rect_fill(c, cx + 2, top, 1, locked ? cy - 1 - top : 2, rgb);
+    for (int i = 0; i < 3; i++)                             /* its arrowhead, at the top, pointing clockwise */
+        rect_fill(c, cx + 1 + i, cy - 7 - (2 - i), 1, 2 * (2 - i) + 1, rgb);
+    rect_fill(c, cx - 3, cy - 1, 6, 5, rgb);               /* the padlock's body */
+    int top = locked ? cy - 3 : cy - 5;                     /* the shackle: down in the body, or lifted with one leg free */
+    rect_fill(c, cx - 2, top, 4, 1, rgb);
+    rect_fill(c, cx - 2, top, 1, cy - 1 - top, rgb);
+    rect_fill(c, cx + 1, top, 1, locked ? cy - 1 - top : 2, rgb);
 }
 #else
 static void set_lock_icon(ctx_t *c, int cx, int cy, bool locked, uint32_t rgb) {
@@ -16219,11 +16221,20 @@ static void set_lock_icon(ctx_t *c, int cx, int cy, bool locked, uint32_t rgb) {
 #endif  /* !TANK_WORN */
 #if TANK_WORN || defined(CONFIG_POCKET_TANK_320X240)   /* (this fork: and a 320x240 board's SCREEN tile, where no IMU turns the picture) */
 /* SCREEN's picture: an arrow - up for NORMAL, down for TURNED (by its way up, not by color) */
+#ifdef CONFIG_POCKET_TANK_320X240
+/* (this fork) inside the 24 px tile's double edge: the watch's arrow a size down, 16 rows where its 22 ran over the edge */
+static void set_screen_icon(ctx_t *c, int cx, int cy, bool turned, uint32_t rgb) {
+    const int d = turned ? 1 : -1;
+    for (int i = 0; i < 6; i++) rect_fill(c, cx - i, cy + d * (8 - i), 2 * i + 1, 1, rgb);    /* the head: tip 8 px off centre */
+    rect_fill(c, cx - 2, turned ? cy - 7 : cy - 2, 5, 10, rgb);                              /* the shaft, up to the head */
+}
+#else
 static void set_screen_icon(ctx_t *c, int cx, int cy, bool turned, uint32_t rgb) {
     const int d = turned ? 1 : -1;
     for (int i = 0; i < 8; i++) rect_fill(c, cx - i, cy + d * (11 - i), 2 * i + 1, 1, rgb);   /* the head: tip 11 px off centre */
     rect_fill(c, cx - 3, turned ? cy - 10 : cy - 3, 7, 14, rgb);                             /* the shaft, up to the head */
 }
+#endif
 #endif
 /* THE TILE ROW (0.4.2, from the 11-06 mock Strato saw): ROTATION (the watch: SCREEN) | GRAPHICS, each one 40 px tile -
  * the icon at the left, a small name over the value. GRAPHICS' level is told by SHAPE: three rising bars, filled up to the
@@ -16233,9 +16244,24 @@ void render_set_gfx_level(int level) { s_gfx_down = (uint8_t)(level >= RENDER_GF
 bool render_gfx_low(void) { return s_gfx_down == GFX_LOW_DOWN; }
 const char *render_gfx_name(void) { return s_gfx_down == GFX_LOW_DOWN ? "LOW" : s_gfx_down == GFX_MEDIUM_DOWN ? "MEDIUM" : "HIGH"; }
 void render_settings_box(int which, int *x, int *y, int *w, int *h) {
+#ifdef CONFIG_POCKET_TANK_320X240
+    if (which == SET_BOX_UPDATES) { *x = SET_NAV_X(which); *y = SET_NAV_Y; *w = *h = 0; return; }   /* (this fork) not drawn - no update
+                                                    channel on a 320 x 240 board (CYD.md): an empty box where it would stand */
+#endif
     if (which >= SET_BOX_UPDATES && which <= SET_BOX_CLOSE) { *x = SET_NAV_X(which); *y = SET_NAV_Y; *w = *h = SET_NAV_SQ; return; }
     *x = which == SET_BOX_GFX ? SET_TILE_X1 : SET_TILE_X0; *y = SET_SEG_Y(SET_ROW5_Y); *w = SET_TILE_W; *h = SET_SEG_H;
 }
+#ifdef CONFIG_POCKET_TANK_320X240
+/* (this fork) inside the 24 px tile's double edge: the bars a size down, 16 rows where the 1.8's 22 ran over the edge -
+   5 px wide, 7 apart, 6 / 11 / 16 tall, a hollow one in a 1 px line (a 2 px one would leave it a 1 px slit) */
+static void set_gfx_icon(ctx_t *c, int x, int cy, int level, uint32_t rgb) {
+    for (int i = 0; i < 3; i++) {
+        const int h = 6 + 5 * i, bx = x + i * 7, by = cy + 8 - h;
+        if (i < level) rect_fill(c, bx, by, 5, h, rgb);
+        else { rect_fill(c, bx, by, 5, 1, rgb); rect_fill(c, bx, by + h - 1, 5, 1, rgb); rect_fill(c, bx, by, 1, h, rgb); rect_fill(c, bx + 4, by, 1, h, rgb); }
+    }
+}
+#else
 static void set_gfx_icon(ctx_t *c, int x, int cy, int level, uint32_t rgb) {
     for (int i = 0; i < 3; i++) {
         const int h = 8 + 7 * i, bx = x + i * 10, by = cy + 11 - h;
@@ -16243,12 +16269,20 @@ static void set_gfx_icon(ctx_t *c, int x, int cy, int level, uint32_t rgb) {
         else { rect_fill(c, bx, by, 7, 2, rgb); rect_fill(c, bx, by + h - 2, 7, 2, rgb); rect_fill(c, bx, by, 2, h, rgb); rect_fill(c, bx + 5, by, 2, h, rgb); }
     }
 }
+#endif
 static void set_tile_box(ctx_t *c, int which, bool on, const char *what, const char *word) {
     int x, y, w, h; render_settings_box(which, &x, &y, &w, &h);
     button(c, x, y, w, h, on ? MSP_TEAL : 0x1c2f36, on ? MSP_TEAL : MSP_DIM, "", UI_TEXT(2));
-    /* (this fork: the words' x stays - the icons left of them keep their size - and their lines take the tile's height) */
-    draw_text_8px(c, x + 50, y + UI(6), on ? MSP_INK : MSP_QUIET, what);
-    draw_text(c, x + 50, y + UI(18), UI_TEXT(2), on ? MSP_INK : 0xffffff, word);
+#ifdef CONFIG_POCKET_TANK_320X240
+    /* (this fork) the words' x stays - the icons left of them are drawn a size down, not narrower - and in the 24 px
+       tile the 8 px name and the size 1 value stand a row apart, the pair centred (UI(18) put the value on the name's
+       last row) */
+    draw_text_8px(c, x + 50, y + (h - 16) / 2, on ? MSP_INK : MSP_QUIET, what);
+    draw_text(c, x + 50, y + (h - 16) / 2 + 9, UI_TEXT(2), on ? MSP_INK : 0xffffff, word);
+#else
+    draw_text_8px(c, x + 50, y + 6, on ? MSP_INK : MSP_QUIET, what);
+    draw_text(c, x + 50, y + 18, 2, on ? MSP_INK : 0xffffff, word);
+#endif
 }
 static void set_tiles(ctx_t *c, const tank_t *t) {
     const int lv = render_gfx_level(), y = SET_SEG_Y(SET_ROW5_Y);
@@ -16285,6 +16319,11 @@ static const char *const GFXP_Q[3] = { "LOW", "MEDIUM", "HIGH" };
 #define GFXP_NOTE_Y   SET_ROW3_Y                 /* ONE MOMENT: the third row's line, centred */
 #define GFXP_BACK_W   MSP_CLOSE_W                /* BACK: a text button in the settings foot's own band (SET_NAV_Y, its squares' height), centred - */
 #define GFXP_BACK_X   ((PAGE_W - GFXP_BACK_W) / 2)   /* inside the glass on every board, the bowl too (the ADVANCED page's BACK corner is on its circle) */
+#ifdef CONFIG_POCKET_TANK_320X240
+/* (this fork) a 320 x 240 board's foot is the version line, LINK and CLOSE on the keeper foot's last squares (render.h): BACK in
+   the middle of the band stands over the version line, and its drawn box is clear of LINK's square - only their slops meet */
+_Static_assert(GFXP_BACK_X >= SET_LABEL_X && GFXP_BACK_X + GFXP_BACK_W <= SET_NAV_X(1), "the GRAPHICS page's BACK beside the settings foot's LINK");
+#endif
 bool render_gfx_page(void) { return s_gfxp; }
 bool render_gfx_busy(void) { return s_gfx_busy || s_gfx_day; }           /* a bake is owed (render_gfx_settle is worth calling) */
 bool render_gfx_waiting(void) { return (s_gfx_busy || s_gfx_day) && !s_gfx_gaveup; }   /* ... and ONE MOMENT says so */
@@ -16391,6 +16430,18 @@ static int set_segment(float x, int n) {
  * a step: render_settings_touch takes it); the LIGHTS OUT row's own hits are LIGHT_PREV / LIGHT_NEXT (its
  * left and right halves). The foot and the tiles: where render_settings_box draws them (the bands: render.h). */
 enum { SET_HIT_LIGHT_PREV = 100, SET_HIT_LIGHT_NEXT };
+/* (this fork) how far above its segments a row's band begins, here and on the GRAPHICS page: upstream's 12 (fingers report low on
+   the 1.8). On a 320 x 240 board UI(6), 4 px: there the segments stand 4 to 6 px apart, and UI(12)'s 8 reached into the row above -
+   the last rows of BRIGHTNESS's knob read as VOLUME, of QUALITY's segments as VIGNETTE - with no landing bias on that glass for it
+   to make up for (CYD.md, Touch) */
+#ifdef CONFIG_POCKET_TANK_320X240
+#define SET_BAND_UP UI(6)
+_Static_assert(SET_SEG_Y(SET_ROW2_Y) - SET_BAND_UP >= SET_SEG_Y(SET_ROW1_Y) + SET_SEG_H && SET_SEG_Y(SET_ROW3_Y) - SET_BAND_UP >= SET_SEG_Y(SET_ROW2_Y) + SET_SEG_H &&
+               SET_SEG_Y(SET_ROW4_Y) - SET_BAND_UP >= SET_SEG_Y(SET_ROW3_Y) + SET_SEG_H && SET_SEG_Y(SET_ROW5_Y) - SET_BAND_UP >= SET_SEG_Y(SET_ROW4_Y) + SET_SEG_H &&
+               SET_SEG_Y(SET_ROW6_Y) - SET_BAND_UP >= SET_SEG_Y(SET_ROW5_Y) + SET_SEG_H, "a settings row's band reaches into the row above");
+#else
+#define SET_BAND_UP 12
+#endif
 int render_settings_tap(float x, float y, int *value) {
     x -= PAGE_X; y -= PAGE_Y;                    /* the page's own coordinates */
     *value = 0;
@@ -16409,19 +16460,19 @@ int render_settings_tap(float x, float y, int *value) {
     /* the row bands: from a little above each segment down to the next row
        (fingers report low); the tile row's stops at the foot's band */
     int seg = set_segment(x, 3), two = set_segment(x, 2);
-    if (y >= SET_SEG_Y(SET_ROW1_Y) - UI(12) && y < SET_SEG_Y(SET_ROW2_Y) - UI(12)) { if (seg < 0) return SET_TAP_NONE; *value = set_bright_at(x); return SET_TAP_BRIGHT; }
-    if (y >= SET_SEG_Y(SET_ROW2_Y) - UI(12) && y < SET_SEG_Y(SET_ROW3_Y) - UI(12)) { if (seg < 0) return SET_TAP_NONE; *value = set_volume_at(x); return SET_TAP_VOLUME; }
-    if (y >= SET_SEG_Y(SET_ROW3_Y) - UI(12) && y < SET_SEG_Y(SET_ROW4_Y) - UI(12)) { if (seg < 0) return SET_TAP_NONE; *value = 0; return x < SET_SPAN_MID ? SET_HIT_LIGHT_PREV : SET_HIT_LIGHT_NEXT; }
-    if (y >= SET_SEG_Y(SET_ROW4_Y) - UI(12) && y < SET_SEG_Y(SET_ROW5_Y) - UI(12)) { if (two < 0) return SET_TAP_NONE; *value = two == 0; return SET_TAP_FEED; }
+    if (y >= SET_SEG_Y(SET_ROW1_Y) - SET_BAND_UP && y < SET_SEG_Y(SET_ROW2_Y) - SET_BAND_UP) { if (seg < 0) return SET_TAP_NONE; *value = set_bright_at(x); return SET_TAP_BRIGHT; }
+    if (y >= SET_SEG_Y(SET_ROW2_Y) - SET_BAND_UP && y < SET_SEG_Y(SET_ROW3_Y) - SET_BAND_UP) { if (seg < 0) return SET_TAP_NONE; *value = set_volume_at(x); return SET_TAP_VOLUME; }
+    if (y >= SET_SEG_Y(SET_ROW3_Y) - SET_BAND_UP && y < SET_SEG_Y(SET_ROW4_Y) - SET_BAND_UP) { if (seg < 0) return SET_TAP_NONE; *value = 0; return x < SET_SPAN_MID ? SET_HIT_LIGHT_PREV : SET_HIT_LIGHT_NEXT; }
+    if (y >= SET_SEG_Y(SET_ROW4_Y) - SET_BAND_UP && y < SET_SEG_Y(SET_ROW5_Y) - SET_BAND_UP) { if (two < 0) return SET_TAP_NONE; *value = two == 0; return SET_TAP_FEED; }
 #ifdef CONFIG_POCKET_TANK_320X240
     /* (this fork) the SLEEP row under the tiles (not on a deepsleep build): three segments, as BRIGHTNESS - SET_SLEEP_*.
        Its band runs from a little above its segments to the foot's, and the tiles' band ends where it begins */
-    if (g_set_sleep >= 0 && y >= SET_SEG_Y(SET_ROW6_Y) - UI(12) && y < SET_NAV_HIT_Y0) {
+    if (g_set_sleep >= 0 && y >= SET_SEG_Y(SET_ROW6_Y) - SET_BAND_UP && y < SET_NAV_HIT_Y0) {
         if (seg < 0) return SET_TAP_NONE;
         *value = seg; return SET_TAP_SLEEP;
     }
 #endif
-    if (y >= SET_SEG_Y(SET_ROW5_Y) - UI(12) && y < SET_TILE_HIT_Y1) {   /* THE TILES (0.4.2): ROTATION (SCREEN) | GRAPHICS */
+    if (y >= SET_SEG_Y(SET_ROW5_Y) - SET_BAND_UP && y < SET_TILE_HIT_Y1) {   /* THE TILES (0.4.2): ROTATION (SCREEN) | GRAPHICS */
 #ifdef CONFIG_POCKET_TANK_320X240
         if (!g_set_imu && x >= SET_TILE_X0 - SET_TILE_OUT && x < SET_TILE_X0 + SET_TILE_W + SET_TILE_GAP / 2) {
             *value = !g_set_flipped; return SET_TAP_FLIP;   /* (this fork) no IMU: the SCREEN tile, UPRIGHT <-> FLIPPED (*value 1 = FLIPPED) */
@@ -16441,19 +16492,24 @@ int render_gfx_page_tap(float x, float y, int *value) {
     *value = 0;
     if (y >= SET_NAV_HIT_Y1) return SET_TAP_NONE;
     if (y >= SET_NAV_HIT_Y0) return x >= GFXP_BACK_X - 12 && x < GFXP_BACK_X + GFXP_BACK_W + 12 ? SET_TAP_GFX_PAGE : SET_TAP_NONE;
-    if (y >= SET_SEG_Y(SET_ROW1_Y) - 12 && y < SET_SEG_Y(SET_ROW2_Y) - 12) {
+    if (y >= SET_SEG_Y(SET_ROW1_Y) - SET_BAND_UP && y < SET_SEG_Y(SET_ROW2_Y) - SET_BAND_UP) {
         const int k = set_segment(x, 3);
-        if (k < 0 || x >= SET_SEG_X + SET_SPAN_W + 12) return SET_TAP_NONE;
+        if (k < 0 || x >= SET_SEG_X + SET_SPAN_W + UI(12)) return SET_TAP_NONE;
         *value = RENDER_GFX_LOW + k; return SET_TAP_GFX;
     }
-    if (y >= SET_SEG_Y(SET_ROW2_Y) - 12 && y < SET_SEG_Y(SET_ROW3_Y) - 12) {
+    if (y >= SET_SEG_Y(SET_ROW2_Y) - SET_BAND_UP && y < SET_SEG_Y(SET_ROW3_Y) - SET_BAND_UP) {
         const int k = set_segment(x, 2);
-        if (k < 0 || x >= SET_SEG_X + SET_SEG_DX + SET_SEG_W + 12) return SET_TAP_NONE;
+        if (k < 0 || x >= SET_SEG_X + SET_SEG_DX + SET_SEG_W + UI(12)) return SET_TAP_NONE;
         *value = k == 0; return SET_TAP_VIG;
     }
     return SET_TAP_NONE;
 }
 #define GFXP_HIT 200                             /* (a press on the GRAPHICS page, in s_set_hit: GFXP_HIT + what * 8 + value - never a settings row's) */
+/* (this fork) the 320x240 boards' SET_TAP_FLIP and SET_TAP_SLEEP (render.h: past upstream's taps) are answers of
+   render_settings_tap and values of s_set_hit too, beside the LIGHTS OUT row's hits and GFXP_HIT's codes: below
+   the first, so no tap reads as another. A check, no code */
+_Static_assert(SET_TAP_FLIP < SET_TAP_SLEEP && SET_TAP_SLEEP < SET_HIT_LIGHT_PREV && SET_HIT_LIGHT_NEXT < GFXP_HIT,
+               "the fork's settings taps must not reuse render.c's own hit numbers");
 static int gfxp_hit(float x, float y) { int v = 0; const int r = render_gfx_page_tap(x, y, &v); return r ? GFXP_HIT + r * 8 + v : SET_TAP_NONE; }
 static bool s_set_down; static float s_set_px, s_set_py; static int s_set_hit, s_set_hv;   /* render_settings_touch's press in hand */
 /* THE PAGE TURNED UNDER THE FINGER (0.4.2): SCREEN (the watch) turns the picture 180 at the tap's lift, and ROTATION's

@@ -1897,7 +1897,9 @@ _Static_assert(SHP_MODAL_X >= 0 && SHP_MODAL_X + SHP_MODAL_W <= PAGE_W && SHP_MO
    deepsleep (render_settings_set_sleep), and the foot: its squares, the
    version line beside them. No UPDATES: a 320x240 board has no update channel
    (CYD.md). Upstream's page lost its quiet-at-night note in 0.4.2 (it stood at
-   y 83); the rows keep their places, so LIGHTS OUT is still 42 px under VOLUME */
+   y 83, 42 px between VOLUME and LIGHTS OUT); the four rows under VOLUME took
+   that room as a 30 px pitch (6 px between segments), which leaves 16 px over
+   the foot's squares, where SLEEP's segments had touched their band */
 #undef  SET_TITLE_Y
 #define SET_TITLE_Y   6
 #undef  SET_ROW1_Y
@@ -1905,12 +1907,12 @@ _Static_assert(SHP_MODAL_X >= 0 && SHP_MODAL_X + SHP_MODAL_W <= PAGE_W && SHP_MO
 #undef  SET_ROW2_Y
 #define SET_ROW2_Y    62             /* VOLUME */
 #undef  SET_ROW3_Y
-#define SET_ROW3_Y    104            /* LIGHTS OUT */
+#define SET_ROW3_Y    92             /* LIGHTS OUT */
 #undef  SET_ROW4_Y
-#define SET_ROW4_Y    132            /* AUTO FEED */
+#define SET_ROW4_Y    122            /* AUTO FEED */
 #undef  SET_ROW5_Y
-#define SET_ROW5_Y    160            /* the tiles: SCREEN (no IMU) or ROTATION (an IMU) | GRAPHICS */
-#define SET_ROW6_Y    188            /* SLEEP (not on a deepsleep build) */
+#define SET_ROW5_Y    152            /* the tiles: SCREEN (no IMU) or ROTATION (an IMU) | GRAPHICS */
+#define SET_ROW6_Y    182            /* SLEEP (not on a deepsleep build) */
 #undef  SET_LABEL_X
 #define SET_LABEL_X   CYD_GLASS_X(8)
 #undef  SET_SEG_X
@@ -1939,6 +1941,16 @@ _Static_assert(SHP_MODAL_X >= 0 && SHP_MODAL_X + SHP_MODAL_W <= PAGE_W && SHP_MO
 #define SET_NAV_X(i)  (MSP_FOOT_UPG_X + (MSP_FOOT_CLOSE_X + MSP_CLOSE_W - SET_NAV_SQ - MSP_FOOT_UPG_X) * ((i) + 2) / 4)   /* render_ms_foot_box's, squares 2..4 */
 #undef  SET_VER_Y
 #define SET_VER_Y     (PAGE_H - 8 - 6)
+/* the page as laid out: the title and every row's segments each under the one above (SET_SEG_H
+   in a 28 or 30 px pitch), the labels and the segments' span on the glass, the foot's two
+   squares apart and inside it, on the page's last rows (SLEEP over them: the block's first
+   assert, at its end) */
+_Static_assert(SET_TITLE_Y + 7 * UI_TEXT(3) < SET_SEG_Y(SET_ROW1_Y) && SET_SEG_Y(SET_ROW1_Y) + SET_SEG_H < SET_SEG_Y(SET_ROW2_Y) &&
+               SET_SEG_Y(SET_ROW2_Y) + SET_SEG_H < SET_SEG_Y(SET_ROW3_Y) && SET_SEG_Y(SET_ROW3_Y) + SET_SEG_H < SET_SEG_Y(SET_ROW4_Y) &&
+               SET_SEG_Y(SET_ROW4_Y) + SET_SEG_H < SET_SEG_Y(SET_ROW5_Y) && SET_SEG_Y(SET_ROW5_Y) + SET_SEG_H < SET_SEG_Y(SET_ROW6_Y) &&
+               SET_LABEL_X >= CYD_GLASS_X(0) && SET_SEG_X + SET_SPAN_W <= CYD_GLASS_X(TANK_W) && SET_NAV_Y + SET_NAV_SQ <= PAGE_H &&
+               SET_NAV_X(1) + SET_NAV_SQ <= SET_NAV_X(2) && SET_NAV_X(2) + SET_NAV_SQ <= CYD_GLASS_X(TANK_W),
+               "the 320x240 settings page: its rows one under another, on the glass, over the foot");
 /* MY TANKS (0.4.2): its icon foot, THE LIBRARY's rows and notes, the touch lock's note - this
    board's values for upstream's SH_* and note names */
 

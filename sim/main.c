@@ -7524,10 +7524,21 @@ static int selftest_settings_nav(void) {
     static uint16_t fb[TANK_W * TANK_H], fb2[TANK_W * TANK_H];
     tank_init(&tank, 2026); tank_new_population(&tank); tank_ensure_ids(&tank);
     render_set_gfx_level(RENDER_GFX_HIGH);
+#ifdef CONFIG_POCKET_TANK_320X240
+    render_settings_set_imu(true);                       /* (this fork) a 320 x 240 board with an IMU answering (the CYD with its breakout): the
+                                                            tile is ROTATION, as on upstream's desk tanks. With none it is SCREEN: part 7 */
+#endif
     int v = 0;
     /* 1. on the glass, and hit where drawn */
     for (int b = 0; b < SET_BOX_N; b++) {
         int x, y, w, h; render_settings_box(b, &x, &y, &w, &h);
+#ifdef CONFIG_POCKET_TANK_320X240
+        if (b == SET_BOX_UPDATES) {                      /* (this fork) no update channel on a 320 x 240 board: nothing drawn (an empty box), and the
+                                                            sweep (part 5) finds no point that reads UPDATES */
+            if (w || h) SNF("UPDATES is drawn %dx%d on a 320 x 240 board (it has no update channel)", w, h);
+            continue;
+        }
+#endif
         const float fx[4] = { PG_X(x), PG_X(x + w), PG_X(x), PG_X(x + w) }, fy[4] = { PG_Y(y), PG_Y(y), PG_Y(y + h), PG_Y(y + h) };
         for (int k = 0; k < 4; k++) if (!snav_on_glass(fx[k], fy[k], 4)) SNF("%s: its corner at frame %.0f,%.0f is not 4 px inside the glass", NAME[b], fx[k], fy[k]);
         const int px[5] = { x + w / 2, x + 2, x + w - 3, x + 2, x + w - 3 }, py[5] = { y + h / 2, y + 2, y + 2, y + h - 3, y + h - 3 };
@@ -7535,6 +7546,9 @@ static int selftest_settings_nav(void) {
     }
     /* 2. each does its job at the tap */
     for (int b = SET_BOX_UPDATES; b <= SET_BOX_CLOSE; b++) {
+#ifdef CONFIG_POCKET_TANK_320X240
+        if (b == SET_BOX_UPDATES) continue;              /* (this fork: none to tap - part 1) */
+#endif
         int r = snav_tap(setp_bx(b), setp_by(b), &v);
         if (r != WANT[b]) SNF("%s tapped -> %d", NAME[b], r);
     }
@@ -7577,10 +7591,19 @@ static int selftest_settings_nav(void) {
             const int px[5] = { x + w / 2, x + 2, x + w - 3, x + 2, x + w - 3 }, py[5] = { y + h / 2, y + 2, y + 2, y + h - 3, y + h - 3 };
             for (int k = 0; k < 5; k++) { int u = -1; int q = render_gfx_page_tap(PG_X(px[k]), PG_Y(py[k]), &u);
                 if (q != GW[b] || u != GV[b]) SNF("GRAPHICS page %s at page %d,%d (drawn %d,%d %dx%d) reads %d/%d", GN[b], px[k], py[k], x, y, w, h, q, u); }
+#ifdef CONFIG_POCKET_TANK_320X240
+            /* (this fork) the page's words are UI_TEXT(2) on a 320 x 240 board (set_row: size 1 there, as the settings page's own) */
+            if (render_text_w(GN[b], UI_TEXT(2)) > w - 6) SNF("GRAPHICS page: %s (%d px) does not fit its %d px button", GN[b], render_text_w(GN[b], UI_TEXT(2)), w);
+#else
             if (render_text_w(GN[b], 2) > w - 6) SNF("GRAPHICS page: %s (%d px) does not fit its %d px button", GN[b], render_text_w(GN[b], 2), w);
+#endif
         }
         {   static const char *const LBL[2] = { "QUALITY", "VIGNETTE" };
+#ifdef CONFIG_POCKET_TANK_320X240
+            for (int k = 0; k < 2; k++) if (SET_LABEL_X + render_text_w(LBL[k], UI_TEXT(2)) + 6 > SET_SEG_X) SNF("GRAPHICS page: the label %s runs into its segments", LBL[k]);   /* (this fork: as above) */
+#else
             for (int k = 0; k < 2; k++) if (SET_LABEL_X + render_text_w(LBL[k], 2) + 6 > SET_SEG_X) SNF("GRAPHICS page: the label %s runs into its segments", LBL[k]);
+#endif
             const int tw = render_text_w("GRAPHICS", 3), mw = render_text_w("ONE MOMENT", 2);
             const struct { const char *n; int x, y, w, h; } TX[4] = { { "the title", (PAGE_W - tw) / 2, SET_TITLE_Y, tw, 21 }, { "ONE MOMENT", (PAGE_W - mw) / 2, SET_ROW3_Y, mw, 14 },
                 { "QUALITY", SET_LABEL_X, SET_ROW1_Y, render_text_w("QUALITY", 2), 14 }, { "VIGNETTE", SET_LABEL_X, SET_ROW2_Y, render_text_w("VIGNETTE", 2), 14 } };
@@ -7745,9 +7768,17 @@ static int selftest_settings_nav(void) {
             }
             /* ONLY A CHANGE MADE HERE says ONE MOMENT (the second review): the page opened while the loop is patching (a piece moved, a nibble)
                or has no plan yet shows nothing and bakes nothing behind it */
+#ifdef CONFIG_POCKET_TANK_320X240
+            /* (this fork) the full castle's 92 px half and the 30 px margin keep it to floor x 122 .. 198 on the 320 px floor, where the
+               448 floor's 150 and 170 (107 and 121) both land on 122 - no move, nothing to patch. The middle of the floor, 20 px apart */
+            {   tank.sd_unlocks |= SD_ITEM_CASTLE; tank_castle_place(&tank); tank_decor_set(&tank, 2, TANK_W / 2.0f - 10, DECOR_Z_BACK);
+                GP_WHOLE(false); render_debug_gfx_idle(); render_settings_home();
+                tank_decor_set(&tank, 2, TANK_W / 2.0f + 10, DECOR_Z_BACK); GP_FRAMES(1, false);
+#else
             {   tank.sd_unlocks |= SD_ITEM_CASTLE; tank_castle_place(&tank); tank_decor_set(&tank, 2, TANK_FLOOR_X(150), DECOR_Z_BACK);
                 GP_WHOLE(false); render_debug_gfx_idle(); render_settings_home();
                 tank_decor_set(&tank, 2, TANK_FLOOR_X(170), DECOR_Z_BACK); GP_FRAMES(1, false);
+#endif
                 if (!render_grass_loop_patching() || render_grass_loop_ready() >= render_grass_loop_n()) SNF("the patch's stage: the castle moved and the loop is not patching (%d of %d)", render_grass_loop_ready(), render_grass_loop_n());
                 for (int pass = 0; pass < 2; pass++) {
                     if (pass) { render_settings_home(); render_grass_loop_on(false); render_grass_loop_on(true); if (render_grass_loop_n()) SNF("the no-plan stage: a plan"); }
@@ -8025,6 +8056,63 @@ static int selftest_settings_nav(void) {
                    OLD[o].name, OLD[o].x, OLD[o].y, OLD[o].w, OLD[o].h, none, now, cr ? NAME[snav_box_of(cr)] : "nothing");
         }
     }
+#ifdef CONFIG_POCKET_TANK_320X240
+    /* 7. (this fork) a 320 x 240 board with no IMU answering - the CYD without its breakout, the Touch-LCD-2 (render.h): the tile is
+          SCREEN, UPRIGHT / FLIPPED, where ROTATION stands. Hit where drawn (its centre and corners) as SET_TAP_FLIP with the way up it
+          asks for (*value 1 = FLIPPED) for the platform to apply; its word is the way up the platform reports, and only the tile
+          redraws; the picture turns at once, so as after ROTATION's unlock a press 0.15 s on - a double tap's second half, on the
+          same spot of the glass, now the frame's other end - answers nothing, and 0.65 s on it is the page's; every point that
+          reads SCREEN is within its reach */
+    {   render_settings_set_imu(false); render_settings_set_flip(false); render_settings_home();
+        int x, y, w, h; render_settings_box(SET_BOX_TILE, &x, &y, &w, &h);
+        const int px[5] = { x + w / 2, x + 2, x + w - 3, x + 2, x + w - 3 }, py[5] = { y + h / 2, y + 2, y + 2, y + h - 3, y + h - 3 };
+        for (int k = 0; k < 5; k++) { int r = render_settings_tap(PG_X(px[k]), PG_Y(py[k]), &v);
+            if (r != SET_TAP_FLIP || v != 1) SNF("SCREEN (no IMU) at page %d,%d (drawn %d,%d %dx%d) reads %d/%d (want %d/1)", px[k], py[k], x, y, w, h, r, v, SET_TAP_FLIP); }
+        int r = snav_tap(setp_bx(SET_BOX_TILE), setp_by(SET_BOX_TILE), &v);
+        if (r != SET_TAP_FLIP || v != 1) SNF("SCREEN (no IMU) tapped -> %d/%d (want FLIPPED: %d/1)", r, v, SET_TAP_FLIP);
+        render_settings_set_flip(true);                  /* (the platform turns the picture and says so) */
+        r = snav_tap(setp_bx(SET_BOX_TILE), setp_by(SET_BOX_TILE), &v);
+        if (r != SET_TAP_FLIP || v != 0) SNF("SCREEN (no IMU), FLIPPED, tapped -> %d/%d (want UPRIGHT: %d/0)", r, v, SET_TAP_FLIP);
+        render_settings_set_flip(false); render_settings(&tank, fb, TANK_W, 60, 100);
+        render_settings_set_flip(true); render_settings(&tank, fb2, TANK_W, 60, 100);
+        int inside = 0, outside = 0;
+        for (int yy = 0; yy < TANK_H; yy++) for (int xx = 0; xx < TANK_W; xx++) if (fb[yy * TANK_W + xx] != fb2[yy * TANK_W + xx]) {
+            const int qx = xx - PAGE_X, qy = yy - PAGE_Y;
+            if (qx >= x && qx < x + w && qy >= y && qy < y + h) inside++; else outside++; }
+        if (!inside || outside) SNF("SCREEN (no IMU) UPRIGHT / FLIPPED: %d px changed in its tile, %d outside it", inside, outside);
+        render_settings_set_flip(false);
+        int spent = 0, pts = 0;
+        for (int qy = y + 2; qy < y + h - 2; qy += 6) for (int qx = x + 2; qx < x + w - 2; qx += 12) {
+            const float mx = TANK_W - 1 - PG_X(qx), my = TANK_H - 1 - PG_Y(qy);   /* the same spot, the picture turned */
+            int u = 0; if (render_settings_tap(mx, my, &u) == SET_TAP_NONE) continue;
+            pts++;
+            tank_light_choice_set(&tank, 3);                                       /* (LIGHTS OUT mid-list: either arrow steps) */
+            r = snav_tap(qx, qy, &v); if (r != SET_TAP_FLIP) SNF("SCREEN (no IMU) at %d,%d -> %d", qx, qy, r);
+            const tank_t before = tank;
+            tank.clock += 0.15;                                                    /* the double's second half */
+            render_settings_touch(&tank, mx, my, true, &v); r = render_settings_touch(&tank, mx, my, false, &v);
+            if (r || before.autofeed_off != tank.autofeed_off || tank_light_choice(&before) != tank_light_choice(&tank) || before.light_idle_s != tank.light_idle_s
+                || render_gfx_level() != RENDER_GFX_HIGH || render_gfx_page())
+                SNF("SCREEN (no IMU): a press 0.15 s after the turn at frame %.0f,%.0f (the tile's %d,%d) answered %d/%d", mx, my, qx, qy, r, v);
+            spent++;
+            tank.clock += 0.5;
+            render_settings_touch(&tank, mx, my, true, &v); r = render_settings_touch(&tank, mx, my, false, &v);
+            if (r == SET_TAP_NONE) SNF("SCREEN (no IMU): the same press 0.65 s after the turn answered nothing at frame %.0f,%.0f", mx, my);
+            tank.autofeed_off = false; render_set_gfx_level(RENDER_GFX_HIGH); render_settings_home();
+        }
+        tank_light_choice_set(&tank, 0);
+        if (!pts) SNF("SCREEN (no IMU): no spot of the tile has a control at the frame's other end - the turn's wait tests nothing");
+        int sw = 0;
+        for (int yy = 0; yy < TANK_H; yy += 2) for (int xx = 0; xx < TANK_W; xx += 2) {
+            if (render_settings_tap((float)xx, (float)yy, &v) != SET_TAP_FLIP) continue;
+            sw++;
+            if (!snav_near(SET_BOX_TILE, xx - PAGE_X, yy - PAGE_Y)) SNF("frame %d,%d reads SCREEN (no IMU), drawn more than 12 px away", xx, yy);
+        }
+        printf("selftest-settings-nav: no IMU (a 320 x 240 board) - the tile is SCREEN: hit where drawn as FLIP with the way up it asks for, "
+               "its word the platform's (the tile alone redrawn); the turn spent %d of %d presses 0.15 s on, and 0.65 s on each one answered; %d swept points within reach\n", spent, pts, sw);
+        render_settings_set_imu(true);
+    }
+#endif
     for (int b = 0; b < SET_BOX_N; b++) { int x, y, w, h; render_settings_box(b, &x, &y, &w, &h);
         printf("selftest-settings-nav: %-8s page %3d,%3d %dx%d (frame %d,%d)\n", NAME[b], x, y, w, h, PG_X(x), PG_Y(y)); }
     printf("selftest-settings-nav: %dx%d - five controls on the glass and hit where drawn, each at its tap; GRAPHICS a door to its page, "

@@ -68,6 +68,18 @@ enum { SHELF_TIME_DORMANT = 0, SHELF_TIME_PAUSED = 1 };
 enum { SHELF_TYPE_FISH = 0, SHELF_TYPE_JELLY = 1, SHELF_TYPE_PIRANHA = 2, SHELF_TYPE_MINNOWS = 3 };   /* (0.4.2: the piranha tank, the schooling minnows - experimental, as the jelly tank) */
 /* an EXPERIMENTAL tank: any type but the fish tank - no fish tank's code under it, its save an empty tank, it buys and earns nothing */
 #define SHELF_TYPE_EXPERIMENTAL(t) ((t) != SHELF_TYPE_FISH)       /* the jelly tank: the crew's experimental tank (docs/jelly-tank-0.6.md) */
+/* (this fork) THE CREW'S TANKS IN THE LIBRARY. The jelly tank, the piranhas and the minnows are the Hatchery Crew's, and a
+ * board is on the crew only by the last crew check's answer (net_port_crew), which update mode asks - and a 320 x 240 board
+ * never enters update mode (it has no UPDATES button: CYD.md). There they would stand locked for good, and every tap on one
+ * would open a note promising what a Patreon membership can never bring to that board; so its THE LIBRARY shows the fish
+ * tank alone - no jelly row, no second page - as its ADVANCED page has no BATTERY row (ADV_BATTERY_ROW). Upstream's crew
+ * gate is untouched, and the serial console's `shelf jelly | minnows | piranha` still makes one on the bench. A plain
+ * 0 / 1, as ADV_BATTERY_ROW: firmware/main/main.c reads it */
+#ifdef CONFIG_POCKET_TANK_320X240
+#define SHELF_XT_LIBRARY 0
+#else
+#define SHELF_XT_LIBRARY 1
+#endif
 
 /* a tank on the shelf (or on the glass: shelf_now) - the slot header's own fields, appended only */
 typedef struct {

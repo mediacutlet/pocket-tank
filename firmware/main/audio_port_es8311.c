@@ -1,14 +1,15 @@
-/* audio_port_es8311.c - I2S -> ES8311 -> NS4150B -> the 12 mm speaker.
- * See audio_port.h. Pins from resources/ESP32-S3-Touch-AMOLED-1.8.pdf.
- * The WATCH (2.06) wires its bit clock and data elsewhere (41 / 40): GPIO 9
+/* audio_port_es8311.c - I2S -> ES8311 -> the power amplifier -> the speaker.
+ * See audio_port.h. The AMOLED boards' pins from resources/ESP32-S3-Touch-AMOLED-1.8.pdf;
+ * the WATCH (2.06) wires its bit clock and data elsewhere (41 / 40): GPIO 9
  * and 8, the 1.8's, are its touch and panel RESET lines - never driven here
- * on that board (board_pins.h). */
+ * on that board. The CYD's pins, and its amplifier enabled LOW on GPIO1, are
+ * in board_pins.h. */
 #include "audio_port.h"
+#include "board_pins.h"
 #include "audio.h"
 #include "codec_port.h"
 #include "battery_port.h"
 #include "display_port.h"      /* board_is_watch */
-#include "board_pins.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/semphr.h"
@@ -34,6 +35,7 @@ static const char *TAG = "audio";
 #define PIN_I2S_WS    P4_PIN_I2S_WS
 #define PIN_I2S_DOUT  P4_PIN_I2S_DOUT
 #define PIN_AMP_EN    P4_PIN_AMP_EN
+#elif CONFIG_POCKET_TANK_CYD_320X240   /* (this fork) the CYD names its own in board_pins.h */
 #else
 #define PIN_I2S_MCLK  (board_is_square() ? S_PIN_I2S_MCLK : board_is_175() ? B_PIN_I2S_MCLK : 16)   /* the square: 16 is its PWR key sense; the 1.75: 42 */
 #define PIN_I2S_BCLK  (board_is_watch() ? W_PIN_I2S_BCLK : 9)
@@ -41,9 +43,13 @@ static const char *TAG = "audio";
 #define PIN_I2S_DOUT  (board_is_watch() ? W_PIN_I2S_DOUT : 8)        /* ESP -> codec DSDIN */
 #define PIN_AMP_EN    46       /* NS4150B CTRL, 10k pulldown on the board */
 #endif
+#ifndef AMP_EN_ON              /* (this fork) the level that turns the amplifier on: the NS4150B's, high, unless the board's own
+                                  pins say otherwise (board_pins.h: the CYD's amplifier is enabled low) */
+#define AMP_EN_ON     1
+#endif
 #define BLOCK         160      /* 10 ms at 16 kHz */
 #define IDLE_US       (2 * 1000000LL)
-#define CODEC_RAIL    "aldo1"  /* A3V3: the codec's AVDD + the mic */
+#define CODEC_RAIL    "aldo1"  /* A3V3: the codec's AVDD + the mic (no PMIC, as on the CYD: always on, and the call does nothing) */
 
 extern const uint8_t _binary_sounds_bin_start[];
 extern const uint8_t _binary_sounds_bin_end[];
@@ -74,7 +80,8 @@ static uint32_t now_ms(void) { return (uint32_t)(esp_timer_get_time() / 1000); }
 extern void display_port_tab5_speaker(bool on);
 static void amp(bool on) { display_port_tab5_speaker(on); }
 #else
-static void amp(bool on) { gpio_set_level(PIN_AMP_EN, on); }
+/* (this fork) the amplifier's enable, at the board's own "on" level (AMP_EN_ON: on upstream's boards 1, as it always was) */
+static void amp(bool on) { gpio_set_level(PIN_AMP_EN, on ? AMP_EN_ON : !AMP_EN_ON); }
 #endif
 
 /* Deep sleep (2026-09-16, the night the tank died): the I2S lines and the
@@ -99,7 +106,7 @@ void audio_port_deep_sleep_pins(void) {
         if (p < 0) continue;                      /* (the Tab5's amp enable is on its expander) */
         gpio_reset_pin(p);                        /* off the I2S matrix routing, a GPIO again */
         gpio_set_direction(p, GPIO_MODE_OUTPUT);
-        gpio_set_level(p, 0);
+        gpio_set_level(p, p == PIN_AMP_EN ? !AMP_EN_ON : 0);   /* the amp's enable held at OFF, which is high on the CYD */
         gpio_hold_en(p);
     }
 }
@@ -192,7 +199,13 @@ bool audio_port_init(i2c_master_bus_handle_t bus) {
     if (bank_bytes != SND_BANK_BYTES) { ESP_LOGW(TAG, "bank is %u bytes, sounds.h says %u: rebuild (tools/make_sounds.py build) - silent", (unsigned)bank_bytes, (unsigned)SND_BANK_BYTES); return false; }
     if (!codec_port_present()) { ESP_LOGW(TAG, "no ES8311: silent"); return false; }
 #ifndef TANK_TAB5_HW
+#if AMP_EN_ON
     gpio_config_t io = { .pin_bit_mask = 1ULL << PIN_AMP_EN, .mode = GPIO_MODE_OUTPUT, .pull_down_en = GPIO_PULLDOWN_ENABLE };
+#else   /* (this fork) an amplifier enabled low, the CYD's: off before the pin becomes an output, so it never drives ON for a
+           moment (the reset level, low, is ON), and pulled toward off as well */
+    amp(false);
+    gpio_config_t io = { .pin_bit_mask = 1ULL << PIN_AMP_EN, .mode = GPIO_MODE_OUTPUT, .pull_up_en = GPIO_PULLUP_ENABLE };
+#endif
     gpio_config(&io);
 #endif
     amp(false);

@@ -19,6 +19,12 @@ SDL_LIBS   := $(shell sdl2-config --libs)
 # `make SQUARE=1`: the square's 480 x 480 tank (the Waveshare 2.16) as ./fishsim-square
 # `make P4=1`: the home tank's 640 x 400 world (the Waveshare P4 10.1, drawn 2x there) as ./fishsim-p4
 # `make TAB5=1`: the small home tank's 1280 x 720 world (the M5Stack Tab5) as ./fishsim-tab5
+# `make 320X240=1` (this fork): the 320 x 240 tank every 320 x 240 board shares -
+# the CYD, the Touch-LCD-2 (CYD.md) - as ./fishsim-320x240. It defines the
+# firmware's own CONFIG_POCKET_TANK_320X240, so common/ tests one symbol. It is
+# a pocket tank's world, not a big screen's (PT_BIG_WORLD below is P4 and TAB5
+# alone), so its check runs the whole pocket list - none of BIG_NOT's filters -
+# with the GRAPHICS legs and the controls, as the 1.8's does.
 ifdef ROUND
 BUILD   := build-round
 OUT     := fishsim-round
@@ -39,6 +45,10 @@ else ifdef P4
 BUILD   := build-p4
 OUT     := fishsim-p4
 ROUNDF  := -DTANK_P4
+else ifdef 320X240
+BUILD   := build-320x240
+OUT     := fishsim-320x240
+ROUNDF  := -DCONFIG_POCKET_TANK_320X240=1
 else
 BUILD   := build
 OUT     := fishsim
@@ -47,7 +57,7 @@ endif
 
 CFLAGS  := $(ROUNDF) $(EXTRA_CFLAGS) -O2 -std=c11 $(ARCH) -I. -I../common -I../common/llm -DLV_CONF_INCLUDE_SIMPLE -DSOUNDS_BIN='"../assets/sounds/sounds.bin"' -DPT_VERSION='"$(shell git describe --always --dirty --exclude='*' 2>/dev/null || echo sim)"' $(SDL_CFLAGS) \
            -Wall -Wextra -Wno-unused-parameter -MMD -MP
-LDFLAGS := $(ARCH) $(SDL_LIBS) -lm
+LDFLAGS := $(ARCH) $(SDL_LIBS) -lm -lpthread
 
 APP_SRCS  := main.c selftest_link.c advisor_llm.c persist_port_sim.c net_port_sim.c ../common/tank.c ../common/update.c ../common/wifi_nets.c ../common/advanced.c ../common/shelf.c ../common/boot_show.c ../common/advisor.c ../common/render.c ../common/backgrounds.c ../common/icons.c ../common/icons4.c ../common/progression.c ../common/setup.c ../common/audio.c ../common/notice.c ../common/sounds.c ../common/battery.c ../common/passport.c ../common/link.c ../common/tank_link.c ../common/collection.c ../common/gift.c ../common/sdgift.c ../common/llm/q4_model.c ../common/llm/word_tok.c ../common/llm/advisor_core.c
 
@@ -255,9 +265,15 @@ endif
 # `make check` tests the rectangle; `make ROUND=1 check` / `make WATCH=1 check` /
 # `make SQUARE=1 check` the same selftests in that board's world; `make check-all`
 # all four - the gate for anything in common/ (docs/BOARDS.md)
+# (this fork: and, after upstream's worlds, the 320 x 240 boards' - `make 320X240=1 check`)
 # GRAPHICS (0.4.2): the grass loop's own tests again at LOW (one moment of HIGH's plan, still day and night) and MEDIUM (HIGH by day, a night loop by night)
 SELFTESTS += --selftest-den-shade --selftest-crab-walkin   # THE DEN'S SHADE on what is inside only, none with its lamp on; the crab into its shelter whole, its feet on the line (Strato 11-22, 0.4.3)
 SELFTESTS += --selftest-den                # THE CASTLE IN THREE STAGES, A SOLID BACK: no leaf over the crab in the den, the shape by the stage, the baked lights, the den's floor, the shop's upgrades, the save (0.4.3)
+# this fork: the 320 x 240 world leaves out the UPDATES page's two faces, UPDATES and WI-FI - its boards have no update
+# channel, so no UPDATES button, and they never ask for a network (CYD.md)
+ifdef 320X240
+SELFTESTS := $(filter-out --selftest-wifi3 --selftest-updui,$(SELFTESTS))
+endif
 SELFTESTS_LOW := --selftest-grassloop --selftest-grassloop-through --selftest-grassloop-nomask --selftest-grassloop-shrink --selftest-grasspatch
 ifneq ($(PT_BIG_WORLD),)     # (the big screens: the list above alone - no loop for GRAPHICS' levels to act on, no crab-depth legs)
 check: $(OUT)
@@ -309,6 +325,7 @@ check-all:
 	$(MAKE) SQUARE=1 check
 	$(MAKE) P4=1 check
 	$(MAKE) TAB5=1 check
+	$(MAKE) 320X240=1 check
 
 check-nomodel:
 	$(MAKE) NOMODEL=1 check
@@ -331,6 +348,7 @@ $(BUILD)/%.o: %.c
 
 clean:
 	rm -rf build build-round build-watch build-square build-p4 build-tab5 fishsim fishsim-round fishsim-watch fishsim-square fishsim-p4 fishsim-tab5
+	rm -rf build-320x240 fishsim-320x240
 
 -include $(OBJS:.o=.d)
 

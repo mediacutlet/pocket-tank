@@ -1,6 +1,7 @@
 /* setup.c — first-run setup flow (see setup.h). */
 #include "collection.h"
 #include "setup.h"
+#include "ui.h"
 #include "sdgift.h"
 #include "tank_events.h"
 #include "render.h"
@@ -110,7 +111,7 @@ static bool  s_spun;           /* this press has turned the wheel (or moved the 
 #define WHEEL_REACH_ROW 999
 static int    s_wh_hold_ms = 500;    /* 0 = no hold */
 static int    s_wh_reach = WHEEL_REACH_ROW;
-static int    s_wh_slop = 10;
+static int    s_wh_slop = UI(10);
 static int    s_wh;                  /* this press: SETUP_HIT_SLOT0 + i / _UP / _DOWN on a wheel, 0 = not the wheel */
 static bool   s_wh_held;             /* ... a press on another letter the hold kept on the turned one: no pick, no tap */
 static double s_wh_changed = WHEEL_NEVER;   /* the tank clock when the finger last changed a letter */
@@ -349,20 +350,20 @@ int  setup_keyboard(void) { return s_kbd; }
  * then DEL, then the flip in the corner. Both: a tap anywhere over the block
  * picks the NEAREST key. */
 #define KG_COLS 7
-#define KG_X  (SETUP_X + 17)
-#define KG_Y  (SETUP_Y + 116)
-#define KG_PX 50
-#define KG_PY 38
-#define KG_W  46
-#define KG_H  34
+#define KG_X  (SETUP_X + UI(17))
+#define KG_Y  (SETUP_Y + UI(116))
+#define KG_PX UI(50)
+#define KG_PY UI(38)
+#define KG_W  UI(46)
+#define KG_H  UI(34)
 #define KP_COLS 5
 #define KP_ROWS 3
-#define KP_PX 72
-#define KP_PY 80
-#define KP_W  66
-#define KP_H  74
+#define KP_PX UI(72)
+#define KP_PY UI(80)
+#define KP_W  UI(66)
+#define KP_H  UI(74)
 #define KP_X  (SETUP_X + (SETUP_W - (KP_COLS - 1) * KP_PX - KP_W) / 2)
-#define KP_Y  (SETUP_Y + 76)
+#define KP_Y  (SETUP_Y + UI(76))
 #define KP_HALF 13
 static int kg_row(int k) { return k == SETUP_KEY_DEL ? 3 : k / KG_COLS; }
 static int kg_col(int k) { return k == SETUP_KEY_DEL ? 5 : k % KG_COLS; }
@@ -376,7 +377,7 @@ static int kbd_hit(float x, float y) {
     int best = -1; float bd = 1e9f;
     if (s_kbd == SETUP_KBD_GRID) {
         int kw = KG_COLS * KG_PX - (KG_PX - KG_W), kh = 4 * KG_PY - (KG_PY - KG_H);
-        if (x < KG_X - 6 || x >= KG_X + kw + 6 || y < KG_Y - 6 || y >= KG_Y + kh + 6) return 0;
+        if (x < KG_X - UI(6) || x >= KG_X + kw + UI(6) || y < KG_Y - UI(6) || y >= KG_Y + kh + UI(6)) return 0;
         for (int k = 0; k <= SETUP_KEY_DEL; k++) {
             float kx, ky; kg_center(k, &kx, &ky);
             float dx = x - kx, dy = (y - ky) * 1.3f;    /* rows are tighter than columns */
@@ -384,7 +385,7 @@ static int kbd_hit(float x, float y) {
         }
     } else {
         int kw = (KP_COLS - 1) * KP_PX + KP_W, kh = (KP_ROWS - 1) * KP_PY + KP_H;
-        if (x < KP_X - 16 || x >= KP_X + kw + 16 || y < KP_Y - 16 || y >= KP_Y + kh + 16) return 0;
+        if (x < KP_X - UI(16) || x >= KP_X + kw + UI(16) || y < KP_Y - UI(16) || y >= KP_Y + kh + UI(16)) return 0;
         for (int cell = 0; cell < KP_COLS * KP_ROWS; cell++) {
             float dx = x - (KP_X + (cell % KP_COLS) * KP_PX + KP_W * 0.5f), dy = y - (KP_Y + (cell / KP_COLS) * KP_PY + KP_H * 0.5f);
             if (dx * dx + dy * dy < bd) { bd = dx * dx + dy * dy; best = kp_key(cell); }
@@ -481,13 +482,13 @@ static void tidy_name(tank_t *t, int fish) {
 /* a swatch that cannot be picked: a bold ink X corner to corner (the editor's
    markings the body's own color) - a shape, so it reads without color */
 static void struck_out(uint16_t *fb, int stride, int x, int y, int w, int h, uint32_t under) {
-    const int n = w > h ? w : h;
+    const int n = w > h ? w : h, block = UI(4);                 /* (a block of the X: 4 px at the design size) */
     uint32_t r = under >> 16 & 255, g = under >> 8 & 255, b = under & 255;
     uint32_t ink = r * 299 + g * 587 + b * 114 < 100 * 1000 ? C_CAPT : C_PANEL;   /* light on a dark swatch (charcoal), ink on the rest */
     for (int i = 2; i <= n - 3; i++) {
         int px = x + 3 + (w - 6) * i / n, py = y + 3 + (h - 6) * i / n, qy = y + h - 3 - (h - 6) * i / n;
-        render_rect(fb, stride, px - 2, py - 2, 4, 4, ink);
-        render_rect(fb, stride, px - 2, qy - 2, 4, 4, ink);
+        render_rect(fb, stride, px - block / 2, py - block / 2, block, block, ink);
+        render_rect(fb, stride, px - block / 2, qy - block / 2, block, block, ink);
     }
 }
 /* SWAP (COLORS): a tall key between the palettes, a double-headed arrow -
@@ -496,13 +497,13 @@ static void swap_button(uint16_t *fb, int stride) {
     const int x = SETUP_SWAP_X, y = SETUP_SWAP_Y, w = SETUP_SWAP_W, h = SETUP_SWAP_H, cx = x + w / 2;
     render_rect(fb, stride, x, y, w, h, C_KEY);
     render_rect_edge(fb, stride, x, y, w, h, C_EDGE);
-    const int head = 9;                                  /* each arrowhead: rows 2..18 px wide */
+    const int head = UI(9);                              /* each arrowhead: rows 2..18 px wide (at the design size) */
     for (int i = 0; i < head; i++) {
         int half = 1 + i;
-        render_rect(fb, stride, cx - half, y + 6 + i, 2 * half, 1, C_TEXT);          /* up, its tip at the top */
-        render_rect(fb, stride, cx - half, y + h - 7 - i, 2 * half, 1, C_TEXT);      /* down, its tip at the foot */
+        render_rect(fb, stride, cx - half, y + UI(6) + i, 2 * half, 1, C_TEXT);      /* up, its tip at the top */
+        render_rect(fb, stride, cx - half, y + h - UI(7) - i, 2 * half, 1, C_TEXT);  /* down, its tip at the foot */
     }
-    render_rect(fb, stride, cx - 2, y + 6 + head, 4, h - 12 - 2 * head, C_TEXT);    /* the shaft between them */
+    render_rect(fb, stride, cx - UI(2), y + UI(6) + head, UI(4), h - UI(12) - 2 * head, C_TEXT);   /* the shaft between them */
 }
 /* the editor's rows (setup.h, THE EDITOR): where each sits and what a pick is */
 typedef struct { int y, h, x, px, w, n, hit0, gene; const char *label; } edit_row_t;
@@ -667,12 +668,12 @@ static int wheel_slot_at(const wheel_t *w, float x) {
  * (a hand wide); further along the row, above / below another letter is that letter's column. 0 = off the dial. */
 static int wheel_hit(const wheel_t *w, float x, float y) {
     int rw = (w->n - 1) * SETUP_SLOT_PX + SETUP_SLOT_W;
-    if (x < w->x0 - 24 || x >= w->x0 + rw + 24) return 0;
-    const int top = SETUP_SLOT_Y - 16, bot = SETUP_SLOT_Y + SETUP_SLOT_H + 20;
+    if (x < w->x0 - UI(24) || x >= w->x0 + rw + UI(24)) return 0;
+    const int top = SETUP_SLOT_Y - UI(16), bot = SETUP_SLOT_Y + SETUP_SLOT_H + UI(20);
     if (y >= top && y < bot) return SETUP_HIT_SLOT0 + wheel_slot_at(w, x);
-    if (y < top - 70 || y >= bot + 70) return 0;
+    if (y < top - UI(70) || y >= bot + UI(70)) return 0;
     float cx = w->x0 + s_slot * SETUP_SLOT_PX + SETUP_SLOT_W * 0.5f;
-    if (x >= cx - 66 && x <= cx + 66) return y < top ? SETUP_HIT_UP : SETUP_HIT_DOWN;
+    if (x >= cx - UI(66) && x <= cx + UI(66)) return y < top ? SETUP_HIT_UP : SETUP_HIT_DOWN;
     return SETUP_HIT_SLOT0 + wheel_slot_at(w, x);
 }
 static bool wheel_held(const tank_t *t) {
@@ -753,7 +754,7 @@ static void sdg_pick(tank_t *t, int i) { (void)t; s_slot = i < 0 ? 0 : i >= SDG_
 static const wheel_t SDG_WHEEL = { SDG_SLOTS, (PAGE_W - ((SDG_SLOTS - 1) * SETUP_SLOT_PX + SETUP_SLOT_W)) / 2, sdg_spin_t, sdg_pick };
 /* the confirm page: a panel, the foot's BACK | SEND (far from the dial's NEXT: a doubled tap cannot send) */
 static int sdg_hit(float x, float y) {
-    const int m = 10;
+    const int m = UI(10);
     if (s_sdg == 2) {
         if (in_box(x, y, SETUP_NEXT_X, SETUP_BTN_Y, SETUP_BTN_W, SETUP_BTN_H, m)) return SETUP_HIT_NEXT;
         if (in_box(x, y, SETUP_BACK_X, SETUP_BTN_Y, SETUP_BTN_W, SETUP_BTN_H, m)) return SETUP_HIT_BACK;
@@ -896,9 +897,9 @@ static void evo_fill(const tank_t *t, evo_page_t *pg) {
     }
 }
 static int evo_hit(float x, float y) {
-    const int m = 6;
-    if (in_box(x, y, EVP_BACK_X, EVP_BTN_Y, EVP_BACK_W, EVP_BTN_H, 10)) return SETUP_HIT_BACK;
-    if (in_box(x, y, EVP_KEEP_X, EVP_BTN_Y, EVP_KEEP_W, EVP_BTN_H, 10)) return SETUP_HIT_NEXT;
+    const int m = UI(6);
+    if (in_box(x, y, EVP_BACK_X, EVP_BTN_Y, EVP_BACK_W, EVP_BTN_H, UI(10))) return SETUP_HIT_BACK;
+    if (in_box(x, y, EVP_KEEP_X, EVP_BTN_Y, EVP_KEEP_W, EVP_BTN_H, UI(10))) return SETUP_HIT_NEXT;
     if (s_evo_confirm) return 0;
     for (int k = 0; k < 3; k++) if (in_box(x, y, EVP_TILE_X(k) - EVP_TILE_GAP / 2 + m, EVP_TILE_Y, EVP_TILE_W + EVP_TILE_GAP - 2 * m, EVP_TILE_H, m)) return SETUP_HIT_SLOT0 + k;
     return 0;
@@ -993,7 +994,7 @@ int setup_hit(float x, float y) {
     x -= PAGE_X; y -= PAGE_Y;                           /* the page's own coordinates (render.h) */
     if (s_sdg) return sdg_hit(x, y);
     if (s_evo) return evo_hit(x, y);
-    const int m = 10;                                   /* a fingertip's slop, as on the reset prompt */
+    const int m = UI(10);                               /* a fingertip's slop, as on the reset prompt */
     if (s_lab && s_page == SETUP_PG_LAB_TUBE) {
         if (in_box(x, y, LAB_L, SETUP_LAB_BACK_Y, SETUP_LAB_BACK_W, SETUP_BTN_H, m)) return SETUP_HIT_BACK;
         return in_box(x, y, SETUP_LAB_BTN_X, SETUP_LAB_BTN_Y, SETUP_LAB_BTN_W, SETUP_BTN_H, m) ? SETUP_HIT_POUR : 0;
@@ -1010,12 +1011,12 @@ int setup_hit(float x, float y) {
         else if (in_box(x, y, SETUP_TOP_NEXT_X, SETUP_TOP_BTN_Y, SETUP_TOP_BTN_W, SETUP_BTN_H, m)) return SETUP_HIT_NEXT;
         const bool plant = s_place && s_item == 0, two = plant && s_plant_two;   /* (the plant's page: two rows with a piece beside it) */
         const int ord_y = two ? SETUP_ORD2_Y : SETUP_ORD_Y;
-        if (s_place && in_box(x, y, SETUP_ORD_X0, ord_y, SETUP_ORD_W, SETUP_BTN_H, 6)) return SETUP_HIT_BCK;   /* (every piece, the sword plant too) */
-        if (plant && in_box(x, y, SETUP_ORDSQ_X, SETUP_DEPTH_Y, 2 * SETUP_DEPTH_SEG_W, SETUP_DEPTH_H, 6))
+        if (s_place && in_box(x, y, SETUP_ORD_X0, ord_y, SETUP_ORD_W, SETUP_BTN_H, UI(6))) return SETUP_HIT_BCK; /* (every piece, the sword plant too) */
+        if (plant && in_box(x, y, SETUP_ORDSQ_X, SETUP_DEPTH_Y, 2 * SETUP_DEPTH_SEG_W, SETUP_DEPTH_H, UI(6)))
             return SETUP_HIT_SG0 + (x >= SETUP_ORDSQ_X + SETUP_DEPTH_SEG_W);    /* the plant's SEAGRASS squares (0.4.1) */
-        if (two && in_box(x, y, SETUP_ORDSQ_X, SETUP_ORDSQ2_Y, 2 * SETUP_DEPTH_SEG_W, SETUP_DEPTH_H, 6))
+        if (two && in_box(x, y, SETUP_ORDSQ_X, SETUP_ORDSQ2_Y, 2 * SETUP_DEPTH_SEG_W, SETUP_DEPTH_H, UI(6)))
             return SETUP_HIT_ORD0 + (x >= SETUP_ORDSQ_X + SETUP_DEPTH_SEG_W);   /* ... and its ORDER SQUARES, the row under them */
-        if (s_place && in_box(x, y, SETUP_ORD_X1, ord_y, SETUP_ORD_W, SETUP_BTN_H, 6)) return SETUP_HIT_FWD;
+        if (s_place && in_box(x, y, SETUP_ORD_X1, ord_y, SETUP_ORD_W, SETUP_BTN_H, UI(6))) return SETUP_HIT_FWD;
         if (!s_place && in_box(x, y, SETUP_TOP_BACK_X, SETUP_TOP_BTN_Y, SETUP_TOP_BTN_W, SETUP_BTN_H, m)) return SETUP_HIT_BACK;
         if (page_is_look() && in_box(x, y, SETUP_ROLL_X, SETUP_TOP_BTN_Y, SETUP_TOP_BTN_W, SETUP_BTN_H, m)) return SETUP_HIT_ROLL;
     } else {
@@ -1027,7 +1028,7 @@ int setup_hit(float x, float y) {
     if (s_page == SETUP_PG_PLACE) {
         if (s_item == 4) {                              /* the cluster's LOOK row: the nearest tile along x */
             int rw = (SETUP_LOOK_N - 1) * SETUP_LOOK_PX + SETUP_LOOK_W;
-            if (in_box(x, y, SETUP_LOOK_X, SETUP_LOOK_Y, rw, SETUP_LOOK_H, 12)) {
+            if (in_box(x, y, SETUP_LOOK_X, SETUP_LOOK_Y, rw, SETUP_LOOK_H, UI(12))) {
                 int i = (int)((x - SETUP_LOOK_X + (SETUP_LOOK_PX - SETUP_LOOK_W) * 0.5f) / SETUP_LOOK_PX);
                 if (i < 0) i = 0;
                 if (i >= SETUP_LOOK_N) i = SETUP_LOOK_N - 1;
@@ -1036,7 +1037,7 @@ int setup_hit(float x, float y) {
         }
         if (s_item == 3) {                              /* the coral's COLOR row: the nearest swatch along x, a band 12 px around */
             int rw = (SETUP_COL_N - 1) * SETUP_COL_PX + SETUP_COL_W;
-            if (in_box(x, y, SETUP_COL_X, SETUP_COL_Y, rw, SETUP_COL_H, 12)) {
+            if (in_box(x, y, SETUP_COL_X, SETUP_COL_Y, rw, SETUP_COL_H, UI(12))) {
                 int i = (int)((x - SETUP_COL_X + (SETUP_COL_PX - SETUP_COL_W) * 0.5f) / SETUP_COL_PX);
                 if (i < 0) i = 0;
                 if (i >= SETUP_COL_N) i = SETUP_COL_N - 1;
@@ -1046,7 +1047,7 @@ int setup_hit(float x, float y) {
         /* the DEPTH bar: a band 8 px around it, the segment under the finger
            (the item's own depths: the plant's three, the castle's two) */
         int n = tank_decor_z_count(s_item), bw = n * SETUP_DEPTH_SEG_W, bx = (PAGE_W - bw) / 2;
-        if (n < 2 || !in_box(x, y, bx, SETUP_DEPTH_Y, bw, SETUP_DEPTH_H, 8)) return 0;   /* (the plant: one depth, no bar - 0.4) */
+        if (n < 2 || !in_box(x, y, bx, SETUP_DEPTH_Y, bw, SETUP_DEPTH_H, UI(8))) return 0; /* (the plant: one depth, no bar - 0.4) */
         int i = (int)((x - bx) / SETUP_DEPTH_SEG_W);
         if (i < 0) i = 0;
         if (i >= n) i = n - 1;
@@ -1054,25 +1055,25 @@ int setup_hit(float x, float y) {
     }
     if (page_is_stretch()) {                           /* (0.4.3) the tiles' row - a band round it, the nearest along x - else the stage */
         const int rw = (SETUP_TILE_N - 1) * SETUP_TILE_PX + SETUP_TILE_W;
-        if (y >= SETUP_ST_TILE_Y - 6 && y < SETUP_ST_TILE_Y + SETUP_ST_TILE_H + 18 && x >= SETUP_TILE_X - 12 && x < SETUP_TILE_X + rw + 12) {
+        if (y >= SETUP_ST_TILE_Y - UI(6) && y < SETUP_ST_TILE_Y + SETUP_ST_TILE_H + UI(18) && x >= SETUP_TILE_X - UI(12) && x < SETUP_TILE_X + rw + UI(12)) {
             int i = (int)((x - SETUP_TILE_X + (SETUP_TILE_PX - SETUP_TILE_W) * 0.5f) / SETUP_TILE_PX);
             i = i < 0 ? 0 : i >= SETUP_TILE_N ? SETUP_TILE_N - 1 : i;
             return page_is_body() ? SETUP_HIT_SHAPE0 + ST_SHAPES[i] : SETUP_HIT_FINS0 + i;
         }
         return y >= SETUP_ST_TOP && y < SETUP_ST_BOT ? SETUP_HIT_STAGE : 0;
     }
-    if (page_is_colors() && in_box(x, y, SETUP_SWAP_X, SETUP_SWAP_Y, SETUP_SWAP_W, SETUP_SWAP_H, 6)) return SETUP_HIT_SWAP;   /* before the rows' bands */
+    if (page_is_colors() && in_box(x, y, SETUP_SWAP_X, SETUP_SWAP_Y, SETUP_SWAP_W, SETUP_SWAP_H, UI(6))) return SETUP_HIT_SWAP; /* before the rows' bands */
     if (page_is_look()) {
         /* the rows: a band from a row's label to halfway into the gap under
            it (the last one 24 px past its foot - fingers land low), the
            nearest choice along x */
         const edit_row_t *r; int n = edit_rows(&r);
         for (int k = 0; k < n; k++) {
-            int top = r[k].y - SETUP_LABEL_DY - 4;
-            int bot = k + 1 < n ? (r[k].y + r[k].h + r[k + 1].y - SETUP_LABEL_DY - 4) / 2 : r[k].y + r[k].h + 24;
+            int top = r[k].y - SETUP_LABEL_DY - UI(4);
+            int bot = k + 1 < n ? (r[k].y + r[k].h + r[k + 1].y - SETUP_LABEL_DY - UI(4)) / 2 : r[k].y + r[k].h + UI(24);
             if (k + 1 < n && bot < r[k].y + r[k].h) bot = r[k].y + r[k].h;
             int rw = (r[k].n - 1) * r[k].px + r[k].w;
-            if (y < top || y >= bot || x < r[k].x - 12 || x >= r[k].x + rw + 12) continue;
+            if (y < top || y >= bot || x < r[k].x - UI(12) || x >= r[k].x + rw + UI(12)) continue;
             int i = (int)((x - r[k].x + (r[k].px - r[k].w) * 0.5f) / r[k].px);
             if (i < 0) i = 0;
             if (i >= r[k].n) i = r[k].n - 1;
@@ -1237,7 +1238,7 @@ static void setup_touch_in(tank_t *t, float x, float y, bool down) {
         if (page_is_name() && !s_kbd) wheel_press(t, &NAME_WHEEL, x, h);   /* a letter picked on touch (the drag turns it), or held */
         else s_wh = 0;
         s_st_press = page_is_stretch() && h == SETUP_HIT_STAGE; s_st_axis = 0;
-        if (s_page == SETUP_PG_BUBBLES && !h && y - PAGE_Y > SETUP_TOP_BTN_Y + SETUP_BTN_H + 8) {
+        if (s_page == SETUP_PG_BUBBLES && !h && y - PAGE_Y > SETUP_TOP_BTN_Y + SETUP_BTN_H + UI(8)) {
             tank_set_bubble_x(t, x); s_spun = true;         /* the column comes to the finger */
         }
         if (s_page == SETUP_PG_PLACE && !h && y - PAGE_Y > place_y()) {
@@ -1272,25 +1273,29 @@ static void setup_touch_in(tank_t *t, float x, float y, bool down) {
 }
 
 /* ---- drawing ---- */
+/* (this fork: a page measurement here is UI(n), a text scale UI_TEXT(s), a fish drawn on a page UI_F - ui.h; all are
+   identities on upstream's boards. As written: lines, edges and insets of 1 to 3 px; the pixel art - the depth tiles'
+   glyphs, a critter's card art, the sand dollar coins, a parent mark's head - and what is laid out at its size round
+   it (the order squares' block, the critter's plate, the coins' pile); the rings round a live fish in the tank.) */
 static void text_c(uint16_t *fb, int stride, int cx, int y, int scale, uint32_t rgb, const char *s) {
     render_text(fb, stride, cx - render_text_w(s, scale) / 2, y, scale, rgb, s);
 }
 static void lines_c(uint16_t *fb, int stride, int y, int pitch, uint32_t rgb, const char *const *ls, int n) {
-    for (int i = 0; i < n; i++) text_c(fb, stride, SETUP_X + SETUP_W / 2, y + i * pitch, 2, rgb, ls[i]);
+    for (int i = 0; i < n; i++) text_c(fb, stride, SETUP_X + SETUP_W / 2, y + i * pitch, UI_TEXT(2), rgb, ls[i]);
 }
 static void nav(uint16_t *fb, int stride, bool top, const char *next_label, bool go) {
     int y = top ? SETUP_TOP_BTN_Y : SETUP_BTN_Y, w = top ? SETUP_TOP_BTN_W : SETUP_BTN_W;
-    render_button(fb, stride, top ? SETUP_TOP_BACK_X : SETUP_BACK_X, y, w, SETUP_BTN_H, C_KEY, C_DIM, s_rename ? "CANCEL" : "BACK", 2);
+    render_button(fb, stride, top ? SETUP_TOP_BACK_X : SETUP_BACK_X, y, w, SETUP_BTN_H, C_KEY, C_DIM, s_rename ? "CANCEL" : "BACK", UI_TEXT(2));
     render_button(fb, stride, top ? SETUP_TOP_NEXT_X : SETUP_NEXT_X, y, w, SETUP_BTN_H,
-                  go ? C_GO : C_INNER, go ? C_GO_E : C_EDGE, next_label, 2);
+                  go ? C_GO : C_INNER, go ? C_GO_E : C_EDGE, next_label, UI_TEXT(2));
 }
 /* page dots along the foot: where the keeper is in the flow */
 static void dots(uint16_t *fb, int stride, int y) {
     if (s_place || s_rename) return;                    /* one page: nothing to count */
     int n = s_lab ? SETUP_LAB_PAGES : s_about ? SETUP_ABOUT_PAGES : s_birth ? SETUP_BIRTH_PAGES : SETUP_PG_N, cur = s_page - first_page();
     if (s_about) cur = s_page == SETUP_PG_ABOUT ? 0 : s_page == SETUP_PG_FAMILY ? 1 : 2;
-    int w = n * 10 - 4, x0 = (PAGE_W - w) / 2;
-    for (int i = 0; i < n; i++) render_rect(fb, stride, x0 + i * 10, y, 6, 3, i == cur ? C_EDGE : C_DIM);
+    int w = n * UI(10) - UI(4), x0 = (PAGE_W - w) / 2;
+    for (int i = 0; i < n; i++) render_rect(fb, stride, x0 + i * UI(10), y, UI(6), UI(3) < 2 ? 2 : UI(3), i == cur ? C_EDGE : C_DIM);
 }
 /* a ring round a fish where it swims: the fish is in the TANK, the drawing on
    the page - on a glass the page does not start at (the bowl, the watch) the
@@ -1301,14 +1306,14 @@ static void fish_ring(uint16_t *fb, int stride, const fish_t *f, float r, uint32
 static void now_fry(const tank_t *t, uint16_t *fb, int stride, const fish_t *f, int x, int y, float r, double clock) {
     (void)t;
     if (!s_lab) { fish_ring(fb, stride, f, r, f->color); return; }
-    render_fish_portrait(fb, stride, x, y, f->size * 1.6f, f, 0, clock);
+    render_fish_portrait(fb, stride, x, y, f->size * 1.6f * UI_F, f, 0, clock);
     render_ring(fb, stride, x, y, r, f->color);
 }
 /* a caption with a name in it, the name in its own colour: `pre` NAME `post` */
 static void text_named(uint16_t *fb, int stride, int x, int y, const char *pre, const char *name, uint32_t name_rgb, const char *post) {
-    render_text(fb, stride, x, y, 2, C_CAPT, pre); x += render_text_w(pre, 2);
-    render_text(fb, stride, x, y, 2, name_rgb, name); x += render_text_w(name, 2);
-    if (post) render_text(fb, stride, x, y, 2, C_CAPT, post);
+    render_text(fb, stride, x, y, UI_TEXT(2), C_CAPT, pre); x += render_text_w(pre, UI_TEXT(2));
+    render_text(fb, stride, x, y, UI_TEXT(2), name_rgb, name); x += render_text_w(name, UI_TEXT(2));
+    if (post) render_text(fb, stride, x, y, UI_TEXT(2), C_CAPT, post);
 }
 static uint32_t dim(uint32_t c, int pct) {              /* c toward the ink, pct% of it left */
     return ((c >> 16 & 255) * pct / 100) << 16 | ((c >> 8 & 255) * pct / 100) << 8 | (c & 255) * pct / 100;
@@ -1334,17 +1339,18 @@ static void nat_head(uint16_t *fb, int stride, int cx, int y0, bool up, uint32_t
 /* parent p's mark at tx on the bar whose top is by: the tick on an ink outline, its head above (p 0) or below (p 1) */
 static void nature_mark(uint16_t *fb, int stride, int tx, int by, int p, uint32_t rgb) {
     const int y0 = p ? SETUP_NAT_HEAD_B_Y(by) : SETUP_NAT_HEAD_A_Y(by);
-    render_rect(fb, stride, tx - 2, by - 5, 5, SETUP_FAM_BAR_H + 10, C_PANEL);
+    render_rect(fb, stride, tx - 2, by - UI(5), 5, SETUP_FAM_BAR_H + UI(10), C_PANEL);
     nat_head(fb, stride, tx, y0, p != 0, 0, true);
-    render_rect(fb, stride, tx - 1, by - 4, 3, SETUP_FAM_BAR_H + 8, rgb);
+    render_rect(fb, stride, tx - 1, by - UI(4), 3, SETUP_FAM_BAR_H + UI(8), rgb);
     nat_head(fb, stride, tx, y0, p != 0, rgb, false);
 }
-/* a chevron of 4x4 blocks, `up` pointing up, apex at (cx, y) */
+/* a chevron of 4x4 blocks (at the design size), `up` pointing up, apex at (cx, y) */
 static void chevron(uint16_t *fb, int stride, int cx, int y, bool up, uint32_t rgb) {
+    const int b = UI(4);                                /* the block */
     for (int i = 0; i < 5; i++) {
-        int yy = up ? y + i * 4 : y - i * 4;
-        render_rect(fb, stride, cx - 4 - i * 4, yy, 4, 4, rgb);
-        render_rect(fb, stride, cx + i * 4, yy, 4, 4, rgb);
+        int yy = up ? y + i * b : y - i * b;
+        render_rect(fb, stride, cx - b - i * b, yy, b, b, rgb);
+        render_rect(fb, stride, cx + i * b, yy, b, b, rgb);
     }
 }
 /* a small sword leaf for the depth tiles: `h` px tall on the spine x, the
@@ -1439,19 +1445,19 @@ static void depth_tile(const tank_t *t, uint16_t *fb, int stride, int x, int y, 
     const fish_t *who = t->n_fish > 0 ? &t->fish[0] : NULL;
     if (item == 8) {                                    /* the pumpkin: the castle's reading, the lantern between two leaves */
         if (z == DECOR_Z_BACK) pumpkin_glyph(fb, stride, cx, yb);
-        leaf_glyph(fb, stride, cx - 14, yb, lh, la); leaf_glyph(fb, stride, cx + 15, yb, lh, lb);
+        leaf_glyph(fb, stride, cx - UI(14), yb, lh, la); leaf_glyph(fb, stride, cx + UI(15), yb, lh, lb);
         if (z != DECOR_Z_BACK) pumpkin_glyph(fb, stride, cx, yb);
         return;
     }
     if (item == 9) {                                    /* the volcano: the castle's reading */
         if (z == DECOR_Z_BACK) volcano_glyph(fb, stride, cx, yb);
-        leaf_glyph(fb, stride, cx - 14, yb, lh, la); leaf_glyph(fb, stride, cx + 15, yb, lh, lb);
+        leaf_glyph(fb, stride, cx - UI(14), yb, lh, la); leaf_glyph(fb, stride, cx + UI(15), yb, lh, lb);
         if (z != DECOR_Z_BACK) volcano_glyph(fb, stride, cx, yb);
         return;
     }
     if (item == 2) {
         if (z == DECOR_Z_BACK) castle_glyph(fb, stride, cx, yb, 0xa99b7b, 0xc4a95e);
-        leaf_glyph(fb, stride, cx - 14, yb, lh, la); leaf_glyph(fb, stride, cx + 15, yb, lh, lb);
+        leaf_glyph(fb, stride, cx - UI(14), yb, lh, la); leaf_glyph(fb, stride, cx + UI(15), yb, lh, lb);
         if (z != DECOR_Z_BACK) castle_glyph(fb, stride, cx, yb, 0xa99b7b, 0xc4a95e);
         return;
     }
@@ -1459,14 +1465,14 @@ static void depth_tile(const tank_t *t, uint16_t *fb, int stride, int x, int y, 
                                                            Strato: no fish in a piece's tiles - the fish choose their own depth now) */
         const cluster_scheme_t *sc = &CLUSTER_SCHEMES[tank_cluster_scheme(t)];
         if (z == DECOR_Z_BACK) cluster_glyph(fb, stride, cx, yb, sc);
-        leaf_glyph(fb, stride, cx - 14, yb, lh, la); leaf_glyph(fb, stride, cx + 15, yb, lh, lb);
+        leaf_glyph(fb, stride, cx - UI(14), yb, lh, la); leaf_glyph(fb, stride, cx + UI(15), yb, lh, lb);
         if (z != DECOR_Z_BACK) cluster_glyph(fb, stride, cx, yb, sc);
         return;
     }
     if (item == 3) {                                    /* the coral: likewise */
         uint32_t rgb = tank_coral_rgb(t);
         if (z == DECOR_Z_BACK) coral_glyph(fb, stride, cx, yb, rgb);
-        leaf_glyph(fb, stride, cx - 14, yb, lh, la); leaf_glyph(fb, stride, cx + 15, yb, lh, lb);
+        leaf_glyph(fb, stride, cx - UI(14), yb, lh, la); leaf_glyph(fb, stride, cx + UI(15), yb, lh, lb);
         if (z != DECOR_Z_BACK) coral_glyph(fb, stride, cx, yb, rgb);
         return;
     }
@@ -1475,9 +1481,9 @@ static void depth_tile(const tank_t *t, uint16_t *fb, int stride, int x, int y, 
        fish, which chooses its own depth now (docs/swim-depth.md) */
     (void)who; (void)cy; (void)clock;
     const uint32_t sg = 0x3f8f5a;
-    if (z == DECOR_Z_BACK) { leaf_glyph(fb, stride, cx - 8, yb, lh, la); leaf_glyph(fb, stride, cx + 8, yb, lh, lb); }
-    for (int k = -2; k <= 2; k++) frond_glyph(fb, stride, cx + k * 9 - 1, yb, lh - 4 - (k & 1) * 6, sg);
-    if (z != DECOR_Z_BACK) { leaf_glyph(fb, stride, cx - 8, yb, lh, la); leaf_glyph(fb, stride, cx + 8, yb, lh, lb); }
+    if (z == DECOR_Z_BACK) { leaf_glyph(fb, stride, cx - UI(8), yb, lh, la); leaf_glyph(fb, stride, cx + UI(8), yb, lh, lb); }
+    for (int k = -2; k <= 2; k++) frond_glyph(fb, stride, cx + k * UI(9) - 1, yb, lh - UI(4) - (k & 1) * UI(6), sg);
+    if (z != DECOR_Z_BACK) { leaf_glyph(fb, stride, cx - UI(8), yb, lh, la); leaf_glyph(fb, stride, cx + UI(8), yb, lh, lb); }
 }
 /* THE ORDER SQUARES (0.4, Strato 11-02: "it looks odd with no examples when there is something like 'behind or in front of x' ...
    a universal object in front / behind squares"): the page's piece against its neighbor in the stack, drawn as ONE universal
@@ -1526,16 +1532,16 @@ static void order_bar(const tank_t *t, uint16_t *fb, int stride, int bx, int by,
     for (int i = 0; i < 2; i++) {
         const int sx = bx + i * segw; const bool on = (i == 1) == front;
         if (on) { render_rect(fb, stride, sx, by, segw, bh, C_INNER); render_rect_edge(fb, stride, sx + 1, by + 1, segw - 2, bh - 2, C_EDGE); }
-        else if (i > 0) render_rect(fb, stride, sx, by + 6, 1, bh - 12, C_DIM);
-        order_tile(t, fb, stride, sx, by + 4, segw, tile_h, item, i == 1);
-        text_c(fb, stride, sx + segw / 2, by + tile_h + 10, 2, on ? C_TEXT : dim(C_CAPT, 45), W[i]);
+        else if (i > 0) render_rect(fb, stride, sx, by + UI(6), 1, bh - UI(12), C_DIM);
+        order_tile(t, fb, stride, sx, by + UI(4), segw, tile_h, item, i == 1);
+        text_c(fb, stride, sx + segw / 2, by + tile_h + UI(10), UI_TEXT(2), on ? C_TEXT : dim(C_CAPT, 45), W[i]);
     }
     render_rect_edge(fb, stride, bx, by, 2 * segw, bh, C_EDGE);
 }
 /* an order arrow (the placement page): a chevron in a small button, lit or dim */
 static void ord_arrow(uint16_t *fb, int stride, int x, int y, bool right, bool on) {
     uint32_t e = on ? C_EDGE : dim(C_CAPT, 45);
-    render_button(fb, stride, x, y, SETUP_ORD_W, SETUP_BTN_H, C_INNER, e, "", 2);
+    render_button(fb, stride, x, y, SETUP_ORD_W, SETUP_BTN_H, C_INNER, e, "", UI_TEXT(2));
     int cx = x + SETUP_ORD_W / 2, cy = y + SETUP_BTN_H / 2;
     for (int i = 0; i < 7; i++) {
         int xx = right ? cx - 3 + i : cx + 3 - i;
@@ -1579,53 +1585,53 @@ static void about_from(const tank_t *t, const fish_t *f, char *out, size_t n) {
 /* SAND DOLLAR GIFTS (0.4.2): the dial over the live tank, as a name's wheel; the confirm page a panel */
 static void sdg_coin_line(uint16_t *fb, int stride, int cy, const char *pre, int n, const char *post) {
     char num[16]; snprintf(num, sizeof num, "%d", n);
-    int w = render_text_w(pre, 2) + 4 + 32 + 4 + render_text_w(num, 2) + (post ? render_text_w(post, 2) : 0);
+    int w = render_text_w(pre, UI_TEXT(2)) + UI(4) + 32 + UI(4) + render_text_w(num, UI_TEXT(2)) + (post ? render_text_w(post, UI_TEXT(2)) : 0);
     int x = (PAGE_W - w) / 2;
-    render_text(fb, stride, x, cy - 7, 2, C_CAPT, pre); x += render_text_w(pre, 2) + 4;
-    render_sd_coin(fb, stride, x + PAGE_X, cy - 16 + PAGE_Y, 0); x += 36;
-    render_text(fb, stride, x, cy - 7, 2, C_TEXT, num); x += render_text_w(num, 2);
-    if (post) render_text(fb, stride, x, cy - 7, 2, C_CAPT, post);
+    render_text(fb, stride, x, cy - 7 * UI_TEXT(2) / 2, UI_TEXT(2), C_CAPT, pre); x += render_text_w(pre, UI_TEXT(2)) + UI(4);
+    render_sd_coin(fb, stride, x + PAGE_X, cy - 16 + PAGE_Y, 0); x += 32 + UI(4);   /* (the coin is pixel art: 32 px on every board) */
+    render_text(fb, stride, x, cy - 7 * UI_TEXT(2) / 2, UI_TEXT(2), C_TEXT, num); x += render_text_w(num, UI_TEXT(2));
+    if (post) render_text(fb, stride, x, cy - 7 * UI_TEXT(2) / 2, UI_TEXT(2), C_CAPT, post);
 }
 static void sdg_to_line(uint16_t *fb, int stride, int cy) {   /* TO <badge> NEXT DOOR: the shape, never the color alone */
     const char *a = "TO THE", *b = "TANK NEXT DOOR";
-    int w = render_text_w(a, 2) + 8 + 18 + 8 + render_text_w(b, 2), x = (PAGE_W - w) / 2;
-    render_text(fb, stride, x, cy - 7, 2, C_CAPT, a); x += render_text_w(a, 2) + 8;
-    render_link_badge(fb, stride, x + 9 + PAGE_X, cy + PAGE_Y, 9, s_sdg_badge); x += 18 + 8;
-    render_text(fb, stride, x, cy - 7, 2, C_CAPT, b);
+    int w = render_text_w(a, UI_TEXT(2)) + UI(8) + UI(18) + UI(8) + render_text_w(b, UI_TEXT(2)), x = (PAGE_W - w) / 2;
+    render_text(fb, stride, x, cy - 7 * UI_TEXT(2) / 2, UI_TEXT(2), C_CAPT, a); x += render_text_w(a, UI_TEXT(2)) + UI(8);
+    render_link_badge(fb, stride, x + UI(9) + PAGE_X, cy + PAGE_Y, UI(9), s_sdg_badge); x += UI(18) + UI(8);
+    render_text(fb, stride, x, cy - 7 * UI_TEXT(2) / 2, UI_TEXT(2), C_CAPT, b);
 }
 static void render_sdgift(const tank_t *t, uint16_t *fb, int stride, double clock) {
     const int CX = PAGE_W / 2;
     const int n = sdg_amount(), bal = t->sd_balance;
     if (s_sdg == 2) {
         panel(fb, stride);
-        text_c(fb, stride, CX, SETUP_Y + 16, 2, C_CAPT, "SEND SAND DOLLARS?");
+        text_c(fb, stride, CX, SETUP_Y + UI(16), UI_TEXT(2), C_CAPT, "SEND SAND DOLLARS?");
         char num[8]; snprintf(num, sizeof num, "%d", n);
-        int w = 64 + 12 + render_text_w(num, 6), x = CX - w / 2, y = SETUP_Y + 52;
+        int w = 64 + UI(12) + render_text_w(num, UI_TEXT(6)), x = CX - w / 2, y = SETUP_Y + UI(52);   /* (the coins are pixel art: the pile's 64 px keep their size) */
         render_sd_coin(fb, stride, x + 16 + PAGE_X, y + 5 + PAGE_Y, 0);
         render_sd_coin(fb, stride, x + PAGE_X, y + 9 + PAGE_Y, 0);   /* (two coins, a little pile) */
-        render_text(fb, stride, x + 64 + 12, y, 6, C_TEXT, num);
-        sdg_to_line(fb, stride, SETUP_Y + 132);
+        render_text(fb, stride, x + 64 + UI(12), y, UI_TEXT(6), C_TEXT, num);
+        sdg_to_line(fb, stride, SETUP_Y + UI(132));
         char left[40]; snprintf(left, sizeof left, "YOU WILL HAVE %d LEFT", bal - n);
-        text_c(fb, stride, CX, SETUP_Y + 162, 2, C_CAPT, left);
-        text_c(fb, stride, CX, SETUP_Y + 196, 2, C_TEXT, "THEY KEEP THEM");
-        text_c(fb, stride, CX, SETUP_Y + 218, 2, C_TEXT, "FOR GOOD");
-        render_button(fb, stride, SETUP_BACK_X, SETUP_BTN_Y, SETUP_BTN_W, SETUP_BTN_H, C_KEY, C_DIM, "BACK", 2);
-        render_button(fb, stride, SETUP_NEXT_X, SETUP_BTN_Y, SETUP_BTN_W, SETUP_BTN_H, C_GO, C_GO_E, "SEND", 2);
+        text_c(fb, stride, CX, SETUP_Y + UI(162), UI_TEXT(2), C_CAPT, left);
+        text_c(fb, stride, CX, SETUP_Y + UI(196), UI_TEXT(2), C_TEXT, "THEY KEEP THEM");
+        text_c(fb, stride, CX, SETUP_Y + UI(218), UI_TEXT(2), C_TEXT, "FOR GOOD");
+        render_button(fb, stride, SETUP_BACK_X, SETUP_BTN_Y, SETUP_BTN_W, SETUP_BTN_H, C_KEY, C_DIM, "BACK", UI_TEXT(2));
+        render_button(fb, stride, SETUP_NEXT_X, SETUP_BTN_Y, SETUP_BTN_W, SETUP_BTN_H, C_GO, C_GO_E, "SEND", UI_TEXT(2));
         return;
     }
-    render_rect_blend(fb, stride, SU_LEFT, SETUP_SLOT_Y - SETUP_ARROW_GAP - 2, SU_FULL_W, SETUP_SLOT_H + 2 * SETUP_ARROW_GAP + 36, C_PANEL, 150);
+    render_rect_blend(fb, stride, SU_LEFT, SETUP_SLOT_Y - SETUP_ARROW_GAP - 2, SU_FULL_W, SETUP_SLOT_H + 2 * SETUP_ARROW_GAP + UI(36), C_PANEL, 150);
     {   /* the title names the door: SEND SAND DOLLARS TO <badge> - the shape, as on the tab (never the color alone) */
         const char *tt = "SEND SAND DOLLARS TO";
-        int w = render_text_w(tt, 2) + 8 + 16, x = CX - w / 2;
-        render_text(fb, stride, x, SETUP_Y + 7, 2, C_CAPT, tt);
-        render_link_badge(fb, stride, x + render_text_w(tt, 2) + 8 + 8 + PAGE_X, SETUP_Y + 14 + PAGE_Y, 8, s_sdg_badge);
+        int w = render_text_w(tt, UI_TEXT(2)) + UI(8) + UI(16), x = CX - w / 2;
+        render_text(fb, stride, x, SETUP_Y + UI(7), UI_TEXT(2), C_CAPT, tt);
+        render_link_badge(fb, stride, x + render_text_w(tt, UI_TEXT(2)) + UI(8) + UI(8) + PAGE_X, SETUP_Y + UI(14) + PAGE_Y, UI(8), s_sdg_badge);
     }
-    render_button(fb, stride, SETUP_TOP_BACK_X, SETUP_TOP_BTN_Y, SETUP_TOP_BTN_W, SETUP_BTN_H, C_KEY, C_DIM, "CANCEL", 2);
+    render_button(fb, stride, SETUP_TOP_BACK_X, SETUP_TOP_BTN_Y, SETUP_TOP_BTN_W, SETUP_BTN_H, C_KEY, C_DIM, "CANCEL", UI_TEXT(2));
     bool ok = sdg_ok(t);
-    if (ok) render_button(fb, stride, SETUP_TOP_NEXT_X, SETUP_TOP_BTN_Y, SETUP_TOP_BTN_W, SETUP_BTN_H, C_GO, C_GO_E, "NEXT", 2);
+    if (ok) render_button(fb, stride, SETUP_TOP_NEXT_X, SETUP_TOP_BTN_Y, SETUP_TOP_BTN_W, SETUP_BTN_H, C_GO, C_GO_E, "NEXT", UI_TEXT(2));
     else {   /* dim: an outline and gray letters (the line under the dial says why) */
         render_rect_edge(fb, stride, SETUP_TOP_NEXT_X, SETUP_TOP_BTN_Y, SETUP_TOP_BTN_W, SETUP_BTN_H, C_DIM);
-        text_c(fb, stride, SETUP_TOP_NEXT_X + SETUP_TOP_BTN_W / 2, SETUP_TOP_BTN_Y + (SETUP_BTN_H - 14) / 2, 2, dim(C_CAPT, 45), "NEXT");
+        text_c(fb, stride, SETUP_TOP_NEXT_X + SETUP_TOP_BTN_W / 2, SETUP_TOP_BTN_Y + (SETUP_BTN_H - 7 * UI_TEXT(2)) / 2, UI_TEXT(2), dim(C_CAPT, 45), "NEXT");
     }
     sdg_coin_line(fb, stride, (SETUP_TOP_BTN_Y + SETUP_BTN_H + SETUP_SLOT_Y - SETUP_ARROW_GAP) / 2, "YOU HAVE", bal, NULL);   /* (between the buttons and the chevron) */
     bool lead = true;
@@ -1636,16 +1642,16 @@ static void render_sdgift(const tank_t *t, uint16_t *fb, int stride, double cloc
         uint32_t col = on ? C_NEW : lead ? C_DIM : dim(C_NEW, 70);
         char ch[2] = { (char)('0' + v), 0 };
         render_text(fb, stride, x, SETUP_SLOT_Y, SETUP_SLOT_SCALE, col, ch);
-        render_rect(fb, stride, x, SETUP_SLOT_Y + SETUP_SLOT_H + 8, SETUP_SLOT_W, 4, on ? C_TEXT : col);
+        render_rect(fb, stride, x, SETUP_SLOT_Y + SETUP_SLOT_H + UI(8), SETUP_SLOT_W, UI(4), on ? C_TEXT : col);
         if (on) {
             chevron(fb, stride, x + SETUP_SLOT_W / 2, SETUP_SLOT_Y - SETUP_ARROW_GAP, true, C_EDGE);
-            chevron(fb, stride, x + SETUP_SLOT_W / 2, SETUP_SLOT_Y + SETUP_SLOT_H + SETUP_ARROW_GAP + 4, false, C_EDGE);
+            chevron(fb, stride, x + SETUP_SLOT_W / 2, SETUP_SLOT_Y + SETUP_SLOT_H + SETUP_ARROW_GAP + UI(4), false, C_EDGE);
         }
     }
     char why[40];
     if (n > bal) snprintf(why, sizeof why, "YOU HAVE ONLY %d", bal < 0 ? 0 : bal);
     else snprintf(why, sizeof why, "SWIPE A NUMBER UP OR DOWN");
-    text_c(fb, stride, CX, SETUP_SLOT_Y + SETUP_SLOT_H + 96, 2, n > bal ? C_TEXT : C_CAPT, why);
+    text_c(fb, stride, CX, SETUP_SLOT_Y + SETUP_SLOT_H + UI(96), UI_TEXT(2), n > bal ? C_TEXT : C_CAPT, why);
     (void)clock;
 }
 /* ---- THE PANEL KEPT (0.4.2; Strato 11-08 on the watch: "the framerate looks slow ... there is only the fins moving, is
@@ -1657,18 +1663,18 @@ static void render_sdgift(const tank_t *t, uint16_t *fb, int stride, double cloc
  * its held frames draw nothing. */
 static void about_portrait(const tank_t *t, uint16_t *fb, int stride, double clock) {
     const fish_t *f = &t->fish[page_fish()];
-    float ps = f->size * 1.5f; if (ps > 1.5f) ps = 1.5f;
+    float ps = f->size * 1.5f * UI_F; if (ps > 1.5f * UI_F) ps = 1.5f * UI_F;
     render_fish_portrait(fb, stride, PAGE_W / 2, SETUP_AB_PORTRAIT_Y, ps, f, FISH_ROOM_FAM, clock);
 }
 static void fam_portraits(const tank_t *t, uint16_t *fb, int stride, double clock) {
     const fish_t *f = &t->fish[page_fish()];
-    float ps = f->size * 2.0f; if (ps > 1.2f) ps = 1.2f;
+    float ps = f->size * 2.0f * UI_F; if (ps > 1.2f * UI_F) ps = 1.2f * UI_F;
     if (s_about && f->stage >= STAGE_ADULT)                       /* its story: a grown fish is the GROWN UP already - the one portrait */
         render_fish_portrait(fb, stride, PAGE_W / 2, SETUP_FAM_PORTRAIT_Y, SETUP_FAM_GROWN_SIZE, f, FISH_ROOM_FAM, clock);
     else {
         render_ring(fb, stride, SETUP_FAM_NOW_X, SETUP_FAM_PORTRAIT_Y, 17 * ps + 6, f->color);
         render_fish_portrait(fb, stride, SETUP_FAM_NOW_X, SETUP_FAM_PORTRAIT_Y, ps, f, FISH_ROOM_FAM, clock);
-        text_c(fb, stride, (SETUP_FAM_NOW_X + SETUP_FAM_GROWN_X) / 2 - 6, SETUP_FAM_PORTRAIT_Y - 10, 3, C_CAPT, ">");
+        text_c(fb, stride, (SETUP_FAM_NOW_X + SETUP_FAM_GROWN_X) / 2 - UI(6), SETUP_FAM_PORTRAIT_Y - UI(10), UI_TEXT(3), C_CAPT, ">");
         render_fish_preview(fb, stride, SETUP_FAM_GROWN_X, SETUP_FAM_PORTRAIT_Y, SETUP_FAM_GROWN_SIZE, f->color, f->fin, f->accent, f, FISH_ROOM_FAM, clock);
     }
 }
@@ -1676,16 +1682,16 @@ static void fam_portraits(const tank_t *t, uint16_t *fb, int stride, double cloc
    goes to the right of the table, where a starter fish has no FROM column */
 static void stamp_at(const fish_t *f, int *x, int *y) {
     if (f->stage >= STAGE_ADULT) { *x = SETUP_X + SETUP_STAMP_IN_X; *y = SETUP_Y + SETUP_STAMP_IN_Y; }
-    else { *x = SETUP_X + SETUP_W - SETUP_STAMP_IN_X - 4; *y = SETUP_FAM_ROW_Y + 2 * SETUP_FAM_ROW_DY + 7; }
+    else { *x = SETUP_X + SETUP_W - SETUP_STAMP_IN_X - UI(4); *y = SETUP_FAM_ROW_Y + 2 * SETUP_FAM_ROW_DY + UI(7); }
 }
 bool setup_about_band(const tank_t *t, int box[4]) {
     if (!setup_is_about() || s_page == SETUP_PG_NATURE) return false;
     box[0] = SETUP_X + 3; box[2] = SETUP_X + SETUP_W - 4;
-    box[1] = SETUP_Y + 44;                                        /* (under the name: scale 3 at +20 ends at +41) */
-    box[3] = s_page == SETUP_PG_ABOUT ? SETUP_AB_ROW_Y - 3 : SETUP_FAM_ROW_Y - 23;   /* (over the rows; FAMILY: over FROM) */
+    box[1] = SETUP_Y + UI(44);                                    /* (under the name: scale 3 at +20 ends at +41) */
+    box[3] = s_page == SETUP_PG_ABOUT ? SETUP_AB_ROW_Y - UI(3) : SETUP_FAM_ROW_Y - UI(23);  /* (over the rows; FAMILY: over FROM) */
     if (s_page == SETUP_PG_FAMILY && s_stamp_l1) {                /* a grown starter fish's stamp at the top left: the band starts right of it */
         const fish_t *f = &t->fish[page_fish()];
-        if (founder(f) && f->stage >= STAGE_ADULT) box[0] = SETUP_X + SETUP_STAMP_IN_X + 66;
+        if (founder(f) && f->stage >= STAGE_ADULT) box[0] = SETUP_X + SETUP_STAMP_IN_X + UI(66);
     }
     return true;
 }
@@ -1721,9 +1727,11 @@ uint32_t setup_about_key(const tank_t *t) {                       /* everything 
 static void st_moving(const tank_t *t, uint16_t *fb, int stride, double clock) {       /* BODY / FINS: the stage, the fry */
     const fish_t *f = &t->fish[page_fish()];
     render_stretch_stage(fb, stride, f, !page_is_body(), s_st_axis, clock, setup_lab_black());
-    now_fry(t, fb, stride, f, SETUP_ST_NOW_X, SETUP_ST_NOW_Y, 20, clock);
-    text_c(fb, stride, SETUP_ST_NOW_X, SETUP_ST_NOW_Y + 26, 2, C_CAPT, "NOW");
-    text_c(fb, stride, STG_PLATE_X + STG_PLATE_W - 60, SETUP_ST_TOP + 4, 2, C_CAPT, "GROWN UP");
+    const int nr = s_lab ? UI(20) : 20;                 /* (this fork: the lab's fry is drawn at the page's scale, a live one in the
+                                                           tank keeps its size - and its ring, NOW 6 px under it as on the design) */
+    now_fry(t, fb, stride, f, SETUP_ST_NOW_X, SETUP_ST_NOW_Y, nr, clock);
+    text_c(fb, stride, SETUP_ST_NOW_X, SETUP_ST_NOW_Y + nr + UI(6), UI_TEXT(2), C_CAPT, "NOW");
+    text_c(fb, stride, STG_PLATE_X + STG_PLATE_W - UI(60), SETUP_ST_TOP + UI(4), UI_TEXT(2), C_CAPT, "GROWN UP");
 }
 /* BODY / FINS: the three named tiles, each with its little grown fish. The fish swim, so on the lab's held page the row
    is a moving box like the stage - at the SAME clock as the stage's fish (Strato on the square, 11-22: kept in the
@@ -1744,8 +1752,8 @@ static void st_tiles(const tank_t *t, uint16_t *fb, int stride, double clock) {
         render_rect(fb, stride, x, y, w, h, C_KEY);
         render_rect_edge(fb, stride, x, y, w, h, near ? C_TEXT : C_DIM);           /* the nearest name: framed ... */
         if (exact) render_rect_edge(fb, stride, x + 1, y + 1, w - 2, h - 2, C_TEXT);   /* ... exactly it: the double frame */
-        render_fish_preview(fb, stride, x + w / 2.0f, y + 12, 0.8f, f->color, f->fin, f->accent, &form, FISH_ROOM_ROW, clock);
-        text_c(fb, stride, x + w / 2, y + h - 17, 2, near ? C_TEXT : dim(C_CAPT, 60), name);
+        render_fish_preview(fb, stride, x + w / 2.0f, y + UI(12), 0.8f * UI_F, f->color, f->fin, f->accent, &form, FISH_ROOM_ROW, clock);
+        text_c(fb, stride, x + w / 2, y + h - UI(17), UI_TEXT(2), near ? C_TEXT : dim(C_CAPT, 60), name);
     }
 }
 /* COLORS: the three PATTERN tiles, each a little grown fish wearing that pattern - swimming too, so the same */
@@ -1758,44 +1766,56 @@ static void pat_tiles(const tank_t *t, uint16_t *fb, int stride, double clock) {
         render_rect(fb, stride, x, y, w, h, C_KEY);
         render_rect_edge(fb, stride, x, y, w, h, on ? C_TEXT : C_DIM);
         if (on) render_rect_edge(fb, stride, x + 1, y + 1, w - 2, h - 2, C_TEXT);
-        render_fish_preview(fb, stride, x + w / 2.0f, y + h / 2.0f, 1.4f, f->color, f->fin, f->accent, &form, FISH_ROOM_ROW, clock);
+        render_fish_preview(fb, stride, x + w / 2.0f, y + h / 2.0f, 1.4f * UI_F, f->color, f->fin, f->accent, &form, FISH_ROOM_ROW, clock);
     }
 }
 static void col_moving(const tank_t *t, uint16_t *fb, int stride, double clock) {      /* COLORS: the fry and the grown fish */
     const fish_t *f = &t->fish[page_fish()];
     now_fry(t, fb, stride, f, SETUP_ED_NOW_X, SETUP_ED_PREVIEW_Y, 17 * f->size + 6, clock);
-    if (setup_lab_black()) render_rect(fb, stride, SETUP_ED_GROWN_X - 72, SETUP_ED_PREVIEW_Y - 26, 144, 54, C_PANEL);
-    else render_rect_blend(fb, stride, SETUP_ED_GROWN_X - 72, SETUP_ED_PREVIEW_Y - 26, 144, 54, C_PANEL, 150);   /* clear of the buttons */
+    if (setup_lab_black()) render_rect(fb, stride, SETUP_ED_GROWN_X - UI(72), SETUP_ED_PREVIEW_Y - UI(26), UI(144), UI(54), C_PANEL);
+    else render_rect_blend(fb, stride, SETUP_ED_GROWN_X - UI(72), SETUP_ED_PREVIEW_Y - UI(26), UI(144), UI(54), C_PANEL, 150);   /* clear of the buttons */
     render_fish_preview(fb, stride, SETUP_ED_GROWN_X, SETUP_ED_PREVIEW_Y, SETUP_ED_GROWN_SIZE, f->color, f->fin, f->accent, f, FISH_ROOM_CARD, clock);
-    text_c(fb, stride, (SETUP_ED_NOW_X + SETUP_ED_GROWN_X) / 2, SETUP_ED_PREVIEW_Y - 10, 3, C_CAPT, ">");
+    text_c(fb, stride, (SETUP_ED_NOW_X + SETUP_ED_GROWN_X) / 2, SETUP_ED_PREVIEW_Y - UI(10), UI_TEXT(3), C_CAPT, ">");
     if (setup_lab_black()) pat_tiles(t, fb, stride, clock);          /* (the held page: its second moving box) */
 }
 static void name_moving(const tank_t *t, uint16_t *fb, int stride, double clock) {     /* NAME (the lab's): the fry and the grown fish over the letters */
     const fish_t *f = &t->fish[page_fish()];
     now_fry(t, fb, stride, f, SETUP_ED_NOW_X, SETUP_NAME_PREVIEW_Y, 17 * f->size + 6, clock);
-    render_rect(fb, stride, SETUP_ED_GROWN_X - 64, SETUP_NAME_PREVIEW_Y - 24, 128, 48, C_PANEL);
+    render_rect(fb, stride, SETUP_ED_GROWN_X - UI(64), SETUP_NAME_PREVIEW_Y - UI(24), UI(128), UI(48), C_PANEL);
     render_fish_preview(fb, stride, SETUP_ED_GROWN_X, SETUP_NAME_PREVIEW_Y, SETUP_NAME_GROWN_SIZE, f->color, f->fin, f->accent, f, FISH_ROOM_FAM, clock);
-    text_c(fb, stride, (SETUP_ED_NOW_X + SETUP_ED_GROWN_X) / 2, SETUP_NAME_PREVIEW_Y - 10, 3, C_CAPT, ">");
+    text_c(fb, stride, (SETUP_ED_NOW_X + SETUP_ED_GROWN_X) / 2, SETUP_NAME_PREVIEW_Y - UI(10), UI_TEXT(3), C_CAPT, ">");
 }
 static void tube_moving(const tank_t *t, uint16_t *fb, int stride, double clock) {     /* THE TUBE: the tube, and what it will grow into */
     const fish_t *f = &t->fish[SETUP_LAB_SLOT];
     render_lab_tube(fb, stride, f, f->name, clock);
-    render_fish_preview(fb, stride, (LAB_COL2_X + LAB_R) / 2 + 9, 154, 1.5f, f->color, f->fin, f->accent, f, FISH_ROOM_CARD, clock);
+    render_fish_preview(fb, stride, (LAB_COL2_X + LAB_R) / 2 + UI(9), UI(154), 1.5f * UI_F, f->color, f->fin, f->accent, f, FISH_ROOM_CARD, clock);
 }
 /* THE LAB KEPT (render.h): the boxes that move, what the rest is drawn from */
 int setup_lab_bands(const tank_t *t, int box[SETUP_LAB_BANDS][4]) {
     (void)t;
     if (!setup_lab_black()) return 0;
     #define BOX(i, x0, y0, x1, y1) do { box[i][0] = (x0); box[i][1] = (y0); box[i][2] = (x1); box[i][3] = (y1); } while (0)
-    if (page_is_stretch()) { BOX(0, 20, SETUP_ST_TOP - 2, STG_PLATE_X + STG_PLATE_W + 3, SETUP_ST_BOT - 1);   /* the stage, its handles, the fry at its left */
-                             BOX(1, SETUP_TILE_X, SETUP_ST_TILE_Y - 9, SETUP_TILE_X + (SETUP_TILE_N - 1) * SETUP_TILE_PX + SETUP_TILE_W - 1, SETUP_ST_TILE_Y + SETUP_ST_TILE_H - 1); return 2; }   /* the tiles' row: their fish swim (a tall sail stands a few px over its tile's top: the box takes it in) */
-    if (page_is_colors())  { BOX(0, SETUP_ED_NOW_X - 44, SETUP_ED_PREVIEW_Y - 27, SETUP_ED_GROWN_X + 75, SETUP_ED_PREVIEW_Y + 28);
+    if (page_is_stretch()) { BOX(0, UI(20), SETUP_ST_TOP - 2, STG_PLATE_X + STG_PLATE_W + 3, SETUP_ST_BOT - 1);   /* the stage, its handles, the fry at its left */
+#ifdef CONFIG_POCKET_TANK_320X240
+                             box[0][3] = SETUP_ST_BOT + 2;   /* (this fork) a held handle stopped at the plate's foot - a long belly fin's -
+                                                                draws its second ring 2 px past it, as at the plate's top, where the box's
+                                                                - 2 takes it in: kept out of the box, it stayed behind as a trail */
+#endif
+                             BOX(1, SETUP_TILE_X, SETUP_ST_TILE_Y - UI(9), SETUP_TILE_X + (SETUP_TILE_N - 1) * SETUP_TILE_PX + SETUP_TILE_W - 1, SETUP_ST_TILE_Y + SETUP_ST_TILE_H - 1); return 2; }   /* the tiles' row: their fish swim (a tall sail stands a few px over its tile's top: the box takes it in) */
+    if (page_is_colors())  { BOX(0, SETUP_ED_NOW_X - UI(44), SETUP_ED_PREVIEW_Y - UI(27), SETUP_ED_GROWN_X + UI(75), SETUP_ED_PREVIEW_Y + UI(28));
                              BOX(1, SETUP_PAT_TILE_X, SETUP_COLOR_PAT_Y, SETUP_PAT_TILE_X + (PATTERN_TILES - 1) * SETUP_PAT_TILE_PX + SETUP_PAT_TILE_W - 1, SETUP_COLOR_PAT_Y + SETUP_COLOR_PAT_H - 1); return 2; }
-    if (s_page == SETUP_PG_LAB_TUBE) { BOX(0, LAB_TUBE_X - 30, LAB_TUBE_Y - 32, LAB_TUBE_X + LAB_TUBE_W + 30, LAB_TUBE_Y + LAB_TUBE_H + 28);
-                                       BOX(1, LAB_COL2_X + 24, 122, 392, 186); return 2; }
+    if (s_page == SETUP_PG_LAB_TUBE) { BOX(0, LAB_TUBE_X - UI(30), LAB_TUBE_Y - UI(32), LAB_TUBE_X + LAB_TUBE_W + UI(30), LAB_TUBE_Y + LAB_TUBE_H + UI(28));
+                                       BOX(1, LAB_COL2_X + UI(24), UI(122), UI(392), UI(186));
+#ifdef CONFIG_POCKET_TANK_320X240
+                                       box[1][1] -= 4;   /* (this fork) the grown fish's dorsal tip reaches over UI(122) here (a deep
+                                                            VEIL body with short fins: page row 79 of the box's 80), and in the union of
+                                                            the two boxes, not in this one, it was never cleared: a held page kept it.
+                                                            4 rows take in every body and fin set and stop short of the caption above */
+#endif
+                                       return 2; }
     /* NAME, on the letter wheel: the letters only change with a pick and the cursor with its blink - both in the key - so
        the page is held too, and only the fry and the grown fish over it move (the legacy keyboards: whole, every frame) */
-    if (s_page == SETUP_PG_LAB_NAME && !s_kbd) { BOX(0, SETUP_ED_NOW_X - 44, SETUP_NAME_PREVIEW_Y - 25, SETUP_ED_GROWN_X + 66, SETUP_NAME_PREVIEW_Y + 25); return 1; }
+    if (s_page == SETUP_PG_LAB_NAME && !s_kbd) { BOX(0, SETUP_ED_NOW_X - UI(44), SETUP_NAME_PREVIEW_Y - UI(25), SETUP_ED_GROWN_X + UI(66), SETUP_NAME_PREVIEW_Y + UI(25)); return 1; }
     #undef BOX
     return 0;
 }
@@ -1932,7 +1952,7 @@ static void render_setup_in(const tank_t *t, uint16_t *fb, int stride, double cl
     const int FLOOR = TANK_BOT - 16 - PAGE_Y;           /* the tank's sand line, in the page's coordinates */
     if (s_page == SETUP_PG_WELCOME) {
         panel(fb, stride);
-        text_c(fb, stride, CX, SETUP_Y + 36, 3, C_TEXT, "WELCOME");
+        text_c(fb, stride, CX, SETUP_Y + UI(36), UI_TEXT(3), C_TEXT, "WELCOME");
         static const char *const ls[] = {
             "TWO FRY HAVE MOVED IN.",
             "THEY EAT, PLAY, REST AND",
@@ -1940,37 +1960,37 @@ static void render_setup_in(const tank_t *t, uint16_t *fb, int stride, double cl
             "EACH ONE THINKS FOR ITSELF.",
             "FIRST, LET'S MEET THEM.",
         };
-        lines_c(fb, stride, SETUP_Y + 96, 24, C_CAPT, ls, 5);
-        render_button(fb, stride, SETUP_MID_X, SETUP_BTN_Y, SETUP_BTN_W, SETUP_BTN_H, C_INNER, C_EDGE, "NEXT", 2);
-        dots(fb, stride, SETUP_Y + SETUP_H - 8);
+        lines_c(fb, stride, SETUP_Y + UI(96), UI(24), C_CAPT, ls, 5);
+        render_button(fb, stride, SETUP_MID_X, SETUP_BTN_Y, SETUP_BTN_W, SETUP_BTN_H, C_INNER, C_EDGE, "NEXT", UI_TEXT(2));
+        dots(fb, stride, SETUP_Y + SETUP_H - UI(8));
     } else if (s_page == SETUP_PG_BUBBLES) {
         /* the live tank with a stripe down the column: drag it anywhere */
-        text_c(fb, stride, CX, SETUP_Y + 7, 2, C_CAPT, "PLACE THE BUBBLES");
+        text_c(fb, stride, CX, SETUP_Y + UI(7), UI_TEXT(2), C_CAPT, "PLACE THE BUBBLES");
         nav(fb, stride, true, "NEXT", false);
         int bx = (int)t->bubble_x - PAGE_X;
-        render_rect_blend(fb, stride, bx - 22, SETUP_TOP_BTN_Y + SETUP_BTN_H + 10, 44, FLOOR - (SETUP_TOP_BTN_Y + SETUP_BTN_H + 10), C_EDGE, 46);
-        chevron(fb, stride, bx, FLOOR - 34, true, C_EDGE);
-        text_c(fb, stride, CX, 296, 2, C_CAPT, "DRAG THEM LEFT OR RIGHT");
-        dots(fb, stride, PAGE_H - 14);
+        render_rect_blend(fb, stride, bx - UI(22), SETUP_TOP_BTN_Y + SETUP_BTN_H + UI(10), UI(44), FLOOR - (SETUP_TOP_BTN_Y + SETUP_BTN_H + UI(10)), C_EDGE, 46);
+        chevron(fb, stride, bx, FLOOR - UI(34), true, C_EDGE);
+        text_c(fb, stride, CX, UI(296), UI_TEXT(2), C_CAPT, "DRAG THEM LEFT OR RIGHT");
+        dots(fb, stride, PAGE_H - UI(14));
     } else if (s_page == SETUP_PG_PLACE) {
         /* the live tank with a stripe over the piece's footprint: drag it
            anywhere on the water; the layer row picks its depth (the tank
            under the page redraws with it, so the fish and grass show the choice) */
         char title[40]; snprintf(title, sizeof title, "PLACE THE %s", SD_ITEMS[s_item].name);
-        text_c(fb, stride, CX, SETUP_Y + 7, 2, C_CAPT, title);
-        render_button(fb, stride, SETUP_TOP_DONE_X, SETUP_TOP_BTN_Y, SETUP_PL_BTN_W, SETUP_BTN_H, C_GO, C_GO_E, "DONE", 2);
+        text_c(fb, stride, CX, SETUP_Y + UI(7), UI_TEXT(2), C_CAPT, title);
+        render_button(fb, stride, SETUP_TOP_DONE_X, SETUP_TOP_BTN_Y, SETUP_PL_BTN_W, SETUP_BTN_H, C_GO, C_GO_E, "DONE", UI_TEXT(2));
         /* SELL, top left (2026-09-24): a tap arms it and names the refund, a
            second tap sells the piece back to the shop and closes the page */
         if (s_sell_armed) { char ok[16]; snprintf(ok, sizeof ok, "+%d OK?", progression_sell_value_of(t, s_item));
-                            render_button(fb, stride, SETUP_TOP_BACK_X, SETUP_TOP_BTN_Y, SETUP_PL_BTN_W, SETUP_BTN_H, C_GO, C_GO_E, ok, 2); }
-        else render_button(fb, stride, SETUP_TOP_BACK_X, SETUP_TOP_BTN_Y, SETUP_PL_BTN_W, SETUP_BTN_H, C_INNER, C_DIM, "SELL", 2);
+                            render_button(fb, stride, SETUP_TOP_BACK_X, SETUP_TOP_BTN_Y, SETUP_PL_BTN_W, SETUP_BTN_H, C_GO, C_GO_E, ok, UI_TEXT(2)); }
+        else render_button(fb, stride, SETUP_TOP_BACK_X, SETUP_TOP_BTN_Y, SETUP_PL_BTN_W, SETUP_BTN_H, C_INNER, C_DIM, "SELL", UI_TEXT(2));
         /* SHELVE beside it (0.3.9): put the piece away for later, kept as it is */
-        render_button(fb, stride, SETUP_TOP_SHELVE_X, SETUP_TOP_BTN_Y, SETUP_PL_BTN_W, SETUP_BTN_H, C_INNER, C_EDGE, "SHELVE", 2);
+        render_button(fb, stride, SETUP_TOP_SHELVE_X, SETUP_TOP_BTN_Y, SETUP_PL_BTN_W, SETUP_BTN_H, C_INNER, C_EDGE, "SHELVE", UI_TEXT(2));
         /* LOCK between SHELVE and DONE (0.3.9): the word says the state - LOCK
            (open, an outlined button) or LOCKED (shut, a filled one) - never the
            color alone (Strato is color blind) */
-        if (tank_decor_locked(t, s_item)) render_button(fb, stride, SETUP_TOP_LOCK_X, SETUP_TOP_BTN_Y, SETUP_PL_BTN_W, SETUP_BTN_H, C_FILL, C_TEXT, "LOCKED", 2);
-        else render_button(fb, stride, SETUP_TOP_LOCK_X, SETUP_TOP_BTN_Y, SETUP_PL_BTN_W, SETUP_BTN_H, C_INNER, C_EDGE, "LOCK", 2);
+        if (tank_decor_locked(t, s_item)) render_button(fb, stride, SETUP_TOP_LOCK_X, SETUP_TOP_BTN_Y, SETUP_PL_BTN_W, SETUP_BTN_H, C_FILL, C_TEXT, "LOCKED", UI_TEXT(2));
+        else render_button(fb, stride, SETUP_TOP_LOCK_X, SETUP_TOP_BTN_Y, SETUP_PL_BTN_W, SETUP_BTN_H, C_INNER, C_EDGE, "LOCK", UI_TEXT(2));
         /* the ORDER arrows (2026-10-17): a step back / forward in the stack of
            pieces at this depth, lit when there is a piece to pass; the relation
            is named on the hint line ("UNDER THE CORAL"). At the ends of the
@@ -1984,14 +2004,14 @@ static void render_setup_in(const tank_t *t, uint16_t *fb, int stride, double cl
            the coral" / "in front of the coral"); "THE" goes when the line is too
            long for where it sits (the hint line, or beside COLOR / LOOK) */
         char rel[40] = "";
-        int rel_avail = PAGE_W - 2 * 56 - 8;                               /* the hint line: the box every glass shows whole */
-        if (s_item == 3) rel_avail = (SETUP_COL_N - 1) * SETUP_COL_PX + SETUP_COL_W - render_text_w("COLOR", 2) - 14;
-        if (s_item == 4) rel_avail = (SETUP_LOOK_N - 1) * SETUP_LOOK_PX + SETUP_LOOK_W - render_text_w("LOOK", 2) - 14;
+        int rel_avail = PAGE_W - 2 * UI(56) - UI(8);                       /* the hint line: the box every glass shows whole */
+        if (s_item == 3) rel_avail = (SETUP_COL_N - 1) * SETUP_COL_PX + SETUP_COL_W - render_text_w("COLOR", UI_TEXT(2)) - UI(14);
+        if (s_item == 4) rel_avail = (SETUP_LOOK_N - 1) * SETUP_LOOK_PX + SETUP_LOOK_W - render_text_w("LOOK", UI_TEXT(2)) - UI(14);
         for (int pass = 0; pass < 2; pass++) {
             const char *the = pass ? "" : "THE ";
             if (above >= 0) snprintf(rel, sizeof rel, "BEHIND %s%s", the, SD_ITEMS[above].name);
             else if (below >= 0) snprintf(rel, sizeof rel, "IN FRONT OF %s%s", the, SD_ITEMS[below].name);
-            if (render_text_w(rel, 2) <= rel_avail) break;
+            if (render_text_w(rel, UI_TEXT(2)) <= rel_avail) break;
         }
         /* the DEPTH bar: one outlined box, three joined segments, the chosen
            one lit; a picture tile on each and the word under it */
@@ -2003,15 +2023,15 @@ static void render_setup_in(const tank_t *t, uint16_t *fb, int stride, double cl
         int z = tank_decor_z(t, s_item), zi = tank_decor_z_index(s_item, z);
         int n = tank_decor_z_count(s_item), bw = n * SETUP_DEPTH_SEG_W, bx = (PAGE_W - bw) / 2;   /* the item's own depths */
         if (n > 1) {                                                       /* (the plant has one depth: no bar, 0.4) */
-        text_c(fb, stride, CX, SETUP_DEPTH_Y - 18, 2, C_CAPT, "DEPTH");
+        text_c(fb, stride, CX, SETUP_DEPTH_Y - UI(18), UI_TEXT(2), C_CAPT, "DEPTH");
         render_rect(fb, stride, bx, SETUP_DEPTH_Y, bw, SETUP_DEPTH_H, C_KEY);
         for (int i = 0; i < n; i++) {
             int sx = bx + i * SETUP_DEPTH_SEG_W, zi_ = tank_decor_z_at(s_item, i);
             if (i == zi) { render_rect(fb, stride, sx, SETUP_DEPTH_Y, SETUP_DEPTH_SEG_W, SETUP_DEPTH_H, C_INNER);
                            render_rect_edge(fb, stride, sx + 1, SETUP_DEPTH_Y + 1, SETUP_DEPTH_SEG_W - 2, SETUP_DEPTH_H - 2, C_EDGE); }
-            else if (i > 0) render_rect(fb, stride, sx, SETUP_DEPTH_Y + 6, 1, SETUP_DEPTH_H - 12, C_DIM);   /* a divider */
-            depth_tile(t, fb, stride, sx, SETUP_DEPTH_Y + 4, SETUP_DEPTH_SEG_W, SETUP_DEPTH_TILE_H, zi_, s_item, clock);
-            text_c(fb, stride, sx + SETUP_DEPTH_SEG_W / 2, SETUP_DEPTH_Y + SETUP_DEPTH_TILE_H + 10, 2, i == zi ? C_TEXT : dim(C_CAPT, 45), zl[zi_]);
+            else if (i > 0) render_rect(fb, stride, sx, SETUP_DEPTH_Y + UI(6), 1, SETUP_DEPTH_H - UI(12), C_DIM);   /* a divider */
+            depth_tile(t, fb, stride, sx, SETUP_DEPTH_Y + UI(4), SETUP_DEPTH_SEG_W, SETUP_DEPTH_TILE_H, zi_, s_item, clock);
+            text_c(fb, stride, sx + SETUP_DEPTH_SEG_W / 2, SETUP_DEPTH_Y + SETUP_DEPTH_TILE_H + UI(10), UI_TEXT(2), i == zi ? C_TEXT : dim(C_CAPT, 45), zl[zi_]);
         }
         render_rect_edge(fb, stride, bx, SETUP_DEPTH_Y, bw, SETUP_DEPTH_H, C_EDGE);
         }
@@ -2020,22 +2040,22 @@ static void render_setup_in(const tank_t *t, uint16_t *fb, int stride, double cl
                                                                SEAGRASS; with a piece beside it, the ORDER SQUARES a row down under that piece's name. Each row's
                                                                caption names what it is behind or in front of: no hint line */
             const bool under = tank_plant_under(t);
-            text_c(fb, stride, CX, SETUP_DEPTH_Y - 18, 2, C_CAPT, "THE SEAGRASS");
+            text_c(fb, stride, CX, SETUP_DEPTH_Y - UI(18), UI_TEXT(2), C_CAPT, "THE SEAGRASS");
             render_rect(fb, stride, SETUP_ORDSQ_X, SETUP_DEPTH_Y, 2 * SETUP_DEPTH_SEG_W, SETUP_DEPTH_H, C_KEY);
             static const char *const W[2] = { "BEHIND", "IN FRONT" };
             for (int i = 0; i < 2; i++) {
                 const int sx = SETUP_ORDSQ_X + i * SETUP_DEPTH_SEG_W; const bool on = (i == 0) == under;
                 if (on) { render_rect(fb, stride, sx, SETUP_DEPTH_Y, SETUP_DEPTH_SEG_W, SETUP_DEPTH_H, C_INNER);
                           render_rect_edge(fb, stride, sx + 1, SETUP_DEPTH_Y + 1, SETUP_DEPTH_SEG_W - 2, SETUP_DEPTH_H - 2, C_EDGE); }
-                else if (i > 0) render_rect(fb, stride, sx, SETUP_DEPTH_Y + 6, 1, SETUP_DEPTH_H - 12, C_DIM);
-                depth_tile(t, fb, stride, sx, SETUP_DEPTH_Y + 4, SETUP_DEPTH_SEG_W, SETUP_DEPTH_TILE_H, i == 0 ? DECOR_Z_BACK : DECOR_Z_FRONT, 0, clock);
-                text_c(fb, stride, sx + SETUP_DEPTH_SEG_W / 2, SETUP_DEPTH_Y + SETUP_DEPTH_TILE_H + 10, 2, on ? C_TEXT : dim(C_CAPT, 45), W[i]);
+                else if (i > 0) render_rect(fb, stride, sx, SETUP_DEPTH_Y + UI(6), 1, SETUP_DEPTH_H - UI(12), C_DIM);
+                depth_tile(t, fb, stride, sx, SETUP_DEPTH_Y + UI(4), SETUP_DEPTH_SEG_W, SETUP_DEPTH_TILE_H, i == 0 ? DECOR_Z_BACK : DECOR_Z_FRONT, 0, clock);
+                text_c(fb, stride, sx + SETUP_DEPTH_SEG_W / 2, SETUP_DEPTH_Y + SETUP_DEPTH_TILE_H + UI(10), UI_TEXT(2), on ? C_TEXT : dim(C_CAPT, 45), W[i]);
             }
             render_rect_edge(fb, stride, SETUP_ORDSQ_X, SETUP_DEPTH_Y, 2 * SETUP_DEPTH_SEG_W, SETUP_DEPTH_H, C_EDGE);
             const int ref = order_ref(t);
             if (ref >= 0) {
                 char cap[40]; snprintf(cap, sizeof cap, "THE %s", SD_ITEMS[ref].name);
-                text_c(fb, stride, CX, SETUP_ORDSQ2_Y - 18, 2, C_CAPT, cap);
+                text_c(fb, stride, CX, SETUP_ORDSQ2_Y - UI(18), UI_TEXT(2), C_CAPT, cap);
                 order_bar(t, fb, stride, SETUP_ORDSQ_X, SETUP_ORDSQ2_Y, SETUP_DEPTH_SEG_W, SETUP_DEPTH_H, SETUP_DEPTH_TILE_H, s_item, ref);
             }
             rel[0] = 0;
@@ -2044,18 +2064,18 @@ static void render_setup_in(const tank_t *t, uint16_t *fb, int stride, double cl
             /* the cluster: a LOOK row of three tiles - the coral, the tubes and
                the brain as three bands over the look's name - the pick ringed */
             int look = tank_cluster_scheme(t);
-            render_rect_blend(fb, stride, SU_LEFT, SETUP_LOOK_Y - 22, SU_FULL_W, SETUP_LOOK_H + 30, C_PANEL, 110);
-            render_text(fb, stride, SETUP_LOOK_X + 2, SETUP_LOOK_Y - 18, 2, C_CAPT, "LOOK");
-            if (rel[0]) render_text(fb, stride, SETUP_LOOK_X + SETUP_LOOK_N * SETUP_LOOK_PX - SETUP_LOOK_PX + SETUP_LOOK_W - 2 - render_text_w(rel, 2), SETUP_LOOK_Y - 18, 2, C_CAPT, rel);
+            render_rect_blend(fb, stride, SU_LEFT, SETUP_LOOK_Y - UI(22), SU_FULL_W, SETUP_LOOK_H + UI(30), C_PANEL, 110);
+            render_text(fb, stride, SETUP_LOOK_X + 2, SETUP_LOOK_Y - UI(18), UI_TEXT(2), C_CAPT, "LOOK");
+            if (rel[0]) render_text(fb, stride, SETUP_LOOK_X + SETUP_LOOK_N * SETUP_LOOK_PX - SETUP_LOOK_PX + SETUP_LOOK_W - 2 - render_text_w(rel, UI_TEXT(2)), SETUP_LOOK_Y - UI(18), UI_TEXT(2), C_CAPT, rel);
             for (int i = 0; i < SETUP_LOOK_N; i++) {
                 int x = SETUP_LOOK_X + i * SETUP_LOOK_PX; bool on = i == look;
                 const cluster_scheme_t *sc = &CLUSTER_SCHEMES[i];
                 render_rect(fb, stride, x, SETUP_LOOK_Y, SETUP_LOOK_W, SETUP_LOOK_H, C_KEY);
                 int bw = (SETUP_LOOK_W - 6) / 3;
-                render_rect(fb, stride, x + 3, SETUP_LOOK_Y + 3, bw, 14, sc->coral);
-                render_rect(fb, stride, x + 3 + bw, SETUP_LOOK_Y + 3, bw, 14, sc->tube);
-                render_rect(fb, stride, x + 3 + 2 * bw, SETUP_LOOK_Y + 3, SETUP_LOOK_W - 6 - 2 * bw, 14, sc->brain);
-                text_c(fb, stride, x + SETUP_LOOK_W / 2, SETUP_LOOK_Y + 20, 2, on ? C_TEXT : dim(C_CAPT, 45), sc->name);
+                render_rect(fb, stride, x + 3, SETUP_LOOK_Y + 3, bw, UI(14), sc->coral);
+                render_rect(fb, stride, x + 3 + bw, SETUP_LOOK_Y + 3, bw, UI(14), sc->tube);
+                render_rect(fb, stride, x + 3 + 2 * bw, SETUP_LOOK_Y + 3, SETUP_LOOK_W - 6 - 2 * bw, UI(14), sc->brain);
+                text_c(fb, stride, x + SETUP_LOOK_W / 2, SETUP_LOOK_Y + UI(20), UI_TEXT(2), on ? C_TEXT : dim(C_CAPT, 45), sc->name);
                 render_rect_edge(fb, stride, x, SETUP_LOOK_Y, SETUP_LOOK_W, SETUP_LOOK_H, on ? C_TEXT : C_DIM);
                 if (on) render_rect_edge(fb, stride, x + 1, SETUP_LOOK_Y + 1, SETUP_LOOK_W - 2, SETUP_LOOK_H - 2, C_TEXT);
             }
@@ -2064,9 +2084,9 @@ static void render_setup_in(const tank_t *t, uint16_t *fb, int stride, double cl
                page's swatches, shorter), the pick ringed, the hint under the
                row's caption */
             uint32_t rgb = tank_coral_rgb(t);
-            render_rect_blend(fb, stride, SU_LEFT, SETUP_COL_Y - 22, SU_FULL_W, SETUP_COL_H + 30, C_PANEL, 110);   /* a band the swatches read on, like the colour page's */
-            render_text(fb, stride, SETUP_COL_X + 2, SETUP_COL_Y - 18, 2, C_CAPT, "COLOR");
-            if (rel[0]) render_text(fb, stride, SETUP_COL_X + (SETUP_COL_N - 1) * SETUP_COL_PX + SETUP_COL_W - 2 - render_text_w(rel, 2), SETUP_COL_Y - 18, 2, C_CAPT, rel);
+            render_rect_blend(fb, stride, SU_LEFT, SETUP_COL_Y - UI(22), SU_FULL_W, SETUP_COL_H + UI(30), C_PANEL, 110);   /* a band the swatches read on, like the colour page's */
+            render_text(fb, stride, SETUP_COL_X + 2, SETUP_COL_Y - UI(18), UI_TEXT(2), C_CAPT, "COLOR");
+            if (rel[0]) render_text(fb, stride, SETUP_COL_X + (SETUP_COL_N - 1) * SETUP_COL_PX + SETUP_COL_W - 2 - render_text_w(rel, UI_TEXT(2)), SETUP_COL_Y - UI(18), UI_TEXT(2), C_CAPT, rel);
             (void)coral_hint;
             for (int i = 0; i < SETUP_COL_N; i++) {
                 int x = SETUP_COL_X + i * SETUP_COL_PX;
@@ -2075,15 +2095,24 @@ static void render_setup_in(const tank_t *t, uint16_t *fb, int stride, double cl
                 render_rect_edge(fb, stride, x, SETUP_COL_Y, SETUP_COL_W, SETUP_COL_H, on ? C_TEXT : C_DIM);
                 if (on) render_rect_edge(fb, stride, x + 1, SETUP_COL_Y + 1, SETUP_COL_W - 2, SETUP_COL_H - 2, C_TEXT);
             }
-        } else if (s_item != 0) text_c(fb, stride, CX, SETUP_DEPTH_HINT_Y, 2, C_CAPT, rel[0] ? rel : s_item == 2 || s_item == 8 || s_item == 9 ? castle_hint[z] : hint[z]);
-        float x0 = tank_decor_x(t, s_item) - tank_piece_half_w(t, s_item) - 10, x1 = tank_decor_x(t, s_item) + tank_piece_half_w(t, s_item) + 10, top = TANK_BOT - 16 - 40;
+        } else if (s_item != 0) text_c(fb, stride, CX, SETUP_DEPTH_HINT_Y, UI_TEXT(2), C_CAPT, rel[0] ? rel : s_item == 2 || s_item == 8 || s_item == 9 ? castle_hint[z] : hint[z]);
+        float x0 = tank_decor_x(t, s_item) - tank_piece_half_w(t, s_item) - UI(10), x1 = tank_decor_x(t, s_item) + tank_piece_half_w(t, s_item) + UI(10), top = TANK_BOT - 16 - 40;
         if (s_item == 0) tank_veg_bed(t, 3, NULL, NULL, &top, NULL);   /* the leaves' reach */
         else top = tank_decor_fy(t, s_item) - tank_piece_height(t, s_item);   /* its highest pixel on its depth's floor line (0.3.9) */
         x0 -= PAGE_X; x1 -= PAGE_X; top -= PAGE_Y;                     /* the piece is in the tank; the stripe is drawn on the page */
-        int sy = (int)top - 8; if (sy < place_y()) sy = place_y();
+        int sy = (int)top - UI(8); if (sy < place_y()) sy = place_y();
         render_rect_blend(fb, stride, (int)x0, sy, (int)(x1 - x0), FLOOR - sy + 4, C_EDGE, 46);
-        chevron(fb, stride, (int)((x0 + x1) * 0.5f), FLOOR - 34, true, C_EDGE);
-        text_c(fb, stride, CX, 296, 2, C_CAPT, "DRAG IT LEFT OR RIGHT");
+#ifdef CONFIG_POCKET_TANK_320X240
+        /* (this fork) the sword plant's second row of squares ends where the hint stands on the design (their tiles keep 34
+           rows for the glyphs, SETUP_DEPTH_TILE_H): with that row up, the hint takes the drag zone's top and the chevron
+           stands on the sand under it (setup.h SETUP_PLANT2_CHEVRON_Y and its assert) */
+        const bool plant2 = s_item == 0 && s_plant_two;
+        chevron(fb, stride, (int)((x0 + x1) * 0.5f), plant2 ? SETUP_PLANT2_CHEVRON_Y : FLOOR - UI(34), true, C_EDGE);
+        text_c(fb, stride, CX, plant2 ? SETUP_PLACE_PLANT2_Y : UI(296), UI_TEXT(2), C_CAPT, "DRAG IT LEFT OR RIGHT");
+#else
+        chevron(fb, stride, (int)((x0 + x1) * 0.5f), FLOOR - UI(34), true, C_EDGE);
+        text_c(fb, stride, CX, UI(296), UI_TEXT(2), C_CAPT, "DRAG IT LEFT OR RIGHT");
+#endif
     } else if (page_is_name() && s_kbd) {
         /* the two rejected designs, drawn as they were: a panel over the tank,
            the name as underlined slots (the next free one blinks; an untouched
@@ -2093,16 +2122,16 @@ static void render_setup_in(const tank_t *t, uint16_t *fb, int stride, double cl
         const uint32_t nrgb = f ? name_rgb(f->color) : C_CRIT;
         bool grid = s_kbd == SETUP_KBD_GRID;
         panel(fb, stride);
-        char tb[32]; text_c(fb, stride, CX, SETUP_Y + (grid ? 12 : 7), 2, C_CAPT, name_title(tb, sizeof tb));
-        if (grid && f) render_fish_preview(fb, stride, SETUP_X + 88, SETUP_Y + 72, 2.0f, f->color, f->fin, f->accent, f, FISH_ROOM_CARD, clock);
-        else if (grid) render_crit_portrait(fb, stride, t, s_crit, SETUP_X + 88, SETUP_Y + 72);
-        const int SL = 22, NX = grid ? SETUP_X + 160 : CX - FISH_NAME_MAX * SL / 2 + 2, NY = grid ? SETUP_Y + 58 : SETUP_TOP_BTN_Y + (SETUP_BTN_H - 28) / 2;
+        char tb[32]; text_c(fb, stride, CX, SETUP_Y + (grid ? UI(12) : UI(7)), UI_TEXT(2), C_CAPT, name_title(tb, sizeof tb));
+        if (grid && f) render_fish_preview(fb, stride, SETUP_X + UI(88), SETUP_Y + UI(72), 2.0f * UI_F, f->color, f->fin, f->accent, f, FISH_ROOM_CARD, clock);
+        else if (grid) render_crit_portrait(fb, stride, t, s_crit, SETUP_X + UI(88), SETUP_Y + UI(72));
+        const int SL = UI(22), NX = grid ? SETUP_X + UI(160) : CX - FISH_NAME_MAX * SL / 2 + 2, NY = grid ? SETUP_Y + UI(58) : SETUP_TOP_BTN_Y + (SETUP_BTN_H - UI(28)) / 2;
         int n = name_len(nm);
         for (int i = 0; i < FISH_NAME_MAX; i++) {
             int x = NX + i * SL;
             bool cursor = i == n && ((int)(clock * 2) & 1);
-            render_rect(fb, stride, x, NY + 26, SL - 4, 2, cursor ? C_EDGE : i < n ? nrgb : C_DIM);
-            if (i < n) { char ch[2] = { nm[i], 0 }; render_text(fb, stride, x + 3, NY, 3, s_typed ? C_TEXT : C_CAPT, ch); }
+            render_rect(fb, stride, x, NY + UI(26), SL - UI(4), 2, cursor ? C_EDGE : i < n ? nrgb : C_DIM);
+            if (i < n) { char ch[2] = { nm[i], 0 }; render_text(fb, stride, x + UI(3), NY, UI_TEXT(3), s_typed ? C_TEXT : C_CAPT, ch); }
         }
         if (grid) for (int k = 0; k <= SETUP_KEY_DEL; k++) {
             int x = KG_X + kg_col(k) * KG_PX, y = KG_Y + kg_row(k) * KG_PY, w = kg_w(k);
@@ -2110,7 +2139,7 @@ static void render_setup_in(const tank_t *t, uint16_t *fb, int stride, double cl
             render_rect_edge(fb, stride, x, y, w, KG_H, C_DIM);
             char lab[4] = { (char)('A' + k), 0 };
             if (k == SETUP_KEY_DEL) strcpy(lab, "DEL");
-            render_text(fb, stride, x + (w - render_text_w(lab, 2)) / 2, y + (KG_H - 14) / 2, 2, C_TEXT, lab);
+            render_text(fb, stride, x + (w - render_text_w(lab, UI_TEXT(2))) / 2, y + (KG_H - 7 * UI_TEXT(2)) / 2, UI_TEXT(2), C_TEXT, lab);
         } else for (int cell = 0; cell < KP_COLS * KP_ROWS; cell++) {
             int k = kp_key(cell), x = KP_X + (cell % KP_COLS) * KP_PX, y = KP_Y + (cell / KP_COLS) * KP_PY;
             bool special = k >= 26;
@@ -2119,10 +2148,10 @@ static void render_setup_in(const tank_t *t, uint16_t *fb, int stride, double cl
             char lab[4] = { (char)('A' + k), 0 };
             if (k == SETUP_KEY_DEL) strcpy(lab, "DEL");
             if (k == SETUP_KEY_PAGE) strcpy(lab, s_kb_page ? "A-M" : "N-Z");
-            render_text(fb, stride, x + (KP_W - render_text_w(lab, 3)) / 2, y + (KP_H - 21) / 2, 3, C_TEXT, lab);
+            render_text(fb, stride, x + (KP_W - render_text_w(lab, UI_TEXT(3))) / 2, y + (KP_H - 7 * UI_TEXT(3)) / 2, UI_TEXT(3), C_TEXT, lab);
         }
         nav(fb, stride, !grid, s_rename ? "DONE" : "NEXT", s_rename);
-        if (grid) dots(fb, stride, SETUP_Y + SETUP_H - 8);
+        if (grid) dots(fb, stride, SETUP_Y + SETUP_H - UI(8));
     } else if (page_is_name()) {
         /* straight on the tank: the fish being named wears a ring in its own
            colour, its name spans the middle in that colour, the active slot
@@ -2137,17 +2166,24 @@ static void render_setup_in(const tank_t *t, uint16_t *fb, int stride, double cl
                                                                    on a plate where a fish would stand on stage */
             float rx, ry, rr;
             if (render_crit_spot(t, s_crit, &rx, &ry, &rr)) render_ring(fb, stride, rx - PAGE_X, ry - PAGE_Y, rr, C_CRIT);
+#ifdef CONFIG_POCKET_TANK_320X240
+            /* (this fork) the card's art keeps its size - the octopus's box is 80 x 48 - and a 240 px page has no 48 rows
+               for it under the top buttons: its plate stands between them, under the title (setup.h SETUP_CRIT_PLATE_*) */
+            const int px = SETUP_STAGE_X - PAGE_X, py = SETUP_CRIT_PLATE_Y;
+            render_rect_blend(fb, stride, px - SETUP_CRIT_PLATE_W / 2, py - SETUP_CRIT_PLATE_H / 2, SETUP_CRIT_PLATE_W, SETUP_CRIT_PLATE_H, C_PANEL, 150);
+#else
             const int px = SETUP_STAGE_X - PAGE_X, py = SETUP_STAGE_NAME_Y - PAGE_Y;
             render_rect_blend(fb, stride, px - 64, py - 24, 128, 48, C_PANEL, 150);
+#endif
             render_crit_portrait(fb, stride, t, s_crit, px, py);
         }
         if (name_beside(t) && !setup_lab_black()) {             /* the form they chose, in view while they name it (0.4) */
-            render_rect_blend(fb, stride, SETUP_ED_GROWN_X - 64, SETUP_NAME_PREVIEW_Y - 24, 128, 48, C_PANEL, 150);
+            render_rect_blend(fb, stride, SETUP_ED_GROWN_X - UI(64), SETUP_NAME_PREVIEW_Y - UI(24), UI(128), UI(48), C_PANEL, 150);
             render_fish_preview(fb, stride, SETUP_ED_GROWN_X, SETUP_NAME_PREVIEW_Y, SETUP_NAME_GROWN_SIZE, f->color, f->fin, f->accent, f, FISH_ROOM_FAM, clock);
-            text_c(fb, stride, (SETUP_ED_NOW_X + SETUP_ED_GROWN_X) / 2, SETUP_NAME_PREVIEW_Y - 10, 3, C_CAPT, ">");
+            text_c(fb, stride, (SETUP_ED_NOW_X + SETUP_ED_GROWN_X) / 2, SETUP_NAME_PREVIEW_Y - UI(10), UI_TEXT(3), C_CAPT, ">");
         }
-        render_rect_blend(fb, stride, SU_LEFT, SETUP_SLOT_Y - SETUP_ARROW_GAP - 2, SU_FULL_W, SETUP_SLOT_H + 2 * SETUP_ARROW_GAP + 36, C_PANEL, 150);
-        char tb[32]; text_c(fb, stride, CX, SETUP_Y + 7, 2, C_CAPT, name_title(tb, sizeof tb));
+        render_rect_blend(fb, stride, SU_LEFT, SETUP_SLOT_Y - SETUP_ARROW_GAP - 2, SU_FULL_W, SETUP_SLOT_H + 2 * SETUP_ARROW_GAP + UI(36), C_PANEL, 150);
+        char tb[32]; text_c(fb, stride, CX, SETUP_Y + UI(7), UI_TEXT(2), C_CAPT, name_title(tb, sizeof tb));
         nav(fb, stride, true, s_rename ? "DONE" : "NEXT", s_rename);
         int n = name_len(nm);
         if (s_slot > n) s_slot = n;
@@ -2157,73 +2193,73 @@ static void render_setup_in(const tank_t *t, uint16_t *fb, int stride, double cl
             uint32_t col = on ? nrgb : reach ? dim(nrgb, 55) : C_DIM;
             int v = slot_val(nm, i);
             if (v) { char ch[2] = { (char)('A' + v - 1), 0 }; render_text(fb, stride, x, SETUP_SLOT_Y, SETUP_SLOT_SCALE, col, ch); }
-            render_rect(fb, stride, x, SETUP_SLOT_Y + SETUP_SLOT_H + 8, SETUP_SLOT_W, 4,
+            render_rect(fb, stride, x, SETUP_SLOT_Y + SETUP_SLOT_H + UI(8), SETUP_SLOT_W, UI(4),
                         on && !v && ((int)(clock * 2) & 1) ? C_TEXT : col);
             if (on) {
                 chevron(fb, stride, x + SETUP_SLOT_W / 2, SETUP_SLOT_Y - SETUP_ARROW_GAP, true, C_EDGE);
-                chevron(fb, stride, x + SETUP_SLOT_W / 2, SETUP_SLOT_Y + SETUP_SLOT_H + SETUP_ARROW_GAP + 4, false, C_EDGE);
+                chevron(fb, stride, x + SETUP_SLOT_W / 2, SETUP_SLOT_Y + SETUP_SLOT_H + SETUP_ARROW_GAP + UI(4), false, C_EDGE);
             }
         }
-        text_c(fb, stride, CX, LAB_BENCH_Y + (LAB_BENCH_H - 14) / 2, 2, C_CAPT, "SWIPE A LETTER UP OR DOWN");   /* (the lab: centred in the bench's top) */
-        dots(fb, stride, PAGE_H - 14);
+        text_c(fb, stride, CX, LAB_BENCH_Y + (LAB_BENCH_H - 7 * UI_TEXT(2)) / 2, UI_TEXT(2), C_CAPT, "SWIPE A LETTER UP OR DOWN"); /* (the lab: centred in the bench's top) */
+        dots(fb, stride, PAGE_H - UI(14));
     } else if (s_lab && s_page == SETUP_PG_LAB_TUBE) {
         /* THE TUBE: the fry in its tube at the left, what it will grow into and its recipe at the right, one button */
         const fish_t *f = &t->fish[SETUP_LAB_SLOT];
         if (!setup_lab_black()) render_rect_blend(fb, stride, -PAGE_X, -PAGE_Y, TANK_W, TANK_H, C_PANEL, 240);
         /* THE LAB'S GRID: the heading, BACK and the rack share the left margin, BACK is the rack's width; the right column's
            words, the recipe and POUR IT IN share LAB_COL2_X; POUR and the rack's foot stand on the bench's top line */
-        render_text(fb, stride, LAB_L + (PAGE_BOWL ? 24 : 0), PAGE_BOWL ? 18 : 14, 2, C_CAPT, "THE FISH LAB");   /* (the bowl: in from the circle's edge) */
-        render_button(fb, stride, LAB_L, SETUP_LAB_BACK_Y, SETUP_LAB_BACK_W, SETUP_BTN_H, C_KEY, C_DIM, "BACK", 2);
+        render_text(fb, stride, LAB_L + (PAGE_BOWL ? UI(24) : 0), PAGE_BOWL ? UI(18) : UI(14), UI_TEXT(2), C_CAPT, "THE FISH LAB"); /* (the bowl: in from the circle's edge) */
+        render_button(fb, stride, LAB_L, SETUP_LAB_BACK_Y, SETUP_LAB_BACK_W, SETUP_BTN_H, C_KEY, C_DIM, "BACK", UI_TEXT(2));
         if (!setup_lab_black()) tube_moving(t, fb, stride, clock);
-        render_text(fb, stride, LAB_COL2_X, LAB_TUBE_Y - 30, 2, C_CAPT, "IT WILL GROW INTO");
+        render_text(fb, stride, LAB_COL2_X, LAB_TUBE_Y - UI(30), UI_TEXT(2), C_CAPT, "IT WILL GROW INTO");
         char wb[24], wf[24]; lab_words(f, wb, sizeof wb, wf, sizeof wf);
         const char *const row[4][2] = { { "BODY", wb }, { "FINS", wf }, { "PATTERN", PATTERN_NAMES[f->pattern < PATTERN_N ? f->pattern : 0] }, { "HIDDEN", "A SURPRISE" } };
         for (int i = 0; i < 4; i++) {
-            render_text(fb, stride, LAB_COL2_X, 200 + i * 22, 2, C_CAPT, row[i][0]);
-            render_text(fb, stride, LAB_COL2_X + 96, 200 + i * 22, 2, C_TEXT, row[i][1]);
+            render_text(fb, stride, LAB_COL2_X, UI(200) + i * UI(22), UI_TEXT(2), C_CAPT, row[i][0]);
+            render_text(fb, stride, LAB_COL2_X + UI(96), UI(200) + i * UI(22), UI_TEXT(2), C_TEXT, row[i][1]);
         }
         const int why = progression_lab_why(t);
         /* the button's words, then the PRICE as the shop writes one - its sand dollar coin and the number (Strato 11-22:
            "250 is ambiguous") - the pair centred in the button. A full tank has no price to say */
         const bool ok = why == LAB_OK;
         const char *words = setup_lab_pour_word(t);
-        render_button(fb, stride, SETUP_LAB_BTN_X, SETUP_LAB_BTN_Y, SETUP_LAB_BTN_W, SETUP_BTN_H, ok ? C_GO : C_KEY, ok ? C_GO_E : C_DIM, "", 2);   /* said plainly; never by a hue alone */
+        render_button(fb, stride, SETUP_LAB_BTN_X, SETUP_LAB_BTN_Y, SETUP_LAB_BTN_W, SETUP_BTN_H, ok ? C_GO : C_KEY, ok ? C_GO_E : C_DIM, "", UI_TEXT(2)); /* said plainly; never by a hue alone */
         {   const bool price = why != LAB_FULL && why != LAB_WELCOME;
-            const int ww = render_text_w(words, 2), gap = 12, w = ww + (price ? gap + render_price_w(SD_PRICE_LAB_FRY) : 0);
-            const int x = SETUP_LAB_BTN_X + (SETUP_LAB_BTN_W - w) / 2, y = SETUP_LAB_BTN_Y + (SETUP_BTN_H - 14) / 2;
-            render_text(fb, stride, x, y, 2, C_TEXT, words);
+            const int ww = render_text_w(words, UI_TEXT(2)), gap = UI(12), w = ww + (price ? gap + render_price_w(SD_PRICE_LAB_FRY) : 0);
+            const int x = SETUP_LAB_BTN_X + (SETUP_LAB_BTN_W - w) / 2, y = SETUP_LAB_BTN_Y + (SETUP_BTN_H - 7 * UI_TEXT(2)) / 2;
+            render_text(fb, stride, x, y, UI_TEXT(2), C_TEXT, words);
             if (price) render_price(fb, stride, x + ww + gap, y, SD_PRICE_LAB_FRY, C_TEXT);
         }
-        dots(fb, stride, PAGE_H - 14);
+        dots(fb, stride, PAGE_H - UI(14));
     } else if (page_is_stretch()) {
         /* BODY and FINS (0.4.3 item 10, setup.h SETUP_ST_*): straight on the tank; the fry ringed at the left (NOW), the
            grown fish large on the stage with its handles, one row of named tiles under it */
         const bool body = page_is_body();
         char cap[40]; snprintf(cap, sizeof cap, "%s FOR %s", body ? "A BODY" : "FINS", s_lab ? "YOUR FRY" : page_fish() ? "THE SECOND FISH" : "THE FIRST FISH");
-        text_c(fb, stride, CX, SETUP_Y + 7, 2, C_CAPT, cap);
+        text_c(fb, stride, CX, SETUP_Y + UI(7), UI_TEXT(2), C_CAPT, cap);
         nav(fb, stride, true, "NEXT", false);
-        render_button(fb, stride, SETUP_ROLL_X, SETUP_TOP_BTN_Y, SETUP_TOP_BTN_W, SETUP_BTN_H, C_KEY, C_DIM, s_st_can_undo ? "UNDO" : "ROLL", 2);
+        render_button(fb, stride, SETUP_ROLL_X, SETUP_TOP_BTN_Y, SETUP_TOP_BTN_W, SETUP_BTN_H, C_KEY, C_DIM, s_st_can_undo ? "UNDO" : "ROLL", UI_TEXT(2));
         /* the band under the hint and the tiles only: the fry at the left swims in clear water, as on the other pages */
-        if (!setup_lab_black()) render_rect_blend(fb, stride, -PAGE_X, SETUP_ST_HINT_Y - 6, TANK_W, SETUP_ST_TILE_Y + SETUP_ST_TILE_H + 8 - (SETUP_ST_HINT_Y - 6), C_PANEL, 150);
+        if (!setup_lab_black()) render_rect_blend(fb, stride, -PAGE_X, SETUP_ST_HINT_Y - UI(6), TANK_W, SETUP_ST_TILE_Y + SETUP_ST_TILE_H + UI(8) - (SETUP_ST_HINT_Y - UI(6)), C_PANEL, 150);
         if (!setup_lab_black()) st_moving(t, fb, stride, clock);          /* (the lab's black page: its boxes draw these - setup_lab_bands_draw) */
-        text_c(fb, stride, CX, SETUP_ST_HINT_Y, 2, C_CAPT, body ? "DRAG TO STRETCH. OR PICK ONE:" : "DRAG A FIN. OR PICK A SET:");
+        text_c(fb, stride, CX, SETUP_ST_HINT_Y, UI_TEXT(2), C_CAPT, body ? "DRAG TO STRETCH. OR PICK ONE:" : "DRAG A FIN. OR PICK A SET:");
         if (!setup_lab_black()) st_tiles(t, fb, stride, clock);         /* (the lab's held page: a moving box of their own) */
-        dots(fb, stride, PAGE_H - 14);
+        dots(fb, stride, PAGE_H - UI(14));
     } else if (page_is_look()) {
         /* THE EDITOR (setup.h): straight on the tank, the fry ringed on stage
            (NOW), the grown fish on a dark plate (GROWN UP), the rows under a
            panel band */
         const fish_t *f = &t->fish[page_fish()];
         char cap[40]; snprintf(cap, sizeof cap, "COLORS FOR %s", s_lab ? "YOUR FRY" : page_fish() ? "THE SECOND FISH" : "THE FIRST FISH");   /* not named yet (0.4) */
-        text_c(fb, stride, CX, SETUP_Y + 7, 2, C_CAPT, cap);
+        text_c(fb, stride, CX, SETUP_Y + UI(7), UI_TEXT(2), C_CAPT, cap);
         nav(fb, stride, true, "NEXT", false);
-        render_button(fb, stride, SETUP_ROLL_X, SETUP_TOP_BTN_Y, SETUP_TOP_BTN_W, SETUP_BTN_H, C_KEY, C_DIM, "ROLL", 2);
+        render_button(fb, stride, SETUP_ROLL_X, SETUP_TOP_BTN_Y, SETUP_TOP_BTN_W, SETUP_BTN_H, C_KEY, C_DIM, "ROLL", UI_TEXT(2));
         const edit_row_t *r; int n = edit_rows(&r);
-        int band = SETUP_ED_CAPTION_Y - 6;                       /* from the captions down: fish swim behind them */
-        render_rect_blend(fb, stride, SU_LEFT, band, SU_FULL_W, r[n - 1].y + r[n - 1].h + 10 - band, C_PANEL, 110);
+        int band = SETUP_ED_CAPTION_Y - UI(6);                   /* from the captions down: fish swim behind them */
+        render_rect_blend(fb, stride, SU_LEFT, band, SU_FULL_W, r[n - 1].y + r[n - 1].h + UI(10) - band, C_PANEL, 110);
         if (!setup_lab_black()) col_moving(t, fb, stride, clock);
-        text_c(fb, stride, SETUP_ED_NOW_X, SETUP_ED_CAPTION_Y, 2, C_CAPT, "NOW");
-        text_c(fb, stride, SETUP_ED_GROWN_X, SETUP_ED_CAPTION_Y, 2, C_CAPT, "GROWN UP");
+        text_c(fb, stride, SETUP_ED_NOW_X, SETUP_ED_CAPTION_Y, UI_TEXT(2), C_CAPT, "NOW");
+        text_c(fb, stride, SETUP_ED_GROWN_X, SETUP_ED_CAPTION_Y, UI_TEXT(2), C_CAPT, "GROWN UP");
         for (int k = 0; k < n; k++) {
             int cur = tank_gene(f, r[k].gene);
             char lab[32];
@@ -2231,7 +2267,7 @@ static void render_setup_in(const tank_t *t, uint16_t *fb, int stride, double cl
             else if (r[k].gene == GENE_ACCENT && s_same_note > 0) snprintf(lab, sizeof lab, "%s  SAME AS ITS BODY", r[k].label);
             else snprintf(lab, sizeof lab, "%s", r[k].label);
             bool unused = r[k].gene == GENE_ACCENT && f->pattern == PATTERN_SOLID;   /* a solid fish wears no markings */
-            render_text(fb, stride, r[k].x + 2, r[k].y - SETUP_LABEL_DY, 2, unused ? dim(C_CAPT, 45) : C_CAPT, lab);
+            render_text(fb, stride, r[k].x + 2, r[k].y - SETUP_LABEL_DY, UI_TEXT(2), unused ? dim(C_CAPT, 45) : C_CAPT, lab);
             if (r[k].gene == GENE_PATTERN) { if (!setup_lab_black()) pat_tiles(t, fb, stride, clock); continue; }   /* (its tiles swim: one way to draw them) */
             for (int i = 0; i < r[k].n; i++) {
                 int x = r[k].x + i * r[k].px, y = r[k].y, w = r[k].w, h = r[k].h;
@@ -2255,10 +2291,10 @@ static void render_setup_in(const tank_t *t, uint16_t *fb, int stride, double cl
                 render_rect_edge(fb, stride, x, y, w, h, on ? C_TEXT : C_DIM);
                 if (on) render_rect_edge(fb, stride, x + 1, y + 1, w - 2, h - 2, C_TEXT);
                 if (r[k].gene == GENE_PATTERN)
-                    render_fish_preview(fb, stride, x + w / 2.0f, y + h / 2.0f, 1.4f, f->color, f->fin, f->accent, &form, FISH_ROOM_ROW, clock);
+                    render_fish_preview(fb, stride, x + w / 2.0f, y + h / 2.0f, 1.4f * UI_F, f->color, f->fin, f->accent, &form, FISH_ROOM_ROW, clock);
                 else {
-                    render_fish_preview(fb, stride, x + w / 2.0f, y + 21, 1.0f, f->color, f->fin, f->accent, &form, FISH_ROOM_ROW, clock);
-                    text_c(fb, stride, x + w / 2, y + h - 17, 2, on ? C_TEXT : dim(C_CAPT, 60),
+                    render_fish_preview(fb, stride, x + w / 2.0f, y + UI(21), 1.0f * UI_F, f->color, f->fin, f->accent, &form, FISH_ROOM_ROW, clock);
+                    text_c(fb, stride, x + w / 2, y + h - UI(17), UI_TEXT(2), on ? C_TEXT : dim(C_CAPT, 60),
                            r[k].gene == GENE_SHAPE ? SHAPE_NAMES[i] : FINS_NAMES[i]);
                 }
             }
@@ -2267,7 +2303,7 @@ static void render_setup_in(const tank_t *t, uint16_t *fb, int stride, double cl
                 render_rect_blend(fb, stride, r[k].x - 2, r[k].y - 2, (r[k].n - 1) * r[k].px + r[k].w + 4, r[k].h + 4, C_PANEL, 150);
         }
         if (page_is_colors()) swap_button(fb, stride);
-        dots(fb, stride, PAGE_H - 14);
+        dots(fb, stride, PAGE_H - UI(14));
     } else if (s_page == SETUP_PG_BORN) {
         /* the announcement, over the live tank: the fry wears a double ring
            wherever it hatched (no stage - it stays in the grass it was born
@@ -2277,41 +2313,41 @@ static void render_setup_in(const tank_t *t, uint16_t *fb, int stride, double cl
         float r = 17 * f->size + 6 + 3 * sinf(tank_anim(clock) * 3);   /* a ring that breathes */
         fish_ring(fb, stride, f, r, f->color);
         fish_ring(fb, stride, f, r + 8, mut ? C_NEW : C_EDGE);     /* a mutation: a gold outer ring */
-        render_rect_blend(fb, stride, SU_LEFT, 92, SU_FULL_W, mut ? 138 : 116, C_PANEL, 150);
-        text_c(fb, stride, CX, 104, 3, C_TEXT, "A NEW FRY!");
+        render_rect_blend(fb, stride, SU_LEFT, UI(92), SU_FULL_W, mut ? UI(138) : UI(116), C_PANEL, 150);
+        text_c(fb, stride, CX, UI(104), UI_TEXT(3), C_TEXT, "A NEW FRY!");
         char l1[FISH_NAME_MAX * 2 + 24]; const char *l2;
         setup_born_lines(t, page_fish(), l1, sizeof l1, &l2);
-        text_c(fb, stride, CX, 140, 2, C_CAPT, l1);
-        text_c(fb, stride, CX, 162, 2, C_CAPT, l2);
-        text_c(fb, stride, CX, 184, 2, C_CAPT, "GO AND SAY HELLO.");
-        if (mut) text_c(fb, stride, CX, 206, 2, C_NEW, news);      /* 0.4: neither parent shows it */
-        render_button(fb, stride, SETUP_MID_X, SETUP_BTN_Y, SETUP_BTN_W, SETUP_BTN_H, C_GO, C_GO_E, "MEET IT", 2);
-        dots(fb, stride, PAGE_H - 14);
+        text_c(fb, stride, CX, UI(140), UI_TEXT(2), C_CAPT, l1);
+        text_c(fb, stride, CX, UI(162), UI_TEXT(2), C_CAPT, l2);
+        text_c(fb, stride, CX, UI(184), UI_TEXT(2), C_CAPT, "GO AND SAY HELLO.");
+        if (mut) text_c(fb, stride, CX, UI(206), UI_TEXT(2), C_NEW, news);  /* 0.4: neither parent shows it */
+        render_button(fb, stride, SETUP_MID_X, SETUP_BTN_Y, SETUP_BTN_W, SETUP_BTN_H, C_GO, C_GO_E, "MEET IT", UI_TEXT(2));
+        dots(fb, stride, PAGE_H - UI(14));
     } else if (s_page == SETUP_PG_FAMILY) {
         /* the family page (setup.h): NOW and GROWN UP, then each gene and
            where it came from - a parent (* = that parent's hidden copy), or
            NEW! (a mutation) */
         const fish_t *f = &t->fish[page_fish()];
         panel(fb, stride);
-        text_c(fb, stride, CX, SETUP_Y + 20, 3, C_TEXT, f->name);
-        float ps = f->size * 2.0f;                                   /* the fry, twice life size ... */
-        if (ps > 1.2f) ps = 1.2f;                                    /* ... a juvenile's ring clear of the name */
+        text_c(fb, stride, CX, SETUP_Y + UI(20), UI_TEXT(3), C_TEXT, f->name);
+        float ps = f->size * 2.0f * UI_F;                            /* the fry, twice life size ... */
+        if (ps > 1.2f * UI_F) ps = 1.2f * UI_F;                      /* ... a juvenile's ring clear of the name */
         const bool first = s_about && founder(f);                     /* a first fish (its story, 0.4.2): its genes are its own */
         (void)ps;
         fam_portraits(t, fb, stride, clock);                          /* (THE PANEL KEPT: the band, as a held frame draws it) */
-        if (!first) render_text(fb, stride, SETUP_FAM_FROM_X, SETUP_FAM_ROW_Y - 20, 2, dim(C_CAPT, 60), "FROM");
+        if (!first) render_text(fb, stride, SETUP_FAM_FROM_X, SETUP_FAM_ROW_Y - UI(20), UI_TEXT(2), dim(C_CAPT, 60), "FROM");
         bool hidden = false;
         for (int g = 0; g < GENE_N; g++) {
             int y = SETUP_FAM_ROW_Y + g * SETUP_FAM_ROW_DY, vx = SETUP_FAM_VALUE_X;
             static const char *const LABEL[GENE_N] = { "SHAPE", "FINS", "PATTERN", "BODY", "MARKINGS" };
-            render_text(fb, stride, SETUP_FAM_LABEL_X, y, 2, C_CAPT, LABEL[g]);
+            render_text(fb, stride, SETUP_FAM_LABEL_X, y, UI_TEXT(2), C_CAPT, LABEL[g]);
             if (g == GENE_BODY || g == GENE_ACCENT) {
                 uint32_t rgb = g == GENE_BODY ? f->color : f->accent;
-                render_rect(fb, stride, vx, y - 1, 16, 16, rgb); render_rect_edge(fb, stride, vx, y - 1, 16, 16, C_INNER);
-            } else render_text(fb, stride, vx, y, 2, C_TEXT, g == GENE_SHAPE ? SHAPE_NAMES[f->shape] : g == GENE_FINS ? FINS_NAMES[f->fins] : PATTERN_NAMES[f->pattern]);
+                render_rect(fb, stride, vx, y - 1, UI(16), UI(16), rgb); render_rect_edge(fb, stride, vx, y - 1, UI(16), UI(16), C_INNER);
+            } else render_text(fb, stride, vx, y, UI_TEXT(2), C_TEXT, g == GENE_SHAPE ? SHAPE_NAMES[f->shape] : g == GENE_FINS ? FINS_NAMES[f->fins] : PATTERN_NAMES[f->pattern]);
             if (first) continue;
-            if (f->mutated == g + 1) { render_text(fb, stride, SETUP_FAM_FROM_X, y, 2, C_NEW, "NEW!"); continue; }
-            if (from_shop(f)) { render_text(fb, stride, SETUP_FAM_FROM_X, y, 2, C_CAPT, shop_word(t, f)); continue; }   /* (0.4.1: was "?" on every row) */
+            if (f->mutated == g + 1) { render_text(fb, stride, SETUP_FAM_FROM_X, y, UI_TEXT(2), C_NEW, "NEW!"); continue; }
+            if (from_shop(f)) { render_text(fb, stride, SETUP_FAM_FROM_X, y, UI_TEXT(2), C_CAPT, shop_word(t, f)); continue; } /* (0.4.1: was "?" on every row) */
             parent_t p = parent_of(t, f, (f->from_b >> g & 1) ? 1 : 0);
             bool sec = f->from_carried >> g & 1;
             hidden |= sec;
@@ -2319,13 +2355,13 @@ static void render_setup_in(const tank_t *t, uint16_t *fb, int stride, double cl
         }
         if (hidden)                                     /* (Strato 11-08: two words in the gap between BACK and NEXT - the long line squeezed
                                                            the rows - one row's pitch under the table, so it reads with it) */
-            text_c(fb, stride, SETUP_X + SETUP_W / 2, SETUP_FAM_ROW_Y + 5 * SETUP_FAM_ROW_DY, 2, dim(C_CAPT, 70), "* HIDDEN");
+            text_c(fb, stride, SETUP_X + SETUP_W / 2, SETUP_FAM_ROW_Y + 5 * SETUP_FAM_ROW_DY, UI_TEXT(2), dim(C_CAPT, 70), "* HIDDEN");
         if (first && s_stamp_l1) {                      /* (Strato 11-08: a STARTER FISH stamp, turned up the way a hand stamps it) */
             int sx, sy; stamp_at(f, &sx, &sy);
-            render_stamp(fb, stride, sx, sy, s_stamp_deg, 0xe8c872, s_stamp_l1, s_stamp_l2, 2);
+            render_stamp(fb, stride, sx, sy, s_stamp_deg, 0xe8c872, s_stamp_l1, s_stamp_l2, UI_TEXT(2));
         }
         nav(fb, stride, false, "NEXT", false);
-        dots(fb, stride, SETUP_Y + SETUP_H - 8);
+        dots(fb, stride, SETUP_Y + SETUP_H - UI(8));
     } else if (s_page == SETUP_PG_NATURE) {
         /* the nature page: how bold and sociable it is next to its parents'
            marks, and who they are */
@@ -2336,15 +2372,15 @@ static void render_setup_in(const tank_t *t, uint16_t *fb, int stride, double cl
         const char *na = shop ? shop_word(t, f) : PA.name, *nb = shop ? shop_word(t, f) : PB.name;
         uint32_t ca = pa ? name_rgb(pa->color) : shop ? C_CAPT : C_DIM, cb = pb ? name_rgb(pb->color) : shop ? C_CAPT : C_DIM;
         panel(fb, stride);
-        text_c(fb, stride, CX, SETUP_Y + 20, 3, C_TEXT, f->name);
-        text_c(fb, stride, CX, SETUP_Y + 56, 2, C_CAPT, "ITS NATURE");
-        int y = SETUP_NAT_ROW_Y, vx = SETUP_FAM_VALUE_X + 12;
+        text_c(fb, stride, CX, SETUP_Y + UI(20), UI_TEXT(3), C_TEXT, f->name);
+        text_c(fb, stride, CX, SETUP_Y + UI(56), UI_TEXT(2), C_CAPT, "ITS NATURE");
+        int y = SETUP_NAT_ROW_Y, vx = SETUP_FAM_VALUE_X + UI(12);
         static const char *const TRAIT[2] = { "BOLD", "SOCIAL" };
         for (int k = 0; k < 2; k++, y += SETUP_NAT_ROW_DY) {          /* the fry's own bar, the parents' marks */
             float v = k ? f->sociable : f->bold;
             float va = pa ? (k ? pa->sociable : pa->bold) : -1, vb = pb ? (k ? pb->sociable : pb->bold) : -1;
-            int by = y + 3;
-            render_text(fb, stride, SETUP_FAM_LABEL_X, y, 2, C_CAPT, TRAIT[k]);
+            int by = y + UI(3);
+            render_text(fb, stride, SETUP_FAM_LABEL_X, y, UI_TEXT(2), C_CAPT, TRAIT[k]);
             render_rect(fb, stride, vx, by, SETUP_FAM_BAR_W, SETUP_FAM_BAR_H, C_DIM);
             render_rect(fb, stride, vx, by, (int)(SETUP_FAM_BAR_W * v + 0.5f), SETUP_FAM_BAR_H, C_FILL);
             for (int p = 0; p < 2; p++) {                            /* a parent's mark (none for a parent not known) */
@@ -2352,25 +2388,25 @@ static void render_setup_in(const tank_t *t, uint16_t *fb, int stride, double cl
                 nature_mark(fb, stride, vx + (int)(SETUP_FAM_BAR_W * vp), by, p, p ? cb : ca);
             }
         }
-        render_text(fb, stride, SETUP_FAM_LABEL_X, y, 2, C_CAPT, "PARENTS");
-        if (shop) render_text(fb, stride, vx, y, 2, C_CAPT, "NONE HERE");
-        else if (s_about && founder(f)) render_text(fb, stride, vx, y, 2, C_CAPT, "STARTER FISH");
+        render_text(fb, stride, SETUP_FAM_LABEL_X, y, UI_TEXT(2), C_CAPT, "PARENTS");
+        if (shop) render_text(fb, stride, vx, y, UI_TEXT(2), C_CAPT, "NONE HERE");
+        else if (s_about && founder(f)) render_text(fb, stride, vx, y, UI_TEXT(2), C_CAPT, "STARTER FISH");
         else {
             int x = vx;                                              /* each name after its mark's head (a parent not known: no mark, no key) */
-            if (pa) { nat_head(fb, stride, x + SETUP_NAT_KEY_W / 2, y + 3, false, ca, false); x += SETUP_NAT_KEY_W + 5; }
-            render_text(fb, stride, x, y, 2, ca, na);
-            x += render_text_w(na, 2) + 16;
-            if (pb) { nat_head(fb, stride, x + SETUP_NAT_KEY_W / 2, y + 3, true, cb, false); x += SETUP_NAT_KEY_W + 5; }
-            render_text(fb, stride, x, y, 2, cb, nb);
+            if (pa) { nat_head(fb, stride, x + SETUP_NAT_KEY_W / 2, y + (7 * UI_TEXT(2) - SETUP_NAT_HEAD_H) / 2, false, ca, false); x += SETUP_NAT_KEY_W + UI(5); }
+            render_text(fb, stride, x, y, UI_TEXT(2), ca, na);
+            x += render_text_w(na, UI_TEXT(2)) + UI(16);
+            if (pb) { nat_head(fb, stride, x + SETUP_NAT_KEY_W / 2, y + (7 * UI_TEXT(2) - SETUP_NAT_HEAD_H) / 2, true, cb, false); x += SETUP_NAT_KEY_W + UI(5); }
+            render_text(fb, stride, x, y, UI_TEXT(2), cb, nb);
         }
         nav(fb, stride, false, "DONE", true);
-        dots(fb, stride, SETUP_Y + SETUP_H - 8);
+        dots(fb, stride, SETUP_Y + SETUP_H - UI(8));
     } else if (s_page == SETUP_PG_ABOUT) {
         /* ITS STORY (0.4.2): the fish as it is, then a row each - how long it has lived, where it came from, its
            parents, its meals (and how many from the keeper's hand), its size, and how much it trusts the keeper */
         const int fi = page_fish(); const fish_t *f = &t->fish[fi];
         panel(fb, stride);
-        text_c(fb, stride, CX, SETUP_Y + 20, 3, C_TEXT, f->name);
+        text_c(fb, stride, CX, SETUP_Y + UI(20), UI_TEXT(3), C_TEXT, f->name);
         about_portrait(t, fb, stride, clock);          /* (THE PANEL KEPT: the band, as a held frame draws it) */
         static const char *const LABEL[7] = { "AGE", "FROM", "PARENTS", "MEALS", "SIZE", "TRUST", "EVOLVED" };
         char v[40];
@@ -2378,36 +2414,36 @@ static void render_setup_in(const tank_t *t, uint16_t *fb, int stride, double cl
            seven rows 21 apart in the six rows' room (a plain fish's page is as it was) */
         const bool par = f->evo > EVO_NONE && f->evo < EVO_N;
         static const int8_t ROWS6[6] = { 0, 1, 2, 3, 4, 5 }, ROWS7[7] = { 0, 1, 2, 6, 3, 4, 5 };
-        const int8_t *rows = par ? ROWS7 : ROWS6; const int nrows = par ? 7 : 6, dy = par ? 21 : SETUP_AB_ROW_DY;
+        const int8_t *rows = par ? ROWS7 : ROWS6; const int nrows = par ? 7 : 6, dy = par ? UI(21) : SETUP_AB_ROW_DY;
         for (int k = 0; k < nrows; k++) {
             const int r = rows[k];
-            int y = SETUP_AB_ROW_Y + k * dy - (par ? 2 : 0), vx = SETUP_FAM_VALUE_X;
-            render_text(fb, stride, SETUP_FAM_LABEL_X, y, 2, C_CAPT, LABEL[r]);
-            if (r == 6) { render_text(fb, stride, vx, y, 2, C_NEW, tank_evo_name(f->evo)); continue; }
-            if (r == 0) { about_age(t, fi, v, sizeof v); render_text(fb, stride, vx, y, 2, C_TEXT, v); }
-            else if (r == 1) { about_from(t, f, v, sizeof v); render_text(fb, stride, vx, y, 2, C_TEXT, v); }
+            int y = SETUP_AB_ROW_Y + k * dy - (par ? UI(2) : 0), vx = SETUP_FAM_VALUE_X;
+            render_text(fb, stride, SETUP_FAM_LABEL_X, y, UI_TEXT(2), C_CAPT, LABEL[r]);
+            if (r == 6) { render_text(fb, stride, vx, y, UI_TEXT(2), C_NEW, tank_evo_name(f->evo)); continue; }
+            if (r == 0) { about_age(t, fi, v, sizeof v); render_text(fb, stride, vx, y, UI_TEXT(2), C_TEXT, v); }
+            else if (r == 1) { about_from(t, f, v, sizeof v); render_text(fb, stride, vx, y, UI_TEXT(2), C_TEXT, v); }
             else if (r == 2) {
-                if (from_shop(f)) render_text(fb, stride, vx, y, 2, C_TEXT, "NONE HERE");
-                else if (founder(f)) render_text(fb, stride, vx, y, 2, C_TEXT, "STARTER FISH");
+                if (from_shop(f)) render_text(fb, stride, vx, y, UI_TEXT(2), C_TEXT, "NONE HERE");
+                else if (founder(f)) render_text(fb, stride, vx, y, UI_TEXT(2), C_TEXT, "STARTER FISH");
                 else {
                     parent_t pa = parent_of(t, f, 0), pb = parent_of(t, f, 1);
-                    render_text(fb, stride, vx, y, 2, pa.known ? name_rgb(pa.color) : C_DIM, pa.name);
-                    render_text(fb, stride, vx + render_text_w(pa.name, 2) + 16, y, 2, pb.known ? name_rgb(pb.color) : C_DIM, pb.name);
+                    render_text(fb, stride, vx, y, UI_TEXT(2), pa.known ? name_rgb(pa.color) : C_DIM, pa.name);
+                    render_text(fb, stride, vx + render_text_w(pa.name, UI_TEXT(2)) + UI(16), y, UI_TEXT(2), pb.known ? name_rgb(pb.color) : C_DIM, pb.name);
                 }
             }
             else if (r == 3) {
                 if (f->eaten_player > 0) snprintf(v, sizeof v, "%d, %d FROM YOU", f->eaten, f->eaten_player);
                 else snprintf(v, sizeof v, "%d", f->eaten);
-                render_text(fb, stride, vx, y, 2, C_TEXT, v);
+                render_text(fb, stride, vx, y, UI_TEXT(2), C_TEXT, v);
             }
-            else if (r == 4) { snprintf(v, sizeof v, "%.1f INCHES", f->size * ABOUT_INCHES); render_text(fb, stride, vx, y, 2, C_TEXT, v); }
-            else render_hearts(fb, stride, vx, y - 3, (int)(f->trust / 2 + 0.0001f), 2);
+            else if (r == 4) { snprintf(v, sizeof v, "%.1f INCHES", f->size * ABOUT_INCHES); render_text(fb, stride, vx, y, UI_TEXT(2), C_TEXT, v); }
+            else render_hearts(fb, stride, vx, y - UI(3), (int)(f->trust / 2 + 0.0001f), UI_TEXT(2));
         }
         nav(fb, stride, false, "NEXT", false);
-        dots(fb, stride, SETUP_Y + SETUP_H - 8);
+        dots(fb, stride, SETUP_Y + SETUP_H - UI(8));
     } else {                                                        /* SETUP_PG_CARE */
         panel(fb, stride);
-        text_c(fb, stride, CX, SETUP_Y + 22, 3, C_TEXT, "CARING FOR THEM");
+        text_c(fb, stride, CX, SETUP_Y + UI(22), UI_TEXT(3), C_TEXT, "CARING FOR THEM");
         static const char *const ls[] = {
             "TAP THE SURFACE TO FEED",
             "HOLD A FINGER AND THEY VISIT",
@@ -2417,9 +2453,9 @@ static void render_setup_in(const tank_t *t, uint16_t *fb, int stride, double cl
             "TWO TAPS FLIP THE LIGHT",
             "THEY CHOOSE. YOU CARE.",
         };
-        lines_c(fb, stride, SETUP_Y + 66, 24, C_CAPT, ls, 7);
+        lines_c(fb, stride, SETUP_Y + UI(66), UI(24), C_CAPT, ls, 7);
         nav(fb, stride, false, "BEGIN", true);
-        dots(fb, stride, SETUP_Y + SETUP_H - 8);
+        dots(fb, stride, SETUP_Y + SETUP_H - UI(8));
     }
 }
 

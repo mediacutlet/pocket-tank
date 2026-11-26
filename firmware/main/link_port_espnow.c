@@ -3,6 +3,7 @@
 #include "esp_log.h"
 #include "esp_wifi.h"
 #include "esp_now.h"
+#include "esp_idf_version.h"   /* (this fork) on_sent's two signatures */
 #include "esp_timer.h"
 #include "esp_heap_caps.h"
 #include "freertos/FreeRTOS.h"
@@ -84,7 +85,13 @@ static void on_recv(const esp_now_recv_info_t *info, const uint8_t *data, int le
     s_n++;
     portEXIT_CRITICAL(&s_mux);
 }
+/* (this fork) ESP-IDF 5.5 hands the send callback the frame's tx info where 5.4 handed the peer's address: the fork
+   builds with 5.5, upstream's pocket boards with 5.4. The argument is not read either way. */
+#if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 5, 0)
+static void on_sent(const esp_now_send_info_t *info, esp_now_send_status_t st) { (void)info; if (st != ESP_NOW_SEND_SUCCESS) s_tx_fail++; }
+#else
 static void on_sent(const uint8_t *mac, esp_now_send_status_t st) { (void)mac; if (st != ESP_NOW_SEND_SUCCESS) s_tx_fail++; }
+#endif
 
 /* learn which radio address speaks for which tank (a frame's sender ID is at
  * bytes 4..7 of its header); unicast needs the address as an ESP-NOW peer */

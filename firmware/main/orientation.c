@@ -1,0 +1,33 @@
+/*
+ * SPDX-License-Identifier: MIT
+ * SPDX-FileCopyrightText: 2026 Leonid Moiseichuk
+ * SPDX-FileCopyrightText: 2026 MediaCutlet
+ * MediaCutlet's are a few lines from upstream's MIT releases (v0.3.9.2 and
+ * earlier); LICENSE-MIT-CYD says which.
+ */
+/* orientation.c - see orientation.h. */
+#include "orientation.h"
+#include "nvs_flash.h"
+#include "nvs.h"
+#include "esp_log.h"
+
+static const char *TAG = "orientation";
+static bool s_flipped;
+
+void orientation_init(void) {
+    nvs_handle_t h; uint8_t v;
+    if (nvs_open("tank", NVS_READONLY, &h) != ESP_OK) return;
+    if (nvs_get_u8(h, "flip", &v) == ESP_OK) s_flipped = v != 0;
+    nvs_close(h);
+}
+void orientation_save(void) {
+    nvs_handle_t h;
+    if (nvs_open("tank", NVS_READWRITE, &h) != ESP_OK) return;
+    nvs_set_u8(h, "flip", s_flipped ? 1 : 0);
+    nvs_commit(h); nvs_close(h);
+}
+bool orientation_flipped(void) { return s_flipped; }
+void orientation_set(bool flipped) {
+    s_flipped = flipped; orientation_save();
+    ESP_LOGI(TAG, "screen %s", s_flipped ? "FLIPPED" : "UPRIGHT");
+}

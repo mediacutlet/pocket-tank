@@ -90,8 +90,17 @@ bool esp_lcd_touch_get_coordinates(esp_lcd_touch_handle_t tp, uint16_t *x, uint1
 #define HB_WATCH 1
 #elif defined(TANK_SQUARE)
 #define HB_SQUARE 1
+#elif defined(CONFIG_POCKET_TANK_320X240)
+#define HB_320X240 1                                        /* (this fork) a 320 x 240 board: its driver reports landscape (swap_xy), so a
+                                                               panel px is a frame px; no bias, no fitted map (CYD.md: the AMOLED's 10 px
+                                                               made every miss land above its button). This world builds neither board's
+                                                               symbol, so the port takes the Touch-LCD-2's way up (the CYD's is that one
+                                                               turned 180 degrees: TOUCH_TURN_180). No UPDATES button (no update channel) */
 #else
 #define HB_V2 1                                             /* the 1.8 (V2: CST816), Strato's */
+#endif
+#ifndef HB_320X240
+#define HB_320X240 0
 #endif
 #ifndef HB_ROUND
 #define HB_ROUND 0
@@ -134,8 +143,13 @@ bool link_dev_drift_hit(float x, float y) { (void)x; (void)y; return false; }
 static tank_t T;
 static int64_t g_shelf_press;                              /* touch_port_take_shelf_tap's press time (main.c's waits read it) */
 #define FRAME_MS 40
+#if HB_320X240
+static int panel_w(void) { return TANK_W; }                /* (this fork) landscape from the driver: the frame's own px */
+static int panel_h(void) { return TANK_H; }
+#else
 static int panel_w(void) { return HB_ROUND ? R_PANEL : HB_SQUARE ? S_PANEL : HB_WATCH ? W_PANEL_W : PANEL_W; }
 static int panel_h(void) { return HB_ROUND ? R_PANEL : HB_SQUARE ? S_PANEL : HB_WATCH ? W_PANEL_H : PANEL_H; }
+#endif
 static void chip_from_panel(int px, int py, int *rx, int *ry) {   /* the CST92xx's mirror bits undone (cst9217_read) */
     if (HB_ROUND || HB_SQUARE) {
         int m = s_cst_mirror, pn = cst_panel();
@@ -250,11 +264,27 @@ static void jelly_cb(float x, float y, bool down, double now) { (void)x; (void)y
 static void settings_nav(void) {
     static const char *const NAME[SET_BOX_N] = { "UPDATES", "LINK", "CLOSE", TANK_WORN ? "SCREEN" : "ROTATION", "GRAPHICS" };
     int n = 0;
+#if HB_320X240
+    render_settings_set_imu(false); render_settings_set_flip(false);   /* (this fork) no IMU answering: the tile is SCREEN (an IMU: below) */
+#endif
     for (int jelly = 0; jelly < 2; jelly++)
         for (int b = 0; b < SET_BOX_N; b++) {
             bare(); touch_port_set_jelly(jelly ? jelly_cb : NULL); render_set_gfx_level(RENDER_GFX_HIGH);
             touch_port_show_settings(true); hold_for(800);
             int bx, by, bw, bh; render_settings_box(b, &bx, &by, &bw, &bh);
+#if HB_320X240
+            if (b == SET_BOX_UPDATES) {                     /* (this fork) no update channel on a 320 x 240 board: UPDATES' box is empty, and
+                                                               the foot where it would stand (the version line's) opens nothing, settings stay */
+                pagestate_t u0 = pagestate();
+                if (bw || bh) TFAIL("settings' UPDATES has a %dx%d box on a 320 x 240 board", bw, bh);
+                if (!tap(PAGE_X + bx + SET_NAV_SQ / 2.0f, PAGE_Y + by + SET_NAV_SQ / 2.0f, 90, FRAME_MS)) { TFAIL("settings' foot where UPDATES would stand is past the panel's reach"); continue; }
+                int uv = 0, uw = touch_port_take_setting(&uv);
+                if (touch_port_updates() || !touch_port_settings() || g_link_page || uw || !same(u0, pagestate()))
+                    TFAIL("settings' foot where UPDATES would stand answered%s: updates %d, settings %d, link %d, setting %d", jelly ? " (the jelly tank)" : "",
+                          touch_port_updates(), touch_port_settings(), g_link_page, uw);
+                n++; continue;
+            }
+#endif
             const float x = PAGE_X + bx + bw / 2.0f, y = PAGE_Y + by + bh / 2.0f;
             pagestate_t s0 = pagestate();
             if (!tap(x, y, 90, FRAME_MS)) { TFAIL("settings' %s at %.0f,%.0f is past the panel's reach", NAME[b], x, y); continue; }
@@ -264,8 +294,13 @@ static void settings_nav(void) {
             if (b == SET_BOX_LINK && (jelly ? (g_link_page || !touch_port_settings()) : (!g_link_page || touch_port_settings())))
                 TFAIL("settings' LINK%s: link page %d, settings %d", jt, g_link_page, touch_port_settings());
             if (b == SET_BOX_CLOSE && (touch_port_settings() || touch_port_milestones() == (bool)jelly)) TFAIL("settings' CLOSE%s: settings %d, keeper page %d", jt, touch_port_settings(), touch_port_milestones());
+#if HB_320X240
+            if (b == SET_BOX_TILE && (!touch_port_settings() || w != SET_TAP_FLIP || v != 1))   /* (this fork) no IMU: SCREEN, FLIPPED handed to main */
+                TFAIL("settings' SCREEN%s (no IMU) handed main %d/%d (want SET_TAP_FLIP %d, 1: FLIPPED)", jt, w, v, SET_TAP_FLIP);
+#else
             if (b == SET_BOX_TILE && (!touch_port_settings() || (TANK_WORN ? T.screen_turned == s0.scr : (T.orient_lock == s0.rot || w != SET_TAP_ROTATE))))
                 TFAIL("settings' %s%s did not turn (setting %d)", NAME[b], jt, w);
+#endif
             if (b == SET_BOX_GFX) {                                          /* THE DOOR, and the page behind it through the port */
                 if (!touch_port_settings() || !render_gfx_page() || w || render_gfx_level() != RENDER_GFX_HIGH || !render_vignette())
                     TFAIL("settings' GRAPHICS%s: settings %d, its page %d, setting %d/%d, level %d (want the GRAPHICS page, nothing changed)", jt, touch_port_settings(), render_gfx_page(), w, v, render_gfx_level());
@@ -309,6 +344,20 @@ static void settings_nav(void) {
             n++;
         }
     touch_port_set_jelly(NULL); render_set_gfx_level(RENDER_GFX_HIGH); render_set_vignette(true); render_settings_home(); render_debug_gfx_idle(); bare();
+#if HB_320X240
+    {   /* (this fork) with an IMU answering the tile is ROTATION, as on upstream's desk tanks: a tap locks the way up and hands it to main */
+        render_settings_set_imu(true);
+        bare(); touch_port_show_settings(true); hold_for(800);
+        int bx, by, bw, bh, v = 0; render_settings_box(SET_BOX_TILE, &bx, &by, &bw, &bh);
+        const bool rot0 = T.orient_lock;
+        if (!tap(PAGE_X + bx + bw / 2.0f, PAGE_Y + by + bh / 2.0f, 90, FRAME_MS)) TFAIL("settings' ROTATION (an IMU) is past the panel's reach");
+        const int w = touch_port_take_setting(&v);
+        if (!touch_port_settings() || w != SET_TAP_ROTATE || T.orient_lock == rot0 || v != T.orient_lock)
+            TFAIL("settings' ROTATION (an IMU) did not turn: setting %d/%d, locked %d (was %d)", w, v, T.orient_lock, rot0);
+        else n++;
+        tank_orient_lock(&T, rot0); render_settings_set_imu(false); bare();
+    }
+#endif
     {   /* a setting changed off the glass (the director's `vignette off`, `gfx low`) reaches main as the page's own tap does: one save */
         int v = 7, w;
         touch_port_push_setting(SET_TAP_VIG, 0); w = touch_port_take_setting(&v);
@@ -359,7 +408,11 @@ static void settings_nav(void) {
         }
         net_port_creds_forget();
         if (keep[0]) setenv("POCKET_TANK_WIFI", keep, 1); else unsetenv("POCKET_TANK_WIFI");
+#if HB_320X240
+        if (swept[0] || !swept[1] || !swept[2]) TFAIL("the foot's reach: UPDATES %d px (want none: no update channel), LINK %d, CLOSE %d", swept[0], swept[1], swept[2]);   /* (this fork) */
+#else
         if (!swept[0] || !swept[1] || !swept[2]) TFAIL("the foot's reach: a button answers nowhere (%d %d %d px)", swept[0], swept[1], swept[2]);
+#endif
         printf("selftest-touch-port: the foot's whole reach - UPDATES %d px, LINK %d, CLOSE %d: none over FORGET, CHECK, DISCONNECT, a door or SELL%s\n",
                swept[0], swept[1], swept[2], bad ? " (FAILED)" : "");
     }
@@ -579,7 +632,11 @@ static void double_taps(void) {
             ways++;
         }
     }
+#if HB_320X240
+    if (have_up || !have_link) TFAIL("settings has %s", have_up ? "an UPDATES button (a 320 x 240 board has no update channel)" : "no LINK button");   /* (this fork) */
+#else
     if (!have_up || !have_link) TFAIL("settings has no UPDATES / LINK button");
+#endif
     printf("selftest-touch-port: double taps and mashes - UPDATES' CLOSE at %d points x 3 (%d over a settings button, %d over SCREEN), the cog, UPDATES, LINK (%d): "
            "nothing reached the page under them, each answered after a 0.7 s pause\n", pts / 3, over, screen, ways);
 }
@@ -2976,6 +3033,8 @@ static void keeper_panel(const keeper_t *k, int q, float tx, float ty, int *px, 
     int irx = (int)lroundf(rx), iry = (int)lroundf(ry);
 #if defined(TANK_WATCH) || defined(TANK_SQUARE) || defined(TANK_ROUND)
     *px = irx; *py = iry;
+#elif HB_320X240
+    *px = irx; *py = iry;                                   /* (this fork) map_touch's 320 x 240 way up in this world: rx = fx, ry = fy */
 #else
     *px = iry; *py = TANK_W - 1 - irx;                      /* map_touch's rx = TANK_W - 1 - fy, ry = fx, undone */
 #endif
@@ -3084,6 +3143,26 @@ static void calib_guided(void) {
             if (w > 4) TFAIL("guided: %s, the two sittings of the flow: a tap at quarter %d lands %.1f px off (at %.0f,%.0f)", who, qs[k], w, wx, wy); n++; }
         g_live = 0; touch_port_set_quarter(0); bare();
     }
+#if HB_320X240
+    {   /* (this fork) a 320 x 240 board with no IMU answering (main.c hands adv_quarter -1): the kept check ends the flow at DONE, through
+           the port - no TURN IT OVER to wait on a turn nothing reports - and DONE's OK is the ADVANCED page again, the picture the tank's */
+        float x, y;
+        adv_init(ADV_CELL_STOCK, NULL); g_live = -1; way_up(0); bare(); s_adv_act = 0;
+        adv_open(); hold_for(200);
+        if (!find_hit(hp_adv, ADV_HIT_CALIBRATE, &x, &y) || !tap(x, y, 90, 300) || !find_hit(intro_now, ADV_HIT_START, &x, &y) || !tap(x, y, 90, 300))
+            TFAIL("guided, no IMU: CALIBRATE / START not reached");
+        else {
+            for (int i = 0; i < ADV_N_CROSS; i++) { float tx, ty; adv_cross_target(i, &tx, &ty); way_up(0); keeper_tap(&BOTH, 0, tx, ty); }
+            float cx, cy; adv_check_target(&cx, &cy); way_up(0); keeper_tap(&BOTH, 0, cx, cy);
+            if (s_adv_act != ADV_ACT_FIT || adv_page() != ADV_PG_DONE || adv_touch_cal()->n != 1)
+                TFAIL("guided, no IMU: the check: saved %d, page %d, %d sittings (want saved, DONE at once, one)", s_adv_act == ADV_ACT_FIT, adv_page(), adv_touch_cal()->n);
+            s_adv_act = 0; way_up(0);
+            if (!find_hit_read(hp_done, ADV_HIT_OK, &x, &y) || !tap(x, y, 90, 300) || adv_page() != ADV_PG_MAIN) TFAIL("guided, no IMU: DONE's OK (page %d)", adv_page());
+            else n++;
+        }
+        adv_close(); g_live = 0; way_up(0);
+    }
+#endif
     g_v1 = false; g_live = 0; adv_init(ADV_CELL_STOCK, NULL); touch_port_set_quarter(0); bare();
     printf("selftest-touch-port: the guided turn - %d checks: the first sitting upright, TURN IT OVER (%s), the second upside down, through "
            "the port: a panel and a finger landing 4 right / 9 low hold every way up (taps within 4 px)\n", n, TANK_WORN ? "GO on the page drawn turned" : "the IMU's turn");
@@ -3154,7 +3233,13 @@ static void wheel_feel_port(void) {
         int at = -1;
         for (int k = 1; k <= 8 && at < 0; k++) { if (!aim(slot_cx(1), cy - k * 12.0f)) TFAIL("wheel: the drag's frame %d off the glass", k); frame(); if (T.fish[0].name[0] == 'g') at = k; }
         lift(120);
+#if HB_320X240
+        /* (this fork) a step is SETUP_SPIN_PX, UI(30) = 20 px here, so the 12 px frames pass it at the second (24 px), not the third */
+        if (at != (SETUP_SPIN_PX + 11) / 12) TFAIL("wheel B/C: a drag from the next letter inside the hold turned the focused letter at frame %d (want %d: %d px, the step's own frame)",
+                                                    at, (SETUP_SPIN_PX + 11) / 12, (SETUP_SPIN_PX + 11) / 12 * 12); else n++;
+#else
         if (at != 3) TFAIL("wheel B/C: a drag from the next letter inside the hold turned the focused letter at frame %d (want 3: 36 px, the step's own frame)", at); else n++;
+#endif
         NAME_IS("gaa", "wheel C: the drag from the next letter inside the hold did not turn the focused one (or turned the next)");
         if (setup_slot() != 0) TFAIL("wheel C: the drag from the next letter moved the focus to %d", setup_slot());
     }
@@ -3219,8 +3304,12 @@ static void reset_pages_port(void) {
     tap(x, y, 80, FRAME_MS);
     if (render_reset_page() != RESET_PG_ERASE || render_reset_wifi() || touch_port_confirm_take()) TFAIL("reset pages: the double of the tap that brought ERASE EVERYTHING? did something");
     /* the box, NEXT, the last page */
+#if HB_320X240
+    if (rp_at(RESET_BTN_WIFI, &x, &y)) TFAIL("reset pages: ERASE EVERYTHING? has a Wi-Fi box on a 320 x 240 board (it never saves a network)");   /* (this fork) */
+#else
     if (!rp_tap(RESET_BTN_WIFI, 300) || !render_reset_wifi()) TFAIL("reset pages: the Wi-Fi box did not tick");
     if (!rp_tap(RESET_BTN_WIFI, 300) || render_reset_wifi()) TFAIL("reset pages: the Wi-Fi box did not untick");
+#endif
     if (!rp_tap(RESET_BTN_NEXT, 300) || render_reset_page() != RESET_PG_HOLD) TFAIL("reset pages: NEXT did not bring the last page (page %d)", render_reset_page());
     if (!rp_at(RESET_BTN_HOLD, &hx, &hy) || !rp_at(RESET_BTN_BACK, &nx, &ny)) { TFAIL("reset pages: the last page has no HOLD TO ERASE or no NO the panel can read"); return; }
     n++;
@@ -3246,10 +3335,12 @@ static void reset_pages_port(void) {
     if ((a = touch_port_confirm_take()) != RESET_ANS_ERASE || touch_port_confirm_up()) TFAIL("reset pages: the full hold answered %d (want %d), prompt %s", a, RESET_ANS_ERASE, touch_port_confirm_up() ? "still up" : "down");
     lift(FRAME_MS); n++;
     /* ... and with the box ticked */
+#if !HB_320X240                                             /* (this fork: no box on a 320 x 240 board - above) */
     if (!rp_to_hold(true)) TFAIL("reset pages: could not walk to the last page with the box ticked");
     else { lift(300); press(hx, hy, 3200);
            if ((a = touch_port_confirm_take()) != RESET_ANS_ERASE_WIFI) TFAIL("reset pages: the full hold, the box ticked, answered %d (want %d)", a, RESET_ANS_ERASE_WIFI);
            lift(FRAME_MS); n++; }
+#endif
     /* a press from before the page (the finger already there as it came), and one in its first 0.2 s: held 5 s, nothing */
     bare(); press(hx, hy, 200); touch_port_confirm_open_page(RESET_PG_HOLD); hold_for(5000);
     if (touch_port_confirm_take() > 0) TFAIL("reset pages: a finger down before the last page came, held 5 s, erased");
@@ -3388,16 +3479,32 @@ int selftest_back_overlap(void) {
     }
     int gx, gy, gw, gh; render_gfx_page_box(GFXP_BOX_BACK, &gx, &gy, &gw, &gh);
     const float my = PAGE_Y + gy + gh / 2.0f, mx = PAGE_X + gx + gw / 2.0f;
+#if HB_320X240
+    /* (this fork) a 320 x 240 board's foot is the version line, LINK and CLOSE on the keeper foot's last squares (render.h): BACK in
+       the band's middle stands over the version line, which is no button, and only its reach's right end meets LINK's reach - UPDATES
+       is not drawn (no update channel) and CLOSE is past BACK's reach. The guard's one case here is that end, over LINK (B, E); BACK's
+       middle and its left end read nothing on the settings page */
+    const float PX[1] = { PAGE_X + gx + gw + 8.0f };      /* BACK's reach's right end */
+    static const char *const PN[1] = { "right end (LINK)" };
+    static const int PW[1] = { SET_TAP_LINK };
+    { int v; if (render_settings_tap(mx, my, &v) != SET_TAP_NONE || render_settings_tap(PAGE_X + gx - 9.0f, my, &v) != SET_TAP_NONE) BF("(BACK's middle or its left end reads a settings button on this board)"); }
+    for (int k = 0; k < 1; k++) { int v; if (render_settings_tap(PX[k], my, &v) != PW[k] || render_gfx_page_tap(PX[k], my, &v) != SET_TAP_GFX_PAGE) BF("(BACK's %s is not over that button on this board)", PN[k]); }
+#else
     const float PX[3] = { mx, PAGE_X + gx - 9.0f, PAGE_X + gx + gw + 8.0f };   /* BACK's middle, its reach's left end, its right end */
     static const char *const PN[3] = { "middle (LINK)", "left end (UPDATES)", "right end (CLOSE)" };
     static const int PW[3] = { SET_TAP_LINK, SET_TAP_UPDATES, SET_TAP_CLOSE };
     for (int k = 0; k < 3; k++) { int v; if (render_settings_tap(PX[k], my, &v) != PW[k] || render_gfx_page_tap(PX[k], my, &v) != SET_TAP_GFX_PAGE) BF("(BACK's %s is not over that button on this board)", PN[k]); }
+#endif
     #define ACTED(k) ((k) == 0 ? g_link_page : (k) == 1 ? touch_port_updates() : !touch_port_settings())
     #define FROM_UPDATES() do { bare(); touch_port_show_updates(true); hold_for(800); tap(mx, my, 90, FRAME_MS); \
                                 if (!touch_port_settings() || touch_port_updates()) BF("(the UPDATES page's BACK did not bring settings back)"); \
                                 if (getenv("PT_UPDBACK_OLD")) render_settings_from_updates_off(); } while (0)
     /* ---- B ---- */
+#if HB_320X240
+    for (int k = 0; k < 1; k++) {                            /* (this fork: the one spot over a button here) */
+#else
     for (int k = 0; k < 3; k++) {
+#endif
         FROM_UPDATES(); hold_for(400);                       /* (0.44 s after the lift) */
         tap(PX[k], my, 90, FRAME_MS);
         if (ACTED(k) || !touch_port_settings() || g_link_page || touch_port_updates()) BF("B: back from UPDATES, a tap 0.44 s on at BACK's %s acted (settings %d, updates %d, link %d)", PN[k], touch_port_settings(), touch_port_updates(), g_link_page);
@@ -3438,11 +3545,20 @@ int selftest_back_overlap(void) {
     /* ---- E: the GRAPHICS page, as on main ---- */
     FROM_UPDATES(); hold_for(800);                           /* (an UPDATES BACK earlier in the run: its guard is long over) */
     render_gfx_page_show(true); hold_for(800);
+#if HB_320X240
+    /* (this fork) at the spot of BACK's reach over LINK's here (its right end; its middle stands over the version line) */
+    tap(PX[0], my, 90, FRAME_MS);
+    if (!touch_port_settings() || render_gfx_page() || g_link_page) BF("E: (the GRAPHICS page's BACK did not bring settings back)");
+    hold_for(160); tap(PX[0], my, 90, FRAME_MS);             /* 0.2 s on: inside the page's own 0.4 s (SET_TURN_WAIT_S, main's) */
+    if (g_link_page) BF("E: the GRAPHICS page's BACK: a tap 0.2 s on opened link mode (main spends it: the page just changed its face)");
+    hold_for(400); tap(PX[0], my, 90, FRAME_MS);
+#else
     tap(mx, my, 90, FRAME_MS);
     if (!touch_port_settings() || render_gfx_page() || g_link_page) BF("E: (the GRAPHICS page's BACK did not bring settings back)");
     hold_for(160); tap(mx, my, 90, FRAME_MS);                /* 0.2 s on: inside the page's own 0.4 s (SET_TURN_WAIT_S, main's) */
     if (g_link_page) BF("E: the GRAPHICS page's BACK: a tap 0.2 s on opened link mode (main spends it: the page just changed its face)");
     hold_for(400); tap(mx, my, 90, FRAME_MS);
+#endif
     const bool g_link = g_link_page;
     if (!g_link) BF("E: the GRAPHICS page's BACK, a second tap past 0.4 s did NOT open link mode - the GRAPHICS page is to stay as it is on main (no guard there: Strato)");
     printf("back-overlap: KNOWN, as on main: after the GRAPHICS page's BACK a second tap at the same spot past 0.4 s opens link mode (no guard there, by Strato's word)\n");
@@ -3498,6 +3614,53 @@ static void xt_notice_port(void) {
     char cmd[700]; snprintf(cmd, sizeof cmd, "rm -rf '%s'", dir); if (system(cmd)) {}
     printf("selftest-touch-port: the experimental tank's thank-you - %d of 6 (a tap closes it unseen by the tank, the next tap is the tank's, the tank's own press keeps it up, a slow press closes it, a press in the poll it first went up is spent)\n", n);
 }
+#ifdef CONFIG_POCKET_TANK_320X240
+/* (this fork) AN EXPERIMENTAL TANK'S WAY BACK on a 320 x 240 board, through the board's own port: BOOT is out of reach in the
+   CYD's case, so a finger held still 5 s in the glass's bottom-left corner asks for MY TANKS (touch_port_take_lock_open, which
+   main.c opens), as anywhere on the locked glass. The tank lets go of that press as it asks and sees no more of it; a press
+   lifted sooner, one that moves - even back to where it landed - and a still finger anywhere else (the minnows' mill, the
+   jellies' light: the tank's own gestures, held as long as the keeper likes) ask nothing and stay the tank's. The locked
+   glass takes the same latch: a finger that strays out of its slop and comes back is no still finger */
+static int g_xh_down, g_xh_up; static bool g_xh_was;
+static void xh_cb(float x, float y, bool down, double now) { (void)x; (void)y; (void)now; if (down) g_xh_down++; else if (g_xh_was) g_xh_up++; g_xh_was = down; }
+static void xt_hold_port(void) {
+    const float x = 20, y = TANK_H - 20;                        /* in the bottom-left corner (the port's XT_BACK_PX, 56) */
+    const float mx = TANK_W / 2.0f, my = TANK_H / 2.0f;         /* the glass's middle */
+    int n = 0;
+    bare(); touch_port_set_jelly(xh_cb); touch_port_take_lock_open(); g_xh_down = g_xh_up = 0; g_xh_was = false;
+    if (!press(x, y, 4600)) { TFAIL("xt hold: the glass's bottom-left corner is past the panel's reach"); touch_port_set_jelly(NULL); bare(); return; }
+    lift(FRAME_MS);
+    const bool early = touch_port_take_lock_open();
+    if (early || g_xh_up != 1) TFAIL("xt hold: a press held 4.6 s in the corner - asked for MY TANKS %d, the tank saw %d lifts (want no ask, its own lift)", early, g_xh_up); else n++;
+    press(x, y, 5200);
+    const int d0 = g_xh_down, u0 = g_xh_up;
+    hold_for(600);
+    if (!touch_port_take_lock_open()) TFAIL("xt hold: a finger held still 5 s in the corner of an experimental tank did not ask for MY TANKS"); else n++;
+    if (u0 != 2 || g_xh_down != d0 || g_xh_was) TFAIL("xt hold: the tank had %d lifts at the ask (want its press let go), and %d presses after it", u0 - 1, g_xh_down - d0); else n++;
+    lift(FRAME_MS);
+    if (touch_port_take_lock_open() || g_xh_up != 2) TFAIL("xt hold: the held finger's lift asked again, or the tank saw it (%d lifts)", g_xh_up); else n++;
+    press(x, y, 1000); aim(x + 60, y); hold_for(5200);         /* held 6 s, but moved: the tank's drag, no ask */
+    lift(FRAME_MS);
+    if (touch_port_take_lock_open() || g_xh_up != 3) TFAIL("xt hold: a finger held 6 s and moved 60 px asked for MY TANKS (or the tank lost it)"); else n++;
+    press(mx, my, 8000);                                       /* (the 11-26 review) held still in the middle: the tank's own gesture */
+    const bool mid = touch_port_take_lock_open();
+    lift(FRAME_MS);
+    if (mid || g_xh_up != 4) TFAIL("xt hold: a finger held still 8 s in the middle of the glass asked for MY TANKS %d (the tank's: %d lifts, want 4)", mid, g_xh_up); else n++;
+    press(x, y, 1000); aim(x + 40, y); hold_for(400); aim(x, y); hold_for(5200);   /* out of its slop and back to where it landed */
+    lift(FRAME_MS);
+    if (touch_port_take_lock_open() || g_xh_up != 5) TFAIL("xt hold: a finger that left its slop and came back to its corner asked for MY TANKS (%d lifts)", g_xh_up); else n++;
+    touch_port_set_jelly(NULL); bare();
+    touch_port_set_touch_lock(true);                           /* THE LOCKED GLASS: a still finger anywhere asks ... */
+    press(mx, my, 5200); hold_for(200);
+    if (!touch_port_take_lock_open()) TFAIL("touch lock: a finger held still 5 s on the locked glass did not ask for MY TANKS"); else n++;
+    lift(FRAME_MS); touch_port_take_lock_open();
+    press(mx, my, 1000); aim(mx + 40, my); hold_for(400); aim(mx, my); hold_for(5200);   /* ... one that strayed and came back does not */
+    if (touch_port_take_lock_open()) TFAIL("touch lock: a finger that left its slop and came back asked for MY TANKS"); else n++;
+    lift(FRAME_MS); touch_port_take_lock_open();
+    touch_port_set_touch_lock(false); bare();
+    printf("selftest-touch-port: an experimental tank's way back - %d of 9 (in the corner: 4.6 s asks nothing, 5 s still asks and the tank lets go, its lift asks no more, a moving finger asks nothing; 8 s still in the middle is the tank's; a finger back at its landing point after straying asks nothing; the locked glass: 5 s still asks, strayed and back does not)\n", n);
+}
+#endif
 #include "reveal_touch_test.inc"   /* the reveal and the lab, 0.4.3 audit r1 (TP-1..6, TP-8, TP-9b, PE-3) */
 int selftest_touch_port(void) {
     g_log = getenv("PT_TOUCH_LOG") != NULL;
@@ -3507,8 +3670,12 @@ int selftest_touch_port(void) {
     T.trickle_off = true;
     if (!touch_port_init()) { printf("FAIL: touch-port: the port found no chip\n"); return 1; }
     touch_port_set_quiet(false);                             /* (LOADING is over) */
+#if HB_320X240
+    printf("selftest-touch-port: a 320 x 240 board's port (landscape from its driver, no bias, no fitted map) on every tap\n");
+#else
     printf("selftest-touch-port: the %s's port (%s), its calibration and bias on every tap\n",
            HB_ROUND ? "bowl" : HB_WATCH ? "watch" : HB_SQUARE ? "square" : "1.8", s_cst ? "CST92xx" : s_ft ? "FT3168" : "CST816 via esp_lcd");
+#endif
     settings_nav();
     firm_press();
     slow_close();
@@ -3551,6 +3718,9 @@ int selftest_touch_port(void) {
     wheel_feel_port();
     reset_pages_port();
     xt_notice_port();
+#ifdef CONFIG_POCKET_TANK_320X240
+    xt_hold_port();                                          /* (this fork) the 5 s hold over an experimental tank */
+#endif
     reveal_touch_port();
     if (getenv("PT_TOUCH_AUDIT")) audit_probes();
     if (getenv("PT_TOUCH_AUDIT2")) r2_probes();

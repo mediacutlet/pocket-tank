@@ -210,7 +210,9 @@ static int selftest_lab(void) {
     setup_activate(&tank, SETUP_HIT_BACK);
     if (setup_active() || tank.sd_balance != 100 || tank.n_fish != n0) ST_FAIL("L2: BACK on the first page did not leave clean");
     setup_begin_lab(&tank);
-    pg_touch(200, 200, true); for (int i = 1; i <= 38; i++) pg_touch(200 + i, 200, true); pg_touch(238, 200, false);   /* 30 px longer: 19 */
+    /* (this fork: the drags' points are UI(n), as the stage's are, and a drag measured past the pick is ST_PAST(n) - the 1.8's
+       8 + n - as --selftest-pop's on the first run's BODY page: on a 320 x 240 page (200, 200) is under the stage) */
+    pg_touch(UI(200), UI(200), true); for (int i = 1; i <= ST_PAST(30); i++) pg_touch(UI(200) + i, UI(200), true); pg_touch(UI(200) + ST_PAST(30), UI(200), false);   /* 30 px longer: 19 */
     setup_activate(&tank, SETUP_HIT_NEXT); setup_activate(&tank, SETUP_HIT_FINS0 + FINS_VEIL);
     setup_activate(&tank, SETUP_HIT_NEXT); setup_activate(&tank, SETUP_HIT_BODY0 + 5); setup_activate(&tank, SETUP_HIT_PAT0 + PATTERN_MASK);
     setup_activate(&tank, SETUP_HIT_NEXT);
@@ -294,24 +296,24 @@ static int selftest_lab(void) {
             for (int k = 0; k < 10; k++) { memcpy(prev, fb, sizeof fb); LK_FRAME(); LK_ROW_SAME(prev, fb, d); moved += d > 0; }
             if (moved < 8) ST_FAIL("L6: the tiles' fish moved in %d of 10 still frames (they keep the clock)", moved);
             for (int pass = 0; pass < 2; pass++) {
-                if (pass) { pg_touch(200, 200, true); for (int i = 1; i <= 14; i++) { render_frame_begin(); tank.clock += 1.0 / 30; pg_touch(200 + i, 200, true); render_lab_page(&tank, fb, TANK_W, tank.clock); } }
+                if (pass) { pg_touch(UI(200), UI(200), true); for (int i = 1; i <= ST_PAST(6); i++) { render_frame_begin(); tank.clock += 1.0 / 30; pg_touch(UI(200) + i, UI(200), true); render_lab_page(&tank, fb, TANK_W, tank.clock); } }
                 render_setup(&tank, ref, TANK_W, tank.clock);       /* (a buffer nobody keeps: the page whole, at this clock) */
                 LK_ROW_SAME(ref, fb, d);
                 if (d) ST_FAIL("L6: %s, the held page's tiles differ from a page drawn whole at the same clock (%d px)", pass ? "mid-drag" : "idle", d);
-                if (pass) pg_touch(214, 200, false);
+                if (pass) pg_touch(UI(200) + ST_PAST(6), UI(200), false);
             }
             #undef LK_ROW_SAME
             LK_FRAME(); LK_FRAME(); render_lab_page_counts(&b1, &w1); memcpy(was, fb, sizeof fb);   /* (the reference draws spoiled the kept buffer: settled again) */
         }
         float l0, d0, l1, d1; tank_body(setup_lab_fish(), &l0, &d0);
-        pg_touch(200, 200, true);                                /* a drag: the length, 20 px - the fish changes, and nothing outside its box is drawn */
-        for (int i = 1; i <= 28; i++) { render_frame_begin(); tank.clock += 1.0 / 30; pg_touch(200 + i, 200, true); render_lab_page(&tank, fb, TANK_W, tank.clock); }
+        pg_touch(UI(200), UI(200), true);                        /* a drag: the length, 20 px - the fish changes, and nothing outside its box is drawn */
+        for (int i = 1; i <= ST_PAST(20); i++) { render_frame_begin(); tank.clock += 1.0 / 30; pg_touch(UI(200) + i, UI(200), true); render_lab_page(&tank, fb, TANK_W, tank.clock); }
         tank_body(setup_lab_fish(), &l1, &d1);
         render_lab_page_counts(&b0, &w0);
         if (l1 < l0 + 1.0f) ST_FAIL("L6: the drag did not stretch the body (%.1f -> %.1f)", l0, l1);
         if (w0 != w1) ST_FAIL("L6: a drag drew the page whole %d time(s)", w0 - w1);
         LK_OUTSIDE("a drag");
-        pg_touch(228, 200, false);
+        pg_touch(UI(200) + ST_PAST(20), UI(200), false);
         static const int PGS[3] = { SETUP_PG_LAB_FINS, SETUP_PG_LAB_COLORS, SETUP_PG_LAB_TUBE };
         for (int p = 0; p < 3; p++) {
             setup_lab_goto(&tank, PGS[p]); LK_FRAME(); memcpy(was, fb, sizeof fb);
@@ -348,6 +350,42 @@ static int selftest_lab(void) {
         #undef LK_FRAME
         #undef LK_OUTSIDE
     }
+#ifdef CONFIG_POCKET_TANK_320X240
+    /* L7 (this fork): every handle held and dragged through its whole travel and past both its ends, on BODY and FINS, for
+       every shape and fin set - then the held page is the page drawn whole: nothing a handle drew is left outside the
+       moving boxes. A long belly fin's handle, held where it stops at the plate's foot, draws its second ring 2 px under
+       the plate; setup_lab_bands' stage box takes that in here. (Upstream's boards leave it behind - their box ends on the
+       plate's last row - so the step is this world's) */
+    {   static uint16_t hb[2][TANK_W * TANK_H], ref[TANK_W * TANK_H];
+        static const char *const WAY[3] = { "sideways", "upward", "downward" };
+        int n = 0;
+        setup_begin_lab(&tank);
+        if (!setup_is_lab()) ST_FAIL("L7: the lab did not open");
+        for (int pg = 0; pg < 2; pg++) for (int sh = 0; sh < SHAPE_N; sh++) for (int fi = 0; fi < FINS_N; fi++) for (int ax = 0; ax < 3; ax++) {
+            if (!pg && ax == 2) continue;                         /* (BODY's handles: the length and the height) */
+            setup_lab_goto(&tank, SETUP_PG_LAB_BODY + pg);
+            fish_t *lf = setup_lab_fish(); lf->shape = (uint8_t)sh; lf->fins = (uint8_t)fi; tank_clear_body(lf); tank_clear_fin_len(lf);
+            for (int k = 0; k < 4; k++) { render_frame_begin(); tank.clock += 1.0 / 25; setup_touch(&tank, 0, 0, false); render_lab_page(&tank, hb[++n & 1], TANK_W, tank.clock); }
+            const float x = PAGE_X + STG_X, y = PAGE_Y + (ax == 0 ? STG_Y : ax == 1 ? STG_Y - UI(30) : STG_Y + UI(30));   /* (from over the fish: its top fin) */
+            tank.clock += 0.3; setup_touch(&tank, x, y, true);
+            for (int i = 1; i <= 200; i++) {                     /* 140 px out, back, out the other way, back and out again */
+                const float d = 140 * sinf(i * 0.0471f);
+                render_frame_begin(); tank.clock += 1.0 / 25;
+                setup_touch(&tank, ax == 0 ? x + d : x, ax == 0 ? y : y + (ax == 1 ? -d : d), true);
+                render_lab_page(&tank, hb[++n & 1], TANK_W, tank.clock);
+            }
+            setup_touch(&tank, x, y, false);
+            for (int k = 0; k < 2; k++) { render_frame_begin(); tank.clock += 1.0 / 25; setup_touch(&tank, 0, 0, false); render_lab_page(&tank, hb[++n & 1], TANK_W, tank.clock); }
+            render_setup(&tank, ref, TANK_W, tank.clock);         /* (a buffer nobody keeps: the page whole, at this clock) */
+            int d = 0, fx = 0, fy = 0;
+            for (int i = 0; i < TANK_W * TANK_H; i++) if (hb[n & 1][i] != ref[i]) { if (!d) { fx = i % TANK_W; fy = i / TANK_W; } d++; }
+            if (d) ST_FAIL("L7: %s, %s body, %s fins, a handle held %s: the held page kept %d px the page whole does not draw (first at %d,%d)",
+                           pg ? "FINS" : "BODY", SHAPE_NAMES[sh], FINS_NAMES[fi], WAY[ax], d, fx, fy);
+            for (int k = 0; k < 2; k++) { render_frame_begin(); tank.clock += 1.0 / 25; render_lab_page(&tank, hb[++n & 1], TANK_W, tank.clock); }   /* (the reference spoiled the kept buffers) */
+        }
+        setup_cancel(&tank);
+    }
+#endif
     printf("selftest-lab: PASS (the row and modal, 1500 once, the pages, refused short and full, the pour, the fry, the save; the black page held)\n");
     return 0;
 }

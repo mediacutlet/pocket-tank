@@ -149,8 +149,11 @@ static void tank_pages(const char *name, bool armed_row1) {
 #define UF(...) do { printf("FAIL: updui: "); printf(__VA_ARGS__); printf("\n"); return 1; } while (0)
 _Static_assert(UPD_CHECK_H == UPD_BTN40 && UPD_DOOR_H == UPD_BTN40 && UPD_NET_H == UPD_BTN40 && UPD_FORGET_H == UPD_BTN40, "one button height");
 _Static_assert(UPD_CHECK_X == UPD_X && UPD_CHECK_W == UPD_W && UPD_FORGET_X + UPD_FORGET_W == UPD_X + UPD_W, "one column");
+#ifndef CONFIG_POCKET_TANK_320X240   /* (this fork) a 320 x 240 board never reaches the UPDATES page (no update channel); its
+                                        rows are laid out for the 368 px page and run past that board's foot */
 _Static_assert(UPD_NET_DY > UPD_NET_H && UPD_NET_Y0 + 2 * UPD_NET_DY + UPD_NET_H < UPD_LEGEND_Y && UPD_LEGEND_Y + 14 < UPD_ADD_Y && UPD_ADD_Y + UPD_BTN40 < UPD_CLOSE_Y, "the WI-FI face's rows in order");
 _Static_assert(UPD_INFO_Y + 2 * UPD_INFO_DY + 14 < UPD_CHECK_Y && UPD_CHECK_Y + UPD_CHECK_H < UPD_TEXT_Y && UPD_TEXT_Y + 34 < UPD_DOOR_Y && UPD_DOOR_Y + UPD_DOOR_H < UPD_CLOSE_Y, "the UPDATES face's rows in order");
+#endif
 static bool u_on_glass(int x, int y, int in) {
     return y >= in && y < TANK_H - in && x >= tank_glass_x0((float)y) + in && x <= tank_glass_x1((float)y) - in && y >= tank_glass_top((float)x) + in;
 }

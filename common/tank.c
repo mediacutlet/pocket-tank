@@ -872,6 +872,18 @@ void tank_init(tank_t *t, uint32_t seed) {
 #define HOLD_APPROACH_FROM 140.0f /* a hold-approach must START at least this far out - past the ring:
                                  * a fish already at the finger earns nothing (0.3.9.3: was 60 / 30, under the fingertip) */
 #define HOLD_APPROACH_AT   HOLD_GATHERED_PX   /* ... and come in this close: onto the ring */
+#ifdef CONFIG_POCKET_TANK_320X240
+/* (this fork) the 320 x 240 tank: a finger held mid-tank has no fish 140 px
+ * off it but in the corners (the farthest a fish swims from the middle is
+ * ~150 px), so the FIRST HOLD APPROACH badge and the fry's HOLD step would
+ * wait on a fish that happened to be in one - in the sim's --selftest-hold
+ * none of four, spread over the glass, ever counted (0.3.9.5's sync). The
+ * ring keeps its pixels (the fish do), so the start stays past the ring's
+ * reach, HOLD_GATHERED_PX, by half the 1.8's margin: 120 px, the 1.8's 140
+ * at about the same share of the shorter glass */
+#undef  HOLD_APPROACH_FROM
+#define HOLD_APPROACH_FROM 120.0f
+#endif
 #define TRUST_PER_S        0.012f /* trust a fish earns a second under a resting finger (0.3.6: was 0.02;
                                    * Strato: "a bit slower" so the seahorse's double is worth having) */
 #define SEAHORSE_TRUST_X   2.0f   /* ... times this while the seahorse hangs on the finger */
@@ -941,6 +953,18 @@ bool tank_at_finger(const tank_t *t, int i) {   /* (hold_time, not hold_active: 
                                        * glass to the cap, so every morning looked the
                                        * same; now a night lands near ALGAE_DIRTY) */
 #define ALGAE_COVER_CAP     0.30f     /* growth stops claiming new cells here */
+#ifdef CONFIG_POCKET_TANK_320X240
+/* (this fork) the steps above were tuned on the 1.8's 28 x 23 = 644 cells; the
+ * CYD's glass is 20 x 15 = 300. A step claims or thickens one cell, so at the
+ * same pace per step its film covered the glass at twice the share an hour, and
+ * a 7 h night filmed it to the cap - every morning the same, the defect the
+ * 2026-09-23 retune fixed on the 1.8. The same pace PER CELL instead: one step
+ * per 644 / 300 of the time, so a night lands near ALGAE_DIRTY here too. */
+#undef  ALGAE_STEP_AWAKE_S
+#define ALGAE_STEP_AWAKE_S  (240.0f * 644 / ALGAE_CELLS)
+#undef  ALGAE_STEP_SLEEP_S
+#define ALGAE_STEP_SLEEP_S  (180.0f * 644 / ALGAE_CELLS)
+#endif
 #define WIPE_RADIUS      (ALGAE_CELL > 24 ? ALGAE_CELL * 0.75f : 20.0f)  /* squeegee half-width around the drag path: 20 px, or three quarters
                                                                             of a big cell (the home tank's 40 px cells, under a finger that wide) */
 #define WIPE_ENGAGE_PX   18.0f  /* stroke travel before a drag starts wiping
@@ -2527,7 +2551,18 @@ float tank_octopus_wait_now(const tank_t *t) {
 }
 void tank_octopus_place(tank_t *t) {
     float x0, x1; tank_veg_bed(t, 0, &x0, &x1, NULL, NULL);
+#ifdef CONFIG_POCKET_TANK_320X240
+    /* (this fork) the 320 px floor. Right of the reef bed the critters stand in a row - the urchin set down at x1 + 18
+       (tank_urchin_place), the crab at x1 + 70 (tank_crab_place) - and the octopus 100 px past the crab's spot, x1 + 170. Here
+       that is past the end of its span (x1 is 162..186, OCTO_XHI 274; 170 in proportion to the floor, 121, is past it too), so
+       it stood at 274, 18..42 px from the crab's spot: a crab bought after it was set down on it. And with a crab in the water,
+       the search below took it left of the crab, against the urchin's spot. There is no room past the row here, so it starts
+       at the row's other end: left of the urchin's spot by its own half and the 30 px the search keeps from a crab - x 110..134
+       for the baby - where neither critter is set down on it later */
+    const float want = x1 + 18 - 30 - 40.0f * (1.0f + t->oc_growth / 65535.0f);   /* (its half: as below) */
+#else
     const float want = x1 + 170;                                      /* open sand right of the reef bed, well past the crab's spot */
+#endif
     float x = clampf(want, OCTO_XLO, OCTO_XHI);
     const float half = 40.0f * (1.0f + t->oc_growth / 65535.0f);
     const bool crab = tank_crit_in(t, SD_ITEM_CRAB) && t->cr_x >= 0;

@@ -52,6 +52,8 @@
 #include "blackbox.h"
 #include "i2c_guard.h"
 #include "brightness.h"
+#include "orientation.h"
+#include "sleep_setting.h"                 /* (this fork) the 320x240 boards' SLEEP row: SLEEP_SETTING_ROW */
 #include "batlog.h"
 #include "codec_port.h"
 #include "backgrounds.h"
@@ -74,6 +76,10 @@
 #include "esp_sleep.h"
 #include "driver/rtc_io.h"
 #include "soc/soc_caps.h"
+#if CONFIG_POCKET_TANK_SLEEP_LIGHT || SLEEP_SETTING_ROW
+#include "driver/usb_serial_jtag.h"         /* usb_serial_jtag_is_connected: the dark stays awake for a USB host */
+#include "board_pins.h"                     /* the outputs the dark holds through light sleep (dark_hold_pins) */
+#endif
 
 /* BOOT (GPIO0, active low, RTC-wake capable): the reset chord (held + a tap
  * on the glass), the director's deep-sleep wake, and the sleep key only on a
@@ -107,7 +113,43 @@ static int s_dt_n60, s_dt_n100;        /* ... and how many took over 60 / 100 ms
 #define PWR_SENSE ((gpio_num_t)board_pwr_sense_pin())   /* the round board and the watch: a line that is high while the PWR key is down */
 static bool pwr_sensed(void) { return board_pwr_sense_pin() >= 0; }
 static bool pwr_sense_down(void) { return pwr_sensed() && gpio_get_level(PWR_SENSE); }
-#if CONFIG_POCKET_TANK_DISPLAY_SH8601 || CONFIG_POCKET_TANK_DISPLAY_JD9365
+static bool s_imu;                         /* an IMU answered: it turns the picture (and, on the CYD, the face-down gesture) */
+static bool s_sleep_by_face;               /* the next sleep was the face-down gesture: face up wakes it */
+static const char *s_sleep_why = "?";      /* what asked for the next sleep, for the none and dark modes' log lines */
+/* the sleep mode (Kconfig POCKET_TANK_SLEEP_MODE): deepsleep is the two
+ * stages below as they always were; none, screen and lightsleep turn off at
+ * the top of enter_sleep_for (2026-10-08). An sdkconfig naming none of the
+ * four is deepsleep too: idf.py does not re-read Kconfig for a build
+ * directory that already has one, so an sdkconfig made before the choice
+ * existed has no line for it, and must build the tank as it was. */
+#if CONFIG_POCKET_TANK_SLEEP_NONE
+#define SLEEP_MODE_NAME "none"
+#elif CONFIG_POCKET_TANK_SLEEP_SCREEN
+#define SLEEP_MODE_NAME "screen"
+#elif CONFIG_POCKET_TANK_SLEEP_LIGHT
+#define SLEEP_MODE_NAME "lightsleep"
+#else
+#define SLEEP_MODE_NAME "deepsleep"
+#define SLEEP_MODE_DEEP 1
+#endif
+/* (this fork) the 320x240 boards' SLEEP row (sleep_setting.h, 2026-10-08):
+ * on a CYD or a Touch-LCD-2 built for none, screen or lightsleep the mode is
+ * the keeper's, chosen at run time, and the build's mode only its factory
+ * default. The dark is compiled for every such build - one built for none
+ * too, since SCREEN and LIGHT are a tap away - and the tests of the build's
+ * mode below become tests of the choice. The name in the log lines is the
+ * choice's. */
+#ifdef SLEEP_SETTING_ROW
+static const char *sleep_mode_name(void) {
+    int choice = sleep_setting();
+    if (choice == SET_SLEEP_NEVER) return "never";
+    if (choice == SET_SLEEP_SCREEN) return "screen";
+    return "lightsleep";
+}
+#undef  SLEEP_MODE_NAME
+#define SLEEP_MODE_NAME sleep_mode_name()
+#endif
+#if CONFIG_POCKET_TANK_DISPLAY_SH8601 || CONFIG_POCKET_TANK_DISPLAY_JD9365 || CONFIG_POCKET_TANK_DISPLAY_ILI9341 || CONFIG_POCKET_TANK_DISPLAY_ST7789   /* (this fork) the 320x240 boards' SPI port owns the bus too */
 extern i2c_master_bus_handle_t board_i2c_bus(void);
 #else
 static i2c_master_bus_handle_t board_i2c_bus(void) { return NULL; }
@@ -244,6 +286,9 @@ static void assert_plan(void) {
 
 static void enter_poweroff(void);
 static void deep_sleep_now(int wake_after_s);
+#if CONFIG_POCKET_TANK_SLEEP_SCREEN || CONFIG_POCKET_TANK_SLEEP_LIGHT || SLEEP_SETTING_ROW
+static void enter_dark(int wake_after_s, bool by_face);
+#endif
 /* THE IMAGE MARKED GOOD (0.4): a fresh image boots "pending" and the bootloader
  * rolls back on the next start that finds it still pending - a crash, but also a
  * sleep, a power-off, a SWAP IN or CHECK FOR UPDATES. So it is marked once the
@@ -612,6 +657,11 @@ static bool keys_up_wait(const char *when) {
     return true;
 }
 static void enter_sleep_for(int wake_after_s) {
+    /* the face-down gesture's sleep: the IMU stays awake through the grace so
+       turning the screen up can wake the tank (the CYD, no PMIC: no rails
+       cycle around it, so the latch-up guard below has nothing to guard) */
+    bool by_face = s_sleep_by_face; s_sleep_by_face = false;   /* (this fork) taken before the refusals below, so a refused
+                                                                    face-down sleep leaves no stale flag for the next one */
     if (render_reset_erase_armed()) {           /* ERASE EVERYTHING is on the glass (ERASING) and begins within a frame or two: a sleep
                                                    would take its page down and drop it - the key does nothing just now */
         ESP_LOGW(TAG, "a sleep refused: ERASE EVERYTHING is about to begin");
@@ -619,8 +669,39 @@ static void enter_sleep_for(int wake_after_s) {
     }
     if (link_dev_busy()) { ESP_LOGW(TAG, "a sleep refused: the radio chip is being updated (UPDATING YOUR DEVICE)"); return; }   /* (0.4.3, the one install) */
     ota_valid_now("a sleep");                  /* (before the save and any power cut below) */
+#if CONFIG_POCKET_TANK_IMU_FACE_DOWN_SLEEP
+    /* any sleep that starts face down - the gesture's, or BOOT pressed while
+       it lies there - wakes when it is turned face up. A BOOT sleep face up
+       keeps BOOT as its only wake: "not face down" would be true at once. */
+    if (!by_face && imu_port_face_down_now() == 1) by_face = true;
+#endif
+#ifdef SLEEP_SETTING_ROW
+    /* (this fork) a 320x240 board: what the SLEEP row says - NEVER is the none mode's
+       line, SCREEN and LIGHT the dark (which of the two, it asks itself) */
+    if (sleep_setting() == SET_SLEEP_NEVER) {
+        ESP_LOGI(TAG, "sleep (%s) ignored: the SLEEP row says NEVER, so the tank never goes dark", s_sleep_why);
+        return;
+    }
+    enter_dark(wake_after_s, by_face);         /* never the stages below: no deep sleep, no power-off */
+    return;
+#elif CONFIG_POCKET_TANK_SLEEP_NONE
+    ESP_LOGI(TAG, "sleep (%s) ignored: the sleep mode is none, so the tank never goes dark", s_sleep_why);
+    return;
+#elif CONFIG_POCKET_TANK_SLEEP_SCREEN || CONFIG_POCKET_TANK_SLEEP_LIGHT
+    enter_dark(wake_after_s, by_face);         /* never the stages below: no deep sleep, no power-off */
+    return;
+#endif
     int pct0 = battery_pct(), mv0 = battery_port_vbat_mv();
-    int64_t grace_us = wake_after_s > 0 ? DIRECTOR_GRACE_US : s_rtc ? SLEEP_GRACE_US : SLEEP_GRACE_CLOCKLESS_US;
+    /* (this fork, 2026-10-08) the hour is for a board whose night is the
+       clockless power-off: a PMIC and no clock chip. A board with no PMIC -
+       a CYD or a Touch-LCD-2 built for deepsleep - has no power-off to
+       sync after; its night is a deep sleep with the chip's clock running,
+       so it keeps the 20 minutes the boards with a clock chip keep. Tested
+       on the RTC alone, it light-slept an hour at the grace's ~4.7 mA. */
+    int64_t grace_us;
+    if (wake_after_s > 0) grace_us = DIRECTOR_GRACE_US;
+    else if (s_rtc || !s_pmic) grace_us = SLEEP_GRACE_US;
+    else grace_us = SLEEP_GRACE_CLOCKLESS_US;
     ESP_LOGI(TAG, "sleep: save, panel off, %d s grace then %s | battery %d%% %d mV",
              (int)(grace_us / 1000000),
              wake_after_s > 0 ? "deep sleep with the timer" : night_powers_off() ? (s_rtc ? "PMIC power-off (the PWR key boots it)" : "PMIC power-off (the PWR key boots it; the internet gives the time back)")
@@ -637,7 +718,7 @@ static void enter_sleep_for(int wake_after_s) {
     snapshot_fish();
     audio_port_sleep();        /* amp low, codec down, rail off - before the rails cycle */
     batlog_add(pct0, mv0, display_port_brightness(), true, "sleep");
-    imu_port_sleep();          /* quiesce BEFORE the rails cycle (latch-up guard) */
+    if (!by_face) imu_port_sleep();   /* quiesce BEFORE the rails cycle (latch-up guard) */
     display_port_sleep();
     keys_up_wait("before the grace");
     const bool boot_stuck = !gpio_get_level(BTN_SLEEP), pwr_stuck = pwr_sense_down();   /* (a stuck line's GPIO wake is not armed - it would
@@ -687,6 +768,13 @@ static void enter_sleep_for(int wake_after_s) {
          * slice, then arm stage 2's own. */
         esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_ALL);
         if (why == ESP_SLEEP_WAKEUP_GPIO || battery_port_key_poll()) { pressed = true; break; }
+        /* a face-down sleep wakes when the screen is no longer face down -
+           turned up, or picked up. No answer from the IMU keeps it asleep:
+           a bus hiccup must not wake the tank. */
+        if (by_face && imu_port_face_down_now() == 0) {
+            ESP_LOGI(TAG, "no longer face down: waking");
+            pressed = true; break;
+        }
     }
     if (pressed) {                              /* a quick wake: resume in place */
         keys_up_wait("the wake");                /* the wake press, still down (stuck: the tank comes back anyway) */
@@ -705,7 +793,9 @@ static void enter_sleep_for(int wake_after_s) {
         return;
     }
     /* stage 2: the grace passed. The save (written before the grace) plus the
-       RTC clock cover the whole dark stretch at the next boot. */
+       RTC clock cover the whole dark stretch at the next boot. The IMU kept
+       awake for a face-down wake sleeps now: deep sleep cannot hear it. */
+    if (by_face) imu_port_sleep();
     if (wake_after_s <= 0 && night_powers_off()) {
         batlog_add(battery_pct(), battery_port_vbat_mv(), 0, true, "off");   /* mirrored to NVS: the morning reads it back */
         ESP_LOGI(TAG, "grace over: PMIC power-off (the PWR key or USB boots the tank; the night is lived through at that boot)");
@@ -781,11 +871,205 @@ static void deep_sleep_now(int wake_after_s) {
     blackbox_rwdt_disarm();                     /* (it counts in sleep: a night's deep sleep is no hang) */
     esp_deep_sleep_start();
 }
-void device_sleep(int wake_after_s) { enter_sleep_for(wake_after_s); }   /* director `deepsleep N` */
+
+#if CONFIG_POCKET_TANK_SLEEP_SCREEN || CONFIG_POCKET_TANK_SLEEP_LIGHT || SLEEP_SETTING_ROW
+/* The dark (2026-10-08): the screen and lightsleep modes' sleep, with no
+ * deep sleep after it, on the 320x240 boards. The CYD in its case cannot
+ * reach BOOT, and deep sleep hears nothing else, so once the grace ran out
+ * the tank stayed dark for good; the Touch-LCD-2 has it too (this fork,
+ * 2026-10-08), so a touch wakes it rather than BOOT alone. Here the tank
+ * saves, the backlight and the sound go off, and the tank task stops
+ * drawing and waits in this loop, RAM alive, for as long as it takes. It
+ * lights again, where it was, on:
+ *  - a touch: a finger on the glass, once the glass has been seen clear (a
+ *    finger resting there as it went dark is not one).
+ *  - motion: picked up or tilted off the pose it came to rest in
+ *    (imu_port_rest_moved). The IMU stays awake for it.
+ *  - in a dark begun face down, neither: lying on its glass, the table could
+ *    be the touch, and a knock that read as motion would light it face down
+ *    where the gesture, already spent, could not darken it again. Face up
+ *    is its wake - turned over or picked up - as it was in the grace, but
+ *    on two reads in a row, where the grace took one.
+ *  - BOOT, the PMIC's PWR key, or the director's timer (`deepsleep N`).
+ * It looks every DARK_SLICE_US. In lightsleep (the SLEEP row's LIGHT) the
+ * chip light-sleeps between looks, woken early by BOOT or the
+ * touch controller's INT line; in screen (SCREEN) - and in lightsleep while
+ * a USB host is attached, since light sleep takes the USB port down and the
+ * bench would lose the log - it waits awake. The
+ * dark is lived through at the wake as a deep sleep is: progression_slept,
+ * growth at a quarter and the full-night badge. Nothing ticks in it and the
+ * tank task clamps its next frame's dt, so it is counted once. */
+#define DARK_SLICE_US   100000LL    /* a look at the glass and BOOT: ~0.1 s to wake on a touch held that long */
+#define DARK_SLOW_EVERY 2           /* the IMU and the PWR key every second look: ~5 a second (awake the IMU is read 4) */
+#define DARK_FACE_UP_READS 2        /* a dark begun face down: not face down on this many IMU reads in a row, 0.2 s apart */
+
+#if CONFIG_POCKET_TANK_SLEEP_LIGHT || SLEEP_SETTING_ROW
+/* (this fork) Only a 320x240 board gets here: SLEEP_LIGHT depends on
+   POCKET_TANK_320X240 in Kconfig and SLEEP_SETTING_ROW is defined on those
+   boards alone, so the pins held below are always one of their lists in
+   board_pins.h (BOARD_DARK_HELD_PINS, 2026-10-08). */
+#ifndef BOARD_DARK_HELD_PINS
+#error "a board with the dark names the outputs it holds through light sleep: BOARD_DARK_HELD_PINS in board_pins.h"
+#endif
+/* whether the dark light-sleeps between its looks: always in a lightsleep
+   build; (this fork) on a 320x240 board, when the SLEEP row says LIGHT -
+   SCREEN waits awake, as the screen build does */
+static bool dark_light_sleeps(void) {
+#ifdef SLEEP_SETTING_ROW
+    return sleep_setting() == SET_SLEEP_LIGHT;
+#else
+    return true;
+#endif
+}
+/* Light sleep isolates every pad not armed as a wake (ESP-IDF's
+ * ESP_SLEEP_GPIO_RESET_WORKAROUND, on for the S3): input, output and pulls
+ * off, so for each slice an output is left to whatever resistor the board
+ * puts on it. The outputs the dark relies on must keep their level: each
+ * board names its own, and says why, in board_pins.h (BOARD_DARK_HELD_PINS:
+ * on the CYD the touch reset, the amplifier's enable and the backlight; on
+ * the Touch-LCD-2 the backlight and the TF card's select).
+ * gpio_sleep_sel_dis keeps a pad's awake configuration through light sleep;
+ * gpio_sleep_sel_en at the wake hands it back to the isolation. The other
+ * pads were isolated in every 1 s slice of the old grace, and the panel, the
+ * I2C bus and the IMU answered after it on the bench (CYD.md). */
+static const gpio_num_t DARK_HELD_PINS[] = { BOARD_DARK_HELD_PINS };
+static void dark_hold_pins(bool hold) {
+    for (size_t i = 0; i < sizeof DARK_HELD_PINS / sizeof DARK_HELD_PINS[0]; i++) {
+        if (hold) gpio_sleep_sel_dis(DARK_HELD_PINS[i]);
+        else gpio_sleep_sel_en(DARK_HELD_PINS[i]);
+    }
+}
+#endif
+
+/* one wait between looks: light sleep (light, the dark's own answer from
+   dark_light_sleeps, and no USB host), or awake */
+static void dark_wait(int64_t us, int touch_int, bool light) {
+#if CONFIG_POCKET_TANK_SLEEP_LIGHT || SLEEP_SETTING_ROW
+    if (light && !usb_serial_jtag_is_connected()) {
+        gpio_wakeup_enable(BTN_SLEEP, GPIO_INTR_LOW_LEVEL);      /* released: the loop checks it every look */
+        /* the touch INT only while it idles high: a level wake that already
+           holds would end every slice at once */
+        bool touch_armed = touch_int >= 0 && gpio_get_level((gpio_num_t)touch_int);
+        if (touch_armed) gpio_wakeup_enable((gpio_num_t)touch_int, GPIO_INTR_LOW_LEVEL);
+        esp_sleep_enable_gpio_wakeup();
+        esp_sleep_enable_timer_wakeup(us);
+        blackbox_crumb_phase(BB_PH_LIGHT_SLEEP);   /* (RTC memory, as in upstream's grace: an RTC watchdog reset from inside the sleep says so) */
+        esp_err_t slept = esp_light_sleep_start();
+        blackbox_crumb_phase(BB_PH_GRACE);
+        gpio_wakeup_disable(BTN_SLEEP);
+        if (touch_armed) gpio_wakeup_disable((gpio_num_t)touch_int);
+        esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_ALL);  /* sticky in ESP-IDF: see enter_sleep_for */
+        if (slept == ESP_OK) return;
+        /* refused (a wake already pending): wait awake this once, never spin */
+    }
+#else
+    (void)touch_int; (void)light;
+#endif
+    TickType_t ticks = pdMS_TO_TICKS(us / 1000);
+    vTaskDelay(ticks > 0 ? ticks : 1);
+}
+
+static void enter_dark(int wake_after_s, bool by_face) {
+    int pct0 = battery_pct(), mv0 = battery_port_vbat_mv();
+    touch_port_confirm_answer(-1);              /* an open reset prompt is a NO */
+    link_dev_sleep();                           /* the tank link closes, as in upstream's sleep: visitors home, ours recalled, the
+                                                   radio down - the link is never left on across a sleep (link_dev.c) */
+    adv_close();                                /* ... the ADVANCED page goes, as in upstream's sleep (a sitting cut short keeps the saved map) */
+    tank_link_swap_park(&tank);                 /* ... and the swap notes' waits are kept, as there */
+    if (!progression_save(&tank))               /* if the cell dies in the dark, this save is the tank */
+        ESP_LOGE(TAG, "dark: the tank save failed - going dark anyway, the last good save stands");
+    bat_hist_save();                            /* the screen-on time so far */
+    audio_port_sleep();                         /* amp off, codec down */
+    batlog_add(pct0, mv0, display_port_brightness(), true, "sleep");
+    display_port_sleep();                       /* backlight off, panel off */
+    keys_up_wait("before the dark");            /* BOOT is a level wake: never arm it held. Upstream's wait, bounded and fed: a key
+                                                   still down after it lights the tank again at the first look */
+    vTaskDelay(pdMS_TO_TICKS(30));
+    imu_port_rest_begin();
+    int touch_int = by_face ? -1 : touch_port_wake_gpio();
+    /* whether this dark light-sleeps, asked once: the pins it holds at the
+       start are the pins it lets go at the end, whatever the SLEEP row says
+       by then. (this fork) On a 320x240 board a change of the row takes
+       effect at the next sleep. */
+#if CONFIG_POCKET_TANK_SLEEP_LIGHT || SLEEP_SETTING_ROW
+    bool light = dark_light_sleeps();
+    const char *usb = light && usb_serial_jtag_is_connected() ? ", awake while a USB host is attached" : "";
+#else
+    bool light = false;
+    const char *usb = "";
+#endif
+    ESP_LOGI(TAG, "dark (%s, %s%s): wakes on %s, BOOT%s | battery %d%% %d mV",
+             s_sleep_why, SLEEP_MODE_NAME, usb, by_face ? "face up" : "a touch, motion",
+             wake_after_s > 0 ? ", the timer" : "", pct0, mv0);
+#if CONFIG_POCKET_TANK_SLEEP_LIGHT || SLEEP_SETTING_ROW
+    if (light) dark_hold_pins(true);            /* the board's held outputs (board_pins.h) keep their level in each slice */
+#endif
+    int64_t t0 = esp_timer_get_time();
+    int64_t until = wake_after_s > 0 ? t0 + (int64_t)wake_after_s * 1000000 : 0;
+    bb_state_t bs;                              /* THE BLACK BOX, as in upstream's grace: in, a heartbeat every 10 s, out */
+    bb_fill(&bs, true, 0); blackbox_event(BB_EV_GRACE_IN, &bs);
+    blackbox_crumb_phase(BB_PH_GRACE);
+    int64_t bb_last = t0;
+    bool glass_clear = false;                   /* a finger counts only after the glass was seen without one */
+    int face_up = 0;                            /* IMU reads in a row not face down (a dark begun face down) */
+    const char *why = NULL;
+    int moved = 0;
+    for (int look = 1; ; look++) {
+        int64_t now = esp_timer_get_time();
+        if (until && now >= until) { why = "the timer"; break; }
+        wdt_feed();                             /* each look: the tank task is watched (upstream's 0.4), and the dark is no hang */
+        if (now - bb_last >= 10000000) { bb_last = now; bb_fill(&bs, true, 0); blackbox_tick(now, &bs); }
+        dark_wait(until && until - now < DARK_SLICE_US ? until - now : DARK_SLICE_US, touch_int, light);
+        if (!gpio_get_level(BTN_SLEEP)) { why = "BOOT"; break; }
+        if (!by_face) {
+            if (!touch_port_finger_now()) glass_clear = true;
+            else if (glass_clear) { why = "a touch"; break; }
+        }
+        if (look % DARK_SLOW_EVERY != 0) continue;
+        if (battery_port_key_poll()) { why = "the PWR key"; break; }
+        /* no answer from the IMU keeps it dark: a bus hiccup must not wake it */
+        if (by_face) {
+            /* face up on two reads in a row, 0.2 s apart. One read out of the
+               face-down band is a knock on the table or a cup set down beside
+               it, and a tank lit by that would stay lit lying on its glass:
+               the gesture, already spent, cannot darken it again. A face-down
+               read or no answer starts the count again. */
+            if (imu_port_face_down_now() == 0) face_up++;
+            else face_up = 0;
+            if (face_up >= DARK_FACE_UP_READS) { why = "face up"; break; }
+        } else {
+            moved = imu_port_rest_moved();
+            if (moved) { why = "motion"; break; }
+        }
+    }
+#if CONFIG_POCKET_TANK_SLEEP_LIGHT || SLEEP_SETTING_ROW
+    if (light) dark_hold_pins(false);
+#endif
+    keys_up_wait("the wake");                   /* a BOOT wake press, still down (stuck: the tank comes back anyway) */
+    float dark_s = (esp_timer_get_time() - t0) / 1e6f;
+    progression_slept(&tank, dark_s < PROGRESSION_SLEEP_CAP_S ? dark_s : (float)PROGRESSION_SLEEP_CAP_S);
+    progression_woke(&tank);                    /* a fry that was on its way: born now */
+    battery_woke(&s_bh);                        /* what the gauge lost in the dark is no screen-on drain */
+    display_port_wake();
+    touch_port_swallow();                       /* the waking finger does nothing in the tank */
+    wdt_feed();                                 /* (the dark lived through: a long one is seconds of sleep slices) */
+    batlog_add(battery_pct(), battery_port_vbat_mv(), display_port_brightness(), false, "woke");
+    bb_fill(&bs, false, 0); blackbox_event(BB_EV_GRACE_OUT, &bs);
+    s_btn_armed = false; s_btn_low_since = 0;   /* BOOT's release is not a new press */
+    if (moved) ESP_LOGI(TAG, "lit by motion (%d off the rest pose) after %.0f s dark", moved, dark_s);
+    else ESP_LOGI(TAG, "lit by %s after %.0f s dark", why, dark_s);
+}
+#endif
+
+void device_sleep(int wake_after_s) { s_sleep_why = "the director"; enter_sleep_for(wake_after_s); }   /* director `deepsleep N` */
 
 /* the PWR key held 1.5 s: save and cut NOW, no grace (the same power-off the
  * grace ends in). No PMIC: deep sleep. */
 static void enter_poweroff(void) {
+#ifndef SLEEP_MODE_DEEP
+    enter_sleep_for(0);   /* none (a 320x240 board: NEVER): ignored there, with its line; screen, lightsleep: the dark, as any sleep */
+    return;
+#endif
     if (render_reset_erase_armed()) {           /* ERASE EVERYTHING is on the glass (ERASING) and begins within a frame or two: a power-off
                                                    would take its page down and drop it - the key does nothing just now */
         ESP_LOGW(TAG, "a power-off refused: ERASE EVERYTHING is about to begin");
@@ -811,7 +1095,7 @@ static void enter_poweroff(void) {
     if (battery_port_poweroff()) vTaskDelay(pdMS_TO_TICKS(1000));  /* rails drop here */
     deep_sleep_now(0);   /* no PMIC (QEMU / bring-up) or write failed */
 }
-void device_poweroff(void) { enter_poweroff(); }   /* director `poweroff` */
+void device_poweroff(void) { s_sleep_why = "the director's poweroff"; enter_poweroff(); }   /* director `poweroff` */
 
 /* the PWR key, asked of the PMIC ten times a second: a short press sleeps
  * (the grace, then power-off), 1.5 s powers off at once. The boot's first
@@ -829,6 +1113,7 @@ static void pwr_key_poll(int64_t now) {
     if (k == 3) { ESP_LOGW(TAG, "PWR key: a long press with no key-down before it - noise, ignored"); return; }
     if (now < KEY_BOOT_DEAF_US) { ESP_LOGI(TAG, "PWR key %s press in the boot's first seconds: the power-on press, ignored", k == 2 ? "long" : "short"); return; }
     ESP_LOGI(TAG, "PWR key: %s press", k == 2 ? "long" : "short");
+    s_sleep_why = k == 2 ? "the PWR key, held" : "the PWR key";
     if (k == 2) enter_poweroff(); else enter_sleep();
 }
 
@@ -849,8 +1134,13 @@ static void adv_load(void) {
     adv_init_cal(mah, &c);
     const touch_fit_t *k = adv_touch_fit();
     const touch_cal_t *kc = adv_touch_cal();
+#if ADV_BATTERY_ROW
     ESP_LOGI(TAG, "advanced: battery %d mAh%s, touch %s (x %.3f %+.1f, y %.3f %+.1f; %d sitting%s, quarters %d %d)", adv_cell(), adv_cell() == ADV_CELL_STOCK ? " (the board's own)" : "",
              touch_fit_is_none(k) ? "the board's own map" : "THE KEEPER'S MAP", k->ax, k->bx, k->ay, k->by, kc->n, kc->n == 1 ? "" : "s", kc->q[0], kc->q[1]);
+#else   /* (this fork) a 320 x 240 board: no charger the firmware sets, so no size to name - the 1.8's would be read as this cell's */
+    ESP_LOGI(TAG, "advanced: touch %s (x %.3f %+.1f, y %.3f %+.1f; %d sitting%s, quarters %d %d); no battery row (no charger to set)",
+             touch_fit_is_none(k) ? "the board's own map" : "THE KEEPER'S MAP", k->ax, k->bx, k->ay, k->by, kc->n, kc->n == 1 ? "" : "s", kc->q[0], kc->q[1]);
+#endif
     if (adv_cell() != ADV_CELL_STOCK) battery_port_set_cell(adv_cell());   /* the board's own: battery_port_init set it */
 }
 static void adv_save(int act) {
@@ -884,6 +1174,9 @@ static void adv_save(int act) {
  * the PMIC's PWR key), so nothing waits to tell one press from two. */
 #define BTN_DOUBLE_US 400000
 static int64_t s_btn_up_at; static bool s_btn_once;          /* the first of two: when it lifted */
+#if CONFIG_POCKET_TANK_320X240
+static bool s_btn_sleep_due;                                  /* (this fork) a single press, its sleep waiting out the window for a second */
+#endif
 static bool s_set_back_ms;                                    /* the settings page came from a MY TANKS that came from the keeper page: kept across the round trip */
 static bool s_shelf_want;                                     /* open MY TANKS on the next tank frame (its snapshot first) */
 static uint16_t *s_shelf_thumb;                               /* the tank on the glass, as the NOW slot shows it (PSRAM) */
@@ -1239,10 +1532,19 @@ static void shelf_render(uint16_t *fb) {
     if (!s_shelf_baked) {
         int64_t tb0 = esp_timer_get_time();
         if (s_sh_lib) {                                       /* the fish tank, and THE JELLY TANK (every board sees it; the crew's to make: J6) */
+#if SHELF_XT_LIBRARY
             jelly_lib_open();
+#else
+            (void)jelly_lib_open;                             /* (this fork) no jelly row here (SHELF_XT_LIBRARY): no picture to make for it */
+#endif
             const uint16_t *jth[JELLY_THEME_N];               /* (a picture not made yet: NULL, its glass empty - the page never waits for one) */
             for (int k = 0; k < JELLY_THEME_N; k++) jth[k] = lib_pics_get(s_jpics, k);
+#if SHELF_XT_LIBRARY
             render_library_set_page(s_lib_pg + 1, 2);
+#else
+            render_library_set_page(1, 1);                    /* (this fork) the fish tank alone (shelf.h SHELF_XT_LIBRARY): one page, no
+                                                                 picture made behind it (s_jpics stays NULL), no pager to page 2 */
+#endif
             if (s_sh_pick) {
                 const char *names[JELLY_THEME_N]; for (int k = 0; k < JELLY_THEME_N; k++) names[k] = JELLY_THEMES[k].name;
                 render_jelly_pick_set_have(shelf_jelly_themes());   /* (0.4.3: the themes here already, INSTALLED) */
@@ -1270,7 +1572,11 @@ static void shelf_render(uint16_t *fb) {
                       fish_th, false, true, shelf_price(), false, false },
                     { "JELLY TANK", all ? JELLY_ROW_ALL : "GLOWING JELLIES DRIFTING IN THE DARK. NOTHING TO DO BUT WATCH.",
                       jth[0], true, have != 0, 0, all, jelly_row_locked() } };
+#if SHELF_XT_LIBRARY
                 render_library(s_shelf_page, TANK_W, r, 2, (int)tank.sd_balance, "MORE KINDS OF TANK ARE COMING");
+#else
+                render_library(s_shelf_page, TANK_W, r, 1, (int)tank.sd_balance, "MORE KINDS OF TANK ARE COMING");   /* (this fork) the fish tank's row alone */
+#endif
                 if (s_sh_note) render_library_note(s_shelf_page, TANK_W);
             }
         } else {
@@ -1595,7 +1901,12 @@ static void shelf_tap(float x, float y, int64_t press_us) {   /* (press_us: when
             ESP_LOGI(TAG, "MY TANKS: THE JELLY TANK made - %s, at place %d", jelly_theme_name(s_pick), shelf_get(i)->pos);
             return;
         }
+#if SHELF_XT_LIBRARY
         int r = render_library_tap(x, y, 2);
+#else
+        int r = render_library_tap(x, y, 1);                  /* (this fork) the fish tank's row alone (shelf.h SHELF_XT_LIBRARY): no jelly row,
+                                                                 so no note and no PICK A THEME; one page, so no arrows and no page 2 */
+#endif
         ESP_LOGI(TAG, "MY TANKS: THE LIBRARY page %d, a tap at %.0f,%.0f -> %d", s_lib_pg + 1, x, y, r);
         if (r == LIB_TAP_PREV || r == LIB_TAP_NEXT) { s_lib_pg = r == LIB_TAP_NEXT; tank_emit(TEV_WHEEL_TICK, -1); return; }   /* two pages (0.4.2) */
 #ifdef TANK_P4
@@ -1716,14 +2027,40 @@ static void shelf_tap(float x, float y, int64_t press_us) {   /* (press_us: when
 }
 static void sleep_button_poll(int64_t now) {
     if (gpio_get_level(BTN_SLEEP)) {
+#if CONFIG_POCKET_TANK_320X240
+        /* (this fork) BOOT is the sleep key on a board with no PMIC, and since 0.3.9.3 two presses open MY TANKS: so a
+           single short press sleeps only once BTN_DOUBLE_US has passed with no second press (the release below arms it) */
+        if (s_btn_sleep_due && !s_btn_low_since && now - s_btn_up_at > BTN_DOUBLE_US) {
+            s_btn_sleep_due = false; s_btn_once = false;
+            s_sleep_why = "BOOT";
+            enter_sleep();
+            return;
+        }
+#endif
         if (s_btn_armed && s_btn_low_since && !s_btn_used) {
             int64_t held = now - s_btn_low_since;
             if (held >= BTN_DEBOUNCE_US && held < BTN_DOUBLE_US) {
                 if (s_btn_once && s_btn_low_since - s_btn_up_at <= BTN_DOUBLE_US) { s_btn_once = false; shelf_toggle(); }
                 else { s_btn_once = true; s_btn_up_at = now; }
             } else s_btn_once = false;
-            if (!s_pmic && held >= BTN_DEBOUNCE_US) enter_sleep();
+#if CONFIG_POCKET_TANK_320X240
+            if (!s_pmic && held >= BTN_DEBOUNCE_US) {
+                s_btn_sleep_due = s_btn_once;               /* the first of a possible two: sleep when the window closes (above) */
+                if (held >= BTN_DOUBLE_US) {                /* held past the window: no second to wait for */
+                    s_sleep_why = "BOOT";
+                    enter_sleep();
+                }
+            }
+#else
+            if (!s_pmic && held >= BTN_DEBOUNCE_US) {
+                s_sleep_why = "BOOT";
+                enter_sleep();
+            }
+#endif
         }
+#if CONFIG_POCKET_TANK_320X240
+        else if (s_btn_low_since && s_btn_used) s_btn_sleep_due = false;   /* a chord took this press: the first one's sleep goes too */
+#endif
         s_btn_armed = true; s_btn_low_since = 0; s_btn_used = false;
     } else if (s_btn_armed) {
         if (!s_btn_low_since) s_btn_low_since = now;
@@ -1860,6 +2197,8 @@ static void reset_tank(void) {
     progression_reset(&tank, (uint32_t)esp_timer_get_time() ^ 0xC0FFEEu);
     notice_sync(&tank);                         /* a fresh tank has nothing to announce */
     brightness_save();                          /* the erase took the setting with it */
+    orientation_save();                         /* ... and this one */
+    sleep_setting_save();                       /* ... and the SLEEP row's, if the keeper chose one (this fork) */
     ESP_LOGI(TAG, "fresh tank: %s + %s, both fry", tank.fish[0].name, tank.fish[1].name);
     if (touch_port_shelf()) shelf_close();      /* (the welcome takes the glass alone: nothing under it reads the finger, TCH-3) */
     s_shelf_want = false;
@@ -2068,12 +2407,50 @@ static void tank_task(void *arg) {
         imu_port_poll(now);
         if (imu_port_moving()) audio_port_prewarm();   /* in a hand: the codec stays warm (docs/AUDIO.md) */
         if (imu_port_handled()) tank_handled(&tank);   /* ... and the light stays on (two polls of motion: a bump on the desk is not a pick-up) */
+#if CONFIG_POCKET_TANK_IMU_FACE_DOWN_SLEEP
+        /* screen down and still for 2 s: the sleep key. What it does is the
+           sleep mode's - on a 320x240 board the SLEEP row's, where NEVER ignores it
+           with its line, as it does every other way into sleep. */
+        if (imu_port_take_face_down()) {
+#ifdef SLEEP_MODE_DEEP
+            ESP_LOGI(TAG, "face down: sleeping (face up wakes it within the grace)");
+#endif
+            s_sleep_why = "face down";
+            s_sleep_by_face = true;
+            enter_sleep();
+        }
+#endif
         { static int kept = -1, kept_side = -1; int q = imu_port_quarter();   /* the live way up, kept for the next boot (a turn is rare: one NVS byte) */
           if (kept < 0) { kept = nvs_u8("inv", 0); kept_side = nvs_u8("side", 0); }
           int live = (q & 2) != 0, side = q & 1;     /* "inv" stays the turned-over half (an older build reads it); "side" is the rest (0.3.9.3) */
           if (live != kept) { nvs_u8_put("inv", live); kept = live; }
           if (side != kept_side) { nvs_u8_put("side", side); kept_side = side; } }
-        int q = tank_orient(&tank, imu_port_quarter());   /* the live way up, or the one settings' ROTATION locked (0.3.2; a side, 0.3.9.3) */
+        /* (this fork) the live way up, in quarter turns since 0.3.9.3 (a side
+           only on the square and the pendant, imu_port_sides): */
+#if CONFIG_POCKET_TANK_IMU_FACE_DOWN_SLEEP
+        /* with an IMU answering, the IMU turns the picture and the settings
+           row is ROTATION, not SCREEN: a saved SCREEN choice is set aside */
+        int live = s_imu ? imu_port_quarter() : orientation_flipped() ? 2 : 0;
+#elif CONFIG_POCKET_TANK_IMU_AUTO_FLIP
+        int live = (imu_port_quarter() + (orientation_flipped() ? 2 : 0)) & 3;   /* the IMU's way up, turned over again by the keeper's SCREEN choice */
+#else
+        int live = orientation_flipped() ? 2 : 0;   /* no auto-flip: the keeper's SCREEN choice alone (the IMU still senses handling) */
+#endif
+        int q = tank_orient(&tank, live);   /* the live way up, or the one settings' ROTATION locked (0.3.2; a side, 0.3.9.3) */
+#if CONFIG_POCKET_TANK_320X240
+        /* (this fork) a 320x240 board offers ROTATION only with an IMU
+           answering in a face-down build (render_settings_set_imu, below) -
+           the CYD with its MPU-6050; otherwise its row is SCREEN (the
+           Touch-LCD-2, whose IMU does not run the gesture).
+           A lock saved while an IMU answered stays in the save but does not
+           hold the picture then: SCREEN could not turn it, and no row could
+           unlock it. */
+        bool rotation_row = false;
+#if CONFIG_POCKET_TANK_IMU_FACE_DOWN_SLEEP
+        rotation_row = s_imu;
+#endif
+        if (!rotation_row) q = live;
+#endif
 #ifdef TANK_WATCH
         q = tank_screen_turned(&tank) ? 2 : 0;  /* worn on a wrist the live flip never runs (the arm swings through every angle):
                                                    the way up is the keeper's setting, or what AUTO learned from the taps (tank.h) */
@@ -2082,6 +2459,9 @@ static void tank_task(void *arg) {
                reading (a ROTATION lock set aside), the watch's turned over from its SCREEN - and the IMU's turn starts it */
 #if TANK_WORN
             int sq = adv_quarter(q, -1);
+#elif CONFIG_POCKET_TANK_320X240
+            int sq = adv_quarter(q, s_imu ? imu_port_quarter() : -1);   /* (this fork) no IMU answering: none to go by (-1), and the
+                                                                           calibration ends at its first sitting (advanced.c) */
 #else
             int sq = adv_quarter(q, imu_port_quarter());
 #endif
@@ -2108,6 +2488,15 @@ static void tank_task(void *arg) {
         }
         else if (ans > 0) reset_tank();
         else if (ans < 0) ESP_LOGI(TAG, "reset prompt: tank kept");
+#if CONFIG_POCKET_TANK_320X240
+        if (touch_port_take_lock_open() && !touch_port_shelf())   /* (this fork) a finger held still on the locked glass: MY TANKS,
+                                                                     where its padlock undoes the lock - BOOT twice without BOOT. The
+                                                                     hold comes only from the plain locked tank and an experimental
+                                                                     tank's own glass (0.4.3's sync: its thank-you says so): over a
+                                                                     setup page the lock passes the page its taps (0.3.9.6), and the
+                                                                     reset prompt answers NO by itself (touch_port_ft3168.c) */
+            shelf_toggle();
+#endif
         { int v = 0, w = touch_port_take_setting(&v);                 /* the settings page */
           if (touch_port_take_shelf_return() && !touch_port_shelf()) { shelf_toggle(); s_shelf_from_ms = s_shelf_want && s_set_back_ms && !s_jm; ESP_LOGI(TAG, "settings: CLOSE - back to MY TANKS"); }   /* the cog's page closed (0.4.2) */
           if (w == SET_TAP_TANKS) { shelf_toggle(); s_shelf_from_ms = s_shelf_want && !s_jm; }   /* MY TANKS from the keeper page's foot (0.4; the settings page in 0.3.9.3): as BOOT
@@ -2123,7 +2512,9 @@ static void tank_task(void *arg) {
              what the page shows is what is kept; written only when it differs from what is stored) */
           else if (w == SET_TAP_GFX) { if (nvs_u8("gfx", 0) != v) nvs_u8_put("gfx", v); ESP_LOGI(TAG, "settings: graphics %s (saved; the render takes it up at its next frame)", render_gfx_name()); }
           else if (w == SET_TAP_VIG) { if (nvs_u8("vigoff", 255) != !v) nvs_u8_put("vigoff", !v); ESP_LOGI(TAG, "settings: vignette %s (saved; the render takes it up at its next frame)", v ? "ON" : "OFF"); }
-          else if (w == SET_TAP_ROTATE) ESP_LOGI(TAG, "settings: rotation %s", v ? (tank.orient_q == 2 ? "LOCKED (turned over)" : tank.orient_q ? "LOCKED (on a side)" : "LOCKED (upright)") : "unlocked (the picture follows the tank)"); }
+          else if (w == SET_TAP_ROTATE) ESP_LOGI(TAG, "settings: rotation %s", v ? (tank.orient_q == 2 ? "LOCKED (turned over)" : tank.orient_q ? "LOCKED (on a side)" : "LOCKED (upright)") : "unlocked (the picture follows the tank)");
+          else if (w == SET_TAP_FLIP) orientation_set(v != 0);              /* the CYD's SCREEN row (no IMU) */
+          else if (w == SET_TAP_SLEEP) sleep_setting_set(v); }              /* the 320x240 boards' SLEEP row: NEVER / SCREEN / LIGHT */
         { int a = touch_port_take_adv();                                /* the ADVANCED page: a size SET, a touch map kept or dropped */
           if (a == ADV_ACT_CELL) { adv_save(a); battery_port_set_cell(adv_cell()); audio_port_play(SND_CONFIRM, AUDIO_PITCH_ONE); }
           else if (a == ADV_ACT_FIT) { adv_save(a); audio_port_play(SND_CONFIRM, AUDIO_PITCH_ONE);
@@ -2394,6 +2785,16 @@ static void tank_task(void *arg) {
                 render_milestones(&tank, fb[cur], TANK_W);   /* (the big screens: the wide keeper page keeps its own frame - render_big.c THE WIDE PAGE KEPT - and says its moving boxes) */
                 sel = -1;
             } else if (touch_port_settings()) {  /* settings page: brightness + volume */
+#if CONFIG_POCKET_TANK_320X240
+                /* (this fork) a 320x240 board's row is chosen at run time (common/render.h):
+                   SCREEN with no IMU, ROTATION with one in a face-down build; SLEEP under
+                   it, but not on a deepsleep build */
+                render_settings_set_flip(orientation_flipped());
+#if CONFIG_POCKET_TANK_IMU_FACE_DOWN_SLEEP
+                render_settings_set_imu(s_imu);
+#endif
+                render_settings_set_sleep(sleep_setting());   /* -1 on a deepsleep build: no row */
+#endif
                 { static int64_t gfx_t0; static bool gfx_quit;   /* (the log's ONE MOMENT: how long the page said it, for the bench) */
                   if (!render_gfx_busy()) gfx_t0 = 0, gfx_quit = false;
                   else { if (!gfx_t0) gfx_t0 = esp_timer_get_time();
@@ -2806,6 +3207,13 @@ static void nvs_start(void) {
  * tank is saved as it is before sleep, then the board restarts into update
  * mode (update_mode.c) - the radio never runs beside the tank */
 static void request_update(bool add) {
+#if CONFIG_POCKET_TANK_320X240
+    /* (this fork) the 320x240 boards have no update channel (no manifest of
+       their own, flashed by cable: CYD.md): no restart into update mode,
+       which app_main would not enter anyway */
+    ESP_LOGW(TAG, "%s: a 320x240 board is updated by cable (CYD.md), not over the air", add ? "ADD A NETWORK" : "update check");
+    return;
+#endif
     if (render_reset_erase_armed()) {           /* ERASE EVERYTHING is on the glass (ERASING) and begins within a frame or two: CHECK FOR UPDATES
                                                    would take its page down and drop it - the key does nothing just now */
         ESP_LOGW(TAG, "CHECK FOR UPDATES refused: ERASE EVERYTHING is about to begin");
@@ -2823,6 +3231,10 @@ void device_update_check(void) { request_update(false); }
 /* the installer page asked a RUNNING tank for the networks (its Connect to /
  * Change Wi-Fi): saved the same way, then the restart into provisioning mode */
 void device_provision_request(void) {
+#if CONFIG_POCKET_TANK_320X240
+    ESP_LOGW(TAG, "provisioning: a 320x240 board has no update channel, so no Wi-Fi to set up");
+    return;
+#endif
     if (render_reset_erase_armed()) {           /* ERASE EVERYTHING is on the glass (ERASING) and begins within a frame or two: Wi-Fi setup
                                                    would take its page down and drop it - the key does nothing just now */
         ESP_LOGW(TAG, "Wi-Fi setup refused: ERASE EVERYTHING is about to begin");
@@ -2852,6 +3264,11 @@ void app_main(void) {
     { int carried = batlog_init();       /* the battery log survives every reset but a power-on */
       if (carried) ESP_LOGI(TAG, "batlog: %d samples carried through the reset (director `batlog` reads them)", carried); }
     brightness_init();
+    orientation_init();
+    sleep_setting_init();                    /* (this fork) the 320x240 boards' SLEEP row */
+#ifdef SLEEP_SETTING_ROW
+    ESP_LOGI(TAG, "sleep mode: %s (%s)", SLEEP_MODE_NAME, sleep_setting_saved() ? "chosen in settings" : "the build's default, nothing chosen in settings");
+#endif
     render_set_gfx_level(nvs_u8("gfx", RENDER_GFX_HIGH));   /* GRAPHICS (0.4.2): a device setting; a device that never saved one: HIGH */
     render_set_vignette(nvs_u8("vigoff", 0) != 1);          /* the VIGNETTE (0.4.2): a device setting; no key, or anything but 1: ON */
     bat_hist_load();
@@ -2927,12 +3344,20 @@ void app_main(void) {
     }
 #endif
     blackbox_boot_commit(false);      /* the boot record: the PMIC as found, the reset, the run before */
-    if (imu_port_init(board_i2c_bus())) {   /* screen auto-flip; absent IMU = always upright (never seeded: nothing could turn it back) */
+    s_imu = imu_port_init(board_i2c_bus());   /* screen auto-flip; absent IMU = always upright (never seeded: nothing could turn it back) */
+    if (s_imu) {
         imu_port_sides(display_port_quarters());   /* the square's and the pendant's own builds stand on a side too (0.3.9.3) */
         imu_port_seed_quarter((nvs_u8("inv", 0) ? 2 : 0) | (nvs_u8("side", 0) ? 1 : 0));   /* the way up it had before this boot (written at each turn) */
     }                                 /* (before update mode: its pages turn with the tank too, 0.3.9.3) */
+#if CONFIG_POCKET_TANK_320X240
+    /* (this fork) a 320x240 board: no update mode and no provisioning wait (it
+       would hold the glass dark 8 s after every reset over USB with no network
+       saved). The request word is still read, so a stale one is cleared. */
+    (void)update_mode_pending();
+#else
     if (update_mode_pending()) { brightness_apply(false); update_mode_run(fb[0], nvs_u8("uq", 0)); }
     else if (provision_mode_wanted()) provision_mode_run(fb[0]);   /* just installed, no network yet: the page's Wi-Fi step, the glass dark */
+#endif
     s_rtc = rtc_port_init(board_i2c_bus());   /* wall clock for the ravenous rule (before the clockless night's sync) */
     net_clock_boot(fb[0]);            /* no RTC chip, a stopped one, or a chip not yet on real time, with a saved network: the time from the internet, before the advisor takes the heap */
     battery_port_key_clear();         /* a PWR press on the TIME CHECK page (up to 30 s, nothing polls the key) is not a sleep press once the tank is up (0.4 rc) */

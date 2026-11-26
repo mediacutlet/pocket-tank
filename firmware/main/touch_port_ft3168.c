@@ -25,7 +25,10 @@
  * gestures.
  * The SQUARE (2.16, 2026-10-12) has a CST9220 - the round board's CST9217
  * family, read the same way, on its own reset pin and a 480 px panel; its own
- * build is the panel too. Which way its report runs is `touch mirror`. */
+ * build is the panel too. Which way its report runs is `touch mirror`.
+ * (this fork) The 320x240 boards: the CYD's FT6336 and the Touch-LCD-2's
+ * CST816D (adampog, 2026-10-08) through esp_lcd_touch like the 1.8's, each
+ * already landscape from the driver; map_touch turns the CYD's 180 degrees. */
 #include "touch_port.h"
 #include "link_dev.h"
 #include "display_port.h"
@@ -102,6 +105,7 @@ static int  s_adv_act;                            /* the ADVANCED page's CELL / 
 static int  s_set_what, s_set_val;                /* a segment tapped: SET_TAP_* + value, for main */
 static bool s_pill;                               /* main.c drew the battery pill this frame: a tap on it is its page's */
 static bool s_bat; static int64_t s_bat_us;       /* the battery page up, and since when (it closes itself) */
+static bool s_swallow;                            /* the tank just lit from the dark: no gesture until the glass is clear */
 #define BATTERY_PAGE_US (30LL * 1000000)
 #define CONFIRM_TIMEOUT_US (20LL * 1000000)
 static int  s_q;                                  /* the picture's quarter turns (tank_orient): 2 = flipped, 1 / 3 = on a side */
@@ -110,7 +114,14 @@ static int  s_q;                                  /* the picture's quarter turns
  * same reason; Strato saw it on the swatch rows, 2026-09-13). Reported
  * points move UP by this many px in displayed space; director `touch bias
  * <px>` tunes it live. */
+#if CONFIG_POCKET_TANK_320X240
+/* None on the CYD (2026-09-26): with the AMOLED's 10 px every missed button
+ * in the first setup walk-through read ABOVE the button, never below it.
+ * The Touch-LCD-2 is the same size of glass and starts from the same 0. */
+static int s_bias_y = 0;
+#else
 static int s_bias_y = 10;
+#endif
 void touch_port_set_bias(int px) { s_bias_y = px; }
 int  touch_port_bias(void) { return s_bias_y; }
 
@@ -414,7 +425,62 @@ static bool panel_read(uint16_t *x, uint16_t *y) {
     return true;
 }
 
+#if CONFIG_POCKET_TANK_CYD_320X240
+/* The CYD's FT6336G (the same FT5x06 register family) on the shared bus, with
+ * its reset on GPIO18. The driver's swap_xy turns its portrait report
+ * landscape; what is left for touch_port_poll is a 180-degree turn, found on
+ * the bench (2026-09-26): a drag to the right moved the bubble column left,
+ * and the welcome page's NEXT, at the foot, answered a tap at the top. The
+ * display was turned 180 degrees the same day, and touch has to follow it. */
+#define TOUCH_SWAP_XY  1
+#define TOUCH_MIRROR_X 0
+#define TOUCH_MIRROR_Y 1
+#define TOUCH_TURN_180 1
+
+static bool ft6336_init(void) {
+    esp_lcd_panel_io_handle_t io;
+    esp_lcd_panel_io_i2c_config_t io_cfg = ESP_LCD_TOUCH_IO_I2C_FT5x06_CONFIG();
+    io_cfg.dev_addr = I2C_ADDR_FT6336; io_cfg.scl_speed_hz = 400000;
+    if (esp_lcd_new_panel_io_i2c(board_i2c_bus(), &io_cfg, &io) != ESP_OK) { ESP_LOGW(TAG, "no touch io"); return false; }
+    esp_lcd_touch_config_t tp_cfg = { .x_max = PANEL_W, .y_max = PANEL_H, .rst_gpio_num = PIN_TP_RST, .int_gpio_num = -1,
+        .levels = { .reset = 0, .interrupt = 0 },
+        .flags = { .swap_xy = TOUCH_SWAP_XY, .mirror_x = TOUCH_MIRROR_X, .mirror_y = TOUCH_MIRROR_Y } };
+    if (esp_lcd_touch_new_i2c_ft5x06(io, &tp_cfg, &s_tp) != ESP_OK) { ESP_LOGW(TAG, "no FT6336"); return false; }
+    ESP_LOGI(TAG, "FT6336 ready");
+    return true;
+}
+#elif CONFIG_POCKET_TANK_WST_320X240
+/* The Touch-LCD-2's CST816D (the CST816S driver's register set, as on the
+ * AMOLED's V2 board) on the shared bus, reporting in the panel's portrait
+ * frame. The driver mirrors first, then swaps: x = raw y, y = 239 - raw x,
+ * which is Waveshare's factory app's own mapping for the landscape it scans
+ * (board_pins.h LCD_*: MX | MV). x_max / y_max are the last pixel, so the
+ * mirror lands on 239, not 240. Check against the director's `touch log on`
+ * stroke line: a tap near the top-left corner reads near 0,0. */
+#define TOUCH_SWAP_XY  1
+#define TOUCH_MIRROR_X 1
+#define TOUCH_MIRROR_Y 0
+#define TOUCH_TURN_180 0
+
+static bool cst816d_init(void) {
+    esp_lcd_panel_io_handle_t io;
+    esp_lcd_panel_io_i2c_config_t io_cfg = ESP_LCD_TOUCH_IO_I2C_CST816S_CONFIG();
+    io_cfg.dev_addr = I2C_ADDR_CST816D; io_cfg.scl_speed_hz = 400000;
+    if (esp_lcd_new_panel_io_i2c(board_i2c_bus(), &io_cfg, &io) != ESP_OK) { ESP_LOGW(TAG, "no touch io"); return false; }
+    esp_lcd_touch_config_t tp_cfg = { .x_max = PANEL_W - 1, .y_max = PANEL_H - 1, .rst_gpio_num = PIN_TP_RST, .int_gpio_num = -1,
+        .levels = { .reset = 0, .interrupt = 0 },
+        .flags = { .swap_xy = TOUCH_SWAP_XY, .mirror_x = TOUCH_MIRROR_X, .mirror_y = TOUCH_MIRROR_Y } };
+    if (esp_lcd_touch_new_i2c_cst816s(io, &tp_cfg, &s_tp) != ESP_OK) { ESP_LOGW(TAG, "no CST816D"); return false; }
+    ESP_LOGI(TAG, "CST816D ready");
+    return true;
+}
+#endif
 bool touch_port_init(void) {
+#if CONFIG_POCKET_TANK_CYD_320X240   /* (this fork) the 320x240 boards' own controllers */
+    return ft6336_init();
+#elif CONFIG_POCKET_TANK_WST_320X240
+    return cst816d_init();
+#endif
 #ifdef TOUCH_TAB5
     if (i2c_master_probe(board_i2c_bus(), I2C_ADDR_GT911_ALT, 50) != ESP_OK) return st712x_init();   /* no GT911 at 0x14: an ST712x panel */
 #endif
@@ -613,7 +679,11 @@ static void map_touch(uint16_t px, uint16_t py, float *tx, float *ty) {
      * 180-degree turn comes after it (view_point). Until 2026-10-02 the turn came
      * first, and a turned picture's taps were off by the fit's asymmetry: ~15 px
      * on the watch, ~20 at the top of the bowl, ~2 on the 1.8. */
-#if defined(TANK_WATCH) || defined(TANK_SQUARE)       /* the watch's portrait tank, the square's: the panel's px are the tank's */
+#if CONFIG_POCKET_TANK_320X240 && TOUCH_TURN_180 /* the CYD: landscape from the driver (swap_xy), turned 180 degrees (ft6336_init) */
+    int rx = TANK_W - 1 - fx, ry = TANK_H - 1 - fy;
+#elif CONFIG_POCKET_TANK_320X240                 /* the Touch-LCD-2: landscape from the driver, the right way up (cst816d_init) */
+    int rx = fx, ry = fy;
+#elif defined(TANK_WATCH) || defined(TANK_SQUARE)     /* the watch's portrait tank, the square's: the panel's px are the tank's */
     int rx = fx, ry = fy;
 #elif defined(TOUCH_P4)                                /* the home tank: the panel's px through the display port's turn */
     float p4x, p4y; display_port_panel_to_tank(px, py, &p4x, &p4y);
@@ -740,6 +810,23 @@ static bool s_tlock; static int64_t s_tlock_us;           /* THE TOUCH LOCK, and
 void touch_port_set_touch_lock(bool on) { s_tlock = on; s_tlock_us = 0; }
 bool touch_port_touch_lock(void) { return s_tlock; }
 bool touch_port_lock_hint(void) { return s_tlock && s_tlock_us && esp_timer_get_time() - s_tlock_us < TOUCH_LOCK_HINT_US; }
+/* (this fork) the touch lock undone without BOOT on a 320x240 board: in the CYD's case BOOT cannot be reached, and
+ * upstream's only way back on the glass is BOOT twice. A finger held still on the locked glass for 5 s (the BOOT
+ * chord's hold, ADV_BOOT_HOLD_S) opens MY TANKS instead - nothing else - and its padlock undoes the lock there. 5 s
+ * still is a deliberate act: a tap, a swipe or a palm moving over the glass does nothing, as before. It is needed
+ * over the plain locked tank, and (0.4.3's sync) over an experimental tank, locked or not - its glass is its own, with
+ * no way to MY TANKS but BOOT twice (the jelly tank's branch below): since 0.3.9.6 upstream lets a setup page (a new
+ * tank's welcome, a fry's naming) take its taps through the lock, and the reset prompt answers NO by itself after
+ * CONFIRM_TIMEOUT_US. */
+#define TOUCH_LOCK_HOLD_US 5000000
+#define TOUCH_LOCK_HOLD_SLOP 24                           /* px the finger may roll and still be "still" (a tap's own slop) */
+static bool s_tlock_held, s_tlock_open;                   /* this press already asked; the ask, for main.c */
+#if CONFIG_POCKET_TANK_320X240
+static bool s_hold_moved;                                 /* (this fork) this press has left its slop once: no still finger again */
+#define XT_BACK_PX 56                                     /* (this fork) an experimental tank's way back: a press that lands in the
+                                                             glass's bottom-left square this wide (render_xt_notice names it) */
+#endif
+bool touch_port_take_lock_open(void) { bool o = s_tlock_open; s_tlock_open = false; return o; }
 bool touch_port_read_raw(float *x, float *y) {
     uint16_t px[1], py[1];
     if (!panel_read(px, py)) return false;
@@ -793,6 +880,12 @@ void touch_port_poll(tank_t *t) {
 #endif
     uint16_t x[1], y[1];
     bool touched = panel_read(x, y);
+    if (s_swallow) {                            /* the finger from the dark (touch_port_swallow): no press, */
+        if (!touched) s_swallow = false;        /* no tap, no hold - the next touch is a fresh one */
+        s_down = false; s_held_page = false; s_page_gone = false;
+        s_fdown = false;                        /* ... and none for the pages that follow the finger (touch_port_finger) */
+        return;
+    }
     /* portrait panel (px,py) -> landscape tank (tx,ty): tx = TANK_W-1-py, ty = px;
      * flipped screen: mirror both, so downstream gestures live in displayed space */
     float tx = s_lx, ty = s_ly;
@@ -808,6 +901,12 @@ void touch_port_poll(tank_t *t) {
            a darting fish has moved and the finger hid it the whole time */
         for (int i = 0; i < t->n_fish && i < N_FISH_MAX; i++) { s_fx[i] = t->fish[i].x; s_fy[i] = t->fish[i].y; }
     }
+#if CONFIG_POCKET_TANK_320X240
+    /* (this fork) the 5 s holds below count a finger that stayed still: a press that once leaves its slop is a drag or a
+       stroke to its lift, even back at its landing point - a finger stirring the water came round to it and asked */
+    if (touched && !s_down) s_hold_moved = false;
+    else if (touched && (tx - s_px) * (tx - s_px) + (ty - s_py) * (ty - s_py) >= TOUCH_LOCK_HOLD_SLOP * TOUCH_LOCK_HOLD_SLOP) s_hold_moved = true;
+#endif
     /* LOADING (0.4, the 11-02 sweep: a kid's taps on the boot show fed the fish, opened a card or the keeper page - which ended the
        show at once - or put the light out): over the bare tank the finger goes nowhere until the tank is up; a press that began then
        is let go at its lift. A page (a new tank's welcome, MY TANKS by BOOT twice) is not the show: it takes its taps */
@@ -824,6 +923,13 @@ void touch_port_poll(tank_t *t) {
     if (s_tlock && !s_shelf && !setup_active()) {
         if (touched) s_tlock_us = now;                       /* (held: the note stays up, then 2 s past the lift) */
         if (touched != s_down && s_log) ESP_LOGI(TAG, "touch locked: the %s ignored", touched ? "press" : "lift");
+#if CONFIG_POCKET_TANK_320X240
+        if (!touched) s_tlock_held = false;                  /* (this fork) a held finger opens MY TANKS (above) */
+        else if (s_down && !s_tlock_held && !s_hold_moved && now - s_press_us >= TOUCH_LOCK_HOLD_US) {
+            s_tlock_held = true; s_tlock_open = true;
+            ESP_LOGI(TAG, "touch locked: a finger held still %d s - MY TANKS, where the padlock undoes it", (int)(TOUCH_LOCK_HOLD_US / 1000000));
+        }
+#endif
         s_down = touched; s_held_page = false; s_page_gone = false;
         return;
     }
@@ -852,6 +958,25 @@ void touch_port_poll(tank_t *t) {
     if (xtn && !s_xt_up_was) s_xt_up_us = now;
     s_xt_up_was = xtn;
     if (s_jelly && !s_ms && !s_set && !s_shop && !s_coll && !s_shelf && !s_bat && !s_upd && !s_cf && !su && !adv_up() && !card) {
+#if CONFIG_POCKET_TANK_320X240
+        /* (this fork) AN EXPERIMENTAL TANK's glass is all its own, and upstream's one way from it to MY TANKS is BOOT twice -
+           out of reach in the CYD's case. A finger held still 5 s in the glass's bottom-left corner (XT_BACK_PX) asks for
+           MY TANKS here, as anywhere on the locked glass (above; main.c opens it): the tank lets go of that press at once,
+           and the rest of it is MY TANKS's, whose taps are only presses begun after it opened. Only there - a finger held
+           anywhere else is the tank's own gesture, for as long as the keeper likes (the minnows mill round it, the jellies
+           turn to it as a light), and the corner is clear of each tank's controls (the jellies' nozzle at the upper right,
+           the minnows' feeding band along the top, the piranhas' taps). The thank-you says where (render_xt_notice). On a
+           320 x 240 board only the serial console makes such a tank (shelf.h SHELF_XT_LIBRARY) */
+        if (!touched) s_tlock_held = false;
+        else if (s_tlock_held) { s_down = touched; s_held_page = false; s_page_gone = false; return; }
+        else if (s_down && !s_hold_moved && s_px < XT_BACK_PX && s_py >= TANK_H - XT_BACK_PX && now - s_press_us >= TOUCH_LOCK_HOLD_US) {
+            s_tlock_held = true; s_tlock_open = true;
+            if (s_xt_jdown) { s_jelly(tx, ty, false, now / 1e6); s_xt_jdown = false; }   /* (the tank's own press: it lets go) */
+            ESP_LOGI(TAG, "an experimental tank: a finger held still %d s in the corner - MY TANKS", (int)(TOUCH_LOCK_HOLD_US / 1000000));
+            s_down = touched; s_held_page = false; s_page_gone = false;
+            return;
+        }
+#endif
         if (xtn && !(s_xt_jdown && s_down)) {                /* THE EXPERIMENTAL TANK'S THANK-YOU (0.4.3, xt_notice.h) has the glass: a tap on it
                                                                 closes it, the tank sees nothing. A press the tank already had when it came
                                                                 stays the tank's to its lift (THE TOUCH RULE, G1: no tap on the notice);
@@ -877,7 +1002,8 @@ void touch_port_poll(tank_t *t) {
                                                   : r == SET_TAP_LIGHT ? "lights out" : r == SET_TAP_SCREEN ? "screen (1 = turned)"
                                                   : r == SET_TAP_FEED ? "auto feed (1 = on)" : r == SET_TAP_ROTATE ? "rotation (1 = locked)"
                                                   : r == SET_TAP_UPDATES ? "UPDATES" : r == SET_TAP_LINK ? "LINK" : r == SET_TAP_GFX ? "graphics quality (1 low .. 3 high)"
-                                                  : r == SET_TAP_VIG ? "vignette (1 = on)" : r == SET_TAP_GFX_PAGE ? "the GRAPHICS page (1 = opened, 0 = BACK)" : "idle seconds", v);
+                                                  : r == SET_TAP_VIG ? "vignette (1 = on)" : r == SET_TAP_GFX_PAGE ? "the GRAPHICS page (1 = opened, 0 = BACK)"
+                                                  : r == SET_TAP_FLIP ? "screen" : r == SET_TAP_SLEEP ? "sleep" : "idle seconds", v);
         if (r == SET_TAP_CLOSE && s_set_from_shelf) { s_set = false; s_set_from_shelf = false; s_shelf_return = true; spent_lift_set(&s_back); }   /* opened by MY TANKS's cog (0.4.2, Strato 11-12): CLOSE goes back there (main.c takes it) */
         else if (r == SET_TAP_CLOSE) { s_set = false; s_ms = !s_jelly; spent_lift_set(&s_back); }   /* back to the milestones page (2026-09-16); the release is spent
                                                                        (a jelly tank has no keeper page: back to the jellies) */
@@ -894,6 +1020,9 @@ void touch_port_poll(tank_t *t) {
         else if (r == SET_TAP_LINK && s_jelly) ESP_LOGI(TAG, "settings: LINK - not in a jelly tank (its fish are on the shelf)");
         else if (r == SET_TAP_LINK) { s_set = false; s_set_from_shelf = false; spent_lift_set(&s_back); page_gate_open(&s_page_gate, now); link_dev_page_open(t); }   /* link mode over the live tank (0.4) */
         else if (r == SET_TAP_BRIGHT || r == SET_TAP_BRIGHT_LIVE || r == SET_TAP_VOLUME || r == SET_TAP_VOLUME_LIVE || r == SET_TAP_LIGHT || r == SET_TAP_IDLE || r == SET_TAP_FEED || r == SET_TAP_ROTATE || r == SET_TAP_GFX || r == SET_TAP_VIG) { s_set_what = r; s_set_val = v; }
+#if CONFIG_POCKET_TANK_320X240
+        else if (r == SET_TAP_FLIP || r == SET_TAP_SLEEP) { s_set_what = r; s_set_val = v; }   /* (this fork) the 320x240 boards' SCREEN and SLEEP rows */
+#endif
     } else {                                                 /* not fed this poll (the card, the prompt, closed): its press forgotten (R2T-3) -
                                                                 and a slider in hand saved where the glass shows it (the release would have) */
         int v = 0, w = render_settings_cut(&v);
@@ -1448,3 +1577,64 @@ int  touch_port_take_shop(void) { int r = s_shop_act; s_shop_act = 0; return r; 
 void touch_port_set_pill(bool up) { s_pill = up; }
 bool touch_port_battery(void) { return s_bat; }
 void touch_port_show_battery(bool on) { s_bat = on; if (on) { s_bat_us = esp_timer_get_time(); s_sel = -1; } }
+
+/* ---- the dark (touch_port.h; main.c's enter_dark) ----
+ * The firmware's alone: the simulator's --selftest-touch-port builds this file on the host (TOUCH_PORT_HOST), where
+ * nothing goes dark and its stand-in ESP-IDF has neither esp_lcd_touch_get_data nor the board's INT pin. */
+#ifndef TOUCH_PORT_HOST
+bool touch_port_finger_now(void) {
+    if (!s_tp) return false;
+#if CONFIG_POCKET_TANK_WST_320X240
+    /* (this fork, 2026-10-08) The Touch-LCD-2's CST816D may stop answering
+       I2C while it idles: the CST816 family has an auto-sleep a few seconds
+       after the last finger, woken by a touch - unseen on this chip, since
+       nobody here has the board. A read it does not answer is no finger,
+       but the CST816S driver and each I2C layer under it log an error for
+       it ("I2C read failed", "i2c transaction failed", the NACK): a handful
+       of lines ten times a second, for as long as the dark lasts. A probe of
+       its address first is silent on a NACK (only a stuck bus logs), so a
+       dozing chip is passed over quietly, and the read goes ahead only when
+       it answers. */
+    if (i2c_master_probe(board_i2c_bus(), I2C_ADDR_CST816D, 20) != ESP_OK) return false;
+#endif
+    if (esp_lcd_touch_read_data(s_tp) != ESP_OK) return false;   /* no answer: no finger */
+    esp_lcd_touch_point_data_t point[1];
+    uint8_t n = 0;
+    return esp_lcd_touch_get_data(s_tp, point, &n, 1) == ESP_OK && n > 0;
+}
+void touch_port_swallow(void) { s_swallow = true; }
+#if CONFIG_POCKET_TANK_320X240
+/* The touch controller's INT, PIN_TP_INT in board_pins.h, which the game
+ * never uses: it polls. A floating or dead line costs nothing: the pull-up
+ * keeps it high, main.c never arms a line that already reads low, and the
+ * dark's own reads still find the finger.
+ * The CYD: the FT6336's INT on GPIO17. Not yet seen on the bench, and the
+ * driver never sets the chip's G_MODE, so whether it holds low through a
+ * touch or pulses is the chip's default - a held line is a sure level wake,
+ * a pulse a likely one.
+ * (this fork, 2026-10-08) The Touch-LCD-2: the CST816D's INT on GPIO46,
+ * which pulses low on a touch by the CST816 family's default - a likely
+ * wake, as the CYD's pulse would be; unseen here, since nobody here has the
+ * board. GPIO46 is one of the ESP32-S3's strapping pins (with GPIO0 it
+ * picks the boot mode), and setting it up here is safe: a strap is sampled
+ * only at a chip reset, when every pad is back to its reset state, so what
+ * the running app does with the pad cannot reach the next one; and this
+ * only reads it, with a pull-up towards the level the touch INT idles at -
+ * nothing here drives it. Any GPIO can wake the S3 from light sleep, an
+ * RTC pin or not (gpio_wakeup_enable), so GPIO46, which is not one, is
+ * armed as the CYD's GPIO17 is. */
+int touch_port_wake_gpio(void) {
+    static bool configured;
+    if (!s_tp) return -1;
+    if (!configured) {
+        gpio_config_t io = { .pin_bit_mask = 1ULL << PIN_TP_INT, .mode = GPIO_MODE_INPUT,
+                             .pull_up_en = GPIO_PULLUP_ENABLE, .pull_down_en = GPIO_PULLDOWN_DISABLE };
+        configured = gpio_config(&io) == ESP_OK;
+        if (!configured) return -1;
+    }
+    return PIN_TP_INT;
+}
+#else
+int touch_port_wake_gpio(void) { return -1; }    /* the AMOLED's INT is not in use, and display_port_sleep holds its touch in reset */
+#endif
+#endif  /* TOUCH_PORT_HOST */

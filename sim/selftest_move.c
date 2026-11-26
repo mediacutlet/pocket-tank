@@ -496,21 +496,22 @@ int selftest_move(void) {
             if (render_milestones_tap(&T, (float)mx, (float)my) != MS_TAP_KEPT || render_give_modal_step(&T) != RENDER_GM_MOVE || T.n_fish != 3 || progression_bowl_has()) MV_FAIL("I. a tap on MOVE: step %d, %d fish", render_give_modal_step(&T), T.n_fish);
             live(0.1f);
             if (T.n_fish != 3 || progression_bowl_has()) MV_FAIL("I. one tap on MOVE moved the fish");
-            /* the card's words fit it */
+            /* the card's words fit it (this fork: the card and its words as this board draws them - UI() and UI_TEXT() are
+               the literals on upstream's boards; the waiting row's words start at the page's name column, MSP_NAME_X) */
             char l[48]; snprintf(l, sizeof l, "PUT %s", T.fish[2].name);
-            const int right = 336 - 12 - 100 - 12 - 12;
-            if (render_text_w(l, 2) > right || render_text_w("TRAVEL BOWL?", 2) > right || render_text_w("THE TRAVEL BOWL", 2) > right) MV_FAIL("I. the card's words beside the fish are wider than their %d px", right);
+            const int right = UI(336) - UI(12) - UI(100) - UI(12) - UI(12);
+            if (render_text_w(l, UI_TEXT(2)) > right || render_text_w("TRAVEL BOWL?", UI_TEXT(2)) > right || render_text_w("THE TRAVEL BOWL", UI_TEXT(2)) > right) MV_FAIL("I. the card's words beside the fish are wider than their %d px", right);
             static const char *const LINES[] = { "IT WAITS THERE UNTIL YOU", "LET IT INTO A TANK", "THE LAST TWO FISH STAY", "LIGHT ON TO NAME THIS FRY", "THE BOWL HAS wwwwwww", "VISITING NEXT DOOR",
                 "wwwwwww IS BEING GIVEN", "THIS TANK IS FULL", "wwwwwww CAN'T LIVE HERE", "LET IT INTO THIS TANK?", "wwwwwww IS WAITING", "TRAVEL BOWL" };
-            for (unsigned k = 0; k < sizeof LINES / sizeof LINES[0]; k++) if (render_text_w(LINES[k], 2) > 336 - 24) MV_FAIL("I. \"%s\" is wider than the card", LINES[k]);
-            if (render_text_w("THAT DID NOT WORK.", 2) > 336 - 24 || strlen("THAT DID NOT WORK. TRY AGAIN") > 31) MV_FAIL("I. the refused-write line does not fit");
-            if (render_text_w("TAP HERE TO LET IT IN", 2) > PAGE_W - 92 - 40 || render_text_w("wwwwwww WAITS IN THE BOWL", 2) > PAGE_W - 92 - 40) MV_FAIL("I. the waiting row's words are wider than the row");
+            for (unsigned k = 0; k < sizeof LINES / sizeof LINES[0]; k++) if (render_text_w(LINES[k], UI_TEXT(2)) > UI(336) - UI(24)) MV_FAIL("I. \"%s\" is wider than the card", LINES[k]);
+            if (render_text_w("THAT DID NOT WORK.", UI_TEXT(2)) > UI(336) - UI(24) || strlen("THAT DID NOT WORK. TRY AGAIN") > 31) MV_FAIL("I. the refused-write line does not fit");
+            if (render_text_w("TAP HERE TO LET IT IN", UI_TEXT(2)) > PAGE_W - MSP_NAME_X - UI(40) || render_text_w("wwwwwww WAITS IN THE BOWL", UI_TEXT(2)) > PAGE_W - MSP_NAME_X - UI(40)) MV_FAIL("I. the waiting row's words are wider than the row");
             if (render_text_w("wwwwwww WAITS", 2) > render_text_w("MY TANKS", 3) + 2 * 12) MV_FAIL("I. MY TANKS's line is wider than its title's box and the padlock's gap");
             /* the MOVE card's buttons: on the glass; BACK closes; MOVE moves */
             int bx, bby, kx, ky;
             if (!render_give_modal_button(&T, RENDER_GM_TAP_MOVE, &bx, &bby) || !render_give_modal_button(&T, RENDER_GM_TAP_BACK, &kx, &ky)) MV_FAIL("I. the MOVE card has no MOVE / BACK");
             else {
-                if (!on_glass(bx - 70, bby + 17) || !on_glass(kx + 70, ky + 17) || kx - bx < 150) MV_FAIL("I. the MOVE card's buttons: MOVE at %d,%d BACK at %d,%d", bx, bby, kx, ky);
+                if (!on_glass(bx - UI(70), bby + UI(17)) || !on_glass(kx + UI(70), ky + UI(17)) || kx - bx < UI(150)) MV_FAIL("I. the MOVE card's buttons: MOVE at %d,%d BACK at %d,%d", bx, bby, kx, ky);
                 if (render_give_modal_tap(&T, (float)bx, (float)bby) != RENDER_GM_TAP_HELD) MV_FAIL("I. MOVE took the double of the tap that opened its card");
                 if (card_tap(RENDER_GM_TAP_BACK) != RENDER_GM_TAP_BACK || render_give_modal_step(&T) != RENDER_GM_OFF || T.n_fish != 3) MV_FAIL("I. BACK did not close the MOVE card");
                 render_milestones_tap(&T, (float)mx, (float)my);

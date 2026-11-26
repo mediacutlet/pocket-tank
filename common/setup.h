@@ -53,6 +53,7 @@
 #define POCKET_TANK_SETUP_H
 #include "tank.h"
 #include "render.h"            /* PAGE_*: the page the layout below is on */
+#include "ui.h"                /* UI(): the layout scaled to the page (this fork: the CYD's is smaller) */
 #include <stdint.h>
 #include <stdbool.h>
 
@@ -117,8 +118,8 @@ void setup_debug_stamp(const char *l1, const char *l2, float deg);   /* the star
 bool setup_about_band(const tank_t *t, int box[4]);          /* THE PANEL KEPT (0.4.2): MORE's moving strip, page coords incl. (false: none) */
 void setup_about_band_draw(const tank_t *t, uint16_t *fb, int stride, double clock);   /* ... cleared and its fish drawn again */
 uint32_t setup_about_key(const tank_t *t);                   /* ... all the still page is drawn from */
-#define SETUP_STAMP_IN_X 68             /* its centre from the panel's top left */
-#define SETUP_STAMP_IN_Y 62
+#define SETUP_STAMP_IN_X UI(68)         /* its centre from the panel's top left */
+#define SETUP_STAMP_IN_Y UI(62)
 int  setup_take_renamed(void);
 /* NAME A CRITTER (0.4.2): the same page for the snail, urchin, crab or seahorse (k = CRIT_NAME_*; one the tank owns),
  * opened by its card's NAME / RENAME (render_critter_name_hit) - "NAME YOUR SNAIL" the first time, "RENAME YOUR SNAIL"
@@ -206,8 +207,8 @@ enum { SETUP_PG_LAB_BODY = SETUP_PG_ABOUT + 1, SETUP_PG_LAB_FINS, SETUP_PG_LAB_C
 #define SETUP_LAB_BTN_X  LAB_COL2_X       /* POUR IT IN: from the right column's edge to LAB_R, standing on the bench's top line, */
 #define SETUP_LAB_BTN_Y  LAB_BENCH_Y      /* as tall as the bench's top (its corner clears the round glass) */
 #define SETUP_LAB_BTN_W  (LAB_R - LAB_COL2_X)
-#define SETUP_LAB_BACK_W 128              /* the tube page's BACK: the rack's own width, over it */
-#define SETUP_LAB_BACK_Y 36
+#define SETUP_LAB_BACK_W UI(128)          /* the tube page's BACK: the rack's own width, over it */
+#define SETUP_LAB_BACK_Y UI(36)
 #define SETUP_HIT_POUR   191
 void setup_begin_lab(tank_t *t);
 bool setup_is_lab(void);
@@ -263,33 +264,33 @@ void setup_debug_lab_wiggle(bool on);     /* ... and a handle dragged to and fro
  * sim's selftest. The panelled pages (welcome, colours, care) sit inside the
  * bezel curve (x 32..416, y 16..342); the name page draws straight on the
  * tank. */
-#define SETUP_X 32
-#define SETUP_Y 16
-#define SETUP_W 384
-#define SETUP_H 326
-#define SETUP_BTN_W 110
-#define SETUP_BTN_H 42
-#define SETUP_BTN_Y (SETUP_Y + SETUP_H - 12 - SETUP_BTN_H)   /* welcome / care: the foot */
-#define SETUP_BACK_X (SETUP_X + 16)
-#define SETUP_NEXT_X (SETUP_X + SETUP_W - 16 - SETUP_BTN_W)
+#define SETUP_X UI(32)
+#define SETUP_Y UI(16)
+#define SETUP_W UI(384)
+#define SETUP_H UI(326)
+#define SETUP_BTN_W UI(110)
+#define SETUP_BTN_H UI(42)
+#define SETUP_BTN_Y (SETUP_Y + SETUP_H - UI(12) - SETUP_BTN_H)   /* welcome / care: the foot */
+#define SETUP_BACK_X (SETUP_X + UI(16))
+#define SETUP_NEXT_X (SETUP_X + SETUP_W - UI(16) - SETUP_BTN_W)
 #define SETUP_MID_X  (SETUP_X + (SETUP_W - SETUP_BTN_W) / 2)
-#define SETUP_TOP_BTN_W 84                                 /* name / look: the top row */
-#define SETUP_TOP_BTN_Y (SETUP_Y + 24)
-#define SETUP_TOP_BACK_X (SETUP_X + 12)
-#define SETUP_TOP_NEXT_X (SETUP_X + SETUP_W - 12 - SETUP_TOP_BTN_W)
+#define SETUP_TOP_BTN_W UI(84)                                 /* name / look: the top row */
+#define SETUP_TOP_BTN_Y (SETUP_Y + UI(24))
+#define SETUP_TOP_BACK_X (SETUP_X + UI(12))
+#define SETUP_TOP_NEXT_X (SETUP_X + SETUP_W - UI(12) - SETUP_TOP_BTN_W)
 /* the placement page's top row (0.3.9): FOUR buttons - SELL | SHELVE | LOCK |
  * DONE - a little narrower than the other pages' two (78 px at a 16 px gap
  * fills the same 360 px, so SELL and DONE keep their corners and the row
  * stays inside every glass, the round one included). SHELVE: Strato, "a held
  * piece opens this page, so the shelf must be here"; LOCK: his ask, "a space
  * between shelve and done" for it. */
-#define SETUP_PL_BTN_W 78
-#define SETUP_PL_GAP   16
+#define SETUP_PL_BTN_W UI(78)
+#define SETUP_PL_GAP   UI(16)
 #define SETUP_PL_X(i)  (SETUP_TOP_BACK_X + (i) * (SETUP_PL_BTN_W + SETUP_PL_GAP))   /* 0 SELL, 1 SHELVE, 2 LOCK, 3 DONE */
 #define SETUP_TOP_SHELVE_X SETUP_PL_X(1)
 #define SETUP_TOP_LOCK_X   SETUP_PL_X(2)
 #define SETUP_TOP_DONE_X   SETUP_PL_X(3)                   /* the placement page's DONE (the other pages' NEXT sits at SETUP_TOP_NEXT_X) */
-#define SETUP_ORD_W      36                                 /* the order arrows (the placement page): at the two ends of the DEPTH row since 0.3.9
+#define SETUP_ORD_W      UI(36)                             /* the order arrows (the placement page): at the two ends of the DEPTH row since 0.3.9
                                                              * (SHELVE took their place on the top row); a two-depth piece's tiles leave the
                                                              * room, the plant has no stack and shows none */
 #define SETUP_ORD_X0     SETUP_DEPTH_X
@@ -299,14 +300,14 @@ void setup_debug_lab_wiggle(bool on);     /* ... and a handle dragged to and fro
  * a 44 px pitch across the middle of the tank, chevrons 40 px above and
  * below the active one; a press in the row band picks the nearest slot, the
  * bands above / below it are the chevrons' */
-#define SETUP_SLOT_SCALE 6
-#define SETUP_SLOT_PX  44
+#define SETUP_SLOT_SCALE UI_TEXT(6)
+#define SETUP_SLOT_PX  UI(44)
 #define SETUP_SLOT_W   (5 * SETUP_SLOT_SCALE)
 #define SETUP_SLOT_H   (7 * SETUP_SLOT_SCALE)
 #define SETUP_SLOT_X   ((PAGE_W - ((FISH_NAME_MAX - 1) * SETUP_SLOT_PX + SETUP_SLOT_W)) / 2)
-#define SETUP_SLOT_Y   170              /* (150 until 0.4: the band above now shows a young fish's GROWN UP beside it) */
-#define SETUP_ARROW_GAP 40
-#define SETUP_SPIN_PX   30                                 /* drag travel per letter */
+#define SETUP_SLOT_Y   UI(170)          /* (150 until 0.4: the band above now shows a young fish's GROWN UP beside it) */
+#define SETUP_ARROW_GAP UI(40)
+#define SETUP_SPIN_PX   UI(30)                                 /* drag travel per letter */
 /* THE EDITOR (0.4, docs/genetics-0.4.md; Spore's creature editor in a
  * pocket): per fish, NAME, then FORM (body SHAPE, FINS), then COLORS (BODY,
  * PATTERN, MARKINGS) - over the live tank, BACK / ROLL / NEXT on top. The
@@ -320,30 +321,30 @@ void setup_debug_lab_wiggle(bool on);     /* ... and a handle dragged to and fro
 #define SETUP_SW_N  LOOK_N              /* nine since 0.4 (charcoal): a wider row, 44 px apart, 40 wide - more
                                        swatch in all than eight at 46 / 42; the bowl's circle is narrower
                                        at the markings row, so there 40 / 36 */
-#define SETUP_SW_PX 40                  /* (0.4.3, THE LAB'S GRID: nine swatches from LAB_L to LAB_R on every glass) */
-#define SETUP_SW_W  38
+#define SETUP_SW_PX UI(40)              /* (0.4.3, THE LAB'S GRID: nine swatches from LAB_L to LAB_R on every glass) */
+#define SETUP_SW_W  UI(38)
 #define SETUP_SW_X  ((PAGE_W - (SETUP_SW_N - 1) * SETUP_SW_PX - SETUP_SW_W) / 2)
 #define SETUP_ROLL_X ((PAGE_W - SETUP_TOP_BTN_W) / 2)
 /* COLORS: SWAP (body <-> markings, Strato 10-04) is a tall button at the
    pattern row's right end, between the two palettes, an arrow pointing up at
    the body row and one down at the markings row; the pattern tiles narrow
    to make its room */
-#define SETUP_PAT_TILE_W  98            /* (0.4.3, THE LAB'S GRID: the three tiles and SWAP span LAB_L .. LAB_R) */
-#define SETUP_PAT_TILE_PX 106
-#define SETUP_SWAP_W      40
-#define SETUP_SWAP_GAP    10
+#define SETUP_PAT_TILE_W  UI(98)        /* (0.4.3, THE LAB'S GRID: the three tiles and SWAP span LAB_L .. LAB_R) */
+#define SETUP_PAT_TILE_PX UI(106)
+#define SETUP_SWAP_W      UI(40)
+#define SETUP_SWAP_GAP    UI(10)
 #define SETUP_PAT_TILE_X  ((PAGE_W - (2 * SETUP_PAT_TILE_PX + SETUP_PAT_TILE_W + SETUP_SWAP_GAP + SETUP_SWAP_W)) / 2)
 #define SETUP_SWAP_X      (SETUP_PAT_TILE_X + 2 * SETUP_PAT_TILE_PX + SETUP_PAT_TILE_W + SETUP_SWAP_GAP)
-#define SETUP_SWAP_Y      (SETUP_COLOR_BODY_Y + SETUP_COLOR_SW_H + 8)
-#define SETUP_SWAP_H      (SETUP_COLOR_ACC_Y - SETUP_LABEL_DY - 4 - SETUP_SWAP_Y)
-#define SETUP_ED_NOW_X      136          /* the fry's stage (page x) ... */
-#define SETUP_ED_GROWN_X    312          /* ... and the grown portrait (the pair centred on the page's middle) */
-#define SETUP_ED_PREVIEW_Y  110
-#define SETUP_ED_CAPTION_Y  140          /* NOW / GROWN UP */
-#define SETUP_ED_GROWN_SIZE 1.5f
+#define SETUP_SWAP_Y      (SETUP_COLOR_BODY_Y + SETUP_COLOR_SW_H + UI(8))
+#define SETUP_SWAP_H      (SETUP_COLOR_ACC_Y - SETUP_LABEL_DY - UI(4) - SETUP_SWAP_Y)
+#define SETUP_ED_NOW_X      UI(136)      /* the fry's stage (page x) ... */
+#define SETUP_ED_GROWN_X    UI(312)      /* ... and the grown portrait (the pair centred on the page's middle) */
+#define SETUP_ED_PREVIEW_Y  UI(110)
+#define SETUP_ED_CAPTION_Y  UI(140)      /* NOW / GROWN UP */
+#define SETUP_ED_GROWN_SIZE (1.5f * UI_F)  /* (this fork: a fish drawn on a page scales with it, UI_F, as the family page's portrait does) */
 #define SETUP_TILE_N   3
-#define SETUP_TILE_W   112              /* (0.4.3, THE LAB'S GRID: three tiles from LAB_L to LAB_R) */
-#define SETUP_TILE_PX  124
+#define SETUP_TILE_W   UI(112)          /* (0.4.3, THE LAB'S GRID: three tiles from LAB_L to LAB_R) */
+#define SETUP_TILE_PX  UI(124)
 #define SETUP_TILE_X   ((PAGE_W - (SETUP_TILE_N - 1) * SETUP_TILE_PX - SETUP_TILE_W) / 2)
 /* BODY and FINS (0.4.3 item 10, docs/fish-creator-0.4.3.md): the stage (render.h STG_*) between the top buttons and one
  * row of three named tiles. The fry (NOW) rides at the stage's left, small, in the body being made. A drag anywhere on
@@ -351,24 +352,24 @@ void setup_debug_lab_wiggle(bool on);     /* ... and a handle dragged to and fro
  * down: the height, or the top fin from above the fish's middle and the bottom fin from below), SETUP_ST_TRAVEL px is a
  * value's whole range, and a handle sticks SETUP_ST_STICK px either side of a named value. No hold, no wait: the fish
  * follows from the moment the direction is known. The tiles' row was lifted clear of the round glass's corners. */
-#define SETUP_ST_NOW_X    64
-#define SETUP_ST_NOW_Y    116
-#define SETUP_ST_TOP      92
-#define SETUP_ST_BOT      266
-#define SETUP_ST_HINT_Y   276
+#define SETUP_ST_NOW_X    UI(64)
+#define SETUP_ST_NOW_Y    UI(116)
+#define SETUP_ST_TOP      UI(92)
+#define SETUP_ST_BOT      UI(266)
+#define SETUP_ST_HINT_Y   UI(276)
 #define SETUP_ST_TILE_Y   LAB_BENCH_Y   /* the tiles stand on the bench's top line and are as tall as its top */
 #define SETUP_ST_TILE_H   LAB_BENCH_H
-#define SETUP_ST_PICK     8.0f
-#define SETUP_ST_TRAVEL   120.0f
-#define SETUP_ST_STICK    5.0f
-#define SETUP_LABEL_DY 16                /* a row's label sits this far above it */
-#define SETUP_FORM_TILE_H 56             /* FORM: two rows of named tiles */
-#define SETUP_FORM_SHAPE_Y 174
-#define SETUP_FORM_FINS_Y  256
-#define SETUP_COLOR_SW_H   32            /* COLORS: swatches, tiles, swatches */
-#define SETUP_COLOR_PAT_H  44
-#define SETUP_COLOR_BODY_Y 174
-#define SETUP_COLOR_PAT_Y  230
+#define SETUP_ST_PICK     (8.0f * UI_F)     /* (this fork: the drags scale with the stage they cross, as SETUP_SPIN_PX does) */
+#define SETUP_ST_TRAVEL   (120.0f * UI_F)
+#define SETUP_ST_STICK    (5.0f * UI_F)
+#define SETUP_LABEL_DY UI(16)            /* a row's label sits this far above it */
+#define SETUP_FORM_TILE_H UI(56)         /* FORM: two rows of named tiles */
+#define SETUP_FORM_SHAPE_Y UI(174)
+#define SETUP_FORM_FINS_Y  UI(256)
+#define SETUP_COLOR_SW_H   UI(32)        /* COLORS: swatches, tiles, swatches */
+#define SETUP_COLOR_PAT_H  UI(44)
+#define SETUP_COLOR_BODY_Y UI(174)
+#define SETUP_COLOR_PAT_Y  UI(230)
 #define SETUP_COLOR_ACC_Y  LAB_BENCH_Y   /* (the last row stands on the bench's top line) */
 /* the family page (birth flow; 0.4 heredity): the fry's name; NOW (the fry,
  * ringed) and the GROWN fish it becomes side by side, as in the editor; then
@@ -378,27 +379,31 @@ void setup_debug_lab_wiggle(bool on);     /* ... and a handle dragged to and fro
  * so), or NEW! for a mutation. The nature page after it (DONE): BOLD /
  * SOCIAL - the fry's bar, the parents' ticks (heads above / below, TP2-9) - and the
  * PARENTS legend. BACK + NEXT / DONE at the foot of both. */
-#define SETUP_FAM_PORTRAIT_Y (SETUP_Y + 82)
-#define SETUP_FAM_NOW_X      (SETUP_X + SETUP_W / 2 - 90)
-#define SETUP_FAM_GROWN_X    (SETUP_X + SETUP_W / 2 + 80)
-#define SETUP_FAM_GROWN_SIZE 1.3f
-#define SETUP_FAM_ROW_Y      (SETUP_Y + 134)
-#define SETUP_FAM_ROW_DY     24
-#define SETUP_FAM_LABEL_X    (SETUP_X + 28)
-#define SETUP_FAM_VALUE_X    (SETUP_X + 136)
-#define SETUP_FAM_FROM_X     (SETUP_X + 248)
-#define SETUP_FAM_NOTE_Y     (SETUP_FAM_ROW_Y + 5 * SETUP_FAM_ROW_DY + 2)
-#define SETUP_NAT_ROW_Y      (SETUP_Y + 100)   /* the nature page's rows */
-#define SETUP_AB_PORTRAIT_Y  (SETUP_Y + 84)    /* ITS STORY (0.4.2): the fish as it is, under its name ... */
-#define SETUP_AB_ROW_Y       (SETUP_Y + 128)   /* ... then a row each: AGE, FROM, PARENTS, MEALS, SIZE, TRUST */
-#define SETUP_AB_ROW_DY      24
-#define SETUP_NAT_ROW_DY     34
+#define SETUP_FAM_PORTRAIT_Y (SETUP_Y + UI(82))
+#define SETUP_FAM_NOW_X      (SETUP_X + SETUP_W / 2 - UI(90))
+#define SETUP_FAM_GROWN_X    (SETUP_X + SETUP_W / 2 + UI(80))
+#define SETUP_FAM_GROWN_SIZE (1.3f * UI_F)
+#define SETUP_FAM_ROW_Y      (SETUP_Y + UI(134))
+#define SETUP_FAM_ROW_DY     UI(24)
+#define SETUP_FAM_LABEL_X    (SETUP_X + UI(28))
+#define SETUP_FAM_VALUE_X    (SETUP_X + UI(136))
+#define SETUP_FAM_FROM_X     (SETUP_X + UI(248))
+#define SETUP_FAM_NOTE_Y     (SETUP_FAM_ROW_Y + 5 * SETUP_FAM_ROW_DY + UI(2))
+#define SETUP_NAT_ROW_Y      (SETUP_Y + UI(100))  /* the nature page's rows */
+#define SETUP_AB_PORTRAIT_Y  (SETUP_Y + UI(84))  /* ITS STORY (0.4.2): the fish as it is, under its name ... */
+#define SETUP_AB_ROW_Y       (SETUP_Y + UI(128))  /* ... then a row each: AGE, FROM, PARENTS, MEALS, SIZE, TRUST */
+#define SETUP_AB_ROW_DY      UI(24)
+#define SETUP_NAT_ROW_DY     (UI(34) < 28 ? 28 : UI(34))   /* (this fork: the parents' heads keep their 7 rows, so a 320 x 240 page keeps
+                                                              the design's 4 rows between one bar's lower head and the next bar's upper one) */
 #define SETUP_NAT_HEAD_H     7                 /* a parent's mark's head (TP2-9): 7 rows, 13 px at its widest ... */
 #define SETUP_NAT_KEY_W      13                /* ... (the key before a name under PARENTS: the same head) */
-#define SETUP_NAT_HEAD_A_Y(by) ((by) - 11)     /* the first parent's head above the bar (by = its top), widest row first */
-#define SETUP_NAT_HEAD_B_Y(by) ((by) + SETUP_FAM_BAR_H + 4)   /* the other's below it, widest row last */
-#define SETUP_FAM_BAR_W      200
-#define SETUP_FAM_BAR_H      8
+#define SETUP_NAT_HEAD_A_Y(by) ((by) - UI(4) - SETUP_NAT_HEAD_H)   /* the first parent's head above the bar (by = its top), widest row first */
+#define SETUP_NAT_HEAD_B_Y(by) ((by) - UI(4) + SETUP_FAM_BAR_H + UI(8))   /* the other's below it, widest row last */
+/* (this fork: a head keeps its 7 rows on every board - nat_head draws it a row at a time - while the tick it caps
+   scales, so each head is counted from the tick's end, its point touching it: nature_mark's tick starts at by - UI(4)
+   and is SETUP_FAM_BAR_H + UI(8) long. At the design size these are upstream's by - 11 and by + SETUP_FAM_BAR_H + 4.) */
+#define SETUP_FAM_BAR_W      UI(200)
+#define SETUP_FAM_BAR_H      UI(8)
 /* the placement page's DEPTH control (second design, 2026-09-16 - Strato:
  * "initially i thought 'back' button referred to menu navigation .. the
  * z-layer targeting and buttons are a bit ambiguous"): ONE outlined bar of
@@ -410,54 +415,57 @@ void setup_debug_lab_wiggle(bool on);     /* ... and a handle dragged to and fro
  * for ("THE FISH SWIM THROUGH IT"). DONE stays alone top right in the go
  * teal, the bar in the calm ink, so "choose" and "finish" read apart. The
  * water below SETUP_PLACE_Y is the drag zone. */
-#define SETUP_DEPTH_SEG_W  110
+#define SETUP_DEPTH_SEG_W  UI(110)
 #define SETUP_DEPTH_W      (DECOR_Z_N * SETUP_DEPTH_SEG_W)      /* the plant's three segments; the castle's two (BEHIND / IN
                                                              * FRONT, Strato: no AMONG) are centred the same way - setup.c
                                                              * sizes the bar from tank_decor_z_count */
 #define SETUP_DEPTH_X      ((PAGE_W - SETUP_DEPTH_W) / 2)
-#define SETUP_DEPTH_Y      (SETUP_TOP_BTN_Y + SETUP_BTN_H + 24)
-#define SETUP_DEPTH_H      70
-#define SETUP_DEPTH_TILE_H 40
-#define SETUP_DEPTH_HINT_Y (SETUP_DEPTH_Y + SETUP_DEPTH_H + 8)
+#define SETUP_DEPTH_Y      (SETUP_TOP_BTN_Y + SETUP_BTN_H + UI(24))
+/* the tile holds pixel-art glyphs (the castle is 31 px, the coral 28) that
+ * do not scale, so it never gets shorter than 34 px; the bar is the tile and
+ * the word under it */
+#define SETUP_DEPTH_TILE_H (UI(40) < 34 ? 34 : UI(40))
+#define SETUP_DEPTH_H      (SETUP_DEPTH_TILE_H + UI(30))
+#define SETUP_DEPTH_HINT_Y (SETUP_DEPTH_Y + SETUP_DEPTH_H + UI(8))
 #define SETUP_ORDSQ_X      ((PAGE_W - 2 * SETUP_DEPTH_SEG_W) / 2)   /* the sword plant's ORDER SQUARES (0.4): two segments in the DEPTH bar's place -
                                                                  BEHIND | IN FRONT of the piece beside it in the stack, a universal block for it */
 /* the sword plant's page since 0.4.1 (Strato 11-05: BEHIND THE SEAGRASS back): TWO rows of two squares, each under a caption that
    names what they are behind or in front of - THE SEAGRASS in the DEPTH bar's place, then, with a piece beside the plant, the
    ORDER SQUARES (THE PUMPKIN) under it, the arrows at their ends (alone, the arrows stay at the first row's, dim) */
-#define SETUP_ORDSQ2_Y     (SETUP_DEPTH_Y + SETUP_DEPTH_H + 30)
+#define SETUP_ORDSQ2_Y     (SETUP_DEPTH_Y + SETUP_DEPTH_H + UI(30))
 #define SETUP_ORD2_Y       (SETUP_ORDSQ2_Y + (SETUP_DEPTH_H - SETUP_BTN_H) / 2)
-#define SETUP_PLACE_Y      (SETUP_DEPTH_HINT_Y + 20)
-#define SETUP_PLACE_PLANT2_Y (SETUP_ORDSQ2_Y + SETUP_DEPTH_H + 6)   /* (the plant's page with its second row: the drag zone and the stripe start under it) */
+#define SETUP_PLACE_Y      (SETUP_DEPTH_HINT_Y + UI(20))
+#define SETUP_PLACE_PLANT2_Y (SETUP_ORDSQ2_Y + SETUP_DEPTH_H + UI(6))  /* (the plant's page with its second row: the drag zone and the stripe start under it) */
 /* the coral's placement page (2026-09-23) trades the hint line for a COLOR
  * row: CORAL_N swatches at the colour page's pitch, shorter (42 x 26), the
  * chosen one ringed; the coral on the floor below wears the pick at once.
  * The drag zone starts under the row. */
 #define SETUP_COL_N   CORAL_N
-#define SETUP_COL_PX  46               /* (the editor's swatches' old pitch - the editor's moved to nine in 0.4) */
-#define SETUP_COL_W   42
-#define SETUP_COL_H   26
+#define SETUP_COL_PX  UI(46)           /* (the editor's swatches' old pitch - the editor's moved to nine in 0.4) */
+#define SETUP_COL_W   UI(42)
+#define SETUP_COL_H   UI(26)
 #define SETUP_COL_X   ((PAGE_W - (SETUP_COL_N - 1) * SETUP_COL_PX - SETUP_COL_W) / 2)
-#define SETUP_COL_Y   (SETUP_DEPTH_Y + SETUP_DEPTH_H + 22)
-#define SETUP_PLACE_CORAL_Y (SETUP_COL_Y + SETUP_COL_H + 8)
+#define SETUP_COL_Y   (SETUP_DEPTH_Y + SETUP_DEPTH_H + UI(22))
+#define SETUP_PLACE_CORAL_Y (SETUP_COL_Y + SETUP_COL_H + UI(8))
 /* the reef cluster's page (2026-09-24): a LOOK row of CLUSTER_SCHEME_N tiles
  * in the COLOR row's place, each three bands (the coral, the tubes, the
  * brain) over the look's name; SETUP_HIT_COLOR0 + i picks it */
 #define SETUP_LOOK_N   CLUSTER_SCHEME_N
-#define SETUP_LOOK_W   110
-#define SETUP_LOOK_PX  118
-#define SETUP_LOOK_H   36
+#define SETUP_LOOK_W   UI(110)
+#define SETUP_LOOK_PX  UI(118)
+#define SETUP_LOOK_H   UI(36)
 #define SETUP_LOOK_X   ((PAGE_W - (SETUP_LOOK_N - 1) * SETUP_LOOK_PX - SETUP_LOOK_W) / 2)
 #define SETUP_LOOK_Y   SETUP_COL_Y
-#define SETUP_PLACE_CLUSTER_Y (SETUP_LOOK_Y + SETUP_LOOK_H + 8)
+#define SETUP_PLACE_CLUSTER_Y (SETUP_LOOK_Y + SETUP_LOOK_H + UI(8))
 /* the stage: the clear spot each page leaves for the fish being edited
  * (tank_t.stage_*), top centre between the buttons */
 #define SETUP_STAGE_X   (TANK_W / 2)                    /* the stage is in the TANK: the frame's coordinates, under the page's title */
-#define SETUP_STAGE_NAME_Y (PAGE_Y + 104)
+#define SETUP_STAGE_NAME_Y (PAGE_Y + UI(104))
 /* a name page for a fish not yet grown (0.4): it is staged at NOW, the left,
    and its GROWN UP form sits on a plate at the right, as in the editor - the
    keeper names the fish they designed, fins and markings in view */
-#define SETUP_NAME_PREVIEW_Y   106
-#define SETUP_NAME_GROWN_SIZE  1.3f
+#define SETUP_NAME_PREVIEW_Y   UI(106)
+#define SETUP_NAME_GROWN_SIZE  (1.3f * UI_F)
 #define SETUP_STAGE_EDIT_X (PAGE_X + SETUP_ED_NOW_X)   /* the editor's NOW */
 #define SETUP_STAGE_EDIT_Y (PAGE_Y + SETUP_ED_PREVIEW_Y)
 #define SETUP_STAGE_ST_X   (PAGE_X + SETUP_ST_NOW_X)   /* BODY / FINS: the fry's place */
@@ -477,5 +485,34 @@ void setup_p4_band_wide(bool on);   /* the big screens: the flow's bands across 
 /* THE BIG SCREENS' KEEPER PAGE (render_big.c): a fish's STORY and TRAITS in the page's pane (setup.c; frame px) */
 void setup_big_story(const tank_t *t, int fi, uint16_t *fb, int stride, int x, int y, int dy);
 void setup_big_traits(const tank_t *t, int fi, uint16_t *fb, int stride, int x, int y, int dy, int yn, int dyn);
+#endif
+#ifdef CONFIG_POCKET_TANK_320X240
+/* this fork: the creator's last row and the lab's POUR IT IN take render.h's bench line (LAB_BENCH_Y and LAB_BENCH_H,
+   which its 320 x 240 block scales) with no UI() of their own here, so an upstream edit to them merges cleanly - and
+   must still leave them on the 240 px page */
+_Static_assert(SETUP_ST_TILE_Y + SETUP_ST_TILE_H <= PAGE_H, "BODY and FINS: the tiles' row must stand on the page");
+_Static_assert(SETUP_COLOR_ACC_Y + SETUP_COLOR_SW_H <= PAGE_H, "COLORS: the MARKINGS row must stand on the page");
+_Static_assert(SETUP_LAB_BTN_Y + SETUP_BTN_H <= PAGE_H, "THE TUBE: POUR IT IN must stand on the page");
+/* the nature page: one bar's lower head and the next bar's upper head, SETUP_NAT_ROW_DY apart, keep the design's 4 rows
+   between them (the heads keep their 7 rows; at UI(34) they overlapped by 2) */
+_Static_assert(SETUP_NAT_HEAD_A_Y(SETUP_NAT_ROW_DY) - (SETUP_NAT_HEAD_B_Y(0) + SETUP_NAT_HEAD_H) >= 4,
+               "ITS NATURE: the parents' heads of two bars must not meet");
+/* a critter's name page (0.4.2): its card's art keeps its size - up to the octopus's 80 x 48 box - and the design's plate
+   under the top buttons (SETUP_STAGE_NAME_Y) ran 9 rows into the letters' band here and touched both buttons. Its plate
+   stands between the two buttons instead, its middle halfway from the title's foot to the band's top (setup.c) */
+#define SETUP_CRIT_PLATE_W 96
+#define SETUP_CRIT_PLATE_H 48
+#define SETUP_NAME_TITLE_END (SETUP_Y + UI(7) + 7 * UI_TEXT(2))                /* (the title's line: setup.c's name page) */
+#define SETUP_NAME_BAND_Y    (SETUP_SLOT_Y - SETUP_ARROW_GAP - 2)             /* (the letters' band: its top) */
+#define SETUP_CRIT_PLATE_Y   ((SETUP_NAME_TITLE_END + SETUP_NAME_BAND_Y) / 2)
+_Static_assert(PAGE_W / 2 - SETUP_CRIT_PLATE_W / 2 > SETUP_TOP_BACK_X + SETUP_TOP_BTN_W && PAGE_W / 2 + SETUP_CRIT_PLATE_W / 2 < SETUP_TOP_NEXT_X &&
+               SETUP_CRIT_PLATE_Y - SETUP_CRIT_PLATE_H / 2 >= SETUP_NAME_TITLE_END && SETUP_CRIT_PLATE_Y + SETUP_CRIT_PLATE_H / 2 <= SETUP_NAME_BAND_Y &&
+               SETUP_STAGE_X - PAGE_X == PAGE_W / 2,
+               "a critter's name page: its plate between the top buttons, under the title, over the letters' band");
+/* the sword plant's page with its second row of squares (a piece beside it): the hint DRAG IT LEFT OR RIGHT takes the drag
+   zone's top, SETUP_PLACE_PLANT2_Y, and the chevron - five UI(4) blocks from its apex down - ends on the sand under it */
+#define SETUP_PLANT2_CHEVRON_Y (TANK_BOT - 16 - PAGE_Y - 5 * UI(4))
+_Static_assert(SETUP_PLACE_PLANT2_Y + 7 * UI_TEXT(2) < SETUP_PLANT2_CHEVRON_Y && SETUP_ORDSQ2_Y + SETUP_DEPTH_H < SETUP_PLACE_PLANT2_Y,
+               "the sword plant's page: its hint under the second row of squares, the chevron under the hint");
 #endif
 #endif

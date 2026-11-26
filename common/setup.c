@@ -1805,7 +1805,14 @@ int setup_lab_bands(const tank_t *t, int box[SETUP_LAB_BANDS][4]) {
     if (page_is_colors())  { BOX(0, SETUP_ED_NOW_X - UI(44), SETUP_ED_PREVIEW_Y - UI(27), SETUP_ED_GROWN_X + UI(75), SETUP_ED_PREVIEW_Y + UI(28));
                              BOX(1, SETUP_PAT_TILE_X, SETUP_COLOR_PAT_Y, SETUP_PAT_TILE_X + (PATTERN_TILES - 1) * SETUP_PAT_TILE_PX + SETUP_PAT_TILE_W - 1, SETUP_COLOR_PAT_Y + SETUP_COLOR_PAT_H - 1); return 2; }
     if (s_page == SETUP_PG_LAB_TUBE) { BOX(0, LAB_TUBE_X - UI(30), LAB_TUBE_Y - UI(32), LAB_TUBE_X + LAB_TUBE_W + UI(30), LAB_TUBE_Y + LAB_TUBE_H + UI(28));
-                                       BOX(1, LAB_COL2_X + UI(24), UI(122), UI(392), UI(186)); return 2; }
+                                       BOX(1, LAB_COL2_X + UI(24), UI(122), UI(392), UI(186));
+#ifdef CONFIG_POCKET_TANK_320X240
+                                       box[1][1] -= 4;   /* (this fork) the grown fish's dorsal tip reaches over UI(122) here (a deep
+                                                            VEIL body with short fins: page row 79 of the box's 80), and in the union of
+                                                            the two boxes, not in this one, it was never cleared: a held page kept it.
+                                                            4 rows take in every body and fin set and stop short of the caption above */
+#endif
+                                       return 2; }
     /* NAME, on the letter wheel: the letters only change with a pick and the cursor with its blink - both in the key - so
        the page is held too, and only the fry and the grown fish over it move (the legacy keyboards: whole, every frame) */
     if (s_page == SETUP_PG_LAB_NAME && !s_kbd) { BOX(0, SETUP_ED_NOW_X - UI(44), SETUP_NAME_PREVIEW_Y - UI(25), SETUP_ED_GROWN_X + UI(66), SETUP_NAME_PREVIEW_Y + UI(25)); return 1; }

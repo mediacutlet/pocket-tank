@@ -13799,8 +13799,9 @@ static const icon_t *badge_art(const icon_t *ic) {
 }
 /* (this fork) the icon feet's sprites - the keeper page's foot, the shop's area tabs, settings' LINK and UPDATES (v0.4:
    32 to 36 px, for upstream's 44 px squares): their half-size copies on a 320 x 240 board, whose 240 px page has room
-   for 22 px squares there (tools/gen_icons_small.py). The art itself otherwise. Only the feet call it: the shop's crab
-   row keeps its full-size sprite. */
+   for 22 px squares there (tools/gen_icons_small.py). The art itself otherwise. The feet call it, and a fish's card for
+   its SELL (ms_icon_btn: the foot's own sand dollar in the card's 26 px square); the shop's crab row keeps its full-size
+   sprite. */
 static const icon_t *foot_art(const icon_t *ic) {
 #ifdef CONFIG_POCKET_TANK_320X240
     static const struct { const icon_t *full, *half; } HALF[] = {
@@ -17685,8 +17686,9 @@ void render_shelf_set_touch_lock(bool on) { g_sh_touch_lock = on; }
 /* (this fork) the icon foot's buttons on a 320 x 240 board hold their drawings whole: those are pixel art at their own size
    (ui.h) - the library's little tank and its plus 30 px wide, the cog 20 px, the padlock lifted open 19 rows - and UI(44) x
    MSP_CLOSE_H (29 x 22) cut the plus and laid the shackle on the button's edge. 38 x 26 leaves each a pixel clear of the
-   double edge: the 1.8's 44 x 30 at 0.86. Four of them SHI_GAP apart, from the glass's edges (SH_FOOT_X0), leave the pager
-   the middle 112 px; they stand centred on its line (SH_ICON_Y), 2 px over the plank's shadow and 2 px off the glass's foot */
+   double edge: the 1.8's 44 x 30 at 0.86. Four of them, a pair SHI_GAP apart at each of the glass's edges (SH_FOOT_X0), leave
+   the pager the middle 132 px (the widest, 15 OF 15, is 123: 4-5 px clear of the buttons each side); they stand centred on its
+   line (SH_ICON_Y), 2 px over the plank's shadow and 2 px off the glass's foot */
 #define SH_LOCK_W 38
 #define SH_ICON_H 26
 #else

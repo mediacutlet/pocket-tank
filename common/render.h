@@ -1878,7 +1878,7 @@ _Static_assert(MSP_CARD_SUB_Y + 7 * UI_TEXT(2) <= MSP_CARD_H - UI(10) - MSP_CARD
 /* the shop's foot (0.4.1) is the keeper page's squares (render_ms_foot_box), 22 px with the
    half-size sprites; the area showing keeps its bar under its square at that half size, 8 x 2
    and 2 px under it, in the MSP_FOOT_GAP the glass leaves there (upstream's 16 x 2, 4 px under
-   a 44 px square, would start on the glass's last row and end past it). The fourth row - its
+   a 44 px square, would fall wholly below the glass, on rows 240-241). The fourth row - its
    art the lowest thing it draws - ends above the squares, and its tap band (to UI(8) over the
    next row's top) above the room the squares' taps are given (UI(8) over them, shp_tap) */
 #define SHF_BAR_W     8
@@ -1992,7 +1992,7 @@ _Static_assert(RESET_PANEL_X >= 0 && RESET_PANEL_X + RESET_PANEL_W <= PAGE_W && 
    over one is its rows and the design's gap scaled (7 + UI(3) for upstream's 10 under a label).
    A visitor's passport: under its photo upstream stacks VISITING, its time, INTERESTED IN, five hearts (10 px of pixel art)
    and the two machine lines down to the buttons, and at UI(n) they ran into each other. Here each keeps its rows and only
-   the gaps between them scale, which makes the card 12 px taller than UI(252) and puts its buttons that much lower; the
+   the gaps between them scale, which makes the card 13 px taller than UI(252) and puts its buttons 12 px lower; the
    COLLECTED stamp moves beside the hearts, as INTERESTED IN <NAME> keeps its width and ran under the design's place */
 #define PP_VIS_Y    (UI(36) + UI(84) + UI(12))   /* VISITING (card coordinates): under the photo */
 #define PP_HERE_Y   (PP_VIS_Y + 7 + UI(2))        /* ... its time */

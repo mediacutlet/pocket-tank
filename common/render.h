@@ -1948,6 +1948,30 @@ _Static_assert(MSP_CARD_SUB_Y + 7 * UI_TEXT(2) <= MSP_CARD_H - UI(10) - MSP_CARD
    of slop below and NAME's 6 above. Scaled the gap is UI(12) + 2 = 10, and NAME keeps its 6 (--selftest-crit-names holds
    its slop), so COLLECT's reaches down only to it */
 #define CRIT_COLLECT_SLOP_DN (UI(12) + 2 - 6)
+/* THE CARDS OVER THE TANK (0.4 - 0.4.3): a visitor's passport, the gift card, the GIVE modal and the travel bowl's cards,
+   FISH SWAP's cards and the PAIR card - the design scaled, as the modals are: their numbers in render.c through UI(), their
+   text through UI_TEXT() and their fish times UI_F. A line of text keeps its 7 rows at scale 1, so an offset that steps
+   over one is its rows and the design's gap scaled (7 + UI(3) for upstream's 10 under a label).
+   A visitor's passport: under its photo upstream stacks VISITING, its time, INTERESTED IN, five hearts (10 px of pixel art)
+   and the two machine lines down to the buttons, and at UI(n) they ran into each other. Here each keeps its rows and only
+   the gaps between them scale, which makes the card 12 px taller than UI(252) and puts its buttons that much lower; the
+   COLLECTED stamp moves beside the hearts, as INTERESTED IN <NAME> keeps its width and ran under the design's place */
+#define PP_VIS_Y    (UI(36) + UI(84) + UI(12))   /* VISITING (card coordinates): under the photo */
+#define PP_HERE_Y   (PP_VIS_Y + 7 + UI(2))        /* ... its time */
+#define PP_BOND_Y   (PP_HERE_Y + 7 + UI(4))       /* INTERESTED IN <one of ours> */
+#define PP_HEART_Y  (PP_BOND_Y + 7 + UI(3))       /* ... and the hearts */
+#define PP_M1_Y     (PP_HEART_Y + 10 + UI(7))     /* the machine lines */
+#define PP_M2_Y     (PP_M1_Y + 7 + UI(4))
+#define PP_STAMP_Y  (PP_BOND_Y + 7 + 1)           /* COLLECTED: a row under INTERESTED IN ... */
+#define PP_STAMP_H  (PP_M1_Y - 1 - PP_STAMP_Y)    /* ... down to a row over the first machine line */
+#undef  PASSPORT_BTN_Y
+#define PASSPORT_BTN_Y  (PP_M2_Y + 7 + UI(10))
+#undef  PASSPORT_CARD_H
+#define PASSPORT_CARD_H (PASSPORT_BTN_Y + PASSPORT_BTN_H + UI(8))
+_Static_assert(PASSPORT_CARD_W <= TANK_W && PASSPORT_CARD_H <= TANK_H && GIFT_CARD_W <= TANK_W && GIFT_CARD_H <= TANK_H,
+               "the passport and the gift card (and the GIVE modal and FISH SWAP's cards in its bake) on the glass");
+_Static_assert(PP_STAMP_H >= 7 + 6 && PP_HEART_Y + 10 <= PP_M1_Y && UI(36) + UI(84) <= PP_VIS_Y,
+               "the passport under its photo: the COLLECTED stamp holds its word, the hearts end over the machine lines");
 /* THE TANK LINK (0.4): link mode's hint and notices, and VISITORS, the collection's pages -
    this board's values for upstream's LINK_* and COLL_* names */
 

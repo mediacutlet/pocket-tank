@@ -25217,7 +25217,8 @@ static int selftest_nest(void) {
     if (render_breed_tap(&tank, tank.fish[0].x, tank.fish[0].y) != RENDER_BT_UNMARKED) BFAIL("the same fish again not unmarked");
     render_breed_tap(&tank, tank.fish[0].x, tank.fish[0].y);
     if (render_breed_tap(&tank, tank.fish[1].x, tank.fish[1].y) != RENDER_BT_SECOND || !render_breed_card_up()) BFAIL("two fish: no card");
-    const int CX = (TANK_W - 336) / 2, CY = (TANK_H - 268) / 2, PX_ = CX + 12 + 75, PY_ = CY + 268 - 12 - 17, RX_ = CX + 336 - 12 - 75;
+    /* (this fork) the PAIR card as this board draws it, scaled on a 320 x 240 board: UI() is the literal on upstream's */
+    const int CX = (TANK_W - UI(336)) / 2, CY = (TANK_H - UI(268)) / 2, PX_ = CX + UI(12) + UI(75), PY_ = CY + UI(268) - UI(12) - UI(17), RX_ = CX + UI(336) - UI(12) - UI(75);
     render_tap_press(tank.clock);                                     /* (the press that opened it: before the card) */
     if (render_breed_tap(&tank, PX_, PY_) != RENDER_BT_HELD || tank.breed_a) BFAIL("PAIR THEM answered a press from before the card");
     tank.clock += 0.1; render_tap_press(tank.clock);                  /* the second fish's tap doubled (TAP_W): no answer either */

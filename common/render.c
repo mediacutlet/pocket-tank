@@ -10785,19 +10785,19 @@ static void passport_card_draw(ctx_t *c, uint16_t *fb, int stride, const tank_t 
     const int W = PASSPORT_CARD_W, H = PASSPORT_CARD_H, X = (TANK_W - W) / 2, Y = (TANK_H - H) / 2;
     src_t bg = src_color(0x0e2233, 1.0f);
     for (int y = Y; y < Y + H; y++) span(c, X, X + W - 1, y, &bg, 240);
-    for (int y = Y + 34; y < Y + H - 30; y += 7)              /* the page's fine wavy lines */
-        for (int x = X + 3; x < X + W - 3; x++) px_blend(c, x, y + (int)(2.0f * sinf(x * 0.11f + y * 0.37f)), 0x2b4a63, 80);
+    for (int y = Y + UI(34); y < Y + H - UI(30); y += UI(7))              /* the page's fine wavy lines */
+        for (int x = X + 3; x < X + W - 3; x++) px_blend(c, x, y + (int)(2.0f * UI_F * sinf(x * 0.11f + y * 0.37f)), 0x2b4a63, 80);
     src_t band = src_color(INK, 1.0f);
-    for (int y = Y; y < Y + 26; y++) span(c, X, X + W - 1, y, &band, 255);
+    for (int y = Y; y < Y + UI(26); y++) span(c, X, X + W - 1, y, &band, 255);
     const char *title = "POCKET TANK PASSPORT";
-    draw_text(c, X + (W - text_w(title, 2)) / 2, Y + 7, 2, GOLD, title);
+    draw_text(c, X + (W - text_w(title, UI_TEXT(2))) / 2, Y + UI(7), UI_TEXT(2), GOLD, title);
     rect_edge(c, X, Y, W, H, GOLD); rect_edge(c, X + 1, Y + 1, W - 2, H - 2, INK);
     /* the photo */
-    const int PX = X + 12, PY = Y + 36, PW = 100, PH = 84;
+    const int PX = X + UI(12), PY = Y + UI(36), PW = UI(100), PH = UI(84);
     rect_fill(c, PX, PY, PW, PH, 0x0a1824); rect_edge(c, PX, PY, PW, PH, 0x9fd8e2);
-    render_fish_portrait(fb, stride, PX + PW / 2.0f - PAGE_X, PY + PH / 2.0f - PAGE_Y, 1.3f, f, PW - 20, t->clock);   /* (page coordinates) */
+    render_fish_portrait(fb, stride, PX + PW / 2.0f - PAGE_X, PY + PH / 2.0f - PAGE_Y, 1.3f * UI_F, f, PW - UI(20), t->clock);   /* (page coordinates) */
     /* the fields */
-    const int FX = PX + PW + 12;
+    const int FX = PX + PW + UI(12);
     int vb = t->vis_badge[k];
     char home[24], hlbl[40], form[24], here[24];
     home_fields(t->vis_home[k], t->vis_home_name[k], "HOME", hlbl, sizeof hlbl, home, sizeof home);
@@ -10809,63 +10809,96 @@ static void passport_card_draw(ctx_t *c, uint16_t *fb, int stride, const tank_t 
     static const char *const STAGE_W[4] = { "FRY", "JUVENILE", "ADULT", "ELDER" };
     struct { const char *lbl, *val; } FL[4] = { { "NAME", f->name }, { hlbl, home }, { "FORM", form }, { "STAGE", f->evo ? "PARAGON" : STAGE_W[f->stage & 3] } };   /* (0.4.3: a paragon's passport says so) */
     for (int i = 0; i < 4; i++) {
-        int fy = Y + 33 + i * 26;
+        int fy = Y + UI(33) + i * UI(26);
         draw_text(c, FX, fy, 1, LBL, FL[i].lbl);
         int vx = FX;
-        if (i == 1 && vb >= 0) { link_badge_draw(c, FX + 6, fy + 17, 6, vb, 255); vx += 16; }
-        draw_text(c, vx, fy + 10, 2, 0xffffff, FL[i].val);
+        if (i == 1 && vb >= 0) { link_badge_draw(c, FX + UI(6), fy + UI(17), UI(6), vb, 255); vx += UI(16); }
+        draw_text(c, vx, fy + 7 + UI(3), UI_TEXT(2), 0xffffff, FL[i].val);   /* (this fork: under the label's own 7 rows, which keep their size) */
     }
+#ifdef CONFIG_POCKET_TANK_320X240
+    /* (this fork) under the photo each line keeps its 7 rows and the hearts their 10, and only the gaps between them
+       scale (render.h PP_*): at UI(n) VISITING ran into its time and the hearts into the machine lines */
+    draw_text(c, PX, Y + PP_VIS_Y, 1, LBL, "VISITING");
+    draw_text(c, PX, Y + PP_HERE_Y, UI_TEXT(2), 0xffffff, here);
+#else
     draw_text(c, PX, PY + PH + 12, 1, LBL, "VISITING");   /* (a gap under STAGE's value: HERE NN MIN reaches under it) */
     draw_text(c, PX, PY + PH + 21, 2, 0xffffff, here);
+#endif
     /* time together (2026-10-06): CLOSE TO <one of ours> and five pips that
        fill - filled vs hollow, never colour - no minutes (the goal is random) */
     { uint32_t mate = 0; float b = progression_bond(t, f->uid, &mate);
       const fish_t *m = NULL; for (int i = 0; i < t->n_fish && !m; i++) if (mate && t->fish[i].uid == mate) m = &t->fish[i];
       if (m && b > 0.02f) {
           char cl[32]; snprintf(cl, sizeof cl, "INTERESTED IN %s", m->name);   /* (Strato 11-01: was CLOSE TO) */
+#ifdef CONFIG_POCKET_TANK_320X240
+          draw_text(c, PX, Y + PP_BOND_Y, 1, LBL, cl);
+          hearts(c, PX, Y + PP_HEART_Y, (int)(b * 5 + 0.0001f), 1);
+#else
           int cy = PY + PH + 39;
           draw_text(c, PX, cy, 1, LBL, cl);
           hearts(c, PX, cy + 10, (int)(b * 5 + 0.0001f), 1);   /* five hearts (Strato 11-01): filled, or hollow - the shape, never the color */
+#endif
       } }
     /* this tank's stamp: two rings, our badge, VISITED */
     if (t->link_badge >= 0) {
-        const float sx = X + W - 52, sy = Y + 142;
+#ifdef CONFIG_POCKET_TANK_320X240
+        /* (this fork) the word keeps its 41 px at scale 1, so the rings stay wide enough to hold it under the badge */
+        enum { R1 = 28, R0 = 25, BADGE_DY = -6, WORD_DY = 3 };
+        _Static_assert(R0 * R0 > (21 + 1) * (21 + 1) + (WORD_DY + 7) * (WORD_DY + 7) && UI(142) + R1 < PP_M1_Y && UI(52) > R1 + 2,
+                       "(this fork) the passport's VISITED stamp: its word inside the inner ring, the rings over the machine lines and on the card");
+#else
+        enum { R1 = 30, R0 = 27, BADGE_DY = -5, WORD_DY = 9 };
+#endif
+        const float sx = X + W - UI(52), sy = Y + UI(142);
         for (int a = 0; a < 360; a += 2) {
             float r = a * 0.0174533f;
-            px_blend(c, (int)(sx + cosf(r) * 30), (int)(sy + sinf(r) * 30), GOLD, 170);
-            px_blend(c, (int)(sx + cosf(r) * 27), (int)(sy + sinf(r) * 27), GOLD, 120);
+            px_blend(c, (int)(sx + cosf(r) * R1), (int)(sy + sinf(r) * R1), GOLD, 170);
+            px_blend(c, (int)(sx + cosf(r) * R0), (int)(sy + sinf(r) * R0), GOLD, 120);
         }
-        link_badge_draw(c, (int)sx, (int)sy - 5, 9, t->link_badge, 200);
-        draw_text(c, (int)sx - text_w("VISITED", 1) / 2, (int)sy + 9, 1, GOLD, "VISITED");
+        link_badge_draw(c, (int)sx, (int)sy + BADGE_DY, UI(9), t->link_badge, 200);
+        draw_text(c, (int)sx - text_w("VISITED", 1) / 2, (int)sy + WORD_DY, 1, GOLD, "VISITED");
     }
     /* the machine line */
     char m1[64], m2[64], nm[FISH_NAME_MAX + 1];
     int i = 0; for (; f->name[i] && i < FISH_NAME_MAX; i++) nm[i] = f->name[i]; nm[i] = 0;
-    int cols = (W - 20) / 6; if (cols > 60) cols = 60;
+    int cols = (W - UI(20)) / 6; if (cols > 60) cols = 60;
     snprintf(m1, sizeof m1, "P<FISH<<%s", nm);
     snprintf(m2, sizeof m2, "%08X<<%08X<<%d", (unsigned)f->uid, (unsigned)t->vis_home[k], f->stage & 3);
     for (int j = (int)strlen(m1); j < cols; j++) m1[j] = '<';
     for (int j = (int)strlen(m2); j < cols; j++) m2[j] = '<';
     m1[cols] = m2[cols] = 0;
+#ifdef CONFIG_POCKET_TANK_320X240
+    draw_text(c, X + UI(10), Y + PP_M1_Y, 1, 0xc8d6de, m1);
+    draw_text(c, X + UI(10), Y + PP_M2_Y, 1, 0xc8d6de, m2);
+#else
     draw_text(c, X + 10, Y + 186, 1, 0xc8d6de, m1);
     draw_text(c, X + 10, Y + 197, 1, 0xc8d6de, m2);
+#endif
     /* collected: our COLLECTED stamp beside the VISITED one (Strato: keepers
        tell at a glance), and the buttons - DEPORT | COLLECT, the second dim
        once it is in the collection */
     bool have = collection_find(f->uid) >= 0, full = !have && collection_full();   /* full: every page (0.4 pages) - FULL, dim */
     if (have) {
         const char *st = "COLLECTED";
+#ifdef CONFIG_POCKET_TANK_320X240
+        /* (this fork) beside the hearts, under INTERESTED IN <NAME>: that line keeps its width at scale 1, and ran under
+           the design's place for the stamp (render.h PP_STAMP_*) */
+        int sw = text_w(st, UI_TEXT(2)) + UI(12), sx0 = FX + UI(10), sy0 = Y + PP_STAMP_Y;
+        rect_edge(c, sx0, sy0, sw, PP_STAMP_H, GOLD); rect_edge(c, sx0 + 2, sy0 + 2, sw - 4, PP_STAMP_H - 4, GOLD);
+        draw_text(c, sx0 + UI(6), sy0 + (PP_STAMP_H - 7 * UI_TEXT(2)) / 2, UI_TEXT(2), GOLD, st);
+#else
         int sw = text_w(st, 2) + 12, sx0 = FX + 10, sy0 = Y + 152;   /* (clear of HERE N MIN and of the VISITED stamp) */
         rect_edge(c, sx0, sy0, sw, 24, GOLD); rect_edge(c, sx0 + 2, sy0 + 2, sw - 4, 20, GOLD);
         draw_text(c, sx0 + 6, sy0 + 5, 2, GOLD, st);
+#endif
     }
-    const int BY = Y + PASSPORT_BTN_Y, BW = PASSPORT_BTN_W, gap = W - 2 * BW - 24;
-    button(c, X + 12, BY, BW, PASSPORT_BTN_H, 0x1c2f36, 0x9fd8e2, "DEPORT", 2);
+    const int BY = Y + PASSPORT_BTN_Y, BW = PASSPORT_BTN_W, gap = W - 2 * BW - UI(24);
+    button(c, X + UI(12), BY, BW, PASSPORT_BTN_H, 0x1c2f36, 0x9fd8e2, "DEPORT", UI_TEXT(2));
     if (have || full) {
         const char *w = have ? "COLLECTED" : "FULL";
-        rect_edge(c, X + 12 + BW + gap, BY, BW, PASSPORT_BTN_H, 0x3f6a72);
-        draw_text(c, X + 12 + BW + gap + (BW - text_w(w, 2)) / 2, BY + 8, 2, 0x3f6a72, w);
-    } else button(c, X + 12 + BW + gap, BY, BW, PASSPORT_BTN_H, 0x1c2f36, GOLD, "COLLECT", 2);
+        rect_edge(c, X + UI(12) + BW + gap, BY, BW, PASSPORT_BTN_H, 0x3f6a72);
+        draw_text(c, X + UI(12) + BW + gap + (BW - text_w(w, UI_TEXT(2))) / 2, BY + (PASSPORT_BTN_H - 7 * UI_TEXT(2)) / 2, UI_TEXT(2), 0x3f6a72, w);
+    } else button(c, X + UI(12) + BW + gap, BY, BW, PASSPORT_BTN_H, 0x1c2f36, GOLD, "COLLECT", UI_TEXT(2));
 }
 /* ---- THE CARDS BAKED (0.4, 11-02; Strato's rule: always look for frame-rate wins, never drop frames) ----
  * The GIVE modal and the gift card offered to us were drawn whole over the live tank every frame (+11-12 ms of render
@@ -10947,6 +10980,14 @@ static void bake_blit(const bake_t *b, int X, int Y, int W, int H, uint16_t *fb,
     }
 #endif
 }
+/* (this fork) the gift card's two lines under its four fields (FISH SWAP's offer's too): under the STAGE value's own rows,
+   which keep their size on a 320 x 240 board - on upstream's boards these are its 140 and 160, as written */
+#define GIFT_LINE1_Y (UI(33) + 3 * UI(26) + 7 + UI(3) + 7 * UI_TEXT(2) + UI(5))
+#define GIFT_LINE2_Y (GIFT_LINE1_Y + 7 * UI_TEXT(2) + UI(6))
+#ifdef CONFIG_POCKET_TANK_320X240
+_Static_assert(GIFT_LINE2_Y + 7 * UI_TEXT(2) < UI(186) && UI(186) + UI(6) < GIFT_BTN_Y && GIFT_BTN_Y + GIFT_BTN_H <= GIFT_CARD_H,
+               "(this fork) the gift card's lines over its time bar, the bar over its buttons, the buttons on the card");
+#endif
 /* a gift offered to us: its card (render.h) - baked (THE CARDS BAKED, above), its portrait and the time bar's fill live */
 static void gift_paint(ctx_t *c, const tank_t *t) {
     const gift_book_t *g = gift_of(t);
@@ -10955,13 +10996,13 @@ static void gift_paint(ctx_t *c, const tank_t *t) {
     const uint32_t GOLD = 0xe8c872, INK = 0x13324f, LBL = 0x7fa3b5;   /* (GIVE_GOLD, the passport's gold) */
     const int W = GIFT_CARD_W, H = GIFT_CARD_H, X = (TANK_W - W) / 2, Y = (TANK_H - H) / 2;
     rect_fill(c, X, Y, W, H, 0x0e2233);
-    rect_fill(c, X, Y, W, 26, INK);
+    rect_fill(c, X, Y, W, UI(26), INK);
     const char *title = "A GIFT FOR YOUR TANK";
-    draw_text(c, X + (W - text_w(title, 2)) / 2, Y + 7, 2, GOLD, title);
+    draw_text(c, X + (W - text_w(title, UI_TEXT(2))) / 2, Y + UI(7), UI_TEXT(2), GOLD, title);
     rect_edge(c, X, Y, W, H, GOLD); rect_edge(c, X + 1, Y + 1, W - 2, H - 2, INK);
-    const int PX = X + 12, PY = Y + 36, PW = 100, PH = 84;
+    const int PX = X + UI(12), PY = Y + UI(36), PW = UI(100), PH = UI(84);
     rect_fill(c, PX, PY, PW, PH, 0x0a1824); rect_edge(c, PX, PY, PW, PH, 0x9fd8e2);
-    const int FX = PX + PW + 12;
+    const int FX = PX + PW + UI(12);
     char from[24], flbl[40], form[24];
     int b = g->ask.badge;
     home_fields(pp->home_tank, pp->home_name, "FROM", flbl, sizeof flbl, from, sizeof from);
@@ -10969,19 +11010,19 @@ static void gift_paint(ctx_t *c, const tank_t *t) {
     static const char *const STAGE_W[4] = { "FRY", "JUVENILE", "ADULT", "ELDER" };
     struct { const char *lbl, *val; } FL[4] = { { "NAME", f.name }, { flbl, from }, { "FORM", form }, { "STAGE", f.evo ? "PARAGON" : STAGE_W[pp->stage & 3] } };
     for (int i = 0; i < 4; i++) {
-        int fy = Y + 33 + i * 26;
+        int fy = Y + UI(33) + i * UI(26);
         draw_text(c, FX, fy, 1, LBL, FL[i].lbl);
         int vx = FX;
-        if (i == 1 && b >= 0 && b < LINK_BADGES) { link_badge_draw(c, FX + 6, fy + 17, 6, b, 255); vx += 16; }   /* the shape AND the word */
-        draw_text(c, vx, fy + 10, 2, 0xffffff, FL[i].val);
+        if (i == 1 && b >= 0 && b < LINK_BADGES) { link_badge_draw(c, FX + UI(6), fy + UI(17), UI(6), b, 255); vx += UI(16); }   /* the shape AND the word */
+        draw_text(c, vx, fy + 7 + UI(3), UI_TEXT(2), 0xffffff, FL[i].val);   /* (this fork: under the label's own 7 rows) */
     }
     const char *l1 = "IT WOULD LIVE HERE", *l2 = "FOR GOOD";
-    draw_text(c, X + (W - text_w(l1, 2)) / 2, Y + 140, 2, 0xffffff, l1);
-    draw_text(c, X + (W - text_w(l2, 2)) / 2, Y + 160, 2, 0xffffff, l2);
-    rect_edge(c, X + 24, Y + 186, W - 48, 6, 0x3f6a72);              /* the time left to answer (its fill: live) */
-    const int BY = Y + GIFT_BTN_Y, gap = W - 2 * GIFT_BTN_W - 24;
-    button(c, X + 12, BY, GIFT_BTN_W, GIFT_BTN_H, 0x1c2f36, GOLD, "ACCEPT", 2);
-    button(c, X + 12 + GIFT_BTN_W + gap, BY, GIFT_BTN_W, GIFT_BTN_H, 0x1c2f36, 0x9fd8e2, "NO THANKS", 2);
+    draw_text(c, X + (W - text_w(l1, UI_TEXT(2))) / 2, Y + GIFT_LINE1_Y, UI_TEXT(2), 0xffffff, l1);
+    draw_text(c, X + (W - text_w(l2, UI_TEXT(2))) / 2, Y + GIFT_LINE2_Y, UI_TEXT(2), 0xffffff, l2);
+    rect_edge(c, X + UI(24), Y + UI(186), W - UI(48), UI(6), 0x3f6a72);              /* the time left to answer (its fill: live) */
+    const int BY = Y + GIFT_BTN_Y, gap = W - 2 * GIFT_BTN_W - UI(24);
+    button(c, X + UI(12), BY, GIFT_BTN_W, GIFT_BTN_H, 0x1c2f36, GOLD, "ACCEPT", UI_TEXT(2));
+    button(c, X + UI(12) + GIFT_BTN_W + gap, BY, GIFT_BTN_W, GIFT_BTN_H, 0x1c2f36, 0x9fd8e2, "NO THANKS", UI_TEXT(2));
 }
 /* where it may come up (the 11-02 sweep: it hid under every page - no card, no sound, NO ANSWER CAME after 60 s): OVER any
    page - the keeper page, settings, the shop, VISITORS, MY TANKS, the battery page, the LINK page - and it waits under the
@@ -11036,24 +11077,24 @@ void render_gift(const tank_t *t, uint16_t *fb, int stride) {
         bake_blit(&g_bake_gift, X, Y, W, H, fb, stride);
     } else gift_paint(c, t);
     fish_t f; memset(&f, 0, sizeof f); passport_to_fish(pp, &f);      /* live: the fish in its box, the bar running down */
-    const int PX = X + 12, PY = Y + 36, PW = 100, PH = 84;
-    render_fish_portrait(fb, stride, PX + PW / 2.0f - PAGE_X, PY + PH / 2.0f - PAGE_Y, 1.3f, &f, PW - 20, t->clock);   /* (page coordinates) */
+    const int PX = X + UI(12), PY = Y + UI(36), PW = UI(100), PH = UI(84);
+    render_fish_portrait(fb, stride, PX + PW / 2.0f - PAGE_X, PY + PH / 2.0f - PAGE_Y, 1.3f * UI_F, &f, PW - UI(20), t->clock);   /* (page coordinates) */
     float left = 1.0f - (float)(t->clock - g->ask.since) / (LINK_GIVE_ASK_MS / 1000.0f);   /* the time left to answer */
     left = left < 0 ? 0 : left > 1 ? 1 : left;
-    if (left > 0) rect_fill(c, X + 25, Y + 187, (int)((W - 50) * left), 4, 0x9fd8e2);
+    if (left > 0) rect_fill(c, X + UI(24) + 1, Y + UI(186) + 1, (int)((W - UI(48) - 2) * left), UI(6) - 2, 0x9fd8e2);   /* (inside its edge) */
 }
 int render_gift_hit(float x, float y) {
     const int W = GIFT_CARD_W, H = GIFT_CARD_H, X = (TANK_W - W) / 2, Y = (TANK_H - H) / 2;
-    const int BY = Y + GIFT_BTN_Y, gap = W - 2 * GIFT_BTN_W - 24;
-    if (y >= BY - 10 && y < BY + GIFT_BTN_H + 14 && x >= X && x < X + W) return x < X + 12 + GIFT_BTN_W + gap / 2 ? GIFT_HIT_ACCEPT : GIFT_HIT_NO;
+    const int BY = Y + GIFT_BTN_Y, gap = W - 2 * GIFT_BTN_W - UI(24);
+    if (y >= BY - UI(10) && y < BY + GIFT_BTN_H + UI(14) && x >= X && x < X + W) return x < X + UI(12) + GIFT_BTN_W + gap / 2 ? GIFT_HIT_ACCEPT : GIFT_HIT_NO;
     return x >= X && x < X + W && y >= Y && y < Y + H ? GIFT_HIT_CARD : GIFT_HIT_NONE;
 }
 int render_passport_hit(float x, float y) {
     const int W = PASSPORT_CARD_W, H = PASSPORT_CARD_H, X = (TANK_W - W) / 2, Y = (TANK_H - H) / 2;
-    const int BY = Y + PASSPORT_BTN_Y, BW = PASSPORT_BTN_W, gap = W - 2 * BW - 24;
-    if (y >= BY - 8 && y < BY + PASSPORT_BTN_H + 10) {
-        if (x >= X + 4 && x < X + 12 + BW + gap / 2) return PASSPORT_HIT_DEPORT;
-        if (x >= X + 12 + BW + gap / 2 && x < X + W - 4) return PASSPORT_HIT_COLLECT;
+    const int BY = Y + PASSPORT_BTN_Y, BW = PASSPORT_BTN_W, gap = W - 2 * BW - UI(24);
+    if (y >= BY - UI(8) && y < BY + PASSPORT_BTN_H + UI(10)) {
+        if (x >= X + UI(4) && x < X + UI(12) + BW + gap / 2) return PASSPORT_HIT_DEPORT;
+        if (x >= X + UI(12) + BW + gap / 2 && x < X + W - UI(4)) return PASSPORT_HIT_COLLECT;
     }
     return x >= X && x < X + W && y >= Y && y < Y + H ? PASSPORT_HIT_CARD : PASSPORT_HIT_NONE;
 }
@@ -12862,12 +12903,16 @@ void render_give_tap(const tank_t *t, int fish_idx) { give_tap(t, fish_idx); }  
 #define GM_W   UI(336)              /* (this fork: the gift card's size, as render.h scales it - the bake below is one) */
 #define GM_H   UI(252)              /* the fish's card; the pick is GM_PICK_H */
 #define GM_PICK_H UI(232)
-#define GM_BTN_W 140
-#define GM_BTN_H 34
-#define GM_ROW_Y0 38                /* the pick's rows (card coordinates) */
-#define GM_ROW_PITCH 68
-#define GM_ROW_H 58
+#define GM_BTN_W UI(140)
+#define GM_BTN_H UI(34)
+#define GM_ROW_Y0 UI(38)            /* the pick's rows (card coordinates) */
+#define GM_ROW_PITCH UI(68)
+#define GM_ROW_H UI(58)
 _Static_assert(GM_W * GM_H <= GIFT_CARD_W * GIFT_CARD_H && GM_PICK_H <= GM_H, "the GIVE modal's bake is a gift card's size");
+#ifdef CONFIG_POCKET_TANK_320X240
+_Static_assert(GM_W <= TANK_W && GM_H <= TANK_H && GM_ROW_Y0 + GM_ROW_PITCH + GM_ROW_H < GM_PICK_H - GM_BTN_H - UI(12),
+               "(this fork) the GIVE modal on the 320 x 240 glass, the pick's rows over its BACK");
+#endif
 static struct {
     bool on; uint32_t uid; double opened, step_t, asked; int step;
     bool pick; int8_t edge; uint32_t peer[LINK_EDGES]; int8_t badge[LINK_EDGES];   /* latched as it opens: the door and tank, or the two */
@@ -12966,48 +13011,48 @@ static int bm_eval(const tank_t *t) {
 static void gm_split(const char *s, char *a, char *b, int n);
 static void bm_dim_button(ctx_t *c, int x, int y, int w, int h, const char *s) {
     rect_fill(c, x, y, w, h, 0x04141a); rect_edge(c, x, y, w, h, MSP_DIM);
-    draw_text(c, x + (w - text_w(s, 2)) / 2, y + (h - 14) / 2, 2, MSP_DIM, s);
+    draw_text(c, x + (w - text_w(s, UI_TEXT(2))) / 2, y + (h - 7 * UI_TEXT(2)) / 2, UI_TEXT(2), MSP_DIM, s);
 }
 /* the card, but its fish (live: gm_draw). The GIVE card's frame in the page's teal - a move is no gift */
 static void bm_paint(ctx_t *c, const tank_t *t, int step, int X, int Y, int W, int H, int btn_w, int btn_h) {
     const uint32_t EDGE = 0x9fd8e2, INK = 0x13324f, LBL = 0x7fa3b5;
     const char *nm = bm_name(t);
     rect_fill(c, X, Y, W, H, 0x0e2233);
-    rect_fill(c, X, Y, W, 26, INK);
+    rect_fill(c, X, Y, W, UI(26), INK);
     char title[40];
     if (step == RENDER_GM_BOWL) snprintf(title, sizeof title, "%s IS WAITING", nm); else snprintf(title, sizeof title, "TRAVEL BOWL");
-    draw_text(c, X + (W - text_w(title, 2)) / 2, Y + 7, 2, 0xffffff, title);
+    draw_text(c, X + (W - text_w(title, UI_TEXT(2))) / 2, Y + UI(7), UI_TEXT(2), 0xffffff, title);
     rect_edge(c, X, Y, W, H, EDGE); rect_edge(c, X + 1, Y + 1, W - 2, H - 2, INK);
-    const int PX = X + 12, PY = Y + 36, PW = 100, PH = 84;
+    const int PX = X + UI(12), PY = Y + UI(36), PW = UI(100), PH = UI(84);
     rect_fill(c, PX, PY, PW, PH, 0x0a1824); rect_edge(c, PX, PY, PW, PH, EDGE);
-    const int FX = PX + PW + 12;
+    const int FX = PX + PW + UI(12);
     char a[40], b[40]; a[0] = b[0] = 0;
     int why = BOWL_OK;
     if (step == RENDER_GM_MOVE) {
         char l[24]; snprintf(l, sizeof l, "PUT %s", nm);
-        draw_text(c, FX, Y + 42, 2, 0xffffff, l);
-        draw_text(c, FX, Y + 64, 2, 0xffffff, "IN THE");
-        draw_text(c, FX, Y + 86, 2, 0xffffff, "TRAVEL BOWL?");
+        draw_text(c, FX, Y + UI(42), UI_TEXT(2), 0xffffff, l);
+        draw_text(c, FX, Y + UI(64), UI_TEXT(2), 0xffffff, "IN THE");
+        draw_text(c, FX, Y + UI(86), UI_TEXT(2), 0xffffff, "TRAVEL BOWL?");
         snprintf(a, sizeof a, "IT WAITS THERE UNTIL YOU"); snprintf(b, sizeof b, "LET IT INTO A TANK");
     } else {
-        draw_text(c, FX, Y + 36, 1, LBL, "NAME");
-        draw_text(c, FX, Y + 46, 2, 0xffffff, nm);
+        draw_text(c, FX, Y + UI(36), 1, LBL, "NAME");
+        draw_text(c, FX, Y + UI(36) + 7 + UI(3), UI_TEXT(2), 0xffffff, nm);   /* (this fork: under the label's own 7 rows) */
         if (step == RENDER_GM_BOWL) {
-            draw_text(c, FX, Y + 72, 1, LBL, "WAITING IN");
-            draw_text(c, FX, Y + 82, 2, 0xffffff, "THE TRAVEL BOWL");
-            bowl_icon(c, PX + PW - BOWL_ICON - 4, PY + PH - BOWL_ICON - 3, true);
+            draw_text(c, FX, Y + UI(72), 1, LBL, "WAITING IN");
+            draw_text(c, FX, Y + UI(72) + 7 + UI(3), UI_TEXT(2), 0xffffff, "THE TRAVEL BOWL");
+            bowl_icon(c, PX + PW - BOWL_ICON - UI(4), PY + PH - BOWL_ICON - UI(3), true);   /* (its pixels keep their size) */
             why = progression_bowl_why(t);
             bm_bowl_line(t, a, sizeof a);
         } else snprintf(a, sizeof a, "%s", g_gm.line);
-        if (text_w(a, 2) > W - 24) { char s2[40]; snprintf(s2, sizeof s2, "%s", a); gm_split(s2, a, b, sizeof a); }
+        if (text_w(a, UI_TEXT(2)) > W - UI(24)) { char s2[40]; snprintf(s2, sizeof s2, "%s", a); gm_split(s2, a, b, sizeof a); }
     }
-    draw_text(c, X + (W - text_w(a, 2)) / 2, Y + (b[0] ? 136 : 146), 2, 0xffffff, a);
-    if (b[0]) draw_text(c, X + (W - text_w(b, 2)) / 2, Y + 158, 2, 0xffffff, b);
-    const int BY = Y + H - btn_h - 12, gap = W - 2 * btn_w - 24;
-    if (step == RENDER_GM_MOVE_WHY) { button(c, X + (W - btn_w) / 2, BY, btn_w, btn_h, 0x1c2f36, EDGE, "OK", 2); return; }
-    if (step == RENDER_GM_BOWL && why != BOWL_OK) bm_dim_button(c, X + 12, BY, btn_w, btn_h, "LET IN");
-    else button(c, X + 12, BY, btn_w, btn_h, 0x155e58, 0xffffff, step == RENDER_GM_MOVE ? "MOVE" : "LET IN", 2);   /* the yes: filled, a white edge (not hue alone) */
-    button(c, X + 12 + btn_w + gap, BY, btn_w, btn_h, 0x1c2f36, EDGE, step == RENDER_GM_MOVE ? "BACK" : "NOT NOW", 2);
+    draw_text(c, X + (W - text_w(a, UI_TEXT(2))) / 2, Y + (b[0] ? UI(136) : UI(146)), UI_TEXT(2), 0xffffff, a);
+    if (b[0]) draw_text(c, X + (W - text_w(b, UI_TEXT(2))) / 2, Y + UI(158), UI_TEXT(2), 0xffffff, b);
+    const int BY = Y + H - btn_h - UI(12), gap = W - 2 * btn_w - UI(24);
+    if (step == RENDER_GM_MOVE_WHY) { button(c, X + (W - btn_w) / 2, BY, btn_w, btn_h, 0x1c2f36, EDGE, "OK", UI_TEXT(2)); return; }
+    if (step == RENDER_GM_BOWL && why != BOWL_OK) bm_dim_button(c, X + UI(12), BY, btn_w, btn_h, "LET IN");
+    else button(c, X + UI(12), BY, btn_w, btn_h, 0x155e58, 0xffffff, step == RENDER_GM_MOVE ? "MOVE" : "LET IN", UI_TEXT(2));   /* the yes: filled, a white edge (not hue alone) */
+    button(c, X + UI(12) + btn_w + gap, BY, btn_w, btn_h, 0x1c2f36, EDGE, step == RENDER_GM_MOVE ? "BACK" : "NOT NOW", UI_TEXT(2));
 }
 static int gm_fish(const tank_t *t) {
     for (int i = 0; i < t->n_fish; i++) if (t->fish[i].uid == g_gm.uid) return i;
@@ -13123,42 +13168,43 @@ static void gm_paint(ctx_t *c, const tank_t *t, int step) {
     const int W = GM_W, H = gm_card_h(); int X, Y; gm_frame(&X, &Y);
     if (step >= RENDER_GM_MOVE) { bm_paint(c, t, step, X, Y, W, H, GM_BTN_W, GM_BTN_H); return; }
     rect_fill(c, X, Y, W, H, 0x0e2233);
-    rect_fill(c, X, Y, W, 26, INK);
+    rect_fill(c, X, Y, W, UI(26), INK);
     const bool swp = step == RENDER_GM_CONFIRM && gm_swap(t, g_gm.edge);
     char title[40]; snprintf(title, sizeof title, step == RENDER_GM_PICK ? "GIVE %s TO" : swp ? "SWAP %s?" : "GIVE %s?", nm);
-    draw_text(c, X + (W - text_w(title, 2)) / 2, Y + 7, 2, GOLD, title);
+    draw_text(c, X + (W - text_w(title, UI_TEXT(2))) / 2, Y + UI(7), UI_TEXT(2), GOLD, title);
     rect_edge(c, X, Y, W, H, GOLD); rect_edge(c, X + 1, Y + 1, W - 2, H - 2, INK);
     if (step == RENDER_GM_PICK) {
         for (int s = 0; s < LINK_EDGES; s++) {   /* LINK_LEFT on top, its arrow at the left end; LINK_RIGHT under it, arrow right */
-            const int RX = X + 12, RY = Y + GM_ROW_Y0 + s * GM_ROW_PITCH, RW = W - 24, RH = GM_ROW_H;
+            const int RX = X + UI(12), RY = Y + GM_ROW_Y0 + s * GM_ROW_PITCH, RW = W - UI(24), RH = GM_ROW_H;
             bool off = !gm_row_open(t, g, s);
             uint32_t edge = off ? DIM : GOLD;
             rect_fill(c, RX, RY, RW, RH, 0x1c2f36);
             rect_edge(c, RX, RY, RW, RH, edge); rect_edge(c, RX + 1, RY + 1, RW - 2, RH - 2, edge);
-            gm_arrow(c, s ? RX + RW - 18 : RX + 18, RY + RH / 2, 11, s ? 1 : -1, off ? DIM : 0xffffff);
+            gm_arrow(c, s ? RX + RW - UI(18) : RX + UI(18), RY + RH / 2, UI(11), s ? 1 : -1, off ? DIM : 0xffffff);
             char lbl[40], val[24];
             home_fields(g_gm.peer[s], gm_tank_name(t, g_gm.peer[s]), "HOME", lbl, sizeof lbl, val, sizeof val);
-            int tx = s ? RX + 16 : RX + 40, vx = tx, b = g_gm.badge[s];
-            draw_text(c, tx, RY + 10, 1, off ? 0xc8d6de : LBL, off ? "NOT LINKED NOW" : lbl);   /* (closed while up: which one, dim, no tap) */
-            if (b >= 0 && b < LINK_BADGES) { link_badge_draw(c, tx + 7, RY + 33, 7, b, off ? 90 : 255); vx += 24; }   /* the shape AND the name */
-            draw_text(c, vx, RY + 26, 2, off ? DIM : 0xffffff, val);
+            int tx = s ? RX + UI(16) : RX + UI(40), vx = tx, b = g_gm.badge[s];
+            draw_text(c, tx, RY + UI(10), 1, off ? 0xc8d6de : LBL, off ? "NOT LINKED NOW" : lbl);   /* (closed while up: which one, dim, no tap) */
+            /* (this fork: the value under the label's own 7 rows, the badge at the value's middle) */
+            if (b >= 0 && b < LINK_BADGES) { link_badge_draw(c, tx + UI(7), RY + UI(10) + 7 + UI(9) + 7 * UI_TEXT(2) / 2, UI(7), b, off ? 90 : 255); vx += UI(24); }   /* the shape AND the name */
+            draw_text(c, vx, RY + UI(10) + 7 + UI(9), UI_TEXT(2), off ? DIM : 0xffffff, val);
         }
-        button(c, X + (W - GM_BTN_W) / 2, Y + H - GM_BTN_H - 12, GM_BTN_W, GM_BTN_H, 0x1c2f36, 0x9fd8e2, "BACK", 2);
+        button(c, X + (W - GM_BTN_W) / 2, Y + H - GM_BTN_H - UI(12), GM_BTN_W, GM_BTN_H, 0x1c2f36, 0x9fd8e2, "BACK", UI_TEXT(2));
         return;
     }
-    const int PX = X + 12, PY = Y + 36, PW = 100, PH = 84;
+    const int PX = X + UI(12), PY = Y + UI(36), PW = UI(100), PH = UI(84);
     rect_fill(c, PX, PY, PW, PH, 0x0a1824); rect_edge(c, PX, PY, PW, PH, 0x9fd8e2);
-    const int FX = PX + PW + 12;
-    draw_text(c, FX, Y + 36, 1, LBL, "NAME");
-    draw_text(c, FX, Y + 46, 2, 0xffffff, nm);
+    const int FX = PX + PW + UI(12);
+    draw_text(c, FX, Y + UI(36), 1, LBL, "NAME");
+    draw_text(c, FX, Y + UI(36) + 7 + UI(3), UI_TEXT(2), 0xffffff, nm);   /* (this fork: under the label's own 7 rows) */
     if (g_gm.edge >= 0 && g_gm.peer[g_gm.edge]) {     /* TO: the tank and its door */
         int e = g_gm.edge; char lbl[40], val[24];
         home_fields(g_gm.peer[e], gm_tank_name(t, g_gm.peer[e]), "TO", lbl, sizeof lbl, val, sizeof val);
-        draw_text(c, FX, Y + 72, 1, LBL, lbl);
-        int vx = FX, b = g_gm.badge[e];
-        if (b >= 0 && b < LINK_BADGES) { link_badge_draw(c, FX + 6, Y + 89, 6, b, 255); vx += 18; }
-        draw_text(c, vx, Y + 82, 2, 0xffffff, val);
-        gm_arrow(c, vx + text_w(val, 2) + 14, Y + 89, 7, e == LINK_RIGHT ? 1 : -1, 0xffffff);
+        draw_text(c, FX, Y + UI(72), 1, LBL, lbl);
+        int vx = FX, b = g_gm.badge[e];   /* (this fork: the value under the label's own 7 rows, the badge and arrow at its middle) */
+        if (b >= 0 && b < LINK_BADGES) { link_badge_draw(c, FX + UI(6), Y + UI(72) + 7 + UI(3) + 7 * UI_TEXT(2) / 2, UI(6), b, 255); vx += UI(18); }
+        draw_text(c, vx, Y + UI(72) + 7 + UI(3), UI_TEXT(2), 0xffffff, val);
+        gm_arrow(c, vx + text_w(val, UI_TEXT(2)) + UI(14), Y + UI(72) + 7 + UI(3) + 7 * UI_TEXT(2) / 2, UI(7), e == LINK_RIGHT ? 1 : -1, 0xffffff);
     }
     char a[32], b[32];
     const bool swp_away = swp && gm_swap_away(t, i);   /* (one visiting ANOTHER tank waits for home; the partner's visitor can go - Strato 11-22) */
@@ -13166,17 +13212,17 @@ static void gm_paint(ctx_t *c, const tank_t *t, int step) {
     else if (step == RENDER_GM_CONFIRM && swp) { snprintf(a, sizeof a, "THEIR TANK IS FULL"); snprintf(b, sizeof b, "SWAP FOR ONE OF THEIRS"); }
     else if (step == RENDER_GM_CONFIRM) { snprintf(a, sizeof a, "IT WOULD LIVE THERE"); snprintf(b, sizeof b, "FOR GOOD"); }
     else if (step == RENDER_GM_ASKING) { snprintf(a, sizeof a, "ASKING THEIR KEEPER"); b[0] = 0; }
-    else if (text_w(g_gm.line, 2) <= W - 24) { snprintf(a, sizeof a, "%s", g_gm.line); b[0] = 0; }
+    else if (text_w(g_gm.line, UI_TEXT(2)) <= W - UI(24)) { snprintf(a, sizeof a, "%s", g_gm.line); b[0] = 0; }
     else gm_split(g_gm.line, a, b, sizeof a);
-    draw_text(c, X + (W - text_w(a, 2)) / 2, Y + 136, 2, 0xffffff, a);
-    if (b[0]) draw_text(c, X + (W - text_w(b, 2)) / 2, Y + 156, 2, 0xffffff, b);
-    if (step == RENDER_GM_ASKING) rect_edge(c, X + 24, Y + 162, W - 48, 6, DIM);   /* the other keeper's time (its fill: live) */
-    const int BY = Y + H - GM_BTN_H - 12, gap = W - 2 * GM_BTN_W - 24;
+    draw_text(c, X + (W - text_w(a, UI_TEXT(2))) / 2, Y + UI(136), UI_TEXT(2), 0xffffff, a);
+    if (b[0]) draw_text(c, X + (W - text_w(b, UI_TEXT(2))) / 2, Y + UI(156), UI_TEXT(2), 0xffffff, b);
+    if (step == RENDER_GM_ASKING) rect_edge(c, X + UI(24), Y + UI(162), W - UI(48), UI(6), DIM);   /* the other keeper's time (its fill: live) */
+    const int BY = Y + H - GM_BTN_H - UI(12), gap = W - 2 * GM_BTN_W - UI(24);
     if (step == RENDER_GM_CONFIRM) {
-        if (swp_away) button(c, X + 12, BY, GM_BTN_W, GM_BTN_H, 0x16262b, DIM, "SWAP", 2);   /* (dim: the line says why) */
-        else button(c, X + 12, BY, GM_BTN_W, GM_BTN_H, 0x1c2f36, GOLD, swp ? "SWAP" : "GIVE", 2);
-        button(c, X + 12 + GM_BTN_W + gap, BY, GM_BTN_W, GM_BTN_H, 0x1c2f36, 0x9fd8e2, "BACK", 2);
-    } else button(c, X + (W - GM_BTN_W) / 2, BY, GM_BTN_W, GM_BTN_H, 0x1c2f36, 0x9fd8e2, step == RENDER_GM_ASKING ? "CALL OFF" : "OK", 2);
+        if (swp_away) button(c, X + UI(12), BY, GM_BTN_W, GM_BTN_H, 0x16262b, DIM, "SWAP", UI_TEXT(2));   /* (dim: the line says why) */
+        else button(c, X + UI(12), BY, GM_BTN_W, GM_BTN_H, 0x1c2f36, GOLD, swp ? "SWAP" : "GIVE", UI_TEXT(2));
+        button(c, X + UI(12) + GM_BTN_W + gap, BY, GM_BTN_W, GM_BTN_H, 0x1c2f36, 0x9fd8e2, "BACK", UI_TEXT(2));
+    } else button(c, X + (W - GM_BTN_W) / 2, BY, GM_BTN_W, GM_BTN_H, 0x1c2f36, 0x9fd8e2, step == RENDER_GM_ASKING ? "CALL OFF" : "OK", UI_TEXT(2));
 }
 /* what the still card shows (a new key: painted again) */
 static uint32_t gm_key(const tank_t *t, int step) {
@@ -13214,17 +13260,17 @@ static void gm_draw(const tank_t *t, uint16_t *fb, int stride) {
     } else gm_paint(c, t, step);
     if (step == RENDER_GM_PICK) return;
     int i = gm_fish(t);                                /* live: the fish swims in its box, the bar runs down */
-    const int PX = X + 12, PY = Y + 36, PW = 100, PH = 84;
+    const int PX = X + UI(12), PY = Y + UI(36), PW = UI(100), PH = UI(84);
     if (step == RENDER_GM_BOWL) {                      /* the fish in the bowl: from its passport, as a gift's card draws one */
         if (g_bm_pp_ok) { fish_t f; memset(&f, 0, sizeof f); passport_to_fish(&g_bm_pp, &f);
-            render_fish_portrait(fb, stride, PX + PW / 2.0f - PAGE_X - 8, PY + PH / 2.0f - PAGE_Y - 8, 1.2f, &f, PW - 30, t->clock); }
+            render_fish_portrait(fb, stride, PX + PW / 2.0f - PAGE_X - UI(8), PY + PH / 2.0f - PAGE_Y - UI(8), 1.2f * UI_F, &f, PW - UI(30), t->clock); }
         return;
     }
-    if (i >= 0) render_fish_portrait(fb, stride, PX + PW / 2.0f - PAGE_X, PY + PH / 2.0f - PAGE_Y, 1.3f, &t->fish[i], PW - 20, t->clock);   /* (page coordinates) */
+    if (i >= 0) render_fish_portrait(fb, stride, PX + PW / 2.0f - PAGE_X, PY + PH / 2.0f - PAGE_Y, 1.3f * UI_F, &t->fish[i], PW - UI(20), t->clock);   /* (page coordinates) */
     if (step == RENDER_GM_ASKING) {
         float left = g && g->asking_uid == g_gm.uid ? 1.0f - (float)(t->clock - g->asking_since) / (LINK_GIVE_ASK_MS / 1000.0f) : 1.0f;
         left = left < 0 ? 0 : left > 1 ? 1 : left;
-        if (left > 0) rect_fill(c, X + 25, Y + 163, (int)((W - 50) * left), 4, 0x9fd8e2);
+        if (left > 0) rect_fill(c, X + UI(24) + 1, Y + UI(162) + 1, (int)((W - UI(48) - 2) * left), UI(6) - 2, 0x9fd8e2);   /* (inside its edge) */
     }
 }
 int  render_give_modal_step(const tank_t *t) { return gm_eval(t); }
@@ -13239,20 +13285,20 @@ void render_give_modal(const tank_t *t, uint16_t *fb, int stride) { if (!g_ms_in
 bool render_give_modal_button(const tank_t *t, int which, int *x, int *y) {
     int step = gm_eval(t);
     if (step == RENDER_GM_OFF) return false;
-    int X, Y; gm_frame(&X, &Y); const int H = gm_card_h(), W = GM_W, BY = Y + H - GM_BTN_H - 12 + GM_BTN_H / 2;
+    int X, Y; gm_frame(&X, &Y); const int H = gm_card_h(), W = GM_W, BY = Y + H - GM_BTN_H - UI(12) + GM_BTN_H / 2;
     if (step == RENDER_GM_PICK) {
         if (which == RENDER_GM_TAP_LEFT || which == RENDER_GM_TAP_RIGHT) { *x = X + W / 2; *y = Y + GM_ROW_Y0 + (which == RENDER_GM_TAP_RIGHT) * GM_ROW_PITCH + GM_ROW_H / 2; return true; }
         if (which == RENDER_GM_TAP_BACK) { *x = X + W / 2; *y = BY; return true; }
         return false;
     }
     if (step == RENDER_GM_CONFIRM) {
-        if (which == RENDER_GM_TAP_GIVE) { *x = X + 12 + GM_BTN_W / 2; *y = BY; return true; }
-        if (which == RENDER_GM_TAP_BACK) { *x = X + W - 12 - GM_BTN_W / 2; *y = BY; return true; }
+        if (which == RENDER_GM_TAP_GIVE) { *x = X + UI(12) + GM_BTN_W / 2; *y = BY; return true; }
+        if (which == RENDER_GM_TAP_BACK) { *x = X + W - UI(12) - GM_BTN_W / 2; *y = BY; return true; }
         return false;
     }
     if (step == RENDER_GM_MOVE || step == RENDER_GM_BOWL) {
-        if (which == (step == RENDER_GM_MOVE ? RENDER_GM_TAP_MOVE : RENDER_GM_TAP_LETIN)) { *x = X + 12 + GM_BTN_W / 2; *y = BY; return true; }
-        if (which == RENDER_GM_TAP_BACK) { *x = X + W - 12 - GM_BTN_W / 2; *y = BY; return true; }
+        if (which == (step == RENDER_GM_MOVE ? RENDER_GM_TAP_MOVE : RENDER_GM_TAP_LETIN)) { *x = X + UI(12) + GM_BTN_W / 2; *y = BY; return true; }
+        if (which == RENDER_GM_TAP_BACK) { *x = X + W - UI(12) - GM_BTN_W / 2; *y = BY; return true; }
         return false;
     }
     if (step == RENDER_GM_DONE) return false;
@@ -13269,8 +13315,8 @@ bool render_give_modal_button(const tank_t *t, int which, int *x, int *y) {
 enum { SWC_OFF, SWC_I_ASKING, SWC_I_LAST, SWC_I_GOING, SWC_R_OFFER, SWC_R_TILES, SWC_R_CONFIRM, SWC_R_WAITING, SWC_R_GOING, SWC_SAID };
 #define SW_W GIFT_CARD_W
 #define SW_H GIFT_CARD_H
-#define SW_TW 96
-#define SW_TH 80
+#define SW_TW UI(96)
+#define SW_TH UI(80)
 #define SW_TILES 6
 static struct { uint32_t from, sid; int sub; uint32_t sel; int kind; double step_t; bool by_tap; double said_ok, tapped_at; } g_sw = { 0, 0, 0, 0, SWC_OFF, -1e9, false, -1, -1e9 };
 static const char *sw_tile_why(const tank_t *t, int i);
@@ -13313,21 +13359,25 @@ static bool sw_who(const tank_t *t, int kind, passport_t *mine, passport_t *thei
     return m && th;
 }
 static void sw_portrait_box(ctx_t *c, int x, int y, int w, int h) { rect_fill(c, x, y, w, h, 0x0a1824); rect_edge(c, x, y, w, h, 0x9fd8e2); }
-static void sw_center(ctx_t *c, int X, int y, const char *s, uint32_t rgb) { draw_text(c, X + (SW_W - text_w(s, 2)) / 2, y, 2, rgb, s); }
+static void sw_center(ctx_t *c, int X, int y, const char *s, uint32_t rgb) { draw_text(c, X + (SW_W - text_w(s, UI_TEXT(2))) / 2, y, UI_TEXT(2), rgb, s); }
 static void sw_two(ctx_t *c, int X, int Y, const char *a, const char *b) {
-    const int BY = Y + GIFT_BTN_Y, gap = SW_W - 2 * GIFT_BTN_W - 24;
-    button(c, X + 12, BY, GIFT_BTN_W, GIFT_BTN_H, 0x1c2f36, GIVE_GOLD, a, 2);
-    button(c, X + 12 + GIFT_BTN_W + gap, BY, GIFT_BTN_W, GIFT_BTN_H, 0x1c2f36, 0x9fd8e2, b, 2);
+    const int BY = Y + GIFT_BTN_Y, gap = SW_W - 2 * GIFT_BTN_W - UI(24);
+    button(c, X + UI(12), BY, GIFT_BTN_W, GIFT_BTN_H, 0x1c2f36, GIVE_GOLD, a, UI_TEXT(2));
+    button(c, X + UI(12) + GIFT_BTN_W + gap, BY, GIFT_BTN_W, GIFT_BTN_H, 0x1c2f36, 0x9fd8e2, b, UI_TEXT(2));
 }
-static void sw_one(ctx_t *c, int X, int Y, const char *a) { button(c, X + (SW_W - GIFT_BTN_W) / 2, Y + GIFT_BTN_Y, GIFT_BTN_W, GIFT_BTN_H, 0x1c2f36, 0x9fd8e2, a, 2); }
-#define SW_PB_W 120
-#define SW_PB_H 68
-#define SW_PB_Y 44
+static void sw_one(ctx_t *c, int X, int Y, const char *a) { button(c, X + (SW_W - GIFT_BTN_W) / 2, Y + GIFT_BTN_Y, GIFT_BTN_W, GIFT_BTN_H, 0x1c2f36, 0x9fd8e2, a, UI_TEXT(2)); }
+#define SW_PB_W UI(120)
+#define SW_PB_H UI(68)
+#define SW_PB_Y (UI(32) + 7 + UI(5))   /* (this fork: under YOURS / THEIRS, whose 7 rows keep their size - upstream's 44) */
+#ifdef CONFIG_POCKET_TANK_320X240
+_Static_assert(SW_PB_Y + SW_PB_H + UI(4) + 7 * UI_TEXT(2) < UI(146) && UI(34) + 2 * SW_TH + UI(8) <= GIFT_BTN_Y &&
+               3 * SW_TW + 2 * UI(12) <= SW_W, "(this fork) FISH SWAP's two fish over its lines, its six tiles on the card over BACK");
+#endif
 static int sw_tile_xy(const tank_t *t, int k, int *x, int *y) {   /* tile k of the fish here: its top left; the count shown */
     int n = t->n_fish < SW_TILES ? t->n_fish : SW_TILES, X = sw_frame_x(), Y = sw_frame_y();
     int row = k / 3, inrow = row ? n - 3 : (n < 3 ? n : 3);
-    int x0 = X + (SW_W - inrow * SW_TW - (inrow - 1) * 12) / 2;
-    *x = x0 + (k % 3) * (SW_TW + 12); *y = Y + 34 + row * (SW_TH + 8);
+    int x0 = X + (SW_W - inrow * SW_TW - (inrow - 1) * UI(12)) / 2;
+    *x = x0 + (k % 3) * (SW_TW + UI(12)); *y = Y + UI(34) + row * (SW_TH + UI(8));
     return n;
 }
 static const char *sw_tile_why(const tank_t *t, int i) {   /* a tile that cannot go, and its word: visiting the asking tank is fine (Strato 11-22) */
@@ -13350,8 +13400,8 @@ static void sw_paint(ctx_t *c, const tank_t *t, int kind) {
     else if (kind == SWC_SAID) snprintf(title, sizeof title, "THE SWAP");
     else snprintf(title, sizeof title, "SWAP?");
     rect_fill(c, X, Y, W, H, 0x0e2233);
-    rect_fill(c, X, Y, W, 26, INK);
-    draw_text(c, X + (W - text_w(title, 2)) / 2, Y + 7, 2, GOLD, title);
+    rect_fill(c, X, Y, W, UI(26), INK);
+    draw_text(c, X + (W - text_w(title, UI_TEXT(2))) / 2, Y + UI(7), UI_TEXT(2), GOLD, title);
     rect_edge(c, X, Y, W, H, GOLD); rect_edge(c, X + 1, Y + 1, W - 2, H - 2, INK);
     if (kind == SWC_R_TILES) {
         int x, y, n = sw_tile_xy(t, 0, &x, &y);
@@ -13360,8 +13410,8 @@ static void sw_paint(ctx_t *c, const tank_t *t, int kind) {
             const char *why = sw_tile_why(t, k);
             rect_fill(c, x, y, SW_TW, SW_TH, 0x1c2f36); rect_edge(c, x, y, SW_TW, SW_TH, why ? DIM : 0x9fd8e2);
             char nm[16]; sw_upper(nm, t->fish[k].name, sizeof nm);
-            draw_text(c, x + (SW_TW - text_w(nm, 2)) / 2, y + SW_TH - 22, 2, why ? DIM : 0xffffff, nm);
-            if (why) draw_text(c, x + (SW_TW - text_w(why, 1)) / 2, y + 22, 1, 0xc8d6de, why);   /* (dim, and the word: never by color alone) */
+            draw_text(c, x + (SW_TW - text_w(nm, UI_TEXT(2))) / 2, y + SW_TH - UI(22), UI_TEXT(2), why ? DIM : 0xffffff, nm);
+            if (why) draw_text(c, x + (SW_TW - text_w(why, 1)) / 2, y + UI(22), 1, 0xc8d6de, why);   /* (dim, and the word: never by color alone) */
         }
         sw_one(c, X, Y, "BACK");
         return;
@@ -13369,8 +13419,8 @@ static void sw_paint(ctx_t *c, const tank_t *t, int kind) {
     if (kind == SWC_R_OFFER || (kind == SWC_I_ASKING) || (kind == SWC_SAID && !pair)) {   /* one fish: the gift card's head */
         const passport_t *pp = kind == SWC_R_OFFER ? &theirs : &mine;
         char nm[16]; sw_upper(nm, pp->name, sizeof nm);
-        sw_portrait_box(c, X + 12, Y + 36, 100, 84);
-        const int FX = X + 124;
+        sw_portrait_box(c, X + UI(12), Y + UI(36), UI(100), UI(84));
+        const int FX = X + UI(124);
         char hl[40], hv[24];
         if (kind == SWC_R_OFFER) {
             fish_t f; memset(&f, 0, sizeof f); passport_to_fish(pp, &f);
@@ -13379,36 +13429,36 @@ static void sw_paint(ctx_t *c, const tank_t *t, int kind) {
             home_fields(pp->home_tank, pp->home_name, "FROM", hl, sizeof hl, hv, sizeof hv);
             const char *L[4] = { "NAME", hl, "FORM", "STAGE" }, *V[4] = { nm, hv, form, STAGE_W[pp->stage & 3] };
             for (int i = 0; i < 4; i++) {
-                int fy = Y + 33 + i * 26, vx = FX;
+                int fy = Y + UI(33) + i * UI(26), vx = FX;
                 draw_text(c, FX, fy, 1, LBL, L[i]);
-                if (i == 1 && badge >= 0 && badge < LINK_BADGES) { link_badge_draw(c, FX + 6, fy + 17, 6, badge, 255); vx += 16; }
-                draw_text(c, vx, fy + 10, 2, 0xffffff, V[i]);
+                if (i == 1 && badge >= 0 && badge < LINK_BADGES) { link_badge_draw(c, FX + UI(6), fy + UI(17), UI(6), badge, 255); vx += UI(16); }
+                draw_text(c, vx, fy + 7 + UI(3), UI_TEXT(2), 0xffffff, V[i]);   /* (this fork: under the label's own 7 rows) */
             }
-            sw_center(c, X, Y + 140, "PICK ONE OF YOURS", 0xffffff); sw_center(c, X, Y + 160, "TO SEND BACK", 0xffffff);
-            rect_edge(c, X + 24, Y + 186, W - 48, 6, DIM);
+            sw_center(c, X, Y + GIFT_LINE1_Y, "PICK ONE OF YOURS", 0xffffff); sw_center(c, X, Y + GIFT_LINE2_Y, "TO SEND BACK", 0xffffff);
+            rect_edge(c, X + UI(24), Y + UI(186), W - UI(48), UI(6), DIM);
             sw_two(c, X, Y, "PICK", "NO THANKS");
             return;
         }
-        draw_text(c, FX, Y + 36, 1, LBL, "NAME"); draw_text(c, FX, Y + 46, 2, 0xffffff, nm);
+        draw_text(c, FX, Y + UI(36), 1, LBL, "NAME"); draw_text(c, FX, Y + UI(36) + 7 + UI(3), UI_TEXT(2), 0xffffff, nm);   /* (this fork: under the label's own 7 rows) */
         const swap_book_t *bb = b;
         uint32_t peer = kind == SWC_I_ASKING ? bb->out.peer : 0;
         if (peer) {
             home_fields(peer, gm_tank_name(t, peer), "TO", hl, sizeof hl, hv, sizeof hv);
-            draw_text(c, FX, Y + 72, 1, LBL, hl);
-            int vx = FX; if (badge >= 0 && badge < LINK_BADGES) { link_badge_draw(c, FX + 6, Y + 89, 6, badge, 255); vx += 18; }
-            draw_text(c, vx, Y + 82, 2, 0xffffff, hv);
+            draw_text(c, FX, Y + UI(72), 1, LBL, hl);
+            int vx = FX; if (badge >= 0 && badge < LINK_BADGES) { link_badge_draw(c, FX + UI(6), Y + UI(72) + 7 + UI(3) + 7 * UI_TEXT(2) / 2, UI(6), badge, 255); vx += UI(18); }
+            draw_text(c, vx, Y + UI(72) + 7 + UI(3), UI_TEXT(2), 0xffffff, hv);
         }
     } else {                                             /* the two fish: YOURS goes, THEIRS comes */
-        const int LX = X + 16, RX = X + W - 16 - SW_PB_W, BY = Y + SW_PB_Y;
-        draw_text(c, LX, Y + 32, 1, LBL, "YOURS"); draw_text(c, RX, Y + 32, 1, LBL, "THEIRS");
-        if (t->link_badge >= 0 && t->link_badge < LINK_BADGES) link_badge_draw(c, LX + text_w("YOURS", 1) + 10, Y + 35, 5, t->link_badge, 255);
-        if (badge >= 0 && badge < LINK_BADGES) link_badge_draw(c, RX + text_w("THEIRS", 1) + 10, Y + 35, 5, badge, 255);
+        const int LX = X + UI(16), RX = X + W - UI(16) - SW_PB_W, BY = Y + SW_PB_Y;
+        draw_text(c, LX, Y + UI(32), 1, LBL, "YOURS"); draw_text(c, RX, Y + UI(32), 1, LBL, "THEIRS");
+        if (t->link_badge >= 0 && t->link_badge < LINK_BADGES) link_badge_draw(c, LX + text_w("YOURS", 1) + UI(10), Y + UI(32) + 3, UI(5), t->link_badge, 255);   /* (at the label's middle) */
+        if (badge >= 0 && badge < LINK_BADGES) link_badge_draw(c, RX + text_w("THEIRS", 1) + UI(10), Y + UI(32) + 3, UI(5), badge, 255);
         sw_portrait_box(c, LX, BY, SW_PB_W, SW_PB_H); sw_portrait_box(c, RX, BY, SW_PB_W, SW_PB_H);
-        gm_arrow(c, X + W / 2, BY + 22, 8, 1, GOLD); gm_arrow(c, X + W / 2, BY + 52, 8, -1, 0xffffff);
-        draw_text(c, LX + (SW_PB_W - text_w(mn, 2)) / 2, BY + SW_PB_H + 4, 2, 0xffffff, mn);
-        draw_text(c, RX + (SW_PB_W - text_w(tn, 2)) / 2, BY + SW_PB_H + 4, 2, 0xffffff, tn);
+        gm_arrow(c, X + W / 2, BY + UI(22), UI(8), 1, GOLD); gm_arrow(c, X + W / 2, BY + UI(52), UI(8), -1, 0xffffff);
+        draw_text(c, LX + (SW_PB_W - text_w(mn, UI_TEXT(2))) / 2, BY + SW_PB_H + UI(4), UI_TEXT(2), 0xffffff, mn);
+        draw_text(c, RX + (SW_PB_W - text_w(tn, UI_TEXT(2))) / 2, BY + SW_PB_H + UI(4), UI_TEXT(2), 0xffffff, tn);
     }
-    const int LY = kind == SWC_I_ASKING || (kind == SWC_SAID && !pair) ? Y + 136 : Y + 146;
+    const int LY = kind == SWC_I_ASKING || (kind == SWC_SAID && !pair) ? Y + UI(136) : Y + UI(146);
     switch (kind) {
     case SWC_I_ASKING: snprintf(l1, sizeof l1, "ASKING THEIR KEEPER"); break;
     case SWC_I_LAST: case SWC_R_CONFIRM: snprintf(l1, sizeof l1, "%s GOES, %s COMES", mn, tn); snprintf(l2, sizeof l2, "FOR GOOD"); break;
@@ -13427,15 +13477,15 @@ static void sw_paint(ctx_t *c, const tank_t *t, int kind) {
         } break;
     }
     if (l1[0]) sw_center(c, X, LY, l1, 0xffffff);
-    if (l2[0]) sw_center(c, X, LY + 20, l2, kind == SWC_SAID && b->said.what == SWAP_SAID_SWAPPED ? GOLD : 0xffffff);
-    if (kind == SWC_I_ASKING || kind == SWC_R_WAITING) rect_edge(c, X + 24, Y + 186, W - 48, 6, DIM);
+    if (l2[0]) sw_center(c, X, LY + UI(20), l2, kind == SWC_SAID && b->said.what == SWAP_SAID_SWAPPED ? GOLD : 0xffffff);
+    if (kind == SWC_I_ASKING || kind == SWC_R_WAITING) rect_edge(c, X + UI(24), Y + UI(186), W - UI(48), UI(6), DIM);
     if (kind == SWC_I_LAST) sw_two(c, X, Y, "SWAP", "NO THANKS");
     else if (kind == SWC_R_CONFIRM) sw_two(c, X, Y, "SWAP", "BACK");
     else if (kind == SWC_I_ASKING || kind == SWC_R_WAITING) sw_one(c, X, Y, "CALL OFF");
     else if (kind == SWC_SAID && b->said.what == SWAP_SAID_SWAPPED) {   /* the stamp: nothing to tap */
-        const int SWD = 200, SH = 38, SX = X + (W - SWD) / 2, SY = Y + GIFT_BTN_Y - 2;
+        const int SWD = UI(200), SH = UI(38), SX = X + (W - SWD) / 2, SY = Y + GIFT_BTN_Y - 2;
         rect_edge(c, SX, SY, SWD, SH, GOLD); rect_edge(c, SX + 2, SY + 2, SWD - 4, SH - 4, GOLD);
-        draw_text(c, SX + (SWD - text_w("SWAPPED", 3)) / 2, SY + 8, 3, GOLD, "SWAPPED");
+        draw_text(c, SX + (SWD - text_w("SWAPPED", UI_TEXT(3))) / 2, SY + (SH - 7 * UI_TEXT(3)) / 2, UI_TEXT(3), GOLD, "SWAPPED");
     } else if (kind == SWC_SAID) sw_one(c, X, Y, "OK");
 }
 static uint32_t sw_key(const tank_t *t, int kind) {
@@ -13472,38 +13522,38 @@ void render_swap(const tank_t *t, uint16_t *fb, int stride) {
     if (kind == SWC_R_TILES) {
         int x, y, n = sw_tile_xy(t, 0, &x, &y);
         for (int k = 0; k < n; k++) { sw_tile_xy(t, k, &x, &y);
-            if (!sw_tile_why(t, k)) render_fish_portrait(fb, stride, x + SW_TW / 2.0f - PAGE_X, y + 28 - PAGE_Y, 1.0f, &t->fish[k], SW_TW - 24, t->clock); }
+            if (!sw_tile_why(t, k)) render_fish_portrait(fb, stride, x + SW_TW / 2.0f - PAGE_X, y + UI(28) - PAGE_Y, 1.0f * UI_F, &t->fish[k], SW_TW - UI(24), t->clock); }
     } else if (kind == SWC_R_OFFER || kind == SWC_I_ASKING || (kind == SWC_SAID && !pair)) {
         const passport_t *pp = kind == SWC_R_OFFER ? &theirs : &mine;
-        if (pp->uid) { memset(&f, 0, sizeof f); passport_to_fish(pp, &f); render_fish_portrait(fb, stride, X + 62 - PAGE_X, Y + 78 - PAGE_Y, 1.3f, &f, 80, t->clock); }
+        if (pp->uid) { memset(&f, 0, sizeof f); passport_to_fish(pp, &f); render_fish_portrait(fb, stride, X + UI(62) - PAGE_X, Y + UI(78) - PAGE_Y, 1.3f * UI_F, &f, UI(80), t->clock); }
     } else {
-        const int LX = X + 16, RX = X + SW_W - 16 - SW_PB_W, BY = Y + SW_PB_Y;
-        if (mine.uid) { memset(&f, 0, sizeof f); passport_to_fish(&mine, &f); render_fish_portrait(fb, stride, LX + SW_PB_W / 2.0f - PAGE_X, BY + SW_PB_H / 2.0f - PAGE_Y, 1.2f, &f, SW_PB_W - 24, t->clock); }
-        if (theirs.uid) { memset(&f, 0, sizeof f); passport_to_fish(&theirs, &f); render_fish_portrait(fb, stride, RX + SW_PB_W / 2.0f - PAGE_X, BY + SW_PB_H / 2.0f - PAGE_Y, 1.2f, &f, SW_PB_W - 24, t->clock); }
+        const int LX = X + UI(16), RX = X + SW_W - UI(16) - SW_PB_W, BY = Y + SW_PB_Y;
+        if (mine.uid) { memset(&f, 0, sizeof f); passport_to_fish(&mine, &f); render_fish_portrait(fb, stride, LX + SW_PB_W / 2.0f - PAGE_X, BY + SW_PB_H / 2.0f - PAGE_Y, 1.2f * UI_F, &f, SW_PB_W - UI(24), t->clock); }
+        if (theirs.uid) { memset(&f, 0, sizeof f); passport_to_fish(&theirs, &f); render_fish_portrait(fb, stride, RX + SW_PB_W / 2.0f - PAGE_X, BY + SW_PB_H / 2.0f - PAGE_Y, 1.2f * UI_F, &f, SW_PB_W - UI(24), t->clock); }
     }
     float left = -1;
     if (kind == SWC_R_OFFER) left = 1.0f - (float)(b->now - b->in.t0) / SWAP_ASK_MS;
     else if (kind == SWC_I_ASKING) left = 1.0f - (float)(b->now - b->out.t0) / SWAP_ASK_MS;
     else if (kind == SWC_R_WAITING) left = 1.0f - (float)(b->now - b->in.t0) / SWAP_LAST_MS;
     if (left > 1) left = 1;
-    if (left > 0) rect_fill(c, X + 25, Y + 187, (int)((SW_W - 50) * left), 4, 0x9fd8e2);
+    if (left > 0) rect_fill(c, X + UI(24) + 1, Y + UI(186) + 1, (int)((SW_W - UI(48) - 2) * left), UI(6) - 2, 0x9fd8e2);   /* (inside its edge) */
 }
 int render_swap_tap(const tank_t *t, float x, float y) {
     int kind = sw_eval(t);
     swap_book_t *b = swap_of(t);
     if (kind == SWC_OFF || !b) return RENDER_SW_TAP_NONE;
     const int X = sw_frame_x(), Y = sw_frame_y(), BY = Y + GIFT_BTN_Y;
-    if (x < X || x >= X + SW_W || y < Y || y >= Y + SW_H + 10) return RENDER_SW_TAP_NONE;   /* (off the card: nothing) */
+    if (x < X || x >= X + SW_W || y < Y || y >= Y + SW_H + UI(10)) return RENDER_SW_TAP_NONE;   /* (off the card: nothing) */
     int hit = RENDER_SW_TAP_CARD, tile = -1;
     bool two = kind == SWC_I_LAST || kind == SWC_R_OFFER || kind == SWC_R_CONFIRM;
     bool one = kind == SWC_I_ASKING || kind == SWC_R_WAITING || kind == SWC_R_TILES || (kind == SWC_SAID && b->said.what != SWAP_SAID_SWAPPED);
-    if (y >= BY - 10) {
+    if (y >= BY - UI(10)) {
         if (two) hit = x < X + SW_W / 2 ? RENDER_SW_TAP_YES : RENDER_SW_TAP_NO;
-        else if (one && x >= X + (SW_W - GIFT_BTN_W) / 2 - 20 && x < X + (SW_W + GIFT_BTN_W) / 2 + 20)
+        else if (one && x >= X + (SW_W - GIFT_BTN_W) / 2 - UI(20) && x < X + (SW_W + GIFT_BTN_W) / 2 + UI(20))
             hit = kind == SWC_R_TILES ? RENDER_SW_TAP_BACK : kind == SWC_SAID ? RENDER_SW_TAP_OK : RENDER_SW_TAP_CALLOFF;
     } else if (kind == SWC_R_TILES) {
         int tx, ty, n = sw_tile_xy(t, 0, &tx, &ty);
-        for (int k = 0; k < n; k++) { sw_tile_xy(t, k, &tx, &ty); if (x >= tx - 4 && x < tx + SW_TW + 4 && y >= ty - 4 && y < ty + SW_TH + 4) tile = k; }
+        for (int k = 0; k < n; k++) { sw_tile_xy(t, k, &tx, &ty); if (x >= tx - UI(4) && x < tx + SW_TW + UI(4) && y >= ty - UI(4) && y < ty + SW_TH + UI(4)) tile = k; }
         if (tile >= 0) hit = sw_tile_why(t, tile) ? RENDER_SW_TAP_CARD : RENDER_SW_TAP_FISH;   /* (a dim tile: its word says why) */
     }
     if (hit == RENDER_SW_TAP_CARD) return hit;
@@ -13529,15 +13579,15 @@ int render_swap_tap(const tank_t *t, float x, float y) {
 bool render_swap_button(const tank_t *t, int which, int *x, int *y) {
     int kind = sw_kind(t);
     if (kind == SWC_OFF) return false;
-    const int X = sw_frame_x(), Y = sw_frame_y(), BY = Y + GIFT_BTN_Y + GIFT_BTN_H / 2, gap = SW_W - 2 * GIFT_BTN_W - 24;
+    const int X = sw_frame_x(), Y = sw_frame_y(), BY = Y + GIFT_BTN_Y + GIFT_BTN_H / 2, gap = SW_W - 2 * GIFT_BTN_W - UI(24);
     if (which >= RENDER_SW_BTN_TILE0) {
         int tx, ty, n = sw_tile_xy(t, 0, &tx, &ty), k = which - RENDER_SW_BTN_TILE0;
         if (kind != SWC_R_TILES || k >= n) return false;
         sw_tile_xy(t, k, &tx, &ty); *x = tx + SW_TW / 2; *y = ty + SW_TH / 2; return true;
     }
     *y = BY;
-    if (which == RENDER_SW_BTN_LEFT) *x = X + 12 + GIFT_BTN_W / 2;
-    else if (which == RENDER_SW_BTN_RIGHT) *x = X + 12 + GIFT_BTN_W + gap + GIFT_BTN_W / 2;
+    if (which == RENDER_SW_BTN_LEFT) *x = X + UI(12) + GIFT_BTN_W / 2;
+    else if (which == RENDER_SW_BTN_RIGHT) *x = X + UI(12) + GIFT_BTN_W + gap + GIFT_BTN_W / 2;
     else *x = X + SW_W / 2;
     return true;
 }
@@ -13549,21 +13599,21 @@ int render_give_modal_tap(const tank_t *t, float x, float y) {
     if (step == RENDER_GM_OFF) return RENDER_GM_TAP_NONE;
     gift_book_t *g = gift_of(t);
     if (step == RENDER_GM_DONE) return RENDER_GM_TAP_HELD;   /* the travel bowl's card just went: this tap is its yes's double */
-    int X, Y; gm_frame(&X, &Y); const int H = gm_card_h(), W = GM_W, BY = Y + H - GM_BTN_H - 12;
-    if (x < X || x >= X + W || y < Y || y >= Y + H + 10) return RENDER_GM_TAP_NONE;   /* (off the card: nothing - a kid's stray tap) */
+    int X, Y; gm_frame(&X, &Y); const int H = gm_card_h(), W = GM_W, BY = Y + H - GM_BTN_H - UI(12);
+    if (x < X || x >= X + W || y < Y || y >= Y + H + UI(10)) return RENDER_GM_TAP_NONE;   /* (off the card: nothing - a kid's stray tap) */
     int hit = RENDER_GM_TAP_CARD;
     if (step == RENDER_GM_PICK) {
         for (int s = 0; s < LINK_EDGES; s++) {
             int RY = Y + GM_ROW_Y0 + s * GM_ROW_PITCH;
-            if (y >= RY - 4 && y < RY + GM_ROW_H + 4) hit = gm_row_open(t, g, s) ? (s ? RENDER_GM_TAP_RIGHT : RENDER_GM_TAP_LEFT) : RENDER_GM_TAP_CARD;
+            if (y >= RY - UI(4) && y < RY + GM_ROW_H + UI(4)) hit = gm_row_open(t, g, s) ? (s ? RENDER_GM_TAP_RIGHT : RENDER_GM_TAP_LEFT) : RENDER_GM_TAP_CARD;
         }
-        if (y >= BY - 8 && x >= X + (W - GM_BTN_W) / 2 - 20 && x < X + (W + GM_BTN_W) / 2 + 20) hit = RENDER_GM_TAP_BACK;
-    } else if (y >= BY - 10) {
+        if (y >= BY - UI(8) && x >= X + (W - GM_BTN_W) / 2 - UI(20) && x < X + (W + GM_BTN_W) / 2 + UI(20)) hit = RENDER_GM_TAP_BACK;
+    } else if (y >= BY - UI(10)) {
         if (step == RENDER_GM_CONFIRM) hit = x < X + W / 2 ? RENDER_GM_TAP_GIVE : RENDER_GM_TAP_BACK;
-        else if (x >= X + (W - GM_BTN_W) / 2 - 20 && x < X + (W + GM_BTN_W) / 2 + 20) hit = step == RENDER_GM_ASKING ? RENDER_GM_TAP_CALLOFF : RENDER_GM_TAP_OK;
+        else if (x >= X + (W - GM_BTN_W) / 2 - UI(20) && x < X + (W + GM_BTN_W) / 2 + UI(20)) hit = step == RENDER_GM_ASKING ? RENDER_GM_TAP_CALLOFF : RENDER_GM_TAP_OK;
     }
     if (step == RENDER_GM_MOVE || step == RENDER_GM_BOWL) {   /* the travel bowl: the yes on the left, BACK / NOT NOW on the right */
-        hit = y < BY - 10 ? RENDER_GM_TAP_CARD : x >= X + W / 2 ? RENDER_GM_TAP_BACK : step == RENDER_GM_MOVE ? RENDER_GM_TAP_MOVE : RENDER_GM_TAP_LETIN;
+        hit = y < BY - UI(10) ? RENDER_GM_TAP_CARD : x >= X + W / 2 ? RENDER_GM_TAP_BACK : step == RENDER_GM_MOVE ? RENDER_GM_TAP_MOVE : RENDER_GM_TAP_LETIN;
         if (hit == RENDER_GM_TAP_LETIN && progression_bowl_why(t) != BOWL_OK) hit = RENDER_GM_TAP_CARD;   /* a dim LET IN: its line says why */
         if (g_gm.busy && hit != RENDER_GM_TAP_BACK) hit = RENDER_GM_TAP_CARD;
     }
@@ -18312,7 +18362,7 @@ void render_breed_close(void) { g_bp.on = false; g_bp.a = 0; }
 bool render_breed_card_up(void) { return g_bp.on; }
 static int breed_fish_at(const tank_t *t, float x, float y);   /* below */
 bool render_breed_button_at(const tank_t *t, float x, float y) {   /* a firm press that is still a tap (touch_gate.h): the card, the chip, a fish */
-    if (g_bp.on) { int X = (TANK_W - 336) / 2, Y = (TANK_H - 268) / 2; return x >= X && x < X + 336 && y >= Y && y < Y + 278; }
+    if (g_bp.on) { int X = (TANK_W - UI(336)) / 2, Y = (TANK_H - UI(268)) / 2; return x >= X && x < X + UI(336) && y >= Y && y < Y + UI(268) + UI(10); }   /* (BP_W, BP_H: below) */
     return render_tool_chip_hit(t, x, y) || breed_fish_at(t, x, y) >= 0;
 }
 void render_breed_tool_up(const tank_t *t) {             /* the tool just picked up: a pair already set shows at once */
@@ -18338,22 +18388,26 @@ static int breed_fish_at(const tank_t *t, float x, float y) {
     }
     return best;
 }
-#define BP_W 336
-#define BP_H 268
-#define BP_BTN_H 34
+#define BP_W UI(336)
+#define BP_H UI(268)
+#define BP_BTN_H UI(34)
+#ifdef CONFIG_POCKET_TANK_320X240
+_Static_assert(BP_W <= TANK_W && BP_H <= TANK_H && UI(178) + 15 + UI(5) + 7 < BP_H - BP_BTN_H - UI(12),
+               "(this fork) the PAIR card on the 320 x 240 glass, YOU HAVE over its buttons");
+#endif
 static void bp_frame(int *X, int *Y) { *X = (TANK_W - BP_W) / 2; *Y = (TANK_H - BP_H) / 2; }
 /* every tap while the BREEDING tool is in hand (the tool owns the glass): the card's buttons, the chip's CANCEL, a fish */
 int render_breed_tap(tank_t *t, float x, float y) {
     if (t->tool != TOOL_BREED) return RENDER_BT_NONE;
     if (g_bp.on) {
         int X, Y; bp_frame(&X, &Y);
-        const int BW = (BP_W - 36) / 2, BY = Y + BP_H - BP_BTN_H - 12;
-        if (x < X || x >= X + BP_W || y < Y || y >= Y + BP_H + 10) return RENDER_BT_NONE;   /* (off the card: nothing - a kid's stray tap) */
-        if (y < BY - 10) return RENDER_BT_NONE;
+        const int BW = (BP_W - UI(36)) / 2, BY = Y + BP_H - BP_BTN_H - UI(12);
+        if (x < X || x >= X + BP_W || y < Y || y >= Y + BP_H + UI(10)) return RENDER_BT_NONE;   /* (off the card: nothing - a kid's stray tap) */
+        if (y < BY - UI(10)) return RENDER_BT_NONE;
         if (g_bp.opened > t->clock) g_bp.opened = -1e9;     /* (a clock gone back) */
         if (hold_spent_at(&g_bp.opened, tap_press(t), t->clock, TAP_W_S)) return RENDER_BT_HELD;   /* THE TOUCH RULE: a press begun before the card
                                                                    came up, or within TAP_W of it (a tap brings it up: the double's second half) */
-        bool left = x < X + 12 + BW + 6;
+        bool left = x < X + UI(12) + BW + UI(6);
         if (!g_bp.set) {
             if (!left) { render_breed_close(); tank_set_tool(t, TOOL_HAND); return RENDER_BT_CANCEL; }
             int a = uid_slot(t, g_bp.pa), b = uid_slot(t, g_bp.pb);
@@ -18372,9 +18426,9 @@ int render_breed_tap(tank_t *t, float x, float y) {
     return g_bp.on ? RENDER_BT_SECOND : g_bp.a ? RENDER_BT_FIRST : RENDER_BT_UNMARKED;
 }
 static void bp_line(ctx_t *c, int X, int W, int y, const char *s, uint32_t rgb) {
-    if (text_w(s, 2) <= W - 24) { draw_text(c, X + (W - text_w(s, 2)) / 2, y, 2, rgb, s); return; }
+    if (text_w(s, UI_TEXT(2)) <= W - UI(24)) { draw_text(c, X + (W - text_w(s, UI_TEXT(2))) / 2, y, UI_TEXT(2), rgb, s); return; }
     char a[40], b[40]; gm_split(s, a, b, sizeof a);
-    draw_text(c, X + (W - text_w(a, 2)) / 2, y - 10, 2, rgb, a); draw_text(c, X + (W - text_w(b, 2)) / 2, y + 10, 2, rgb, b);
+    draw_text(c, X + (W - text_w(a, UI_TEXT(2))) / 2, y - UI(10), UI_TEXT(2), rgb, a); draw_text(c, X + (W - text_w(b, UI_TEXT(2))) / 2, y + UI(10), UI_TEXT(2), rgb, b);
 }
 void render_breed_card(const tank_t *t, uint16_t *fb, int stride) {
     if (!g_bp.on) return;
@@ -18385,42 +18439,42 @@ void render_breed_card(const tank_t *t, uint16_t *fb, int stride) {
     const uint32_t INK = 0x13324f, EDGE = 0x9fd8e2;
     const int W = BP_W, H = BP_H; int X, Y; bp_frame(&X, &Y);
     rect_fill(c, X, Y, W, H, 0x0e2233);
-    rect_fill(c, X, Y, W, 26, INK);
-    draw_text(c, X + (W - text_w("SELECTIVE BREEDING", 2)) / 2, Y + 7, 2, 0xffffff, "SELECTIVE BREEDING");
+    rect_fill(c, X, Y, W, UI(26), INK);
+    draw_text(c, X + (W - text_w("SELECTIVE BREEDING", UI_TEXT(2))) / 2, Y + UI(7), UI_TEXT(2), 0xffffff, "SELECTIVE BREEDING");
     rect_edge(c, X, Y, W, H, EDGE); rect_edge(c, X + 1, Y + 1, W - 2, H - 2, INK);
-    const int PW = 100, PH = 84, PY = Y + 36, LX = X + 18, RX = X + W - 18 - PW;
+    const int PW = UI(100), PH = UI(84), PY = Y + UI(36), LX = X + UI(18), RX = X + W - UI(18) - PW;
     for (int k = 0; k < 2; k++) {
         int bx = k ? RX : LX, i = k ? ib : ia;
         rect_fill(c, bx, PY, PW, PH, 0x0a1824); rect_edge(c, bx, PY, PW, PH, EDGE);
         if (i < 0) { draw_text(c, bx + (PW - text_w("NEXT DOOR", 1)) / 2, PY + PH / 2 - 3, 1, 0x7fa3b5, "NEXT DOOR"); continue; }
         const fish_t *f = &t->fish[i];
-        render_fish_portrait(fb, stride, bx + PW / 2.0f - PAGE_X, PY + PH / 2.0f - PAGE_Y, 1.3f, f, PW - 20, t->clock + k * 0.8);   /* (page coordinates) */
-        draw_text(c, bx + (PW - text_w(f->name, 2)) / 2, PY + PH + 8, 2, 0xffffff, f->name);
+        render_fish_portrait(fb, stride, bx + PW / 2.0f - PAGE_X, PY + PH / 2.0f - PAGE_Y, 1.3f * UI_F, f, PW - UI(20), t->clock + k * 0.8);   /* (page coordinates) */
+        draw_text(c, bx + (PW - text_w(f->name, UI_TEXT(2))) / 2, PY + PH + UI(8), UI_TEXT(2), 0xffffff, f->name);
     }
-    const icon_t *hi = &icon_tool_breed;                /* the heart between them, at 2x */
-    blit_icon_scaled(c, X + (W - hi->w * 2) / 2, PY + (PH - hi->h * 2) / 2, hi, 2, true);
-    const int BW = (W - 36) / 2, BH = BP_BTN_H, BY = Y + H - BH - 12;
+    const icon_t *hi = &icon_tool_breed;                /* the heart between them, at 2x (this fork: 1x on a 320 x 240 board, as the critters' portraits) */
+    blit_icon_scaled(c, X + (W - hi->w * UI_TEXT(2)) / 2, PY + (PH - hi->h * UI_TEXT(2)) / 2, hi, UI_TEXT(2), true);
+    const int BW = (W - UI(36)) / 2, BH = BP_BTN_H, BY = Y + H - BH - UI(12);
     char line[48];
     if (!g_bp.set) {
         const fish_t *yf = ia >= 0 && t->fish[ia].stage < STAGE_ADULT ? &t->fish[ia] : ib >= 0 && t->fish[ib].stage < STAGE_ADULT ? &t->fish[ib] : NULL;
         if (yf) snprintf(line, sizeof line, "THEIR FRY ONCE %s GROWS UP", yf->name); else snprintf(line, sizeof line, "THEIR FRY COMES NEXT");
-        bp_line(c, X, W, Y + 156, line, 0xffffff);
+        bp_line(c, X, W, Y + UI(156), line, 0xffffff);
         snprintf(line, sizeof line, "%d", SD_PRICE_PAIR);
-        int pw = text_w(line, 2) + 22;
+        int pw = text_w(line, UI_TEXT(2)) + 16 + UI(6);   /* (this fork: the coin keeps its 16 px) */
         bool can = t->sd_balance >= SD_PRICE_PAIR;
-        price_tag(c, X + (W - pw) / 2, Y + 178, SD_PRICE_PAIR, can ? 0xffffff : MSP_QUIET);
-        if (!can) { snprintf(line, sizeof line, "YOU HAVE %d", (int)t->sd_balance); draw_text(c, X + (W - text_w(line, 2)) / 2, Y + 198, 2, MSP_QUIET, line); }
-        button(c, X + 12, BY, BW, BH, can ? 0x1c2f36 : 0x14252b, can ? 0xffffff : MSP_DIM, "PAIR THEM", 2);
-        button(c, X + W - 12 - BW, BY, BW, BH, 0x1c2f36, EDGE, "CANCEL", 2);
+        price_tag(c, X + (W - pw) / 2, Y + UI(178), SD_PRICE_PAIR, can ? 0xffffff : MSP_QUIET);
+        if (!can) { snprintf(line, sizeof line, "YOU HAVE %d", (int)t->sd_balance); draw_text(c, X + (W - text_w(line, UI_TEXT(2))) / 2, Y + UI(178) + 15 + UI(5), UI_TEXT(2), MSP_QUIET, line); }   /* (this fork: under the coin's own 16 rows) */
+        button(c, X + UI(12), BY, BW, BH, can ? 0x1c2f36 : 0x14252b, can ? 0xffffff : MSP_DIM, "PAIR THEM", UI_TEXT(2));
+        button(c, X + W - UI(12) - BW, BY, BW, BH, 0x1c2f36, EDGE, "CANCEL", UI_TEXT(2));
     } else {
         int young, st = progression_breed_state(t, &young);
         if (ia < 0 || ib < 0) snprintf(line, sizeof line, "WAITING FOR THEM TO COME HOME");
         else if (st == BREED_WAITING && young >= 0) snprintf(line, sizeof line, "WAITING FOR %s TO GROW UP", t->fish[young].name);
         else if (st == BREED_FULL) snprintf(line, sizeof line, "THE TANK IS FULL - A FRY NEEDS ROOM");
         else snprintf(line, sizeof line, "THE NEXT FRY IS THEIRS");
-        bp_line(c, X, W, Y + 172, line, 0xffffff);
-        button(c, X + 12, BY, BW, BH, 0x1c2f36, EDGE, "UNPAIR", 2);
-        button(c, X + W - 12 - BW, BY, BW, BH, 0x1c2f36, EDGE, "DONE", 2);
+        bp_line(c, X, W, Y + UI(172), line, 0xffffff);
+        button(c, X + UI(12), BY, BW, BH, 0x1c2f36, EDGE, "UNPAIR", UI_TEXT(2));
+        button(c, X + W - UI(12) - BW, BY, BW, BH, 0x1c2f36, EDGE, "DONE", UI_TEXT(2));
     }
 }
 #ifdef TANK_P4

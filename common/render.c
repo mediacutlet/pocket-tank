@@ -10921,6 +10921,20 @@ static uint32_t *bake_begin(bake_t *b, ctx_t *bc, int X, int Y, int W, int H, bo
 }
 static void bake_end(bake_t *b, uint32_t key, int h, uint32_t *tm, bool hold) { g_touched = tm; g_dirty_hold = hold; b->key = key; b->h = h; b->ok = true; }
 static void bake_blit(const bake_t *b, int X, int Y, int W, int H, uint16_t *fb, int stride) {
+#ifdef CONFIG_POCKET_TANK_320X240
+    /* (this fork) a card upstream sizes for its own glasses can be wider than a 320 x 240 board's frame (the gift,
+       travel-bowl and START OVER? cards are 336 px): the copy keeps to the frame's columns, or each row's ends would run
+       into its neighbours and the last row past the end of the frame - PSRAM the heap owns */
+    const int x0 = X < 0 ? 0 : X, x1 = X + W > TANK_W ? TANK_W : X + W;
+    if (x1 <= x0) return;
+    for (int y = 0; y < H; y++) {
+        int fy = Y + y;
+        if ((unsigned)fy >= (unsigned)TANK_H) continue;
+        OV_TAINT();
+        memcpy(fb + fy * stride + x0, b->buf + y * W + (x0 - X), (size_t)(x1 - x0) * 2);
+        touch_span_f(x0, x1 - 1, fy);
+    }
+#else
     for (int y = 0; y < H; y++) {
         int fy = Y + y;
         if ((unsigned)fy >= (unsigned)TANK_H) continue;
@@ -10928,6 +10942,7 @@ static void bake_blit(const bake_t *b, int X, int Y, int W, int H, uint16_t *fb,
         memcpy(fb + fy * stride + X, b->buf + y * W, (size_t)W * 2);
         touch_span_f(X, X + W - 1, fy);
     }
+#endif
 }
 /* a gift offered to us: its card (render.h) - baked (THE CARDS BAKED, above), its portrait and the time bar's fill live */
 static void gift_paint(ctx_t *c, const tank_t *t) {

@@ -10572,10 +10572,13 @@ static void snail_card_draw(ctx_t *c, const tank_t *t) {
 static void crab_collect_box(int *x, int *y, int *w, int *h) {   /* the crab card's COLLECT, where the status line stands */
     *w = UI(156); *h = MSP_CLOSE_H; *x = (TANK_W - *w) / 2; *y = (TANK_H - CRAB_CARD_H) / 2 + CRAB_CARD_H - CRIT_NAME_ROW_H - *h - UI(12);   /* (over the NAME row, 0.4.2) */
 }
+#ifndef CRIT_COLLECT_SLOP_DN
+#define CRIT_COLLECT_SLOP_DN 8          /* (this fork) COLLECT's slop below, down to NAME's (render.h's 320 x 240 block: less) */
+#endif
 bool render_crab_collect_hit(const tank_t *t, float x, float y) {
     if (t->cr_find <= 0) return false;
     int bx, by, bw, bh; crab_collect_box(&bx, &by, &bw, &bh);
-    return x >= bx - 8 && x < bx + bw + 8 && y >= by - 8 && y < by + bh + 8;
+    return x >= bx - 8 && x < bx + bw + 8 && y >= by - 8 && y < by + bh + CRIT_COLLECT_SLOP_DN;
 }
 /* the crab's portrait (its card at 2x; the name wheel's box at 1x, 0.4.2): top left (ox, oy) */
 static void crab_card_art(ctx_t *c, const tank_t *t, int ox, int oy, int S) {
@@ -10667,7 +10670,7 @@ static const char *octo_stage_name(const tank_t *t) { const float sz = 1.0f + t-
 bool render_octo_collect_hit(const tank_t *t, float x, float y) {
     if (!tank_octopus_live(t) || octopus_find_left() <= 0) return false;
     int bx, by, bw, bh; crab_collect_box(&bx, &by, &bw, &bh);
-    return x >= bx - 8 && x < bx + bw + 8 && y >= by - 8 && y < by + bh + 8;
+    return x >= bx - 8 && x < bx + bw + 8 && y >= by - 8 && y < by + bh + CRIT_COLLECT_SLOP_DN;
 }
 static void octo_card_draw(ctx_t *c, const tank_t *t) {
     { float rx, ry, rr; crit_spot(t, CRIT_NAME_OCTOPUS, &rx, &ry, &rr); ring(c, rx, ry, rr, 0x9fd8e2); }
@@ -11139,7 +11142,7 @@ static void seahorse_card_draw(ctx_t *c, const tank_t *t) {
      * column starts past the box instead; its longest line, "+NN.N TRUST PASSED ON" at scale 1, still ends inside
      * the card, and the two lines beside the right box (the title - SEAHORSE, or the keeper's name for it since
      * 0.4.2 - and the days) end before it */
-#define SH_CARD_TX (RENDER_CRIT_NAV_IN + RENDER_CRIT_NAV_W + UI(12))      /* the column's x, from the card's left */
+#define SH_CARD_TX (RENDER_CRIT_NAV_IN + RENDER_CRIT_NAV_W + UI(12))      /* the column's x, from the card's left (SHELVE's SURE? too) */
 #define SH_CARD_RIGHT_BOX (SEAHORSE_CARD_W - RENDER_CRIT_NAV_IN - RENDER_CRIT_NAV_W)
 #define SH_CARD_TITLE_N (FISH_NAME_MAX > 8 ? FISH_NAME_MAX : 8)           /* the longest title: SEAHORSE, or a name */
     const int TX = X + SH_CARD_TX;
@@ -11147,7 +11150,6 @@ static void seahorse_card_draw(ctx_t *c, const tank_t *t) {
                    "the seahorse card's column starts past the left arrow, and its longest line still fits");
     _Static_assert(SH_CARD_TX + SH_CARD_TITLE_N * 6 * UI_TEXT(3) < SH_CARD_RIGHT_BOX && SH_CARD_TX + 20 * 6 * UI_TEXT(2) < SH_CARD_RIGHT_BOX,
                    "the seahorse card's title and days line end before the right arrow");
-#undef SH_CARD_TX
 #undef SH_CARD_RIGHT_BOX
 #undef SH_CARD_TITLE_N
 #else
@@ -11327,23 +11329,30 @@ static const char *crit_waits(const tank_t *t, int item, char *out, size_t n) {
 static void crit_shelve_foot(ctx_t *c, const tank_t *t, int card) {
     int bx, by, bw, bh, X, Y, W;
     if (!render_crit_shelve_box(card, &bx, &by, &bw, &bh) || !crit_card_rect(card, &X, &Y, &W)) return;
-    if (!cs_armed(t, card)) { button(c, bx, by, bw, bh, 0x1c2f36, 0x9fd8e2, "SHELVE", 2); return; }
-    button(c, bx, by, bw, bh, 0x9fd8e2, 0x9fd8e2, "SURE?", 2);                 /* armed: lit, ink lettering (as SELL's +N OK?) */
-    draw_text(c, bx + (bw - text_w("SURE?", 2)) / 2, by + (bh - 14) / 2, 2,  0x031015, "SURE?");
+    if (!cs_armed(t, card)) { button(c, bx, by, bw, bh, 0x1c2f36, 0x9fd8e2, "SHELVE", UI_TEXT(2)); return; }
+    button(c, bx, by, bw, bh, 0x9fd8e2, 0x9fd8e2, "SURE?", UI_TEXT(2));                 /* armed: lit, ink lettering (as SELL's +N OK?) */
+    draw_text(c, bx + (bw - text_w("SURE?", UI_TEXT(2))) / 2, by + (bh - 7 * UI_TEXT(2)) / 2, UI_TEXT(2),  0x031015, "SURE?");
     /* while it asks, the card's body under its title gives way to who goes, on two lines: "SHELLY WAITS" / "ON THE SHELF"
        (the seahorse's text column is right of its portrait: the same there) */
-    const int top = Y + (card == RENDER_CARD_SNAIL ? 106 : card == RENDER_CARD_SHRIMP ? 70 : card == RENDER_CARD_URCHIN ? 114 : card == RENDER_CARD_CRAB || card == RENDER_CARD_OCTOPUS ? 94 : 44);
+    const int top = Y + (card == RENDER_CARD_SNAIL ? UI(106) : card == RENDER_CARD_SHRIMP ? UI(70) : card == RENDER_CARD_URCHIN ? UI(114) : card == RENDER_CARD_CRAB || card == RENDER_CARD_OCTOPUS ? UI(94) : UI(44));
+#ifdef CONFIG_POCKET_TANK_320X240
+    /* (this fork) the seahorse's column starts past the left arrow, and its body under the title reaches up beside the
+       arrows, which keep their 34 px: the words give way left of the right arrow, not over it */
+    const int x0 = card == RENDER_CARD_SEAHORSE ? X + SH_CARD_TX - UI(4) : X + 3;
+    const int x1 = card == RENDER_CARD_SEAHORSE ? X + W - RENDER_CRIT_NAV_IN - RENDER_CRIT_NAV_W - 2 : X + W - 4;
+#else
     const int x0 = card == RENDER_CARD_SEAHORSE ? X + 14 + SH_W * 2 + 8 : X + 3, x1 = X + W - 4;
-    int bot = by - 4;
-    if ((card == RENDER_CARD_CRAB && t->cr_find > 0) || (card == RENDER_CARD_OCTOPUS && octopus_find_left() > 0)) { int cx_, cy_, cw_, ch_; crab_collect_box(&cx_, &cy_, &cw_, &ch_); bot = cy_ - 4; }   /* (its COLLECT stays: it still answers) */
+#endif
+    int bot = by - UI(4);
+    if ((card == RENDER_CARD_CRAB && t->cr_find > 0) || (card == RENDER_CARD_OCTOPUS && octopus_find_left() > 0)) { int cx_, cy_, cw_, ch_; crab_collect_box(&cx_, &cy_, &cw_, &ch_); bot = cy_ - UI(4); }   /* (its COLLECT stays: it still answers) */
     src_t bg = src_color(0x04141a, 1.0f);
     for (int y = top; y < bot; y++) span(c, x0, x1, y, &bg, 255);
     char who[40], *sp;
     crit_waits(t, render_crit_item_of_card(card), who, sizeof who);
     if ((sp = strstr(who, " ON THE SHELF")) != NULL) *sp = 0;               /* "SHELLY WAITS" */
-    const int mid = (x0 + x1) / 2, ly = top + (bot - top) / 2 - 18;
-    draw_text(c, mid - text_w(who, 2) / 2, ly, 2, 0xffffff, who);
-    draw_text(c, mid - text_w("ON THE SHELF", 2) / 2, ly + 22, 2, 0xffffff, "ON THE SHELF");
+    const int mid = (x0 + x1) / 2, ly = top + (bot - top) / 2 - (2 * 7 * UI_TEXT(2) + UI(8)) / 2;   /* (two lines and their gap, centred) */
+    draw_text(c, mid - text_w(who, UI_TEXT(2)) / 2, ly, UI_TEXT(2), 0xffffff, who);
+    draw_text(c, mid - text_w("ON THE SHELF", UI_TEXT(2)) / 2, ly + 7 * UI_TEXT(2) + UI(8), UI_TEXT(2), 0xffffff, "ON THE SHELF");
 }
 bool render_critter_name_hit(const tank_t *t, int card, float x, float y) {
     int bx, by, bw, bh;
@@ -11354,7 +11363,7 @@ bool render_critter_name_hit(const tank_t *t, int card, float x, float y) {
 static void crit_name_foot(ctx_t *c, const tank_t *t, int card) {
     int bx, by, bw, bh, k = render_crit_name_of_card(card);
     if (k < 0 || !render_crit_name_box(card, &bx, &by, &bw, &bh)) return;
-    button(c, bx, by, bw, bh, 0x1c2f36, 0x9fd8e2, t->crit_name[k][0] ? "RENAME" : "NAME", 2);
+    button(c, bx, by, bw, bh, 0x1c2f36, 0x9fd8e2, t->crit_name[k][0] ? "RENAME" : "NAME", UI_TEXT(2));
 }
 bool render_crit_spot(const tank_t *t, int k, float *x, float *y, float *r) {
     if (k < 0 || k >= CRIT_NAME_N) return false;

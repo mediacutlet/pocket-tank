@@ -1944,6 +1944,10 @@ _Static_assert(MSP_CARD_SUB_Y + 7 * UI_TEXT(2) <= MSP_CARD_H - UI(10) - MSP_CARD
 #define RENDER_CRIT_NAME_W   UI(132)
 #undef  RENDER_CRIT_FOOT_GAP
 #define RENDER_CRIT_FOOT_GAP UI(16)
+/* the crab's and the octopus's COLLECT stand over NAME's row: upstream leaves 14 px between the two buttons, COLLECT's 8 px
+   of slop below and NAME's 6 above. Scaled the gap is UI(12) + 2 = 10, and NAME keeps its 6 (--selftest-crit-names holds
+   its slop), so COLLECT's reaches down only to it */
+#define CRIT_COLLECT_SLOP_DN (UI(12) + 2 - 6)
 /* THE TANK LINK (0.4): link mode's hint and notices, and VISITORS, the collection's pages -
    this board's values for upstream's LINK_* and COLL_* names */
 

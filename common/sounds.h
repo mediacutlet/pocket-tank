@@ -8,7 +8,7 @@
 #include <stdint.h>
 
 #define SND_RATE 16000
-#define SND_BANK_BYTES 174556u
+#define SND_BANK_BYTES 182066u
 #define SND_ADPCM_BLOCK 256           /* samples a block */
 #define SND_ADPCM_BLOCK_BYTES 132     /* s16 first sample, step index, pad, 128 nibble bytes */
 enum { SND_PCM = 0, SND_ADPCM = 1 };
@@ -40,6 +40,7 @@ enum {
     SND_ERROR,
     SND_CRAB_FIND,
     SND_CRAB_COIN,
+    SND_PLOP,
     SND_COUNT
 };
 
@@ -56,7 +57,7 @@ typedef struct {
     uint16_t gain_q8;         /* playback gain, 256 = 0 dB (gains.csv) */
 } snd_cue_t;
 
-#define SND_N_CLIPS 19
+#define SND_N_CLIPS 20
 extern const snd_clip_t SND_CLIPS[SND_N_CLIPS];
 extern const snd_cue_t  SND_CUES[SND_COUNT];
 

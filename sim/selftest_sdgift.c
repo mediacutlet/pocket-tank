@@ -398,7 +398,7 @@ static void save_rules(void) {
     progression_wake(&t, 0);
     SCHECK(!memcmp(&t.sdg, &want, sizeof want) && t.sd_balance == 1234, "the book did not come back from the save (seq %u, out %u, bal %d)", t.sdg.seq, t.sdg.out.nonce, t.sd_balance);
     static uint8_t f[4096]; FILE *fp = fopen(sav, "rb"); size_t n = fp ? fread(f, 1, sizeof f, fp) : 0; if (fp) fclose(fp);
-    SCHECK(n == 2200, "the save is %zu B (want 2200)", n);
+    SCHECK(n == 2304, "the save is %zu B (want 2304)", n);
     uint32_t seq; memcpy(&seq, f + 2016 + 12, 4); SCHECK(seq == 7, "the giving count is not at 2028 (%u)", seq);
     fp = fopen(sav, "wb"); if (fp) { fwrite(f, 1, 2008, fp); fclose(fp); }   /* the save before this build: no book */
     tank_init(&t, 31); progression_wake(&t, 0);

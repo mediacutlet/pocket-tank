@@ -12,9 +12,11 @@ read before a flash.
 | Waveshare 1.75C (the bowl) | 466 circle | `TANK_ROUND` | `make ROUND=1` -> `fishsim-round` | `tools/flash_round.sh` (`fw-build-175c`) | its USB serial (`ROUND_SERIAL`, tools/boards.local.sh) |
 | Waveshare 2.06 (the watch) | 410 x 502 portrait, 100 px corners | `TANK_WATCH` | `make WATCH=1` -> `fishsim-watch` | `tools/flash_watch.sh` (`fw-build-206`) | its USB serial (`WATCH_SERIAL`, tools/boards.local.sh) |
 | Waveshare 2.16 (the square, 2026-10-12) | 480 x 480, ~40 px corners | `TANK_SQUARE` | `make SQUARE=1` -> `fishsim-square` | `tools/flash_square.sh` (`fw-build-216`) | its USB serial (`SQUARE_SERIAL`, tools/boards.local.sh) |
+| Waveshare ESP32-P4 10.1 (the HOME TANK, an ESP32-P4: its own target and ESP-IDF 5.5) | 1280 x 800 IPS, drawn 2x from a 640 x 400 world | `TANK_P4` | `make P4=1` -> `fishsim-p4` | `tools/flash_p4.sh` (`fw-build-p4`, IDF 5.5) | its USB serial (`P4_SERIAL`, tools/boards.local.sh) |
 
 Each board's own traps are in its doc (board-amoled-1.75c.md,
-board-amoled-2.06-watch.md, board-amoled-2.16.md).
+board-amoled-2.06-watch.md, board-amoled-2.16.md, board-p4-10.1.md,
+board-tab5.md).
 
 ## What is shared, and where a board may differ
 

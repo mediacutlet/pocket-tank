@@ -119,6 +119,8 @@ typedef enum {
     /* SAND DOLLAR GIFTS (0.4.2, sdgift.h): money, not fish - see link_sd_send below */
     LEV_SD_IN,           /* receiver: peer + edge + nonce + amount: a gift from that tank - decide it (sdg_in), save, link_sd_answer */
     LEV_SD_DONE,         /* giver: peer + edge + nonce + amount + reason (SDG_V_*): the answer to our gift - settle the OUT note */
+    /* FISH SWAP (0.4.3, swap.h): one frame type, its kind in reason - the protocol is swap.c's */
+    LEV_SWAP,            /* peer + reason (SWK_*) + nonce (the swap's id) + uid + amount (SWAP_NO_*) + pp (ms_left 1 = it carried one) */
     LEV_COUNT
 } link_ev_type_t;
 
@@ -155,6 +157,8 @@ typedef struct {
        it is answered "we have it" whatever RECEIVED says: that list keeps the last 16, the fish stays (0.4.2, LK-2: the
        giver's GIVEN_LOST brought it back there, two copies). NULL = RECEIVED alone */
     bool (*ours)(void *ctx, uint32_t uid);
+    /* FISH SWAP (0.4.3): this tank's own fish are at POP_CAP (its beacon says so: the GIVE card offers SWAP). NULL = never */
+    bool (*full)(void *ctx);
 } link_host_t;
 
 /* what the NEARBY row and the arrows draw */
@@ -260,6 +264,24 @@ void    link_sd_answer(link_t *L, uint32_t peer, uint32_t nonce, int verdict); /
 bool    link_sd_busy(const link_t *L);                     /* a gift of ours in flight in the engine */
 void    link_sd_forget(link_t *L, uint32_t nonce);         /* stop sending that gift (it came back to us after a day) */
 void    link_test_as_041(link_t *L, bool on);              /* the selftest: this engine acts as a 0.4.1 tank's (no gifts) */
+
+/* FISH SWAP (0.4.3, swap.h). A tank of this build says so in its beacon (BF_SWAP); an older one never gets a swap frame.
+ * The engine only carries the frames: the protocol, its resends and its notes are swap.c's */
+bool    link_swap_send(link_t *L, uint32_t peer, int kind, uint32_t sid, uint32_t uid, int reason, const passport_t *pp);   /* false: not linked */
+bool    link_peer_swap(const link_t *L, uint32_t tank);    /* that tank takes swaps */
+/* that tank's release as its beacon says it (0.4.3 on: version.h's PT_RELEASE_NUM without the hotfix part, 0xMMmmpp00);
+   0 = not known - an older tank (0.4.2, a 0.4.3 dev build before this) sends none. Nothing reads it yet (the 0.4.4 card) */
+uint32_t link_peer_release(const link_t *L, uint32_t tank);
+bool    link_peer_full(const link_t *L, uint32_t tank);    /* ... and its own fish are at POP_CAP (its last beacon) */
+bool    link_swap_outward(const link_t *L, uint32_t uid);  /* FISH SWAP: a trip of this fish of ours under way or on (offered, accepted, away) */
+uint32_t link_swap_away_peer(const link_t *L, uint32_t uid);   /* FISH SWAP: the tank this fish of ours visits (0 none; a paused door counts) */
+void    link_swap_poof(link_t *L, uint32_t uid, uint32_t home);   /* FISH SWAP: that tank's visitor to bubbles here - before an ABORT, so its home
+                                                                     never brings it back while it still swims here */
+void    link_swap_let_go(link_t *L, uint32_t uid);           /* FISH SWAP: one of ours swapped where it is next door - no lease, no restore */
+void    link_swap_settle(link_t *L, uint32_t uid, uint32_t home);   /* ... a visitor kept as ours: its visit ends here */
+uint32_t link_now(const link_t *L);                         /* the engine's clock (ms, as its caller gives it): the swap's timers */
+bool    link_frame_is_swap(const uint8_t *buf, int len);   /* the selftest: a swap frame (to lose it on purpose) */
+void    link_test_as_042(link_t *L, bool on);              /* the selftest: this engine acts as a 0.4.2 tank's (no swaps) */
 
 /* what link mode's page draws (render_link_mode), read off the engine */
 enum { LV_FREE, LV_ARMED, LV_ASKED, LV_TWO, LV_OPEN };   /* an edge: glass / our arrow asking / one tank asks here / two do / the door is open */

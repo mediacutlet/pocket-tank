@@ -1,0 +1,14 @@
+# sdkconfig.tab5radio - the SMALL home tank (M5Stack Tab5) WITH its radio chip: on top of
+# sdkconfig.defaults, sdkconfig.p4, sdkconfig.tab5 and sdkconfig.p4radio (tools/flash_tab5.sh --radio).
+# The Tab5's C6 sits on SDIO slot 1 on other pins than the 10.1's: CLK 12, CMD 13, D0-3 11/10/9/8
+# (esp_hosted's own M5Stack Tab5 board choice), its reset on GPIO 15 (that choice leaves the reset
+# line at the P4's stock 54, so it is named here). Its power (WLAN_PWR_EN, expander 0x44 P0) is on
+# from boot (display_port_jd9365.c, tab5 expanders); its antenna is the built-in one (0x43 P0 low).
+CONFIG_ESP32P4_TAB5_C6_BOARD=y
+CONFIG_ESP_HOSTED_HOST_RESET_GPIO=15
+CONFIG_ESP_HOSTED_HOST_SDIO_PIN_CLK=12
+CONFIG_ESP_HOSTED_HOST_SDIO_PIN_CMD=13
+CONFIG_ESP_HOSTED_HOST_SDIO_PIN_D0=11
+CONFIG_ESP_HOSTED_HOST_SDIO_PIN_D1=10
+CONFIG_ESP_HOSTED_HOST_SDIO_PIN_D2=9
+CONFIG_ESP_HOSTED_HOST_SDIO_PIN_D3=8

@@ -1,0 +1,6 @@
+# BETA (2026-11-22): the home tank on the Waveshare ESP32-P4-WIFI6-Touch-LCD-7 (7 inch, 720 x 1280, ILI9881C).
+# On top of sdkconfig.defaults AND sdkconfig.p4 (the 10.1's chip, flash, console and ports), ESP-IDF 5.5:
+#   tools/flash_p4_beta.sh 7   (idf.py ... -DSDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.p4;sdkconfig.p4lcd7")
+# The world is the Tab5's (720 tall, TANK_TAB5); the hardware is Waveshare's (NOT the Tab5's: no expanders, no ES8388).
+# NOT SEEN ON A BOARD. docs/board-p4-7-8-beta.md has the sources and the unknowns.
+CONFIG_POCKET_TANK_P4_LCD7=y

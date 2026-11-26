@@ -56,6 +56,9 @@ typedef struct {
 } jelly_theme_t;
 #define JELLY_THEME_N 3
 extern const jelly_theme_t JELLY_THEMES[JELLY_THEME_N];
+/* a jelly tank's name in MY TANKS (0.4.3: up to three on a board, one a theme - shelf_new_jelly): the theme told on its
+   plate, two lines of seven letters. A tank made before 0.4.3 keeps the name it has (JELLIES, or the keeper's) */
+extern const char *const JELLY_TANK_NAMES[JELLY_THEME_N];
 
 typedef struct {
     uint8_t  species, neon;

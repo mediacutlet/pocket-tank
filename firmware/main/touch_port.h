@@ -6,12 +6,14 @@
 bool touch_port_init(void);
 bool touch_port_deep_sleep(void);   /* the night's deep sleep: the chip's own sleep, its reset left high (true = it took it); the wake is a reboot */
 void touch_port_poll(tank_t *t);
+void touch_port_select(int fish, int64_t now_us);   /* the director's `card`: a fish's stats card up (as a tap on it), -1 = down */
 int  touch_port_selected(void);   /* tapped fish for the stats card, RENDER_CARD_SNAIL for the snail's, -1 = none */
 /* milestones page: a tap ON the open stats card (its MORE button, or any of
  * it) flips to it; it has no
  * auto-dismiss - the next tap anywhere closes it (and the card, if still up).
  * touch_port_show_milestones is the director's cue (needs no card). */
 bool touch_port_milestones(void);
+bool touch_port_page_open(void);   /* a page, a prompt or a card owned the glass at the last poll (the big screens' radio update waits for the bare tank) */
 void touch_port_show_milestones(bool on);
 void touch_port_dismiss(void);    /* drop the card and the page: a flow (the birth flow) took the glass */
 void touch_port_set_inverted(bool inverted);   /* mirror coords when the screen is flipped */

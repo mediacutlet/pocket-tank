@@ -3,6 +3,7 @@ bool touch_port_init(void) { return false; }
 bool touch_port_deep_sleep(void) { return false; }
 void touch_port_poll(tank_t *t) { (void)t; }
 int  touch_port_selected(void) { return -1; }
+void touch_port_select(int fish, int64_t now_us) { (void)fish; (void)now_us; }
 static bool s_ms;
 bool touch_port_milestones(void) { return s_ms; }
 void touch_port_show_milestones(bool on) { s_ms = on; }
@@ -14,6 +15,7 @@ void touch_port_confirm_open(void) { s_cf = true; s_cf_ans = 0; }
 void touch_port_confirm_open_page(int page) { (void)page; s_cf = true; s_cf_ans = 0; }
 bool touch_port_confirm_answer(int ans) { if (!s_cf) return false; s_cf = false; s_cf_ans = ans == 2 || ans == 3 ? ans : ans > 0 ? 1 : -1; return true; }
 bool touch_port_confirm_up(void) { return s_cf; }
+bool touch_port_page_open(void) { return false; }   /* (the big screens' radio update waits for a bare tank; no glass here) */
 float touch_port_confirm_frac(void) { return s_cf ? 1.0f : 0.0f; }
 int  touch_port_confirm_take(void) { int a = s_cf_ans; s_cf_ans = 0; return a; }
 bool touch_port_pressed_since(int64_t us) { (void)us; return false; }

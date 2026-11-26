@@ -396,7 +396,7 @@ static void case_k(void) {
     {   static uint8_t b[8192]; uint32_t chk = 0, tms = 0; long nb = 0;
         FILE *f = fopen(getenv("POCKET_TANK_SAVE"), "rb"); if (f) { nb = (long)fread(b, 1, sizeof b, f); fclose(f); }
         if (nb >= 2200) { memcpy(&chk, b + 2176, 4); memcpy(&tms, b + 2180, 4); }
-        if (nb != 2200 || !chk || !(tms & TMS_FIRST_REEF)) BW_FAIL("%s: the save (%ld B) does not owe the card (check %08x, tank badges %05x)", w, nb, (unsigned)chk, (unsigned)tms);
+        if (nb != 2304 || !chk || !(tms & TMS_FIRST_REEF)) BW_FAIL("%s: the save (%ld B) does not owe the card (check %08x, tank badges %05x)", w, nb, (unsigned)chk, (unsigned)tms);
     }
     sim_clock_shift(1 * 3600); boot(); s_k_was = false;   /* night 2 (slept again without the light), then the light on */
     T.light_manual_off = false; progression_settings_changed();

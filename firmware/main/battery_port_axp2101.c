@@ -8,6 +8,8 @@
 #include "axp2101_reason.h"
 #include "advanced.h"
 #include "display_port.h"      /* board_is_square */
+#include "blackbox.h"
+#include "i2c_guard.h"           /* the bus lock: a read-modify-write of a register is one step for every task (the audio task switches ALDO1) */
 #include "driver/i2c_master.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
@@ -78,6 +80,18 @@ bool battery_port_init(i2c_master_bus_handle_t bus) {
     i2c_device_config_t cfg = { .dev_addr_length = I2C_ADDR_BIT_LEN_7,
                                 .device_address = AXP2101_ADDR, .scl_speed_hz = 400000 };
     if (i2c_master_bus_add_device(bus, &cfg, &s_dev) != ESP_OK) return false;
+#ifndef TANK_P4   /* (the big screens have no black box in 0.4.3: blackbox.h) */
+    {   /* THE BLACK BOX (0.4.3): the PMIC as this boot found it - why the last run ended (power-off source), what woke it, the
+           protections that can cut the power (the watchdog 18/19, PWROFF_EN 22, the DCDC under-voltage cut 23, the VSYS
+           level 24), before anything below writes them. The watch's REG 90 is the one display_port read before switching
+           its rails on (watch_rails_on): that is the value as found */
+        uint8_t regs[BB_PMIC_N] = { 0 }; uint16_t ok = 0;
+        for (int i = 0; i < BB_PMIC_N; i++) if (rd(bb_pmic_regs[i], &regs[i])) ok |= (uint16_t)(1u << i);
+        const int r90 = display_port_boot_reg90();
+        for (int i = 0; i < BB_PMIC_N; i++) if (bb_pmic_regs[i] == 0x90 && r90 >= 0) { regs[i] = (uint8_t)r90; ok |= (uint16_t)(1u << i); }
+        blackbox_boot_pmic(regs, ok);
+    }
+#endif
     /* charge current: the PMIC's default read back as code 0x11, past the
      * 1000 mA (code 16) top of the table - several C for the 200 mAh 302530
      * cell on this board. 0.5C = 100 mA (code 4; codes 0-8 are 25 mA steps)
@@ -89,19 +103,23 @@ bool battery_port_init(i2c_master_bus_handle_t bus) {
     const int code = icc_code(board_charge_ma());
     uint8_t icc, iin = 0xFF;
     rd(0x16, &iin);                               /* the VBUS input limit (read only: 0 = 100 mA, 1 = 500, 2 = 900, 3 = 1000, 4 = 1500, 5 = 2000) */
+    i2c_guard_lock();
     if (rd(0x62, &icc)) {
         uint8_t wr[2] = { 0x62, (uint8_t)((icc & 0xE0) | code) };
         bool ok = i2c_master_transmit(s_dev, wr, 2, 100) == ESP_OK;
         if (ok) ESP_LOGI("battery", "AXP2101 fuel gauge up; charge current code %d -> %d (%d mA); VBUS input limit code %d", icc & 0x1F, code, icc_ma(code), iin & 0x07);
         else ESP_LOGI("battery", "AXP2101 fuel gauge up; charge current code %d unchanged (write failed)", icc & 0x1F);
     } else ESP_LOGI("battery", "AXP2101 fuel gauge up");
+    i2c_guard_unlock();
     const uint8_t tc = (uint8_t)(board_trickle_ma() / 25);
     for (int i = 0; i < 2; i++) {                 /* 61 precharge, 63 end of charge */
         uint8_t reg = i ? 0x63 : 0x61, v = 0;
-        if (i2c_master_transmit_receive(s_dev, &reg, 1, &v, 1, 100) != ESP_OK) continue;
+        i2c_guard_lock();
+        if (i2c_master_transmit_receive(s_dev, &reg, 1, &v, 1, 100) != ESP_OK) { i2c_guard_unlock(); continue; }
         uint8_t w[2] = { reg, (uint8_t)((v & 0xF0) | tc) };
-        if (i2c_master_transmit(s_dev, w, 2, 100) == ESP_OK)
-            ESP_LOGI("battery", "%s current %d -> %d mA", i ? "end-of-charge" : "precharge", (v & 0x0F) * 25, tc * 25);
+        const bool wok = i2c_master_transmit(s_dev, w, 2, 100) == ESP_OK;
+        i2c_guard_unlock();
+        if (wok) ESP_LOGI("battery", "%s current %d -> %d mA", i ? "end-of-charge" : "precharge", (v & 0x0F) * 25, tc * 25);
     }
     return true;
 }
@@ -115,9 +133,12 @@ static bool rd(uint8_t reg, uint8_t *val) {
 bool battery_port_poweroff(void) {
     if (!s_dev) return false;
     uint8_t v;
-    if (!rd(REG_COMMON_CFG, &v)) return false;
+    i2c_guard_lock();
+    if (!rd(REG_COMMON_CFG, &v)) { i2c_guard_unlock(); return false; }
     uint8_t wr[2] = { REG_COMMON_CFG, (uint8_t)(v | 0x01) };
-    return i2c_master_transmit(s_dev, wr, 2, 100) == ESP_OK;
+    const bool ok = i2c_master_transmit(s_dev, wr, 2, 100) == ESP_OK;
+    i2c_guard_unlock();
+    return ok;
 }
 
 /* ---- the PWR key (2026-09-16): REG 41 IRQ enables, REG 49 IRQ status 1
@@ -142,10 +163,12 @@ void battery_port_key_init(void) {
       ESP_LOGI("battery", "PMIC at boot: power-on source %02x, power-off source %02x, common cfg %02x | IRQ status %02x %02x %02x (49: bit3 short press, bit2 long, bit1 key down, bit0 key up)",
                r20, r21, r10, r48, r49, r4a);
       s_boot_irq0 = r48; s_boot_irq2 = r4a; }         /* kept: the reason a charge stopped before this boot (0.4.2) */
+    i2c_guard_lock();
     bool ok = rd(0x27, &v27) && wr(0x27, (uint8_t)((v27 & ~0x0F) | 0x0C));   /* OFFLEVEL 10 s (the firmware's 1.5 s long press saves + cuts first), ONLEVEL 128 ms */
     ok = rd(0x41, &v) && wr(0x41, (uint8_t)(v | 0x0E)) && ok;           /* short + long press IRQs on (the defaults, made sure of), and the
                                                                             key-down edge: a press must come after one (key_poll) */
     ok = wr(0x48, 0xFF) && wr(0x49, 0xFF) && wr(0x4A, 0xFF) && ok;       /* the power-on press itself: cleared */
+    i2c_guard_unlock();
     ESP_LOGI("battery", "PWR key%s: REG 27 was %02x (power-on hold %s, long press %s) -> power-on hold 128 ms; short press = sleep, %s = power-off, 10 s = the PMIC's own cut",
              ok ? "" : " (a register write FAILED)", v27, ON[v27 & 3], IRQ[(v27 >> 4) & 3], IRQ[(v27 >> 4) & 3]);
 }
@@ -172,12 +195,15 @@ void battery_port_key_clear(void) {
 int battery_port_key_poll(void) {
     if (!s_dev) return 0;
     uint8_t st, again = 0;
-    if (!rd(0x49, &st) || !(st & 0x0E)) return 0;
+    i2c_guard_lock();                                                   /* read, read again, clear what was read: one step */
+    if (!rd(0x49, &st) || !(st & 0x0E)) { i2c_guard_unlock(); return 0; }
     if ((st & 0x0C) && (!rd(0x49, &again) || (again & 0x0E) != (st & 0x0E))) {
+        i2c_guard_unlock();
         ESP_LOGW("battery", "PWR key: REG 49 read %02x, then %02x - a misread, ignored", st, again);
         return 0;
     }
     wr(0x49, (uint8_t)(st & 0x0E));                                     /* clear what was taken */
+    i2c_guard_unlock();
     int64_t now = esp_timer_get_time();
     if (st & 0x02) s_key_down_us = now;                                 /* the key went down */
     if (!(st & 0x0C)) return 0;
@@ -198,7 +224,13 @@ int battery_port_key_poll(void) {
 void battery_port_key_trace(int seconds) {
     if (!s_dev) return;
     int64_t end = esp_timer_get_time() + (int64_t)seconds * 1000000, down = 0, last_up = 0; int n = 0;
-    uint8_t en = 0; rd(0x41, &en); wr(0x41, (uint8_t)(en | 0x0F));       /* the edge IRQs too, for the trace only */
+    uint8_t en = 0;
+    i2c_guard_lock();
+    const bool en_ok = rd(0x41, &en) && wr(0x41, (uint8_t)(en | 0x0F));   /* the edge IRQs too, for the trace only - never written on a failed
+                                                                            read (0.4.3: a garbled 0 would have switched the key's IRQs off
+                                                                            at the end, and the PWR key with them) */
+    i2c_guard_unlock();
+    if (!en_ok) { ESP_LOGW("battery", "key trace: REG 41 not read - no trace"); return; }
     wr(0x49, 0xFF);
     ESP_LOGI("battery", "key trace: press the PWR key a few times, naturally, in the next %d s (the tank holds still; nothing sleeps)", seconds);
     while (esp_timer_get_time() < end) {
@@ -262,11 +294,14 @@ bool battery_port_set_rail(const char *name, bool on) {
     for (size_t i = 0; i < sizeof RAILS / sizeof RAILS[0]; i++) {
         if (strcasecmp(name, RAILS[i].name)) continue;
         uint8_t v;
-        if (!rd(RAILS[i].reg, &v)) return false;
+        i2c_guard_lock();                             /* the audio task switches ALDO1 here while the tank task heals ALDO2 (0.4.3) */
+        if (!rd(RAILS[i].reg, &v)) { i2c_guard_unlock(); return false; }
         uint8_t nv = on ? (v | (1 << RAILS[i].bit)) : (v & ~(1 << RAILS[i].bit));
-        if (nv == v) return true;
+        if (nv == v) { i2c_guard_unlock(); return true; }
         uint8_t wr[2] = { RAILS[i].reg, nv };
-        return i2c_master_transmit(s_dev, wr, 2, 100) == ESP_OK;
+        const bool ok = i2c_master_transmit(s_dev, wr, 2, 100) == ESP_OK;
+        i2c_guard_unlock();
+        return ok;
     }
     ESP_LOGW("battery", "no such rail '%s' (dcdc1 and the RTC LDO are never switched)", name);
     return false;
@@ -275,7 +310,15 @@ bool battery_port_set_rail(const char *name, bool on) {
 void battery_port_trim_rails(void) {
     static const char *off[] = { "dcdc2", "dcdc3", "dcdc4", "aldo1", "aldo2", "aldo3", "aldo4", "bldo1", "bldo2", "cpusldo", "dldo1", "dldo2" };
     int n = 0;
-    for (size_t i = 0; i < sizeof off / sizeof off[0]; i++) n += battery_port_set_rail(off[i], false);
+    for (size_t i = 0; i < sizeof off / sizeof off[0]; i++) {
+#ifdef TANK_WATCH
+        /* the watch's own image never cuts ALDO1 (the ES7210: off, it clamps the bus) or ALDO2 (the panel's power enable),
+           whatever the boot's probe found. 2026-11-13: a probe that failed after a flash left the board unnamed, ALDO2 was
+           not pinned, and this trim cut it - the panel dark at every boot until the next (watch-dark record E12) */
+        if (!strcasecmp(off[i], "aldo1") || !strcasecmp(off[i], "aldo2")) continue;
+#endif
+        n += battery_port_set_rail(off[i], false);
+    }
     ESP_LOGI("battery", "rails trimmed: %d of %d unused outputs off (dcdc1 = VCC3V3 and the RTC LDO stay)", n, (int)(sizeof off / sizeof off[0]));
 }
 
@@ -294,17 +337,22 @@ bool battery_port_set_cell(int mah) {
     if (!s_dev) return false;
     bool own = mah == ADV_CELL_STOCK;                  /* the board's own cell: the board's own rates, as at boot */
     int ma = own ? board_charge_ma() : adv_charge_ma(mah), tr = own ? board_trickle_ma() : adv_trickle_ma(mah);
+    i2c_guard_lock();
     uint8_t v = 0; bool ok = rd(0x62, &v) && wr(0x62, (uint8_t)((v & 0xE0) | icc_code(ma)));
     for (int i = 0; i < 2; i++) {                      /* 61 precharge, 63 end of charge */
         uint8_t reg = i ? 0x63 : 0x61;
         ok = rd(reg, &v) && wr(reg, (uint8_t)((v & 0xF0) | (tr / 25))) && ok;
     }
+    i2c_guard_unlock();
     ESP_LOGI("battery", "cell %d mAh%s: charge %d mA, precharge + end of charge %d mA%s", mah, own ? " (the board's own)" : "", icc_ma(icc_code(ma)), tr, ok ? "" : " - a write FAILED");
     return ok;
 }
 bool battery_port_set_charge_ma(int ma) {
-    uint8_t v; if (!s_dev || !rd(0x62, &v)) return false;
-    return wr(0x62, (uint8_t)((v & 0xE0) | icc_code(ma)));
+    if (!s_dev) return false;
+    i2c_guard_lock();
+    uint8_t v; const bool ok = rd(0x62, &v) && wr(0x62, (uint8_t)((v & 0xE0) | icc_code(ma)));
+    i2c_guard_unlock();
+    return ok;
 }
 static int adc14(uint8_t reg) { uint8_t h = 0, l = 0; return rd(reg, &h) && rd(reg + 1, &l) ? ((h & 0x3F) << 8) | l : 0; }
 /* why the charger is stopped, said (0.4.2; Hugo's pendant: PLUGGED at 2.9 V, "not charging", and no word why).
@@ -333,13 +381,19 @@ static void charge_stop_line(void) {
    the charge back. A restart of the ESP does NOT put it back (its reset is the PMIC's own), so `charge on` always
    follows `charge off`. Writing 1 is also one of the chip's ways out of battery safe mode (6.7.4.2): by hand only */
 bool battery_port_set_charger(bool on) {
-    uint8_t v; if (!s_dev || !rd(0x18, &v)) return false;
-    return wr(0x18, (uint8_t)(on ? v | 0x02 : v & ~0x02));
+    if (!s_dev) return false;
+    i2c_guard_lock();
+    uint8_t v; const bool ok = rd(0x18, &v) && wr(0x18, (uint8_t)(on ? v | 0x02 : v & ~0x02));
+    i2c_guard_unlock();
+    return ok;
 }
 void battery_port_charge_report(void) {
     if (!s_dev) { ESP_LOGW("battery", "no AXP2101"); return; }
     uint8_t adc = 0, st1 = 0, st2 = 0, icc = 0, dpm = 0, iin = 0, pre = 0, term = 0, cv = 0, pct = 0;
-    rd(0x30, &adc); wr(0x30, adc | 0x1C);
+    i2c_guard_lock();
+    const bool adc_ok = rd(0x30, &adc) && wr(0x30, adc | 0x1C);   /* never on a failed read (0.4.3): a garbled 0 put back below would switch
+                                                                     the VBAT channel off */
+    i2c_guard_unlock();
     /* channels found off keep their LAST reading until a new one lands (the
        1.8, 10-13: die 34.0 C and VSYS 4296 mV on every ask through a whole
        charge), and a channel never read holds 0 (the pendant and the watch:
@@ -352,7 +406,7 @@ void battery_port_charge_report(void) {
         if (traw && vbus && vsys) break;
         vTaskDelay(pdMS_TO_TICKS(40));
     }
-    wr(0x30, adc);
+    if (adc_ok) wr(0x30, adc);
     rd(REG_STATUS1, &st1); rd(REG_STATUS2, &st2); rd(0x62, &icc); rd(0x15, &dpm); rd(0x16, &iin);
     rd(0x61, &pre); rd(0x63, &term); rd(0x64, &cv); rd(REG_BAT_PERCENT, &pct);
     static const char *ST[8] = { "trickle", "precharge", "CONSTANT CURRENT", "constant voltage (taper)", "done", "not charging", "?", "?" };

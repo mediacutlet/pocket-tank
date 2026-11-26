@@ -256,19 +256,48 @@ A retrain could add a `door` token (schema v5) later; not needed for 0.4.
 
 ## Breeding across tanks (phase 5)
 
-Strato's rule (2026-10-04): a visitor can court a host fish when the HOST's
-fry gates are met (the host's glass, grass, fed fish). **Each tank that has
-an open slot gets a fry** - both tanks if both have room (the population cap,
-POP_CAP 5 on the sim and every board since 2026-11-03, keeps this in hand). A tank with no room gets none; the
-courtship still counts for the other. Each fry belongs to the keeper of the
-tank it is born in; its parents are stored by fish ID + name, so its family
-page says "FROM MIRA (triangle)". The home tank's fry is born when the
-visitor gets home (its RETURN carries "a fry is waiting"), out of the same
-bubble cloud if it poofed home.
+**The rule (Strato, 2026-11-22; this is the one full statement - other docs
+point here):** a visitor and a host fish that have spent their time together
+court in the HOST tank when the host has **clean glass, a nursery bed and
+room for the fry**, and nothing else. **The host's own at-home fry checklist
+(trust, meals, the wait for the youngest to grow, CHANGE, the finger) does
+not apply.** This is deliberate: it encourages mating when tanks are linked.
+In the code (`cross_ready`, common/progression.c):
 
-**A cross-tank fry is worth 0 sand dollars and cannot be sold** (SELL dims,
-its reason on tap, like the keep-2 rule), so linking two tanks to farm fry
-has no payoff. Assumed: unsellable for life, not only while a fry.
+- **time together**: the visitor and one of ours, both juveniles or older,
+  reach a random goal of 5-10 min side by side (0.3x anywhere in the same
+  water); see "Phase 5 grown up" below;
+- **clean glass**: algae film on no more than 15% of the glass
+  (`ALGAE_DIRTY` 0.15) - the same bar as the at-home GLASS gate;
+- **a nursery bed**: a bed of grass grown to `VEG_NURSERY` (0.12, about
+  47 px, tall enough to hide an adult);
+- **room**: the host holds fewer than five fish (POP_CAP 5, counted by
+  `fish_held`: gifts said yes to and places held for a fry next door count),
+  or the visitor's home has said yes to a place (FRY_ASK, below). A fry
+  that would swim home also needs a free visitor place here and the door
+  open, or the pair waits;
+- **no SELECTIVE BREEDING pair set** in the host: the keeper's pair goes first.
+
+For contrast, the at-home checklist (`care_gates`) asks, by fish count:
+2 fish - trust 6, 12 meals, one finger call; 3 - the youngest a juvenile,
+40 meals, its CHANGE; 4 - the youngest an adult, 80 meals, trust 7;
+5 - the youngest an adult, 140 meals, trust 8; plus clean glass and the
+nursery bed every time. None of it is asked of a cross-tank pair. (A
+second, older path still rides that checklist: when OUR fry is already
+staged, a visitor here a minute gets one 50% coin to be its other parent.)
+
+The fry is born in the host's nursery bed. If both tanks have room a coin
+decides which keeps it; if only one has room, that one does; a fry for the
+visitor's home swims there through the door. Each fry belongs to the keeper
+of the tank that keeps it; its parents are stored by fish ID + name, so its
+family page says "FROM MIRA (triangle)". **A cross-tank fry sells for
+double** (MS_CROSSBRED, `progression_fish_value`).
+
+> Superseded (kept for the history): Strato's first rule (2026-10-04) asked
+> for the HOST's fry gates, gave a fry to each tank with an open slot, and
+> made a cross-tank fry worth 0 and unsellable. Time together (2026-10-06)
+> replaced the gates, one fry with a coin replaced a fry each, and the fry
+> sells for double (Strato 2026-10-05).
 
 With genetics, this is the point of it all: a VEIL fin you never had can come
 into your line from a friend's tank.
@@ -950,7 +979,8 @@ Still open in phase 0:
    escape. The spike decides; radio choice follows it.
 2. **Edges**: left and right, a row of tanks.
 3. **Cross-tank fry**: a fry in each tank that has an open slot; cross-tank
-   fry worth 0 sand dollars and not sellable (above).
+   fry worth 0 sand dollars and not sellable. (The 2026-10-04 plan,
+   superseded: the rule today is in "Breeding across tanks" above.)
 4. **Order**: visits first, then cross-tank fry, then giving.
 
 ## Later: sounds for the link (Strato 2026-10-05)

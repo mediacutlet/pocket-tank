@@ -25,6 +25,11 @@ void display_port_sleep(void);
    when it healed. Asked by the tank task every 10 s while awake. Other boards: false */
 bool display_port_panel_power_check(void);
 uint32_t display_port_panel_heals(void);
+/* the watch-dark work (0.4.3): REG 90 as watch_rails_on found it at boot (-1: not read) - the black box keeps it;
+   whether the panel came up; and, on the watch's image with no panel, whether the board's chips answer now (main restarts) */
+int  display_port_boot_reg90(void);
+bool display_port_panel_up(void);
+bool display_port_board_back(void);
 void display_port_panel_rail_test_off(void);   /* director `panelrail off`: the test */
 /* re-power and re-init the panel after display_port_sleep, without reboot */
 void display_port_wake(void);

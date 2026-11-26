@@ -26,10 +26,10 @@
  * number in that merge. At the 0.4.0 release the stage goes back to "alpha". */
 #define PT_RELEASE_MAJOR 0
 #define PT_RELEASE_MINOR 4
-#define PT_RELEASE_PATCH 2
+#define PT_RELEASE_PATCH 3
 #define PT_RELEASE_HOTFIX 0                    /* a fourth part (2026-10-21): a fix between patches - 0.3.8.1 - that
                                                   must not burn the next number. 0 = none, and the string has three parts */
-#define PT_RELEASE       "0.4.2"
+#define PT_RELEASE       "0.4.3"
 #define PT_RELEASE_STAGE "alpha"               /* pre-1.0: shown beside the number ("alpha" in a release; "dev" on main between them) */
 /* the packed number the tank compares (update.c newer(), the save's stamp):
  * a byte each, major.minor.patch.hotfix. Until 0.3.8 it was three bytes
@@ -67,6 +67,21 @@
 #elif defined(TANK_SQUARE)
 #define PT_BOARD         "square216"
 #define PT_BOARD_NAME    "ESP32-S3-Touch-AMOLED-2.16"
+#elif defined(TANK_P4_LCD7)                    /* BETA (2026-11-22, docs/board-p4-7-8-beta.md): before TANK_TAB5, which it also
+                                                  defines for the 720-tall world - its own id, so no update or installer takes it
+                                                  for the Tab5's, the 10.1's or the 8 inch's (nor the -7B's, 1024 x 600: no id) */
+#define PT_BOARD         "p4lcd7"
+#define PT_BOARD_NAME    "ESP32-P4-WIFI6-Touch-LCD-7"
+#elif defined(TANK_P4_LCD8)                    /* BETA (2026-11-22): before TANK_P4, which it also defines */
+#define PT_BOARD         "p4lcd8"
+#define PT_BOARD_NAME    "ESP32-P4-WIFI6-Touch-LCD-8"
+#elif defined(TANK_TAB5)                       /* (before TANK_P4, which the Tab5 also defines: its chip is a v1.x P4 that the
+                                                  10.1's image cannot run, so an update must never take one for the other) */
+#define PT_BOARD         "tab5"
+#define PT_BOARD_NAME    "M5Stack Tab5"
+#elif defined(TANK_P4)
+#define PT_BOARD         "p4home101"
+#define PT_BOARD_NAME    "ESP32-P4-WIFI6-Touch-LCD-10.1"
 #else
 #define PT_BOARD         "amoled18"
 #define PT_BOARD_NAME    "ESP32-S3-Touch-AMOLED-1.8"

@@ -240,7 +240,118 @@ static void render_nets_face(uint16_t *fb, int stride) {
     render_button(fb, stride, UPD_X, UPD_ADD_Y, UPD_W, UPD_BTN40, C_GO, C_GO_E, "ADD A NETWORK", 2);
     page_back(fb, stride);
 }
+#ifdef TANK_P4
+/* THE BIG SCREENS' UPDATES PAGE (0.4.3; the frame is render_big.c's): both faces at once - UPDATES in the list pane
+   (the version, CHECK FOR UPDATES), WI-FI in the pane beside it (the three places, each saved one's FORGET, ADD A
+   NETWORK). No door and no face to turn. The rail stays, dim: SETTINGS is the way back, with BACK in the foot. The
+   press / release / SURE? rules are updates_page_touch's own, over these places. A still page (render_big_still_*). */
+#define WU_FX(x)     ((x) - PAGE_X)                  /* frame px -> the page's (render_rect and friends take the page's) */
+#define WU_FY(y)     ((y) - PAGE_Y)
+#define WU_LX        (BIG_WL_X + 28)
+#define WU_W         (BIG_WL_W - 56)
+#define WU_RX        (BIG_WD_X + 24)
+#define WU_RW        (BIG_WD_W - 48)
+#define WU_INFO_Y    (BIG_WC_Y + 96)
+#define WU_INFO_DY   32
+#define WU_CHECK_Y   (BIG_WC_Y + 216)
+#define WU_BTN_H     56
+#define WU_TEXT_Y    (BIG_WC_Y + 296)
+#define WU_BACK_W    160
+#define WU_BACK_H    48
+#define WU_BACK_Y    (BIG_WC_Y + BIG_WC_H - 24 - WU_BACK_H)
+#define WU_NET_Y0    (BIG_WC_Y + 96)
+#define WU_NET_DY    68
+#define WU_FORGET_W  124
+#define WU_FORGET_X  (WU_RX + WU_RW - WU_FORGET_W)
+#define WU_NAME_X    (WU_RX + 40)
+#define WU_NAME_CHARS ((WU_FORGET_X - 12 - WU_NAME_X) / 12)
+#define WU_LEGEND_Y  (WU_NET_Y0 + WIFI_NETS_MAX * WU_NET_DY + 4)
+#define WU_ADD_Y     (WU_LEGEND_Y + 40)
+static void wu_mid(uint16_t *fb, int stride, int x0, int w, int y, int scale, uint32_t rgb, const char *s) {
+    render_text(fb, stride, WU_FX(x0 + (w - render_text_w(s, scale)) / 2), WU_FY(y), scale, rgb, s);
+}
+static void wu_info(uint16_t *fb, int stride, int row, const char *label, const char *value) {
+    char shown[40]; const int y = WU_INFO_Y + row * WU_INFO_DY, room = WU_W - render_text_w(label, 2) - 14;
+    wifi_name_fit(shown, sizeof shown, value, (room + 2) / 12 > 39 ? 39 : (room + 2) / 12);
+    render_text(fb, stride, WU_FX(WU_LX), WU_FY(y), 2, C_CAPT, label);
+    render_text(fb, stride, WU_FX(WU_LX + WU_W - render_text_w(shown, 2)), WU_FY(y), 2, C_TEXT, shown);
+}
+static uint32_t wu_key(void) {
+    uint32_t h = 2166136261u;
+    #define WU_MIX(v) (h = (h ^ (uint32_t)(v)) * 16777619u)
+    #define WU_STR(s_) do { for (const char *q_ = (s_); *q_; q_++) WU_MIX(*q_); WU_MIX(0x100); } while (0)
+    WU_MIX(0xdd); WU_STR(PT_RELEASE); WU_STR(PT_RELEASE_STAGE); WU_STR(version_port_string());
+    char code[NET_CODE_LEN + 1]; if (net_port_board_code(code)) { WU_STR(code); WU_MIX(net_port_crew()); }
+    const wifi_nets_t *w = net_port_nets(); WU_MIX(w->n); WU_MIX(updates_forget_row());
+    for (int i = 0; i < w->n && i < WIFI_NETS_MAX; i++) { WU_STR(w->net[i].ssid); WU_MIX(w->net[i].joined); }
+    return h;
+}
+static void render_updates_wide(uint16_t *fb, int stride) {
+    const uint32_t key = wu_key();
+    if (render_big_still_begin(fb, stride, key)) return;
+    render_big_frame_sub(fb, stride, BIG_RAIL_SETTINGS);
+    char line[64];
+    /* UPDATES */
+    render_big_pane(fb, stride, BIG_WL_X, BIG_WL_W, false);
+    wu_mid(fb, stride, BIG_WL_X, BIG_WL_W, BIG_WC_Y + 22, 4, C_TEXT, "UPDATES");
+    snprintf(line, sizeof line, "%s %s", PT_RELEASE, PT_RELEASE_STAGE);
+    wu_info(fb, stride, 0, "VERSION", line);
+    wu_info(fb, stride, 1, "BUILD", version_port_string());
+    char code[NET_CODE_LEN + 1];
+    if (net_port_board_code(code)) wu_info(fb, stride, 2, net_port_crew() ? "HATCHERY CREW" : "BOARD CODE", code);
+    render_button(fb, stride, WU_FX(WU_LX), WU_FY(WU_CHECK_Y), WU_W, WU_BTN_H, C_GO, C_GO_E, "CHECK FOR UPDATES", 3);
+    render_text(fb, stride, WU_FX(WU_LX), WU_FY(WU_TEXT_Y), 2, C_QUIET, "WHILE UPDATING, THE BOARD");
+    render_text(fb, stride, WU_FX(WU_LX), WU_FY(WU_TEXT_Y + 22), 2, C_QUIET, "PAUSES AND REBOOTS ITSELF");
+    render_button(fb, stride, WU_FX(WU_LX), WU_FY(WU_BACK_Y), WU_BACK_W, WU_BACK_H, C_INNER, C_EDGE, "BACK", 3);
+    /* WI-FI */
+    render_big_pane(fb, stride, BIG_WD_X, BIG_WD_W, true);
+    wu_mid(fb, stride, BIG_WD_X, BIG_WD_W, BIG_WC_Y + 22, 4, C_TEXT, "WI-FI");
+    const int armed = updates_forget_row();
+    const wifi_nets_t *w = net_port_nets(); const int nets = w->n;
+    const int ty = (WU_BTN_H - 14) / 2;
+    for (int i = 0; i < WIFI_NETS_MAX; i++) {
+        const int y = WU_NET_Y0 + i * WU_NET_DY;
+        if (i >= nets) {                                               /* an open place */
+            render_rect_edge(fb, stride, WU_FX(WU_RX), WU_FY(y), WU_RW, WU_BTN_H, C_INNER);
+            render_text(fb, stride, WU_FX(WU_NAME_X), WU_FY(y + ty), 2, C_QUIET, "EMPTY");
+            continue;
+        }
+        render_rect(fb, stride, WU_FX(WU_RX), WU_FY(y), WU_RW, WU_BTN_H, C_PANEL); render_rect_edge(fb, stride, WU_FX(WU_RX), WU_FY(y), WU_RW, WU_BTN_H, C_INNER);
+        char shown[40]; wifi_name_fit(shown, sizeof shown, w->net[i].ssid, WU_NAME_CHARS > 39 ? 39 : WU_NAME_CHARS);
+        update_text(fb, stride, WU_FX(WU_NAME_X), WU_FY(y + ty), 2, C_TEXT, shown);
+        if (i == 0 && w->net[0].joined) check_mark(fb, stride, WU_FX(WU_RX + 12), WU_FY(y + ty), C_TEXT);
+        if (armed == i) render_button(fb, stride, WU_FX(WU_FORGET_X), WU_FY(y), WU_FORGET_W, WU_BTN_H, C_GO, C_GO_E, "SURE?", 2);
+        else render_button(fb, stride, WU_FX(WU_FORGET_X), WU_FY(y), WU_FORGET_W, WU_BTN_H, C_INNER, C_DIM, "FORGET", 2);
+    }
+    if (nets && w->net[0].joined) {                                    /* what the mark means, in words */
+        check_mark(fb, stride, WU_FX(WU_RX + 12), WU_FY(WU_LEGEND_Y), C_QUIET);
+        render_text(fb, stride, WU_FX(WU_NAME_X), WU_FY(WU_LEGEND_Y), 2, C_QUIET, "LAST USED");
+    }
+    render_button(fb, stride, WU_FX(WU_RX), WU_FY(WU_ADD_Y), WU_RW, WU_BTN_H, C_GO, C_GO_E, "ADD A NETWORK", 3);
+    render_big_still_end(fb, key);
+}
+static int updates_wide_tap(float x, float y) {                  /* frame px */
+    if (render_big_rail_hit(x, y) == BIG_RAIL_SETTINGS) return UPD_TAP_CLOSE;
+    if (in_box(x, y, WU_LX, WU_BACK_Y, WU_BACK_W, WU_BACK_H, 12)) return UPD_TAP_CLOSE;
+    if (in_box(x, y, WU_LX, WU_CHECK_Y, WU_W, WU_BTN_H, 8)) return UPD_TAP_CHECK;
+    if (in_box(x, y, WU_RX, WU_ADD_Y, WU_RW, WU_BTN_H, 8)) return UPD_TAP_ADD;
+    if (x >= WU_FORGET_X - 10 && x < WU_FORGET_X + WU_FORGET_W + 10 && y >= WU_NET_Y0 - 6 && y < WU_NET_Y0 + WIFI_NETS_MAX * WU_NET_DY) {
+        const int r = (int)(y - (WU_NET_Y0 - 6)) / WU_NET_DY;                           /* a saved network's FORGET, its own row's */
+        if (y < WU_NET_Y0 + r * WU_NET_DY + WU_BTN_H + 6 && r < net_port_creds_count()) return UPD_TAP_FORGET + r;
+    }
+    return UPD_TAP_NONE;
+}
+void updates_big_where(int what, int *x, int *y) {
+    if (what == BIGUPD_CHECK) { *x = WU_LX + WU_W / 2; *y = WU_CHECK_Y + WU_BTN_H / 2; }
+    else if (what == BIGUPD_BACK) { *x = WU_LX + WU_BACK_W / 2; *y = WU_BACK_Y + WU_BACK_H / 2; }
+    else if (what == BIGUPD_ADD) { *x = WU_RX + WU_RW / 2; *y = WU_ADD_Y + WU_BTN_H / 2; }
+    else { *x = WU_FORGET_X + WU_FORGET_W / 2; *y = WU_NET_Y0 + (what - BIGUPD_FORGET0) * WU_NET_DY + WU_BTN_H / 2; }
+}
+#endif
 void render_updates_page(uint16_t *fb, int stride) {
+#ifdef TANK_P4
+    if (!render_big_pocket()) { render_updates_wide(fb, stride); return; }
+#endif
     page_bg(fb, stride);
     if (s_nets) { render_nets_face(fb, stride); return; }
     page_title(fb, stride, "UPDATES");
@@ -270,6 +381,9 @@ void render_updates_page(uint16_t *fb, int stride) {
 /* the taps. BACK: the settings foot's band (no reach above it, 14 under, 12 to each side - the GRAPHICS page's BACK);
    the wide buttons 8 px out; a FORGET 8 to the sides and 3 up and down (half the gap to the next row's) */
 int updates_page_tap(float x, float y) {
+#ifdef TANK_P4
+    if (!render_big_pocket()) return updates_wide_tap(x, y);
+#endif
     x -= PAGE_X; y -= PAGE_Y;                           /* the page's own coordinates (render.h) */
     if (y >= UPD_CLOSE_Y && y < UPD_CLOSE_Y + UPD_CLOSE_H + 14 && x >= UPD_CLOSE_X - 12 && x < UPD_CLOSE_X + UPD_CLOSE_W + 12)
         return s_nets ? UPD_TAP_NETS_BACK : UPD_TAP_CLOSE;
@@ -640,7 +754,13 @@ void update_tick(float dt) {
 }
 
 /* ---- hits ---- */
+#ifdef TANK_P4
+static int update_hit_wide(float x, float y);
+#endif
 int update_hit(float x, float y) {
+#ifdef TANK_P4
+    if (!render_big_pocket()) return update_hit_wide(x, y);
+#endif
     x -= PAGE_X; y -= PAGE_Y;                           /* the page's own coordinates (render.h) */
     switch (s.page) {
     case UPD_PG_POWER:
@@ -700,6 +820,9 @@ static void activate(int id) {
         break;
     case UPD_PG_SCAN: {
         int pages = (s.n_aps + UPD_ROWS_PER - 1) / UPD_ROWS_PER;
+#ifdef TANK_P4
+        if (!render_big_pocket()) pages = (s.n_aps + update_big_rows() - 1) / update_big_rows();   /* (the big screens' list holds more rows) */
+#endif
         if (id == HIT_BACK) leave(UPD_BACK);
         else if (id == HIT_RESCAN) start_scan();
         else if (id == HIT_PG_UP)   { if (s.list_page > 0) s.list_page--; }
@@ -788,7 +911,251 @@ static void wrap2(const char *src, char *l1, char *l2, size_t cap) {   /* two li
 void render_clock_sync(uint16_t *fb, int stride, double clock) {   /* the loading screen's look (10-31): the tank's WAKING THE TANK follows on the same water */
     render_loading(fb, stride, "WAKING UP", clock, "CHECKING THE TIME");
 }
+#ifdef TANK_P4
+/* THE BIG SCREENS' UPDATE MODE (0.4.3; the frame is render_big.c's): the pages UPDATES and ADD A NETWORK lead to, in one
+   pane across the frame beside the rail - the rail all dim, for the tank is not running behind these pages and every
+   way out is a button on the page (BACK TO TANK, CANCEL, NOT NOW). The steps, the words, the hold on UPDATE and the
+   keyboard's keys are update mode's own; only the places and the sizes are these. The crosses (UPD_PG_CALIB) are the
+   whole glass already. All in FRAME px. */
+#define WM_X         (BIG_WC_X + 24)
+#define WM_W         (BIG_WC_W - 48)
+#define WM_CX        (BIG_WC_X + BIG_WC_W / 2)
+#define WM_MY        (BIG_WC_Y + BIG_WC_H / 2)          /* the message pages hang from the pane's middle */
+#define WM_BTN_W     300
+#define WM_BTN_H     56
+#define WM_BTN_L_X   (WM_CX - WM_BTN_W - 12)
+#define WM_BTN_R_X   (WM_CX + 12)
+#define WM_BTN_MID_X (WM_CX - WM_BTN_W / 2)
+#define WM_BTN_Y     (WM_MY + 180)                      /* row B; row A (a message's own actions) 72 above */
+#define WM_BTN_A_Y   (WM_BTN_Y - 72)
+#define WM_ROW_Y0    (BIG_WC_Y + 84)                    /* the list */
+#define WM_ROW_DY    60
+#define WM_ROW_H     52
+#define WM_ROWS      ((BIG_WC_H - 84 - 96) / WM_ROW_DY) /* 9 on the 10.1, 7 on the Tab5 */
+#define WM_ARROW_W   60
+#define WM_ARROW_X   (WM_X + WM_W - WM_ARROW_W)
+#define WM_LIST_Y    (BIG_WC_Y + BIG_WC_H - 24 - WM_BTN_H)   /* the list's two buttons, in the pane's foot */
+#define WM_KB_PX     134                                /* the keyboard */
+#define WM_KB_W      126
+#define WM_KB_PY     144
+#define WM_KB_H      132
+#define WM_KB_T      (BIG_WC_Y + (BIG_WC_H - 548) / 2)  /* PASSWORD FOR's line; the field and the keys under it */
+#define WM_FIELD_Y   (WM_KB_T + 44)
+#define WM_FIELD_H   60
+#define WM_KB_Y      (WM_KB_T + 128)
+#define WM_FIELD_VISIBLE 46                             /* characters that fit the field at scale 3 */
+static void wm_text_c(uint16_t *fb, int stride, int y, int scale, uint32_t rgb, const char *s_) {
+    render_text(fb, stride, WU_FX(WM_CX - render_text_w(s_, scale) / 2), WU_FY(y), scale, rgb, s_);
+}
+static void wm_atext_c(uint16_t *fb, int stride, int y, int scale, uint32_t rgb, const char *s_) {
+    update_text(fb, stride, WU_FX(WM_CX - update_text_w(s_, scale) / 2), WU_FY(y), scale, rgb, s_);
+}
+static void wm_btn(uint16_t *fb, int stride, int x, int y, uint32_t fill, uint32_t edge, const char *lb) {
+    render_button(fb, stride, WU_FX(x), WU_FY(y), WM_BTN_W, WM_BTN_H, fill, edge, lb, 3);
+}
+static int wm_primary_x(void) { return s.secondary ? WM_BTN_L_X : WM_BTN_MID_X; }
+static int wm_pages(void) { return (s.n_aps + WM_ROWS - 1) / WM_ROWS; }
+static int wm_kb_hit(float x, float y) {
+    if (x < WM_X - 14 || x >= WM_X + (UPD_KB_COLS - 1) * WM_KB_PX + WM_KB_W + 14 || y < WM_KB_Y - 14 || y >= WM_KB_Y + (UPD_KB_ROWS - 1) * WM_KB_PY + WM_KB_H + 14) return HIT_NONE;
+    int col = (int)((x - WM_X + (WM_KB_PX - WM_KB_W) / 2) / WM_KB_PX), row = (int)((y - WM_KB_Y + (WM_KB_PY - WM_KB_H) / 2) / WM_KB_PY);
+    if (col < 0) col = 0;
+    if (col >= UPD_KB_COLS) col = UPD_KB_COLS - 1;
+    if (row < 0) row = 0;
+    if (row >= UPD_KB_ROWS) row = UPD_KB_ROWS - 1;
+    return HIT_KEY0 + row * UPD_KB_COLS + col;
+}
+static int update_hit_wide(float x, float y) {                    /* frame px */
+    switch (s.page) {
+    case UPD_PG_POWER:
+        return in_box(x, y, WM_BTN_MID_X, WM_BTN_Y, WM_BTN_W, WM_BTN_H, 10) ? HIT_BACK : HIT_NONE;
+    case UPD_PG_BUSY:
+        if (s.step == STEP_RESTART) return HIT_NONE;
+        return in_box(x, y, WM_BTN_MID_X, WM_BTN_Y, WM_BTN_W, WM_BTN_H, 10) ? HIT_CANCEL : HIT_NONE;
+    case UPD_PG_SCAN: {
+        if (in_box(x, y, WM_BTN_L_X, WM_LIST_Y, WM_BTN_W, WM_BTN_H, 8)) return HIT_BACK;
+        if (in_box(x, y, WM_BTN_R_X, WM_LIST_Y, WM_BTN_W, WM_BTN_H, 8)) return HIT_RESCAN;
+        if (y < WM_ROW_Y0 - 6 || y >= WM_ROW_Y0 + WM_ROWS * WM_ROW_DY) return HIT_NONE;
+        if (wm_pages() > 1 && x >= WM_ARROW_X - 8) return y < WM_ROW_Y0 + WM_ROWS * WM_ROW_DY / 2 ? HIT_PG_UP : HIT_PG_DOWN;
+        if (x < WM_X - 8 || x >= WM_X + WM_W + 8) return HIT_NONE;
+        int r = (int)((y - WM_ROW_Y0 + 6) / WM_ROW_DY); if (r < 0) r = 0; if (r >= WM_ROWS) r = WM_ROWS - 1;
+        const int i = s.list_page * WM_ROWS + r;
+        return i < s.n_aps ? HIT_ROW0 + i : HIT_NONE; }
+    case UPD_PG_PASSWORD:
+        return wm_kb_hit(x, y);
+    case UPD_PG_OFFER:
+        if (in_box(x, y, WM_BTN_L_X, WM_BTN_Y, WM_BTN_W, WM_BTN_H, 10)) return HIT_YES;
+        if (in_box(x, y, WM_BTN_R_X, WM_BTN_Y, WM_BTN_W, WM_BTN_H, 10)) return HIT_NO;
+        return HIT_NONE;
+    case UPD_PG_MESSAGE:
+        if (s.primary && in_box(x, y, wm_primary_x(), WM_BTN_A_Y, WM_BTN_W, WM_BTN_H, 8)) return HIT_PRIMARY;
+        if (s.secondary && in_box(x, y, WM_BTN_R_X, WM_BTN_A_Y, WM_BTN_W, WM_BTN_H, 8)) return HIT_SECONDARY;
+        if (s.tertiary && in_box(x, y, WM_BTN_L_X, WM_BTN_Y, WM_BTN_W, WM_BTN_H, 8)) return HIT_TERTIARY;
+        if (in_box(x, y, s.tertiary ? WM_BTN_R_X : WM_BTN_MID_X, WM_BTN_Y, WM_BTN_W, WM_BTN_H, 8)) return HIT_BACK;
+        return HIT_NONE;
+    default: return HIT_NONE;
+    }
+}
+void update_big_where(int what, int *x, int *y) {
+    *x = WM_BTN_MID_X + WM_BTN_W / 2; *y = WM_BTN_Y + WM_BTN_H / 2;
+    if (what == BIGUM_L) *x = WM_BTN_L_X + WM_BTN_W / 2;
+    else if (what == BIGUM_R) *x = WM_BTN_R_X + WM_BTN_W / 2;
+    else if (what == BIGUM_A_L) { *x = WM_BTN_L_X + WM_BTN_W / 2; *y = WM_BTN_A_Y + WM_BTN_H / 2; }
+    else if (what == BIGUM_A_R) { *x = WM_BTN_R_X + WM_BTN_W / 2; *y = WM_BTN_A_Y + WM_BTN_H / 2; }
+    else if (what == BIGUM_A_MID) *y = WM_BTN_A_Y + WM_BTN_H / 2;
+    else if (what == BIGUM_LIST_L) { *x = WM_BTN_L_X + WM_BTN_W / 2; *y = WM_LIST_Y + WM_BTN_H / 2; }
+    else if (what == BIGUM_LIST_R) { *x = WM_BTN_R_X + WM_BTN_W / 2; *y = WM_LIST_Y + WM_BTN_H / 2; }
+    else if (what == BIGUM_PG_UP) { *x = WM_ARROW_X + WM_ARROW_W / 2; *y = WM_ROW_Y0 + WM_ROW_H / 2; }
+    else if (what == BIGUM_PG_DOWN) { *x = WM_ARROW_X + WM_ARROW_W / 2; *y = WM_ROW_Y0 + (WM_ROWS - 1) * WM_ROW_DY + WM_ROW_H / 2; }
+    else if (what >= BIGUM_KEY0) { const int c = what - BIGUM_KEY0; *x = WM_X + (c % UPD_KB_COLS) * WM_KB_PX + WM_KB_W / 2; *y = WM_KB_Y + (c / UPD_KB_COLS) * WM_KB_PY + WM_KB_H / 2; }
+    else if (what >= BIGUM_ROW0) { *x = WM_X + 200; *y = WM_ROW_Y0 + (what - BIGUM_ROW0) * WM_ROW_DY + WM_ROW_H / 2; }
+}
+int update_big_rows(void) { return WM_ROWS; }
+static void wm_chevron(uint16_t *fb, int stride, int cx, int y, bool up, uint32_t rgb) {   /* 42 x 24 */
+    for (int i = 0; i < 4; i++) {
+        const int yy = up ? y + i * 6 : y + 18 - i * 6;
+        render_rect(fb, stride, WU_FX(cx - 6 - i * 6), WU_FY(yy), 6, 6, rgb); render_rect(fb, stride, WU_FX(cx + i * 6), WU_FY(yy), 6, 6, rgb);
+    }
+}
+static void render_update_wide(uint16_t *fb, int stride, double clock) {
+    render_big_frame_sub(fb, stride, -1);
+    render_big_pane(fb, stride, BIG_WC_X, BIG_WC_W, false);
+    char line[80];
+    switch (s.page) {
+    case UPD_PG_POWER:
+        wm_text_c(fb, stride, WM_MY - 200, 4, C_TEXT, update_power_title());
+        snprintf(line, sizeof line, "THE BATTERY IS AT %d%%", s.battery_pct);
+        wm_text_c(fb, stride, WM_MY - 136, 3, C_CAPT, line);
+        wm_text_c(fb, stride, WM_MY - 100, 3, C_QUIET, update_power_line());
+        wm_btn(fb, stride, WM_BTN_MID_X, WM_BTN_Y, C_INNER, C_EDGE, "BACK TO TANK");
+        break;
+    case UPD_PG_BUSY:
+        wm_text_c(fb, stride, WM_MY - 200, 4, C_TEXT, s.title);
+        if (s.step == STEP_CONNECTING) wm_atext_c(fb, stride, WM_MY - 136, 3, C_CAPT, s.ssid);
+        else if (s.step == STEP_INSTALLING || s.step == STEP_RESTART) {
+            snprintf(line, sizeof line, "VERSION %s", s.m.release); wm_text_c(fb, stride, WM_MY - 136, 3, C_CAPT, line);
+        }
+        if (s.percent >= 0) {                                 /* the bar */
+            const int BW = 640, BX = WM_CX - BW / 2, BY = WM_MY - 40, BH = 28;
+            render_rect(fb, stride, WU_FX(BX), WU_FY(BY), BW, BH, C_INNER); render_rect_edge(fb, stride, WU_FX(BX), WU_FY(BY), BW, BH, C_DIM);
+            render_rect(fb, stride, WU_FX(BX + 3), WU_FY(BY + 3), (BW - 6) * s.percent / 100, BH - 6, C_EDGE);
+            snprintf(line, sizeof line, "%d%%", s.percent); wm_text_c(fb, stride, BY + 46, 3, C_TEXT, line);
+            if (s.step == STEP_RESTART) wm_text_c(fb, stride, WM_MY + 80, 3, C_CAPT, "RESTARTING");
+            else wm_text_c(fb, stride, WM_MY + 80, 3, C_QUIET, "KEEP THE TANK ON");
+        } else {                                              /* the spinner, twice the pocket's */
+            const int lit = (int)(clock * 8) & 7;
+            static const int DX[8] = { 0, 26, 36, 26, 0, -26, -36, -26 }, DY[8] = { -36, -26, 0, 26, 36, 26, 0, -26 };
+            for (int i = 0; i < 8; i++) render_rect(fb, stride, WU_FX(WM_CX + DX[i] - 6), WU_FY(WM_MY + DY[i] - 6), 12, 12, i == lit ? C_EDGE : (i + 7) % 8 == lit ? 0x5a8a94 : C_DIM);
+        }
+        if (s.step != STEP_RESTART) wm_btn(fb, stride, WM_BTN_MID_X, WM_BTN_Y, C_INNER, C_EDGE, "CANCEL");
+        break;
+    case UPD_PG_SCAN: {
+        wm_text_c(fb, stride, BIG_WC_Y + 22, 4, C_TEXT, "CHOOSE YOUR NETWORK");
+        const int pages = wm_pages(), rw = WM_W - (pages > 1 ? WM_ARROW_W + 12 : 0);
+        for (int r = 0; r < WM_ROWS; r++) {
+            const int i = s.list_page * WM_ROWS + r; if (i >= s.n_aps) break;
+            const int y = WM_ROW_Y0 + r * WM_ROW_DY, bx = WM_X + rw - 72;
+            render_rect(fb, stride, WU_FX(WM_X), WU_FY(y), rw, WM_ROW_H, C_PANEL);
+            render_rect_edge(fb, stride, WU_FX(WM_X), WU_FY(y), rw, WM_ROW_H, C_INNER);
+            update_text(fb, stride, WU_FX(WM_X + 20), WU_FY(y + (WM_ROW_H - 21) / 2), 3, C_TEXT, s.aps[i].ssid);
+            const int lit = s.aps[i].rssi >= -55 ? 4 : s.aps[i].rssi >= -65 ? 3 : s.aps[i].rssi >= -75 ? 2 : 1;   /* 4 bars, by strength; count, not hue */
+            for (int b = 0; b < 4; b++) render_rect(fb, stride, WU_FX(bx + b * 14), WU_FY(y + 42 - (8 + b * 8)), 10, 8 + b * 8, b < lit ? C_EDGE : C_DIM);
+            if (!s.aps[i].secured) render_text(fb, stride, WU_FX(bx - 16 - render_text_w("OPEN", 2)), WU_FY(y + (WM_ROW_H - 14) / 2), 2, C_QUIET, "OPEN");
+        }
+        if (pages > 1) {                                       /* a chevron above and one below, the pages' pips between */
+            const int cx = WM_ARROW_X + WM_ARROW_W / 2, y1 = WM_ROW_Y0 + (WM_ROWS - 1) * WM_ROW_DY;
+            render_rect_edge(fb, stride, WU_FX(WM_ARROW_X), WU_FY(WM_ROW_Y0), WM_ARROW_W, WM_ROW_H, s.list_page ? C_EDGE : C_DIM);
+            wm_chevron(fb, stride, cx, WM_ROW_Y0 + 14, true, s.list_page ? C_EDGE : C_DIM);
+            render_rect_edge(fb, stride, WU_FX(WM_ARROW_X), WU_FY(y1), WM_ARROW_W, WM_ROW_H, s.list_page < pages - 1 ? C_EDGE : C_DIM);
+            wm_chevron(fb, stride, cx, y1 + 14, false, s.list_page < pages - 1 ? C_EDGE : C_DIM);
+            for (int i = 0; i < pages; i++) render_rect(fb, stride, WU_FX(cx - 4), WU_FY((WM_ROW_Y0 + y1 + WM_ROW_H) / 2 - pages * 8 + i * 16), 8, 8, i == s.list_page ? C_EDGE : C_DIM);
+        }
+        wm_btn(fb, stride, WM_BTN_L_X, WM_LIST_Y, C_INNER, C_EDGE, "BACK TO TANK");
+        wm_btn(fb, stride, WM_BTN_R_X, WM_LIST_Y, C_INNER, C_EDGE, "SCAN AGAIN");
+        break; }
+    case UPD_PG_PASSWORD: {
+        render_text(fb, stride, WU_FX(WM_X), WU_FY(WM_KB_T), 3, C_CAPT, "PASSWORD FOR");
+        update_text(fb, stride, WU_FX(WM_X + render_text_w("PASSWORD FOR", 3) + 18), WU_FY(WM_KB_T), 3, C_TEXT, s.ssid);
+        /* the field */
+        render_rect(fb, stride, WU_FX(WM_X), WU_FY(WM_FIELD_Y), WM_W, WM_FIELD_H, C_PANEL); render_rect_edge(fb, stride, WU_FX(WM_X), WU_FY(WM_FIELD_Y), WM_W, WM_FIELD_H, C_INNER);
+        const char *p = s.pass; const size_t n = strlen(p);
+        char shown[WM_FIELD_VISIBLE + 2];
+        if (n > WM_FIELD_VISIBLE) { snprintf(shown, sizeof shown, "%c%s", '<', p + n - (WM_FIELD_VISIBLE - 1)); p = shown; }
+        const int fx = WM_X + 16, fy = WM_FIELD_Y + (WM_FIELD_H - 21) / 2;
+        update_text(fb, stride, WU_FX(fx), WU_FY(fy), 3, C_TEXT, p);
+        if ((int)(clock * 2) & 1) render_rect(fb, stride, WU_FX(fx + update_text_w(p, 3) + (*p ? 6 : 0)), WU_FY(fy), 3, 21, C_EDGE);
+        char count[12]; snprintf(count, sizeof count, "%d", (int)n);
+        render_text(fb, stride, WU_FX(WM_X + WM_W - render_text_w(count, 2) - 4), WU_FY(WM_KB_T + 4), 2, C_QUIET, count);
+        /* the keys */
+        static const char *const FK_LABEL[7] = { "MORE", "DEL", "", "CAPS", "123", "BACK", "JOIN" };
+        for (int cell = 0; cell < UPD_KB_COLS * UPD_KB_ROWS; cell++) {
+            const int x = WU_FX(WM_X + (cell % UPD_KB_COLS) * WM_KB_PX), y = WU_FY(WM_KB_Y + (cell / UPD_KB_COLS) * WM_KB_PY);
+            if (cell < KB_CHARS) {
+                char lbl[2] = { kb_char(cell), 0 };
+                render_rect(fb, stride, x, y, WM_KB_W, WM_KB_H, C_KEY); render_rect_edge(fb, stride, x, y, WM_KB_W, WM_KB_H, C_DIM);
+                update_text(fb, stride, x + (WM_KB_W - update_text_w(lbl, 6)) / 2, y + (WM_KB_H - 42) / 2, 6, C_TEXT, lbl);
+            } else {
+                const int fk = cell - KB_CHARS;
+                const char *lbl = fk == FK_MODE ? (s.kb_mode ? "ABC" : "123") : FK_LABEL[fk];
+                const bool lit = (fk == FK_SHIFT && s.kb_caps && !s.kb_mode) || fk == FK_JOIN;
+                const bool dim = (fk == FK_SHIFT && s.kb_mode) || fk == FK_BACK;
+                render_button(fb, stride, x, y, WM_KB_W, WM_KB_H, lit ? C_GO : dim ? C_KEY : C_INNER, dim ? C_DIM : lit ? C_GO_E : C_EDGE, lbl, 3);
+                if (fk == FK_SPACE) render_rect(fb, stride, x + 24, y + WM_KB_H / 2 + 8, WM_KB_W - 48, 5, C_TEXT);
+                if (fk == FK_MORE) {
+                    const int np = kb_pages(), px0 = x + WM_KB_W / 2 - (np * 16 - 8) / 2;
+                    for (int i = 0; i < np; i++) render_rect(fb, stride, px0 + i * 16, y + WM_KB_H - 22, 8, 8, i == s.kb_page ? C_EDGE : C_DIM);
+                }
+            }
+        }
+        break; }
+    case UPD_PG_OFFER: {
+        const char *own = crossgrade() ? pt_board_words(update_target_board()) : NULL;
+        if (own) snprintf(line, sizeof line, "%s VERSION", own);
+        wm_text_c(fb, stride, WM_MY - 200, 4, C_TEXT, own ? line : "UPDATE READY");
+        const uint32_t bytes = s.m.app_size + (s.m.model_offered ? s.m.model_size : 0);
+        snprintf(line, sizeof line, "VERSION %s %s, %.1f MB", s.m.release, PT_RELEASE_STAGE, bytes / 1048576.0);
+        wm_text_c(fb, stride, WM_MY - 136, 3, C_CAPT, line);
+        char l1[32], l2[32];
+        if (own) { snprintf(l1, sizeof l1, "MADE FOR THIS BOARD"); snprintf(l2, sizeof l2, "YOUR FISH STAY"); }
+        else wrap2(s.m.note, l1, l2, sizeof l1);
+        wm_text_c(fb, stride, WM_MY - 72, 3, C_TEXT, l1);
+        if (l2[0]) wm_text_c(fb, stride, WM_MY - 38, 3, C_TEXT, l2);
+        const int secs = (int)(bytes / 120000) + 10;
+        if (secs < 90) snprintf(line, sizeof line, "IT TAKES ABOUT A MINUTE");
+        else snprintf(line, sizeof line, "IT TAKES ABOUT %d MINUTES", (secs + 30) / 60);
+        wm_text_c(fb, stride, WM_MY + 40, 3, C_QUIET, line);
+        wm_text_c(fb, stride, WM_MY + 74, 3, C_QUIET, "THE TANK RESTARTS BY ITSELF");
+        {   /* HOLD TO UPDATE: the fill grows across the button as the finger stays */
+            const char *lb = "HOLD TO UPDATE";
+            float f = s.holding ? (s.t - s.hold_t0) / UPD_HOLD_S : 0; if (f > 1) f = 1;
+            render_rect(fb, stride, WU_FX(WM_BTN_L_X), WU_FY(WM_BTN_Y), WM_BTN_W, WM_BTN_H, C_GO);
+            if (f > 0) render_rect(fb, stride, WU_FX(WM_BTN_L_X), WU_FY(WM_BTN_Y), (int)(WM_BTN_W * f), WM_BTN_H, C_FILL);
+            render_rect_edge(fb, stride, WU_FX(WM_BTN_L_X), WU_FY(WM_BTN_Y), WM_BTN_W, WM_BTN_H, C_GO_E);
+            render_text(fb, stride, WU_FX(WM_BTN_L_X + (WM_BTN_W - render_text_w(lb, 3)) / 2), WU_FY(WM_BTN_Y + (WM_BTN_H - 21) / 2), 3, C_TEXT, lb);
+        }
+        wm_btn(fb, stride, WM_BTN_R_X, WM_BTN_Y, C_INNER, C_EDGE, "NOT NOW");
+        break; }
+    case UPD_PG_MESSAGE: {
+        wm_text_c(fb, stride, WM_MY - 200, 4, C_TEXT, s.title);
+        if (s.line1_ascii) wm_atext_c(fb, stride, WM_MY - 136, 3, C_CAPT, s.line1); else wm_text_c(fb, stride, WM_MY - 136, 3, C_CAPT, s.line1);
+        if (s.line2[0]) wm_text_c(fb, stride, WM_MY - 102, 3, C_CAPT, s.line2);
+        if (s.step == STEP_UP_TO_DATE) {
+            snprintf(line, sizeof line, "VERSION %s %s", PT_RELEASE, PT_RELEASE_STAGE); wm_text_c(fb, stride, WM_MY - 40, 3, C_QUIET, line);
+            float left = 1.0f - s.t / UPD_UP_TO_DATE_S; if (left < 0) left = 0;
+            render_rect(fb, stride, WU_FX(WM_CX - 320), WU_FY(WM_MY + 20), (int)(640 * left), 3, C_INNER);
+        }
+        if (s.primary)   wm_btn(fb, stride, wm_primary_x(), WM_BTN_A_Y, C_GO, C_GO_E, s.primary);
+        if (s.secondary) wm_btn(fb, stride, WM_BTN_R_X, WM_BTN_A_Y, C_INNER, C_EDGE, s.secondary);
+        if (s.tertiary)  wm_btn(fb, stride, WM_BTN_L_X, WM_BTN_Y, C_INNER, C_EDGE, s.tertiary);
+        wm_btn(fb, stride, s.tertiary ? WM_BTN_R_X : WM_BTN_MID_X, WM_BTN_Y, C_INNER, C_EDGE, "BACK TO TANK");
+        break; }
+    default: break;
+    }
+}
+#endif
 void render_update(uint16_t *fb, int stride, double clock) {
+#ifdef TANK_P4
+    if (!render_big_pocket() && s.page != UPD_PG_CALIB) { render_update_wide(fb, stride, clock); return; }
+#endif
     page_bg(fb, stride);
     char line[80];
     switch (s.page) {

@@ -21,6 +21,7 @@ const snd_clip_t SND_CLIPS[SND_N_CLIPS] = {
     { 147500u, 27787u, SND_ADPCM, 0x53DA41E8u },
     { 161830u, 14833u, SND_ADPCM, 0xA97A52A5u },
     { 169478u, 9845u, SND_ADPCM, 0xAAC24B43u },
+    { 174556u, 14562u, SND_ADPCM, 0x13F9FF24u },
 };
 
 const snd_cue_t SND_CUES[SND_COUNT] = {
@@ -50,4 +51,5 @@ const snd_cue_t SND_CUES[SND_COUNT] = {
     { "error", 16, 1, 0, 151 },
     { "crab_find", 17, 1, 0, 171 },
     { "crab_coin", 18, 1, 0, 181 },
+    { "plop", 19, 1, 0, 141 },
 };

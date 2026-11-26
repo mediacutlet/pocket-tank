@@ -10,6 +10,7 @@
    and bytes in a fixed GIFT_REC), then the RECEIVED pairs */
 #define GIFT_MAGIC 0x4647u                  /* "GF" */
 #define GIFT_PP    128                      /* a passport's room in a record (v1 is 94 bytes) */
+_Static_assert(PASSPORT_V5_BYTES <= GIFT_PP, "the passport written today (v5) fits a gift note whole (0.4.3 audit r2, R2-L5)");
 #define GIFT_REC_V1 (12 + 1 + GIFT_PP)
 #define GIFT_REC   (GIFT_REC_V1 + 4)           /* v2 (11-02 sweep): + the ARRIVING note's held seconds - an older build reads past it */
 #define GIFT_BACK  0x4b434142u                 /* "BACK" in that word of a GIVEN note (0.4.1: its held time was never used) */

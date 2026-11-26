@@ -30,6 +30,7 @@ void device_touch_lock(int on);         /* main.c: THE TOUCH LOCK on (1) / off (
 void device_shelf_toggle(void);
 void device_wdt(int hang);              /* main.c: THE WATCHDOG - the longest stall so far; hang = stop feeding it (a dev test, the chip restarts) */
 void device_wdt_feed(void);             /* main.c: feed it from a long director command run on the tank task (`shot`) */
+void device_blackbox_test(const char *what);   /* main.c: THE BLACK BOX's dev tests (`blackbox test rwdt|panic`): the tank saved, then the chip restarts */
 void device_stacks(void);
 void device_grass_loop_on(bool on);    /* main.c: render_grass_loop_on under the render lock (director `grassloop`) */
 void device_bake_cap(int ms);           /* main.c: the grass bake's share of core 1 within one decision, ms (-1 said) */               /* main.c: the tasks' unused stack, the heaps */

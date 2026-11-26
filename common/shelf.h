@@ -118,6 +118,16 @@ int  shelf_count_type(int type);                  /* tanks of a type, the one on
 int  shelf_new(int type, int64_t now_unix);
 /* ... with the type's variant (the jelly tank's theme, fixed for good: J2); a jelly tank is named JELLIES (then JELLIES 2 ...) */
 int  shelf_new_kind(int type, int variant, int64_t now_unix);
+/* THE JELLY TANKS (0.4.3, Strato 11-14: "For now you can install one jelly tank per board. In 0.4.3 that goes up to
+ * three."): a board keeps up to SHELF_JELLY_MAX jelly tanks, AT MOST ONE OF EACH THEME (the header's variant, JELLY_THEMES).
+ * themes: bit k = a jelly tank of theme k is on the board (the glass included; a variant out of range counts as theme 0, as
+ * jelly_theme_start reads it). new: a fresh jelly tank of `theme` named `name` (jelly.h JELLY_TANK_NAMES) in the first empty
+ * place - -1, nothing made, if that theme is here already, the theme is out of range, the shelves are full, or the flash
+ * refused. Nothing in any stored record changed for this: a board from before 0.4.3 (one jelly tank, named JELLIES) loads as
+ * it was, and an older build reads three jelly tanks as tanks like any other (its one-a-board check only stops a fourth) */
+#define SHELF_JELLY_MAX 3
+unsigned shelf_jelly_themes(void);
+int  shelf_new_jelly(int theme, const char *name, int64_t now_unix);
 /* NEW TANK, BOUGHT (0.4.1): the slot and the wallet are two writes, and a power cut between them gave a tank for nothing
  * (slot first) or took the price for none (wallet first). A journal (`buy` in the frame: the price, the new tank's ID and
  * `mark`, a fresh marker) is written first, then the slot, then pay(ctx) takes the price and saves the wallet WITH the
@@ -141,6 +151,7 @@ int  shelf_refund_value(int i, int n[3]);
    rewrites when they trade - a cut between leaves two at one place, which the boot sorts (the later finds a free one) */
 bool shelf_move(int i, int pos);
 bool shelf_remove(int i);
+int  shelf_has_tank(uint32_t tank_uid);            /* a fish tank here with that tank ID: 1, 0 (sure), -1 cannot say */
 /* REMOVE, PAID (0.4.1): the slot's erase and the refund's save are two writes - erased first, a power cut between lost the
  * refund, and a refused erase brought the tank back at the boot with its refund paid. A journal (`rm` in the frame: the
  * tank, the refund, `mark`) is written first, then pay(ctx) adds the refund and saves it WITH the marker (false: refused,

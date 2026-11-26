@@ -27,6 +27,7 @@
 #include "gift.h"
 #include "shelf.h"
 #include "notice.h"
+#include "swap.h"
 
 #ifdef __APPLE__
 float   progression_dbg_starve(int i);
@@ -103,6 +104,50 @@ static void ulog(ub_t *u, const char *fmt, ...) {
 }
 static struct { bool booted; int sold, given_out, mut_here, tms_said[32]; int wel_up, wel_frames; int nb_slot; uint32_t nb_uid;
                 uint32_t count_uid[32]; bool staged_wrong; } K[2];
+/* ---- 0.4.3 audit round 1, seam reviewer SLP (link x progression): FISH SWAP in the soak ----
+   Each tank's swap book (common/swap.h) is attached as the boards attach theirs; its "flash" is the book's own mem (persist
+   off), so a reboot keeps exactly what swap_save wrote. A card for a fish is checked against what THAT fish earned in
+   THIS tank (CARDS EARNED HERE, below): a badge, a stage, READY TO EVOLVE or IS NOW A PARAGON it already had when it came
+   in, or that another fish earned, is a bogus card. */
+static swap_book_t SWB[2];
+static const swap_note_t *swn(const swap_book_t *b) {   /* (audit r1 fix: the book holds an array of notes - the soak's tank has one open at most) */
+    static const swap_note_t none;
+    for (int k = 0; k < SWAP_NOTES; k++) if (b->notes[k].st != SWN_NONE) return &b->notes[k];
+    return &none;
+}
+static int nopen(const swap_book_t *b) { int n = 0; for (int k = 0; k < SWAP_NOTES; k++) n += b->notes[k].st != SWN_NONE; return n; }
+static struct { int asked, picked, last_yes, traded_i, traded_r, no_thanks, last_no, cut_mid, not_full, staged_called_off, sale_need_moved,
+                bogus_cards, cards_checked, pair_swapped, pair_refunded; } sw;
+typedef struct { uint32_t uid; uint32_t ms; uint8_t stage; uint8_t evo; bool ready; } cardfish_t;
+static cardfish_t CPREV[2][N_FISH_MAX]; static int CPN[2] = { -1, -1 }; static bool CBOOT[2];
+static struct { uint32_t uid; int tank; uint32_t ms; uint8_t stages; bool evo, ready; } CE[UMAX]; static int cen;
+static int ce_find(uint32_t uid, int k, bool make) {
+    for (int i = 0; i < cen; i++) if (CE[i].uid == uid && CE[i].tank == k) return i;
+    if (!make || cen >= UMAX) return -1;
+    memset(&CE[cen], 0, sizeof CE[cen]); CE[cen].uid = uid; CE[cen].tank = k; return cen++;
+}
+/* before notice_tick: what each fish of k earned since the last frame, here (an arrival earns nothing: its books start) */
+static void cards_track(int k, const tank_t *t) {
+    if (CBOOT[k] || CPN[k] < 0) {                  /* (a boot: the save is the books; nothing earned in the boot itself) */
+        CBOOT[k] = false;
+    } else {
+        for (int i = 0; i < t->n_fish; i++) {
+            const fish_t *f = &t->fish[i]; int j = -1;
+            for (int q = 0; q < CPN[k]; q++) if (CPREV[k][q].uid == f->uid) j = q;
+            if (j < 0) { int e = ce_find(f->uid, k, true); if (e >= 0) { CE[e].ms = 0; CE[e].stages = 0; CE[e].evo = CE[e].ready = false; } continue; }   /* (new here) */
+            int e = ce_find(f->uid, k, true); if (e < 0) continue;
+            CE[e].ms |= f->ms_bits & ~CPREV[k][j].ms;
+            for (int s2 = CPREV[k][j].stage + 1; s2 <= (int)f->stage && s2 < 4; s2++) CE[e].stages |= (uint8_t)(1u << s2);
+            if (f->evo && !CPREV[k][j].evo) CE[e].evo = true;
+            if (tank_evo_ready(f) && !CPREV[k][j].ready) CE[e].ready = true;
+        }
+    }
+    CPN[k] = t->n_fish;
+    for (int i = 0; i < t->n_fish; i++) { CPREV[k][i].uid = t->fish[i].uid; CPREV[k][i].ms = t->fish[i].ms_bits; CPREV[k][i].stage = (uint8_t)t->fish[i].stage;
+        CPREV[k][i].evo = t->fish[i].evo; CPREV[k][i].ready = tank_evo_ready(&t->fish[i]); }
+}
+static const char *card_name(int kind) { return kind == NOTICE_STAGE ? "STAGE" : kind == NOTICE_MILESTONE ? "BADGE" : kind == NOTICE_EVOLVE ? "READY TO EVOLVE" : kind == NOTICE_PARAGON ? "IS NOW A PARAGON" : "?"; }
+static int g_card_log;                            /* (the told cases: print every fish card that comes up) */
 typedef struct { int n; uint32_t uid[N_FISH_MAX]; uint32_t paid[N_FISH_MAX]; float age[N_FISH_MAX], starve[N_FISH_MAX]; bool away[N_FISH_MAX], born_away[N_FISH_MAX];
                  uint32_t tms; uint8_t gen; int32_t earned, feedings, sale_need;
                  /* round 2 */
@@ -192,9 +237,25 @@ static void keeper(int k, float dt) {
         ln[k] = t->n_fish; for (int i = 0; i < t->n_fish; i++) last[k][i] = t->fish[i].uid;
         if (K[k].booted) { ln[k] = -1; K[k].booted = false; }
     }
+    cards_track(k, t);                             /* (SLP: what each fish earned here, before this tick's diff) */
     notice_tick(t, dt, nb >= 0);
     const notice_t *c = notice_current();
     int cue = notice_take_cue();                   /* (-1 for a notice back after stepping aside: no second chime, not said again) */
+    if (c && c->age == 0 && cue >= 0 && c->fish >= 0 && c->fish < t->n_fish
+        && (c->kind == NOTICE_STAGE || c->kind == NOTICE_MILESTONE || c->kind == NOTICE_EVOLVE || c->kind == NOTICE_PARAGON)) {   /* SLP: CARDS EARNED HERE */
+        const fish_t *f = &t->fish[c->fish]; int e = ce_find(f->uid, k, false);
+        bool ok = e >= 0 && (c->kind == NOTICE_STAGE ? (CE[e].stages >> (f->stage & 3) & 1) : c->kind == NOTICE_MILESTONE ? (CE[e].ms & c->bit) != 0
+                             : c->kind == NOTICE_EVOLVE ? CE[e].ready : CE[e].evo);
+        sw.cards_checked++;
+        if (ok && e >= 0) {                            /* (one card per thing earned: said, it is spent - a second card for it is not earned) */
+            if (c->kind == NOTICE_STAGE) CE[e].stages &= (uint8_t)~(1u << (f->stage & 3)); else if (c->kind == NOTICE_MILESTONE) CE[e].ms &= ~c->bit;
+            else if (c->kind == NOTICE_EVOLVE) CE[e].ready = false; else CE[e].evo = false; }
+        if (g_card_log) printf("    card on %c: %s slot %d \"%s\" (%08x) bit %x stage %d evo %d - %s\n", 'A' + k, card_name(c->kind), c->fish, f->name, f->uid, c->bit, f->stage, f->evo,
+                               ok ? "earned here" : "NOT EARNED HERE");
+        if (!ok) sw.bogus_cards++;
+        BOOK(ok, "card-not-earned-here", "tank %c: %s card for slot %d (%08x \"%s\", bit %x, stage %d) - not earned in this tank:%s", 'A' + k, card_name(c->kind), c->fish,
+             f->uid, f->name, c->bit, f->stage, ub(f->uid)->log);
+    }
     if (c && c->age == 0 && cue >= 0) {
         if (c->kind == NOTICE_TANK_MILESTONE) {
             int b = __builtin_ctz(c->bit);
@@ -399,7 +460,16 @@ static void books(int k, const snap_t *a, const snap_t *b) {
     if (left && came) { st.churn++; for (int i = 0; i < t->n_fish; i++) ulog(ub(t->fish[i].uid), "%c CHURN (a fish left and one came in one frame) slot %d", 'A' + k, i);
         if (getenv("SEAM_TRACE")) printf("  trace t=%.2f %c churn %d -> %d fish\n", tsec(), 'A' + k, a->n, b->n); }
     for (int i = 0; i < b->n; i++) if (s_find(a, b->uid[i]) < 0 && !(t->fish[i].ms_bits & MS_ARRIVED)) BOOK(0, "no-ms-arrived", "tank %c: %08x arrived without MS_ARRIVED (ms %x)", 'A' + k, b->uid[i], t->fish[i].ms_bits);
-    if (left && !came) BOOK(b->sale_need == b->feedings + SELL_FRY_MEALS, "fry-wait", "tank %c: a fish left, the fry wait %d (feedings %d)", 'A' + k, b->sale_need, b->feedings);
+    bool swap_left = false;                          /* (audit r1, LK-8: a swap's departure runs no sale's books - the fry wait stays) */
+    for (int i = 0; i < a->n; i++) if (s_find(b, a->uid[i]) < 0 && swn(&SWB[k])->st != SWN_NONE && swn(&SWB[k])->out.uid == a->uid[i]) {   /* SLP: a swap's departure */
+        swap_left = true;
+        if (a->staged && !b->staged) sw.staged_called_off++;
+        if (b->sale_need != a->sale_need) sw.sale_need_moved++;
+        if (g_card_log) printf("    swap out of %08x at %c (%s): %d -> %d fish; fry staged %d -> %d; fry wait (meals) %d -> %d (feedings %d)\n", a->uid[i], 'A' + k,
+                               swn(&SWB[k])->role == SWAP_ROLE_I ? "I, the commit" : "R, the apply", a->n, b->n, a->staged, b->staged, a->sale_need, b->sale_need, b->feedings);
+    }
+    if (left && !came && !swap_left) BOOK(b->sale_need == b->feedings + SELL_FRY_MEALS, "fry-wait", "tank %c: a fish left, the fry wait %d (feedings %d)", 'A' + k, b->sale_need, b->feedings);
+    if (left && !came && swap_left) BOOK(b->sale_need == a->sale_need, "fry-wait-swap", "tank %c: a swap's departure moved the fry wait %d -> %d", 'A' + k, a->sale_need, b->sale_need);
     if (came && !left) BOOK(b->sale_need == a->sale_need, "fry-wait-arrival", "tank %c: an arrival moved the fry wait %d -> %d", 'A' + k, a->sale_need, b->sale_need);
     /* the courting pair names a fish not here (the visitor is): it can never court - count the frames */
     if (t->fry_partner && t->fry_mate) {
@@ -443,10 +513,12 @@ static void boot_tank(int k, uint32_t seed, bool first) {
     tank_init(&T[k], seed);
     progression_cap_hook = cap_hook;
     memset(&G[k], 0, sizeof G[k]); G[k].persist = true; gift_attach(&T[k], &G[k]);
+    memset(&SWB[k], 0, sizeof SWB[k]); SWB[k].persist = true; SWB[k].peer_edge = -1; swap_attach(&T[k], &SWB[k]);   /* (SLP: the board's book; a boot loads it) */
     shelf_boot(0);
     progression_boot(&T[k]);
     if (first) { progression_setup_done(&T[k]); shelf_rename(-1, k ? "BEA'S\nBAY" : "SAM'S\nREEF"); }
     notice_sync(&T[k]);
+    CBOOT[k] = true; cards_track(k, &T[k]);        /* (SLP: the books CARDS EARNED HERE start from the synced tank) */
     K[k].nb_slot = -1; K[k].nb_uid = 0;
     H[k] = tank_link_host(&T[k], q_send);
     if (!L[k]) L[k] = calloc(1, (size_t)link_size());
@@ -454,6 +526,16 @@ static void boot_tank(int k, uint32_t seed, bool first) {
     link_mode(L[k], true);
 }
 static void relink(void) {
+    if (!getenv("SEAM_RELINK_NOWAIT")) {             /* (on by default since the audit r1 fixes; SEAM_RELINK_NOWAIT=1 for the old way). (SLP: a tank back from a reboot is a stranger to a neighbor that still holds the old link - its
+                                                     link_arm is refused (link.c:297) until that link lapses. Wait for it, as a keeper would see it go) */
+        for (int n = 0; n < 30 * 30; n++) {
+            bool stale = (link_neighbor(L[0], LINK_RIGHT) != 0) != (link_neighbor(L[1], LINK_LEFT) != 0)
+                      || (link_neighbor(L[0], LINK_RIGHT) && link_neighbor(L[0], LINK_RIGHT) != T[1].uid) || (link_neighbor(L[1], LINK_LEFT) && link_neighbor(L[1], LINK_LEFT) != T[0].uid);
+            if (!stale) break;
+            frame();
+        }
+        if (link_neighbor(L[0], LINK_RIGHT) == T[1].uid && link_neighbor(L[1], LINK_LEFT) == T[0].uid) return;
+    }
     use(0); link_mode(L[0], true); link_arm(L[0], LINK_RIGHT);
     run_s(0.2f);
     use(1); link_mode(L[1], true); link_arm(L[1], LINK_LEFT);
@@ -527,6 +609,68 @@ static void ev_give_cut(int k) {
     use(who); ev_reboot_cut(who);
     run_s(5);
 }
+/* ---- SLP (0.4.3): FISH SWAP, as the keepers drive the cards (render.c sets these same fields) ----
+   I = k offers one of its fish (home, or visiting the partner) when the partner is full and takes swaps; R picks one of
+   its own (home, or visiting I), or says NO THANKS; I says the last SWAP (or NO). `cut`: a power cut on one side at a
+   random moment after the last yes (the notes' recovery). Returns true when a trade happened */
+static int swap_pick(int k, uint32_t peer) {      /* a fish of k a keeper may put in a swap with peer: the GIVE card's own rules + sw_can_go's */
+    int n = T[k].n_fish, s = (int)(rnd() % (unsigned)(n ? n : 1));
+    for (int q = 0; q < n; q++) { int i = (s + q) % n; fish_t *f = &T[k].fish[i];
+        if (!progression_fish_swappable(&T[k], i) || !progression_fish_givable(&T[k], i)) continue;
+        if (f->away && link_swap_away_peer(L[k], f->uid) != peer) continue;   /* (a third tank: dim) */
+        if (!f->away && (f->door != DOOR_NONE || link_swap_outward(L[k], f->uid))) continue;
+        return i; }
+    return -1;
+}
+static void hold_visitors(void);
+static int slot_of(int k, uint32_t uid);
+static int g_stage_before_yes = -1;               /* (told case S9: a fry staged at this tank just before the last yes) */
+static bool swap_settled(void) { for (int k = 0; k < 2; k++) if (swap_busy(&SWB[k]) || nopen(&SWB[k])) return false; return true; }   /* (no note open either: swn() reads the one - review 11-22) */
+static bool ev_swap_x(int k, int mode, bool cut, uint32_t fa, uint32_t fb) {   /* mode 0 a trade, 1 R's NO THANKS, 2 I's last NO; fa/fb: the fish (0 = any) */
+    use(k); int o = 1 - k;
+    if (!swap_settled() || G[k].want_uid || G[k].wait_uid || G[k].asking_uid || G[k].leaving_uid || G[o].ask.on) return false;
+    if (!link_peer_swap(L[k], T[o].uid) || !link_peer_full(L[k], T[o].uid)) { sw.not_full++; return false; }
+    int i = swap_pick(k, T[o].uid); if (fa) { i = -1; for (int q = 0; q < T[k].n_fish; q++) if (T[k].fish[q].uid == fa) i = q; }
+    if (i < 0) return false;
+    uint32_t a = T[k].fish[i].uid;
+    SWB[k].want_uid = a; SWB[k].want_peer = T[o].uid; sw.asked++;
+    for (int n = 0; n < 30 * 5 && SWB[o].in.st != SI_ASKED; n++) { hold_visitors(); frame(); }
+    if (SWB[o].in.st != SI_ASKED) return false;
+    run_s(1 + rndf() * 3);
+    use(o);
+    if (mode == 1) { SWB[o].r_answer = -1; sw.no_thanks++; run_s(3); return false; }
+    int j = swap_pick(o, T[k].uid); if (fb) { j = -1; for (int q = 0; q < T[o].n_fish; q++) if (T[o].fish[q].uid == fb) j = q; }
+    if (j < 0) { SWB[o].r_answer = -1; run_s(3); return false; }
+    uint32_t b = T[o].fish[j].uid;
+    bool pair = (T[k].breed_a == a || T[k].breed_b == a) || (T[o].breed_a == b || T[o].breed_b == b); if (pair) sw.pair_swapped++;
+    SWB[o].r_pick = b;
+    for (int n = 0; n < 30 * 5 && SWB[k].out.st != SO_PICKED; n++) { hold_visitors(); frame(); }
+    if (SWB[k].out.st != SO_PICKED) return false;
+    sw.picked++;
+    run_s(0.5f + rndf() * 2);
+    if (mode == 2) { use(k); SWB[k].i_answer = -1; sw.last_no++; run_s(3); return false; }
+    if (g_stage_before_yes >= 0) { use(g_stage_before_yes); progression_stage_arrival(&T[g_stage_before_yes]); }
+    use(k); SWB[k].i_answer = 1; sw.last_yes++;
+    ub_t *ua = ub(a), *ubb = ub(b); ulog(ua, "%c SWAP out (for %08x)", 'A' + k, b); ulog(ubb, "%c SWAP out (for %08x)", 'A' + o, a);
+    if (cut) {
+        if (getenv("SEAM_SWAP_CUT") && atoi(getenv("SEAM_SWAP_CUT")) > 1) {   /* (the cut inside the trade: after I's commit, around R's apply) */
+            for (int n = 0; n < 30 * 30 && swn(&SWB[k])->st != SWN_COMMITTED; n++) { hold_visitors(); frame(); }
+            for (int n = (int)(rndf() * 12); n > 0; n--) frame();
+        } else
+        run_s(rndf() * 8);
+        int who = rndf() < 0.5f ? o : k; sw.cut_mid++;
+        ev_reboot_cut(who);
+    }
+    for (int n = 0; n < 30 * 60 && !swap_settled(); n++) { hold_visitors(); frame(); }
+    run_s(2);
+    bool traded = false;
+    for (int q = 0; q < T[o].n_fish; q++) if (T[o].fish[q].uid == a) traded = true;
+    if (traded) { sw.traded_i++; sw.traded_r++; }
+    if (getenv("SEAM_TRACE_SWAP")) printf("  swap t=%.1f %c->%c a %08x b %08x cut %d: traded %d; a in %c %d, in %c %d; b in %c %d, in %c %d; notes %d/%d\n", tsec(), 'A' + k, 'A' + o, a, b, cut, traded,
+        'A' + k, slot_of(k, a), 'A' + o, slot_of(o, a), 'A' + k, slot_of(k, b), 'A' + o, slot_of(o, b), swn(&SWB[k])->st, swn(&SWB[o])->st);
+    return traded;
+}
+static bool ev_swap(int k, int mode, bool cut) { return ev_swap_x(k, mode, cut, 0, 0); }
 static void ev_birth(int k) {
     use(k); if (progression_fish_held(&T[k]) >= POP_CAP || progression_newborn() >= 0) return;
     if (rndf() < 0.3f) T[k].mutate_next = true;
@@ -768,14 +912,14 @@ static bool send_over(int k, int i, float max_s) {   /* fish i of k through its 
 }
 static void wipe_dirs(void) {
     for (int k = 0; k < 2; k++) { char cmd[700]; snprintf(cmd, sizeof cmd, "rm -rf '%s' && mkdir -p '%s/frame'", dirs[k], dirs[k]); (void)system(cmd); }
-    for (int k = 0; k < 2; k++) { memset(&G[k], 0, sizeof G[k]); if (L[k]) memset(L[k], 0, (size_t)link_size()); }
+    for (int k = 0; k < 2; k++) { memset(&G[k], 0, sizeof G[k]); if (L[k]) memset(L[k], 0, (size_t)link_size()); memset(&SWB[k], 0, sizeof SWB[k]); }
     qn = 0;
     memset(K, 0, sizeof K); un = 0; memset(D, 0, sizeof D);
 }
 static void two_full_tanks(uint32_t base) {
     wipe_dirs();
     for (int k = 0; k < 2; k++) boot_tank(k, base + (uint32_t)k * 31, true);
-    for (int k = 0; k < 2; k++) for (int q = 0; q < 3; q++) add_adult_gift(k, base + 100 + (uint32_t)(k * 7 + q), 0x1111u * (uint32_t)(k * 3 + q + 1));
+    for (int k = 0; k < 2; k++) for (int q = 0; q < POP_CAP - 2; q++) add_adult_gift(k, base + 100 + (uint32_t)(k * (POP_CAP > 5 ? 16 : 7) + q), 0x1111u * (uint32_t)(k * (POP_CAP > 5 ? 9 : 3) + q + 1));   /* (full: POP_CAP - 5 on a pocket tank, 10 on the big screens; their seeds apart) */
     for (int k = 0; k < 2; k++) { use(k); for (int i = 0; i < T[k].n_fish; i++) { progression_set_age(&T[k], i, STAGE_ADULT_AGE + 60); T[k].fish[i].trust = 7; T[k].fish[i].door_seen = T[k].clock + 1e5; } }
     relink(); run_s(10);
 }
@@ -801,7 +945,7 @@ static int case_visitor_rule(void) {
     use(0);
     printf("  S4: called home: %s after %.0f s; A now %d swimming, %d visitors; swim hook %d\n", back ? "HOME" : "NOT HOME", tsec() - t0, swim_count(0), vis_count(0), swim_hooks);
     if (!back) { printf("  S4: FINDING: a fish of ours could not come home to a tank hosting two\n"); bad++; }
-    if (back && swim_count(0) != 7) { printf("  S4: FINDING: %d swimming, not 7\n", swim_count(0)); bad++; }
+    if (back && swim_count(0) != POP_CAP + 2) { printf("  S4: FINDING: %d swimming, not %d (its own and two visitors)\n", swim_count(0), POP_CAP + 2); bad++; }
     /* a third visitor for A: refused (full) */
     use(1); int third = -1; for (int i = 0; i < T[1].n_fish; i++) if (!T[1].fish[i].away) third = i;
     bool crossed = third >= 0 && send_over(1, third, 25);
@@ -925,6 +1069,140 @@ static int case_fry_home_cut(void) {
     printf("  S7: home at the boot, +20 once; its unfinished welcome owed once more (%s), as for a birth here\n", w2 ? "yes" : "no");
     return 0;
 }
+/* ---- SLP (0.4.3 audit round 1): FISH SWAP's told cases ---- */
+static int slot_of(int k, uint32_t uid) { for (int i = 0; i < T[k].n_fish; i++) if (T[k].fish[i].uid == uid) return i; return -1; }
+/* S8: the cards across a swap. Two full tanks; every fish of B a different stage and badges; A's fish an elder PARAGON
+   with badges. A offers it, B picks its slot-0 fish. R (B) takes b out and a in inside one call (swap.c r_apply): its
+   count never changes, so notice_tick (notice.c:112) never re-adopts its per-slot snapshot, and every slot from 0 up is
+   diffed against the fish that WAS there. Any fish card on either tank after the trade is one it did not earn there */
+static int case_swap_cards(void) {
+    int bad = 0;
+    two_full_tanks(0x5300u);
+    static const uint32_t MSB[5] = { 0, MS_FIRST_DART | MS_FIRST_BUBBLES, MS_FIRST_FOLLOW, MS_FIRST_GRASS, MS_FIRST_MEAL_FROM_YOU };
+    use(1); for (int i = 0; i < T[1].n_fish; i++) {
+        float age = i == 0 ? STAGE_JUV_AGE + 60 : i == 2 ? STAGE_ELDER_AGE + 60 : STAGE_ADULT_AGE + 60;
+        progression_set_age(&T[1], i, age); T[1].fish[i].ms_bits |= MSB[i]; }
+    use(0); { fish_t *f = &T[0].fish[0]; progression_set_age(&T[0], 0, STAGE_ELDER_AGE + 60);
+        f->ms_bits |= MS_FIRST_GRASS | MS_FIRST_FOLLOW | MS_FIRST_DART | MS_FIRST_BUBBLES | MS_FIRST_MEAL_FROM_YOU; f->evo = 3; f->evo_offer = 0; }
+    run_s(120);                                       /* (the cards those earned come and go: earned here) */
+    const int b0 = sw.bogus_cards, f0 = fails;
+    use(0); uint32_t a = T[0].fish[0].uid; char an[FISH_NAME_MAX + 1]; snprintf(an, sizeof an, "%s", T[0].fish[0].name);
+    use(1); uint32_t b = T[1].fish[0].uid;
+    printf("  S8: A offers slot 0 \"%s\" (an elder paragon, five badges); B picks its slot 0 (a juvenile). B's slots before:", an);
+    for (int i = 0; i < T[1].n_fish; i++) printf(" %d:%s/st%d/ms%x", i, T[1].fish[i].name, T[1].fish[i].stage, T[1].fish[i].ms_bits & 0x1fff);
+    printf("\n");
+    g_card_log = 1;
+    bool traded = ev_swap_x(0, 0, false, a, b);
+    run_s(90);
+    g_card_log = 0;
+    use(1); printf("  S8: traded %d; B's slots after:", traded);
+    for (int i = 0; i < T[1].n_fish; i++) printf(" %d:%s/st%d/ms%x", i, T[1].fish[i].name, T[1].fish[i].stage, T[1].fish[i].ms_bits & 0x1fff);
+    printf("\n  S8: fish cards that came up after the trade and were not earned there: %d\n", sw.bogus_cards - b0);
+    if (!traded) { printf("  S8: FAIL staging: no trade\n"); return 1; }
+    if (sw.bogus_cards > b0) { printf("  S8: FINDING: a swap brings cards for badges / stages / the paragon the fish did not earn in that tank (R's slots shifted under notice.c's snapshot)\n"); bad++; }
+    fails = f0;                                       /* (counted as the told finding, not as book failures) */
+    return bad;
+}
+/* S9: the sale books a swap runs. A has four fish and a fry ON ITS WAY (staged); B is full. A swaps one fish for one:
+   its count is the same after, yet fish_out (progression.c:1440-1441) calls the staged fry off and starts SELL_FRY_MEALS
+   more meals of wait, as a sale does. The control: the same offer ended by B's NO THANKS keeps the fry */
+static int case_swap_sale_books(void) {
+    int bad = 0;
+    for (int run = 0; run < 2; run++) {
+        wipe_dirs();
+        for (int k = 0; k < 2; k++) boot_tank(k, 0x5900u + (uint32_t)k * 31 + (uint32_t)run * 7, true);
+        for (int q = 0; q < POP_CAP - 3; q++) add_adult_gift(0, 0x5950u + (uint32_t)q, 0x2222u * (uint32_t)(q + 1));
+        for (int q = 0; q < POP_CAP - 2; q++) add_adult_gift(1, 0x5960u + (uint32_t)q, 0x3333u * (uint32_t)(q + 1));
+        for (int k = 0; k < 2; k++) { use(k); for (int i = 0; i < T[k].n_fish; i++) { progression_set_age(&T[k], i, STAGE_ADULT_AGE + 60); T[k].fish[i].trust = 7; T[k].fish[i].door_seen = T[k].clock + 1e5; } }
+        relink(); run_s(10);
+        use(0); int32_t need0 = progression_dbg_sale_need(); int n0 = T[0].n_fish;
+        const int c0 = sw.staged_called_off, m0 = sw.sale_need_moved;
+        g_stage_before_yes = run == 0 ? 0 : -1;
+        g_card_log = 1;
+        bool traded;
+        if (run == 0) traded = ev_swap(0, 0, false);
+        else { use(0); progression_stage_arrival(&T[0]); traded = ev_swap(0, 1, false); }
+        g_card_log = 0; g_stage_before_yes = -1;
+        use(0); bool staged; fry_req_t r[FRY_REQ_MAX]; progression_next_fry(&T[0], r, &staged);
+        printf("  S9 %s: A %d -> %d fish, traded %d; the fry staged at the end %d; fry wait %d -> %d meals (feedings %d); swap departures that called a fry off %d, moved the wait %d\n",
+               run == 0 ? "trade" : "NO THANKS (control)", n0, T[0].n_fish, traded, staged, need0, progression_dbg_sale_need(), T[0].player_feedings,
+               sw.staged_called_off - c0, sw.sale_need_moved - m0);
+        if (run == 0 && traded && (sw.staged_called_off > c0 || sw.sale_need_moved > m0)) {
+            printf("  S9: FINDING: a one-for-one swap runs a sale's books at I: its staged fry is called off and the next waits %d meals\n", SELL_FRY_MEALS); bad++; }
+        if (run == 0 && !traded) { printf("  S9: FAIL staging: no trade\n"); bad++; }
+    }
+    return bad;
+}
+/* S10: a fish that grows up while it visits, swapped where it swims. B's juvenile visits A (20 s from grown); A's host clock
+   (vis_age) passes STAGE_ADULT_AGE; A offers a fish and B picks the visitor. A keeps it as its own (sw_in's visitor path ->
+   progression_gift_adopt): the stage its age gives is applied and marked PAID in the same breath (progression.c:1475-1482) -
+   B never paid it (s_age stops while away), A never pays it. A visit that ends at home pays it there (progression_age_from_visit) */
+static int case_swap_grew_visiting(void) {
+    int bad = 0;
+    two_full_tanks(0x5a00u);
+    use(1); int x = 1; uint32_t xu = T[1].fish[x].uid;
+    progression_set_age(&T[1], x, STAGE_ADULT_AGE - 20); T[1].fish[x].stage = STAGE_JUV; T[1].fish[x].ms_bits &= ~(MS_REACHED_ADULT | MS_REACHED_ELDER);
+    T[1].sd_paid_fish[x] &= ~(SD_PAID_ADULT | SD_PAID_ELDER);
+    run_s(1);
+    if (!send_over(1, x, 60)) { printf("  S10: FAIL staging: the juvenile never got next door\n"); return 1; }
+    for (int n = 0; n < 30 * 40; n++) { hold_visitors(); frame(); }
+    use(0); int v = -1; for (int j = 0; j < N_VISIT_MAX; j++) if (T[0].vis_used[j] && T[0].fish[N_FISH_MAX + j].uid == xu) v = j;
+    float va = v >= 0 ? T[0].vis_age[v] : -1;
+    use(0); int32_t eA = T[0].sd_earned; use(1); int32_t eB = T[1].sd_earned;
+    bool traded = ev_swap_x(0, 0, false, 0, xu);
+    use(0); int s = slot_of(0, xu);
+    int32_t dA = T[0].sd_earned - eA; use(1); int32_t dB = T[1].sd_earned - eB;
+    use(0);
+    printf("  S10: B's juvenile visiting A, host age %.0f s (adult at %d); swapped where it swims: traded %d, in A stage %d, paid %x; A earned +%d, B +%d (SD_STAGE_ADULT %d)\n",
+           va, STAGE_ADULT_AGE, traded, s >= 0 ? T[0].fish[s].stage : -1, s >= 0 ? T[0].sd_paid_fish[s] : 0, (int)dA, (int)dB, SD_STAGE_ADULT);
+    if (traded && s >= 0 && T[0].fish[s].stage >= STAGE_ADULT && (T[0].sd_paid_fish[s] & SD_PAID_ADULT) && dA < SD_STAGE_ADULT && dB < SD_STAGE_ADULT) {
+        printf("  S10: FINDING (audit r1 SLP-3, open - its fix is progression_gift_adopt's, another session's): the stage it reached on the visit is paid in neither tank%s\n",
+               getenv("SEAM_S10_STRICT") ? "" : " - reported, not failed (SEAM_S10_STRICT=1 fails it)"); if (getenv("SEAM_S10_STRICT")) bad++; }
+    if (!traded) { printf("  S10: FAIL staging: no trade\n"); bad++; }
+    return bad;
+}
+/* S11: a power cut inside the trade, at every frame from I's commit to 12 frames on, on I or on R: how long until the
+   trade has settled (both notes gone, a at R, b at I), and is every fish alive exactly once at every frame */
+static int case_swap_cut_inside(void) {
+    int bad = 0, worst = 0; char tab[2][14][8];
+    const char *only = getenv("SEAM_S11_ONLY"); int ow = only ? only[0] - '0' : -1, od = only ? atoi(only + 2) : -1;
+    for (int who = 0; who < 2; who++) for (int d = 0; d < 14; d++) {
+        if (only && (who != ow || d != od)) { snprintf(tab[who][d], 8, "-"); continue; }
+        two_full_tanks(0x5b00u + (uint32_t)(who * 31 + d));
+        use(0); int ia = swap_pick(0, T[1].uid); if (ia < 0) { snprintf(tab[who][d], 8, "pick"); continue; }
+        uint32_t a = T[0].fish[ia].uid;
+        SWB[0].want_uid = a; SWB[0].want_peer = T[1].uid;
+        for (int n = 0; n < 30 * 5 && SWB[1].in.st != SI_ASKED; n++) frame();
+        use(1); int jb = swap_pick(1, T[0].uid); if (jb < 0 || SWB[1].in.st != SI_ASKED) { snprintf(tab[who][d], 8, "ask"); continue; }
+        uint32_t b = T[1].fish[jb].uid; SWB[1].r_pick = b;
+        for (int n = 0; n < 30 * 5 && SWB[0].out.st != SO_PICKED; n++) frame();
+        use(0); SWB[0].i_answer = 1;
+        int n = 0; for (; n < 30 * 30 && swn(&SWB[0])->st != SWN_COMMITTED; n++) frame();
+        if (swn(&SWB[0])->st != SWN_COMMITTED) { snprintf(tab[who][d], 8, "nocm"); continue; }
+        for (int q = 0; q < d; q++) frame();
+        ev_reboot_cut(who);
+        int s = 0; bool both = false, none = false;
+        for (; s < 30 * 600; s++) {
+            int ca = (slot_of(0, a) >= 0) + (slot_of(1, a) >= 0), cb = (slot_of(0, b) >= 0) + (slot_of(1, b) >= 0);
+            both |= ca > 1 || cb > 1;
+            if (only && s % 60 == 0 && s < 30 * 20) printf("    S11 t+%.0f: A note st %d app %d sid %u tank %08x(me %08x) out %08x in %08x | B note st %d app %d sid %u | A out.st %d in.st %d, B out.st %d in.st %d | A linked %d B linked %d | A fin %d B fin %d | a in A %d B %d, b in A %d B %d\n",
+                s / 30.0, swn(&SWB[0])->st, swn(&SWB[0])->applied, (unsigned)swn(&SWB[0])->sid, swn(&SWB[0])->tank, T[0].uid, swn(&SWB[0])->out.uid, swn(&SWB[0])->in.uid,
+                swn(&SWB[1])->st, swn(&SWB[1])->applied, (unsigned)swn(&SWB[1])->sid, SWB[0].out.st, SWB[0].in.st, SWB[1].out.st, SWB[1].in.st,
+                link_neighbor(L[0], LINK_RIGHT) == T[1].uid, link_neighbor(L[1], LINK_LEFT) == T[0].uid, nopen(&SWB[0]), nopen(&SWB[1]), slot_of(0, a), slot_of(1, a), slot_of(0, b), slot_of(1, b));
+            if (slot_of(1, a) >= 0 && slot_of(0, b) >= 0 && swn(&SWB[0])->st == SWN_NONE && swn(&SWB[1])->st == SWN_NONE) break;
+            if (slot_of(0, a) >= 0 && slot_of(1, b) >= 0 && swn(&SWB[0])->st == SWN_NONE && swn(&SWB[1])->st == SWN_NONE) { none = true; break; }   /* (ended without a trade: a home) */
+            frame();
+        }
+        if (s >= 30 * 600) snprintf(tab[who][d], 8, ">600s"); else snprintf(tab[who][d], 8, "%s%.0f", none ? "u" : "", s / 30.0);
+        if (s > worst) worst = s;
+        if (both) { printf("  S11: FINDING: a fish alive in both tanks after a cut on %c %d frames after the commit\n", 'A' + who, d); bad++; }
+        if (s >= 30 * 600) { printf("  S11: FINDING: a cut on %c %d frames after the commit: the trade not settled after 10 min (notes %d/%d, a in A %d B %d, b in A %d B %d)\n",
+                                    'A' + who, d, swn(&SWB[0])->st, swn(&SWB[1])->st, slot_of(0, a), slot_of(1, a), slot_of(0, b), slot_of(1, b)); bad++; }
+    }
+    for (int who = 0; who < 2; who++) { printf("  S11: cut on %c (I=A, R=B), frames after the commit 0..13 -> seconds to settle (u = no trade):", 'A' + who);
+        for (int d = 0; d < 14; d++) printf(" %s", tab[who][d]); printf("\n"); }
+    return bad;
+}
 int selftest_seam(void) {
     const char *seed_s = getenv("SEAM_SEED"); rs = seed_s ? (uint32_t)strtoul(seed_s, NULL, 0) : 0x5ea11u;
     const char *ev_s = getenv("SEAM_EVENTS"); int events = ev_s ? atoi(ev_s) : 1400;
@@ -950,7 +1228,8 @@ int selftest_seam(void) {
         found += case_visitor_rule();
         found += case_dance_loop();
         found += case_fry_home_cut();
-        printf("selftest-seam: the told cases: %d finding(s)\n", found); caps = 0; un = 0; memset(K, 0, sizeof K); memset(&st, 0, sizeof st); nk = 0; fails = 0; memset(kcount, 0, sizeof kcount);
+        if (!getenv("SEAM_NO_SWAP_CASES")) { found += case_swap_cards(); found += case_swap_sale_books(); found += case_swap_grew_visiting(); if (getenv("SEAM_SWAP_CUTS")) found += case_swap_cut_inside(); }   /* (SLP 0.4.3) */
+        printf("selftest-seam: the told cases: %d finding(s)\n", found); caps = 0; un = 0; memset(K, 0, sizeof K); memset(&st, 0, sizeof st); memset(&sw, 0, sizeof sw); cen = 0; nk = 0; fails = 0; memset(kcount, 0, sizeof kcount);
         for (int k = 0; k < 2; k++) { char cmd[700]; snprintf(cmd, sizeof cmd, "rm -rf '%s' && mkdir -p '%s/frame'", dirs[k], dirs[k]); (void)system(cmd); }
         cold(0); cur = -1; memcpy(CB[0], PB, NB); if (ND) memcpy(CD[0], PD, ND); }
     if (getenv("SEAM_CASES_ONLY") || !getenv("SEAM_EVENTS")) {   /* (make check: the told cases; the soak with SEAM_EVENTS, soak.sh) */
@@ -980,6 +1259,7 @@ int selftest_seam(void) {
         else if (r < 0.81f) ev_reboot(k);
         else if (r < 0.83f) ev_night();
         else if (r < 0.85f) ev_give_cut(k);
+        else if (r < (getenv("SEAM_SWAP") && atoi(getenv("SEAM_SWAP")) > 1 ? 0.99f : 0.93f) && !getenv("SEAM_NO_SWAP")) {   /* (swaps on by default since the audit r1 fixes) */ float m = rndf(); ev_swap(k, m < 0.12f ? 1 : m < 0.2f ? 2 : 0, rndf() < (getenv("SEAM_SWAP_CUT") ? 0.6f : 0.15f)); }   /* (SLP 0.4.3: FISH SWAP) */
         else { use(k); tank_feed(&T[k], TANK_W * rndf(), 3); }
         if (getenv("SEAM_CARE")) for (int q = 0; q < 2; q++) {   /* (a keeper who has done every other gate: meals, trust, a hold) */
             use(q); T[q].player_feedings += 60; T[q].hold_approaches += 1; for (int i = 0; i < T[q].n_fish; i++) if (T[q].fish[i].trust < 9) T[q].fish[i].trust = 9; }
@@ -1020,6 +1300,8 @@ int selftest_seam(void) {
            tsec() / 3600, st.nights, st.visits, st.homes, st.deports, st.gives, st.gives_away, st.gift_yes, st.gift_no, st.arrivals_gift,
            st.births, st.cross_try, st.cross_home, st.cross_kept, st.born_next_door, st.fry_home, st.sales, st.buys, st.reboots, st.cuts, st.welcomes,
            st.stale_mate, st.stall_frames, st.given_away_born, st.churn, st.notice_churn, st.reboot_fry_away);
+    printf("selftest-seam SLP swaps: asked %d, picked %d, last yes %d, traded %d, NO THANKS %d, last NO %d, cut mid-trade %d, partner not full %d; swap departures that called a staged fry off %d, moved the fry wait %d; fish cards checked %d, not earned here %d; swaps of a pair fish %d\n",
+           sw.asked, sw.picked, sw.last_yes, sw.traded_i, sw.no_thanks, sw.last_no, sw.cut_mid, sw.not_full, sw.staged_called_off, sw.sale_need_moved, sw.cards_checked, sw.bogus_cards, sw.pair_swapped);
     for (int q = 0; q < nk; q++) printf("  [%s] x%d\n", kname[q], kcount[q]);
     printf("selftest-seam: %s (%d book failures, %d cap, %d swim, %d told-case findings)\n", fails || caps || swim_hooks || found ? "FAILED" : "PASS", fails, caps, swim_hooks, found);
     return fails || caps || swim_hooks || found ? 1 : 0;

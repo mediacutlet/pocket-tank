@@ -291,7 +291,7 @@ static void c6(void) {
     nc_dark(true); nc_frames(1, 0); T.tank_ms_bits |= TMS_FIRST_REEF; nc_frames(1, 0);
     progression_save(&T);
     long n = nc_read(b, sizeof b);
-    if (n != 2200) NC_FAIL("C6a: the save is %ld B (want 2200)", n);
+    if (n != 2304) NC_FAIL("C6a: the save is %ld B (want 2304)", n);
     { uint32_t chk, tms; memcpy(&chk, b + 2176, 4); memcpy(&tms, b + 2180, 4);
       if (!chk || !(tms & TMS_FIRST_REEF)) NC_FAIL("C6a: (the test) the record was not written (check %08x, tank badges %05x)", (unsigned)chk, (unsigned)tms); }
     nc_write(b, 2176);
@@ -300,7 +300,7 @@ static void c6(void) {
     long n2 = (progression_save(&T), nc_read(b2, sizeof b2));
     int diffs = 0;
     for (long i = 2176; i < n2; i++) if (b2[i]) diffs++;
-    if (n2 != 2200 || diffs) NC_FAIL("C6a: saved back %ld B, %d nonzero byte(s) past 2176 (want 2200, none)", n2, diffs);
+    if (n2 != 2304 || diffs) NC_FAIL("C6a: saved back %ld B, %d nonzero byte(s) past 2176 (want 2304, none)", n2, diffs);
     /* b: a rollback - the record kept as this build wrote it, the head rewritten by 0.4.1 */
     nc_board("c6b"); nc_found(7611);
     nc_dark(true); nc_frames(1, 0); T.tank_ms_bits |= TMS_FIRST_REEF; nc_frames(1, 0);
@@ -364,6 +364,8 @@ static void c8(void) {
     if (nc_twice()) NC_FAIL("C8: %d card(s) said again after the normal save", nc_twice());
 }
 int selftest_night_cards(void) {
+    tank_debug_look_old(true);   /* (THE LOOK BACK, SIDE-ON: the cards' cases were built on the fish swimming as before it - a fish badge earned by
+                                    chance in C3a's lit frames and said again after C3b's cut is a different case; the swim is --selftest-look-once's) */
     sim_clock_freeze(1);
     c1(); c2(); c3(); c4(); c5(); c6(); c7(); c8();
     sim_clock_freeze(0);

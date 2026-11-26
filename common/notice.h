@@ -93,7 +93,9 @@
 #include <stdint.h>
 #include "tank.h"
 
-enum { NOTICE_MILESTONE, NOTICE_TANK_MILESTONE, NOTICE_STAGE, NOTICE_LOW_BATTERY, NOTICE_UPDATED, NOTICE_LIGHTS_OUT, NOTICE_MODEL_DAMAGED, NOTICE_WRONG_BOARD };
+enum { NOTICE_MILESTONE, NOTICE_TANK_MILESTONE, NOTICE_STAGE, NOTICE_LOW_BATTERY, NOTICE_UPDATED, NOTICE_LIGHTS_OUT, NOTICE_MODEL_DAMAGED, NOTICE_WRONG_BOARD,
+       NOTICE_EVOLVE, NOTICE_PARAGON };   /* (0.4.3) <NAME> IS READY TO EVOLVE (its three parts are rolled) / IS NOW A PARAGON (it kept one). Not owed across
+                                             a save: a card missed is not said again, the fish card's EVOLVE button stays */
 typedef struct { int kind; int fish; uint32_t bit; float age;   /* age: the time it has been shown, in all (queued: < 0 = it stepped aside) */
                  float since; } notice_t;                        /* (0.4.2) up: the time since it came up or came back - the touch rule's clock.
                                                                     Queued: the time one the dark stepped aside had already been shown */
@@ -108,9 +110,12 @@ void notice_sync(const tank_t *t);
 void notice_tick(const tank_t *t, float dt, bool blocked);
 const notice_t *notice_current(void);      /* NULL = none up */
 void notice_fish_removed(int idx);         /* a fish left, the slots shifted: notices follow their fish (or go) */
+void notice_fish_removed_of(const tank_t *t, int idx);   /* ... from tank t: the per-fish memory moves only if it is t's (the sim runs two tanks) */
 bool notice_dismiss(void);
 bool notice_dismiss_held(float held_s);
 bool notice_came_back(void);              /* the notice up stepped aside under something and came back (a tap closed that page: the port gives it its window) */    /* the same, for a press held_s long: one begun before the notice came is spent */                 /* a tap: true = the notice took it (closed, or held: still up), false = it goes on to the tank */
+bool notice_after_page(void);             /* (0.4.3 audit r2, R2-4) the notice up came the tick a page over the tank went: held under it, or earned by the tap
+                                             that closed it - the port gives it the same window (the double's second half) */
 void notice_low_battery(void);             /* platform: the gauge fell to the threshold */
 void notice_updated(void);                 /* platform: the first boot of a new release (after notice_sync) */
 void notice_model_damaged(void);           /* platform: the AI model is damaged (after notice_sync): once per start */
@@ -120,7 +125,12 @@ bool notice_card_room(const tank_t *t);     /* nothing else has the glass: a car
 int  notice_pending(void);                 /* queued, not counting the one up */
 /* OWED CARDS (0.4.2, above): what is still to be said, by fish slot as the tank is now. tms: tank badges (TMS_*), ms: each
    fish's badges (MS_*: the badges are bits < MS_FISH_COUNT), stage: bit i = fish slot i's "IS NOW A ..." card */
-typedef struct notice_owed { uint32_t tms; uint16_t ms[N_FISH_MAX]; uint8_t stage; } notice_owed_t;
+#if N_FISH_MAX > 8
+typedef uint16_t notice_stage_bits_t;   /* a bit a fish slot (the big screens: eleven slots) */
+#else
+typedef uint8_t notice_stage_bits_t;
+#endif
+typedef struct notice_owed { uint32_t tms; uint16_t ms[N_FISH_MAX]; notice_stage_bits_t stage; } notice_owed_t;
 bool notice_owed_pack(const tank_t *t, unsigned gen, notice_owed_t *o);   /* false (o empty) = the queue is not this tank's: no sync
                                                                              since tank generation gen began (progression's) */
 

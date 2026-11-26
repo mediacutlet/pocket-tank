@@ -280,3 +280,4 @@ int coll_shot(const char *prefix) {
     printf("coll-shot: %s_{page1_of10_full,page2_of10,page10_of10_115,passport_full}.ppm\n", prefix);
     return 0;
 }
+#include "colllab_test.inc"

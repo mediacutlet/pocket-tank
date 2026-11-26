@@ -77,6 +77,11 @@ static void rec_write(const coll_entry_t *e, uint8_t *b) {
     put32(b, 42, e->met_unix); put32(b, 46, e->seen_unix); put32(b, 50, e->here_s);
     put16(b, 54, e->visits); b[56] = e->fry;
     memcpy(b + 57, e->home_name, 16);
+    b[73] = e->evo;                                                   /* 73: a paragon's part (0.4.3; 0 in every older record) */
+    /* (0.4.3 audit SV-8) a lab-made visitor's own form, in bytes every older build writes 0 and never reads: 74..75 its body,
+       and the three color words' top bytes (27, 31, 35) its fin lengths - each color is masked to 24 bits on every read */
+    b[74] = e->body[0]; b[75] = e->body[1];
+    b[27] = e->finl[0]; b[31] = e->finl[1]; b[35] = e->finl[2];
 }
 static void rec_read(coll_entry_t *e, const uint8_t *b, int rec) {
     memset(e, 0, sizeof *e);
@@ -93,6 +98,15 @@ static void rec_read(coll_entry_t *e, const uint8_t *b, int rec) {
     e->met_unix = get32(b, 42); e->seen_unix = get32(b, 46); e->here_s = get32(b, 50);
     e->visits = (uint16_t)get16(b, 54); e->fry = b[56];
     if (rec >= 73) { char raw[16]; memcpy(raw, b + 57, 16); raw[15] = 0; passport_clean_tank_name(e->home_name, raw); }   /* (a 64-byte record: none) */
+    if (rec >= 74) e->evo = b[73] < EVO_N ? b[73] : 0;                /* (a part a later release added: a plain fish here) */
+    {   /* (SV-8) its own body and fins, held to what the creator can make as from the air (zeros: the named body, the set's fins) */
+        uint8_t st[PASSPORT_STRETCH] = { 0 };
+        if (rec >= 76) { st[0] = b[74]; st[1] = b[75]; }
+        st[4] = b[27]; st[5] = b[31]; st[6] = b[35];
+        fish_t f; memset(&f, 0, sizeof f); f.fins = e->fins; f.shape = e->shape;
+        passport_stretch_to(st, &f);
+        memcpy(e->body, f.body, 2); memcpy(e->finl, f.finl, 3);
+    }
 }
 
 /* the parts in `parts` (s_dirty's bits) written: the first page as the "visitors" blob it always was (never more than
@@ -201,6 +215,8 @@ static void entry_from_fish(coll_entry_t *e, const tank_t *t, int k) {
     e->color = f->color & 0xffffff; e->fin = f->fin & 0xffffff; e->accent = f->accent & 0xffffff;
     e->preset = (uint8_t)f->preset; e->stage = (uint8_t)(f->stage & 3);
     e->shape = f->shape; e->fins = f->fins; e->pattern = f->pattern;
+    e->evo = f->evo < EVO_N ? f->evo : 0;                 /* (0.4.3) a paragon is collected with its part; one that evolves later, at its next visit */
+    memcpy(e->body, f->body, 2); memcpy(e->finl, f->finl, 3);   /* (SV-8) a lab-made visitor's own form: the page draws it as the tank did */
     e->badge = t->vis_badge[k];
     passport_clean_tank_name(e->home_name, t->vis_home_name[k]);
     e->seen_unix = now_unix();

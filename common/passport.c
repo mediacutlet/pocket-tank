@@ -22,9 +22,18 @@ enum {
     OFF_CRC_V1 = 92,
     /* version 2 (2026-11-01) */
     OFF_HOME_NAME = 92,                                /* PASSPORT_TANK_NAME bytes, zero-padded */
-    OFF_CRC_V2 = 108
+    OFF_CRC_V2 = 108,
+    OFF_EVO = 108,                 /* v3: where v2's CRC was; an older reader checks the CRC at its length's end and never reads this */
+    OFF_CRC_V3 = 110,
+    OFF_STRETCH = 110,             /* v4: where v3's CRC was */
+    OFF_CRC_V4 = 120,
+    OFF_LAB = 120,                 /* v5 (0.4.3 audit r1, SLB-2): where v4's CRC was - 1 = made in THE FISH LAB */
+    OFF_CRC_V5 = 121
 };
 _Static_assert(OFF_CRC_V2 + 2 == PASSPORT_V2_BYTES, "passport v2 length");
+_Static_assert(OFF_CRC_V3 + 2 == PASSPORT_V3_BYTES, "passport v3 length");
+_Static_assert(OFF_CRC_V4 + 2 == PASSPORT_V4_BYTES && OFF_STRETCH + PASSPORT_STRETCH == OFF_CRC_V4, "passport v4 length");
+_Static_assert(OFF_CRC_V5 + 2 == PASSPORT_V5_BYTES, "passport v5 length");
 _Static_assert(FISH_NAME_MAX + 1 == 8, "passport v1 carries an 8-byte name");
 _Static_assert(OFF_CRC_V1 + 2 == PASSPORT_V1_BYTES, "passport v1 length");
 _Static_assert(MS_FISH_COUNT <= 16, "passport v1 carries 16 badge bits");
@@ -112,6 +121,40 @@ void passport_from_fish(passport_t *p, const fish_t *f, uint32_t home_tank, floa
     p->drift_acc = f->drift_acc; p->size = f->size; p->age_s = age_s;
     p->eaten = f->eaten; p->eaten_player = f->eaten_player;
     p->ms_bits = f->ms_bits & MS_TRAVELS; p->ms_seen = f->ms_seen & p->ms_bits;
+    p->evo = tank_evo_pack(f);
+    p->lab = f->lab ? 1 : 0;
+    passport_stretch_from(p->stretch, f);
+}
+void passport_stretch_from(uint8_t s[PASSPORT_STRETCH], const fish_t *f) {
+    memcpy(s, f->body, 2); memcpy(s + 2, f->body_c, 2); memcpy(s + 4, f->finl, 3); memcpy(s + 7, f->finl_c, 3);
+}
+/* a body: both bytes inside the range, or none. a fin triple: all three set and no longer than the longest, or none */
+static void stretch_clean(uint8_t s[PASSPORT_STRETCH]) {
+    for (int k = 0; k < 4; k += 2) {
+        bool ok = s[k] >= (uint8_t)(BODY_LEN_MIN * BODY_Q) && s[k] <= (uint8_t)(BODY_LEN_MAX * BODY_Q)
+               && s[k + 1] >= (uint8_t)(BODY_DEP_MIN * BODY_Q) && s[k + 1] <= (uint8_t)(BODY_DEP_MAX * BODY_Q);
+        if (!ok) { s[k] = s[k + 1] = 0; continue; }
+        /* (0.4.3 audit r1, SLB-5) and inside the creator's own area, its two trimmed corners: the height gives way, as
+           tank_set_body does - a body the creator made comes through to the byte, one from a modified tank is held to it */
+        /* (the creator clamps against the length BEFORE it is rounded to a tenth, then rounds both: half a step of slack on
+           each, so every body it can store comes through to the byte - the review of 11-22, a 13.54 x 7.534 body) */
+        const float h = 0.5f / BODY_Q, len = s[k] / BODY_Q;
+        const float lo = BODY_AREA_MIN / (len + h) - h, hi = BODY_AREA_MAX / (len - h) + h;
+        float dep = s[k + 1] / BODY_Q;
+        if (dep < lo || dep > hi) { dep = dep < lo ? BODY_AREA_MIN / len : BODY_AREA_MAX / len; s[k + 1] = (uint8_t)(dep * BODY_Q + 0.5f); }
+    }
+    for (int k = 4; k < 10; k += 3) {
+        bool ok = s[k] && s[k + 1] && s[k + 2];
+        for (int i = 0; i < 3 && ok; i++) ok = s[k + i] <= (uint8_t)(1 + FINL_MAX * FINL_Q);
+        if (!ok) s[k] = s[k + 1] = s[k + 2] = 0;
+    }
+}
+void passport_stretch_to(const uint8_t s0[PASSPORT_STRETCH], fish_t *f) {
+    uint8_t s[PASSPORT_STRETCH]; memcpy(s, s0, sizeof s); stretch_clean(s);
+    memcpy(f->body, s, 2); memcpy(f->body_c, s + 2, 2); memcpy(f->finl, s + 4, 3); memcpy(f->finl_c, s + 7, 3);
+    /* the names follow the values, as everywhere: the shown body's, and the carried copy's */
+    if (tank_body_set(f)) { float l, d; tank_body(f, &l, &d); f->shape = (uint8_t)tank_body_nearest(l, d); }
+    if (f->body_c[0]) f->carried[GENE_SHAPE] = (uint8_t)tank_body_nearest(f->body_c[0] / BODY_Q, f->body_c[1] / BODY_Q);
 }
 
 void passport_to_fish(const passport_t *p, fish_t *f) {
@@ -133,13 +176,18 @@ void passport_to_fish(const passport_t *p, fish_t *f) {
     f->drift_acc = p->drift_acc;
     f->eaten = p->eaten; f->eaten_player = p->eaten_player;
     f->ms_bits = p->ms_bits; f->ms_seen = p->ms_seen;
+    tank_evo_unpack(f, p->evo);
+    tank_evo_fit(f);                                     /* (below the paragon stage: no part, never READY - SLB-4) */
+    f->lab = p->lab ? 1 : 0;
+    passport_stretch_to(p->stretch, f);
     f->sig = 0xffffffffu;                                /* the advisor asks about it soon */
 }
 
-int passport_write(const passport_t *p, uint8_t *b, int cap) {
-    if (cap < PASSPORT_V2_BYTES) return 0;
-    memset(b, 0, PASSPORT_V2_BYTES);
-    put16(b, OFF_MAGIC, PASSPORT_MAGIC); b[OFF_VERSION] = PASSPORT_VERSION; b[OFF_LEN] = PASSPORT_V2_BYTES;
+static int write_as(const passport_t *p, uint8_t *b, int cap, int ver) {
+    const int len = ver >= 5 ? PASSPORT_V5_BYTES : ver >= 4 ? PASSPORT_V4_BYTES : PASSPORT_V3_BYTES;
+    if (cap < len) return 0;
+    memset(b, 0, len);
+    put16(b, OFF_MAGIC, PASSPORT_MAGIC); b[OFF_VERSION] = (uint8_t)ver; b[OFF_LEN] = (uint8_t)len;
     put32(b, OFF_UID, p->uid); put32(b, OFF_HOME, p->home_tank);
     put32(b, OFF_PARENT0, p->parent_uid[0]); put32(b, OFF_PARENT1, p->parent_uid[1]);
     clean_name((char *)b + OFF_NAME, p->name, FISH_NAME_MAX);
@@ -160,9 +208,14 @@ int passport_write(const passport_t *p, uint8_t *b, int cap) {
     put16(b, OFF_EATEN_PLAYER, (uint32_t)(p->eaten_player < 0 ? 0 : p->eaten_player > 65535 ? 65535 : p->eaten_player));
     put16(b, OFF_MS_BITS, p->ms_bits & MS_TRAVELS); put16(b, OFF_MS_SEEN, p->ms_seen & p->ms_bits & MS_TRAVELS);
     passport_clean_tank_name((char *)b + OFF_HOME_NAME, p->home_name);
-    put16(b, OFF_CRC_V2, crc16(b, OFF_CRC_V2));
-    return PASSPORT_V2_BYTES;
+    put16(b, OFF_EVO, p->evo);
+    if (ver >= 4) { memcpy(b + OFF_STRETCH, p->stretch, PASSPORT_STRETCH); stretch_clean(b + OFF_STRETCH); }
+    if (ver >= 5) b[OFF_LAB] = p->lab ? 1 : 0;
+    put16(b, len - 2, crc16(b, len - 2));
+    return len;
 }
+int passport_write(const passport_t *p, uint8_t *b, int cap) { return write_as(p, b, cap, PASSPORT_VERSION); }
+int passport_write_v3(const passport_t *p, uint8_t *b, int cap) { return write_as(p, b, cap, 3); }
 
 bool passport_read(passport_t *p, const uint8_t *b, int len) {
     /* what cannot be trusted is refused */
@@ -210,5 +263,14 @@ bool passport_read(passport_t *p, const uint8_t *b, int len) {
         char raw[PASSPORT_TANK_NAME]; memcpy(raw, b + OFF_HOME_NAME, PASSPORT_TANK_NAME); raw[PASSPORT_TANK_NAME - 1] = 0;
         passport_clean_tank_name(p->home_name, raw);
     }
+    if (b[OFF_VERSION] >= 3 && n >= PASSPORT_V3_BYTES) {   /* (v3, 0.4.3) the paragon's word, clamped as a fish would hold it */
+        fish_t tmp; tank_evo_unpack(&tmp, (uint16_t)get16(b, OFF_EVO)); p->evo = tank_evo_pack(&tmp);
+    }
+    if (b[OFF_VERSION] >= 4 && n >= PASSPORT_V4_BYTES) {   /* (v4, 0.4.3) its body and fin values; the names follow them */
+        memcpy(p->stretch, b + OFF_STRETCH, PASSPORT_STRETCH); stretch_clean(p->stretch);
+        if (p->stretch[0]) p->shape = (uint8_t)tank_body_nearest(p->stretch[0] / BODY_Q, p->stretch[1] / BODY_Q);
+        if (p->stretch[2]) p->carried[GENE_SHAPE] = (uint8_t)tank_body_nearest(p->stretch[2] / BODY_Q, p->stretch[3] / BODY_Q);
+    }
+    if (b[OFF_VERSION] >= 5 && n >= PASSPORT_V5_BYTES) p->lab = b[OFF_LAB] == 1;   /* (anything else: not the lab's) */
     return true;
 }

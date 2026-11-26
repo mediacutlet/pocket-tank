@@ -37,6 +37,9 @@ typedef struct {
     uint32_t here_s;                      /* seconds it has spent in this tank, every visit */
     uint16_t visits;
     uint8_t  fry;                         /* cross-tank fry it had here */
+    uint8_t  evo;                         /* (0.4.3) the part a paragon wore when last seen (EVO_*; 0 = none, or met before 0.4.3) */
+    uint8_t  body[2], finl[3];            /* (0.4.3, audit SV-8) a lab-made visitor's own body and fin lengths (fish_t's; zeros = the
+                                             named body, the set's own fins: every older record) */
     char     home_name[16];               /* its home tank's keeper-given name when last seen ("" = none: its HOME WATERS alone) */
 } coll_entry_t;
 

@@ -23,6 +23,7 @@
  * rope simulation and no state per tentacle.
  */
 #include "jelly.h"
+#include "shelf.h"                /* (SHELF_JELLY_MAX: one jelly tank a theme) */
 #include <math.h>
 #include <string.h>
 #include <stdlib.h>
@@ -49,6 +50,8 @@ const jelly_theme_t JELLY_THEMES[JELLY_THEME_N] = {
     /* cool round bells, no nettles, in blue water - the watch */
     { "DEEP",      JLIGHT_BLUE,    23, { { JSP_BLUBBER, 5 }, { JSP_MOON, 7 }, { JSP_BLUBBER, 1 }, { JSP_MOON, 5 }, { JSP_BLUBBER, 7 }, { JSP_MOON, 0 } } },
 };
+_Static_assert(JELLY_THEME_N == SHELF_JELLY_MAX, "a board keeps one jelly tank a theme");
+const char *const JELLY_TANK_NAMES[JELLY_THEME_N] = { "MOONLIT\nJELLIES", "SUNSET\nJELLIES", "DEEP\nJELLIES" };   /* (Strato to approve) */
 
 void jelly_theme_start(jelly_tank_t *t, int theme) {
     if (theme < 0 || theme >= JELLY_THEME_N) theme = 0;

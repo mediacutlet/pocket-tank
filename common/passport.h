@@ -34,9 +34,13 @@
 #include "tank.h"
 
 #define PASSPORT_MAGIC     0x5046u   /* "FP": a fish passport */
-#define PASSPORT_VERSION   2
+#define PASSPORT_VERSION   5
 #define PASSPORT_V1_BYTES  94
 #define PASSPORT_V2_BYTES  110       /* v2 (0.4, 2026-11-01): + its home tank's keeper-given name */
+#define PASSPORT_V3_BYTES  112       /* v3 (0.4.3): + the paragon's word (its part, or the three it is offered: tank_evo_pack) */
+#define PASSPORT_V5_BYTES  123       /* v5 (0.4.3 audit r1, SLB-2): + one byte of where it was made (1 = THE FISH LAB) */
+#define PASSPORT_V4_BYTES  122       /* v4 (0.4.3 item 10): + its body and fin values, shown and carried (PASSPORT_STRETCH bytes) */
+#define PASSPORT_STRETCH   10        /* body[2], body_c[2], finl[3], finl_c[3] - fish_t's own bytes, in that order */
 #define PASSPORT_TANK_NAME 16        /* that name's room: 15 characters and the end */
 #define PASSPORT_MAX_BYTES 240       /* what a reader accepts from a later version (one ESP-NOW frame is 250) */
 #define PASSPORT_KIND_FISH 0         /* passport_t.kind: a reef fish */
@@ -60,6 +64,9 @@ typedef struct {
     float    age_s;                       /* tended seconds (progression) */
     int32_t  eaten, eaten_player;         /* 0..65535 */
     uint32_t ms_bits, ms_seen;            /* MS_* (the retired bits never travel) */
+    uint8_t  stretch[PASSPORT_STRETCH];   /* v4 (0.4.3 item 10): its body and fin values - zeros on an older passport (a named body, the set's own fins) */
+    uint8_t  lab;                         /* v5 (0.4.3 audit r1): made in THE FISH LAB - 0 on an older passport */
+    uint16_t evo;                         /* v3 (0.4.3): tank_evo_pack's word - 0 on an older passport (not evolved, nothing rolled) */
     char     home_name[PASSPORT_TANK_NAME];   /* v2: what its keeper named its home tank, one line ("" = a default
                                                  name - MY TANK, TANK 2 - or a v1 passport: its HOME WATERS stand alone) */
 } passport_t;
@@ -80,8 +87,14 @@ void passport_home_waters(uint32_t home_tank, char *out, int cap);
 /* a tank's name made fit to travel and to draw: one line (a break is a space),
  * A-Z 0-9 and the rename keyboard's ' . - ! ? /, anything else '?' */
 void passport_clean_tank_name(char *dst, const char *src);
-/* bytes written (PASSPORT_V2_BYTES), or 0 if cap is too small */
+/* bytes written (PASSPORT_V5_BYTES), or 0 if cap is too small */
 int  passport_write(const passport_t *p, uint8_t *buf, int cap);
+/* the same fish in v3's 112 bytes, without its body and fin values: for the travel bowl's record, whose passport
+   room is on the flash at that size (the record keeps the values beside it) */
+int  passport_write_v3(const passport_t *p, uint8_t *buf, int cap);
+/* the body and fin values <-> a fish, checked: a pair or a triple that is not whole, or out of range, is none */
+void passport_stretch_from(uint8_t s[PASSPORT_STRETCH], const fish_t *f);
+void passport_stretch_to(const uint8_t s[PASSPORT_STRETCH], fish_t *f);
 /* true = *p holds a checked, clamped passport; false = refused (*p undefined) */
 bool passport_read(passport_t *p, const uint8_t *buf, int len);
 

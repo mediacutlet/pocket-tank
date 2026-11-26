@@ -114,6 +114,7 @@ typedef struct {
                                     * marker the loaded save already has is not given again (0.4.1 audit round 2, "Marker now") */
 } progression_carry_t;
 #define CARRY_BREED 0x01u
+#define CARRY_LAB   0x02u                /* THE FISH LAB (0.4.3): the board's too */
 void progression_carry_take(const tank_t *t, progression_carry_t *c);
 void progression_carry_give(tank_t *t, const progression_carry_t *c);
 /* a stored save's saved_unix rewritten in place (the shelf: the wake then lives the time on the shelf) */
@@ -186,6 +187,10 @@ void progression_cap_check_at(const tank_t *t, const char *file, int line, const
    one of ours gone next door for good (no sand dollars); a gift from next door, ours now (its slot) */
 bool progression_keeps_two(const tank_t *t, int fish);   /* it may go and two stay: the fish of ours on their way out (gifts) counted gone */
 bool progression_fish_givable(const tank_t *t, int fish);
+/* (0.4.3 audit r1, SLB-3) a fish only a tank of 0.4.3 or later can take whole: a paragon (its part), one READY TO EVOLVE (its
+   three), a lab fish (THE LAB), or one with the creator's body or fin values. A 0.4.2 tank's reader drops all of them for good,
+   so such a fish is never GIVEN to one (a tank that takes swaps is 0.4.3: link_peer_swap) - a visit is fine, home keeps it */
+bool progression_fish_needs_new(const tank_t *t, int fish);
 bool progression_give_out(tank_t *t, int fish);
 int  progression_gift_adopt(tank_t *t, const passport_t *pp);
 int  progression_fry_adopt(tank_t *t, const passport_t *pp, int edge);  /* home: one of ours born next door; its slot or -1 */
@@ -218,7 +223,7 @@ double progression_lived_s(const tank_t *t, int idx);     /* seconds alive (0.4.
    doing it (RAM only: any frame). The card's taps hold a const tank: they _ask, progression_tick does it, _answer says
    how it went (-1: not yet) */
 enum { BOWL_OK, BOWL_NO_FISH, BOWL_NO_LAST_TWO, BOWL_NO_FRY_NAME, BOWL_NO_BUSY, BOWL_NO_AWAY, BOWL_NO_GIVING, BOWL_NO_FULL, BOWL_NO_KIND, BOWL_NO_WRITE,
-       BOWL_NO_NOTE };   /* (_NOTE: the tank on the glass holds a gift note for the fish - it gave it away once) */
+       BOWL_NO_NOTE, BOWL_NO_SWAP };   /* (_SWAP: in a swap - the glass says CAN'T MOVE RIGHT NOW, never IS BEING GIVEN: audit r2, R2-L15) */   /* (_NOTE: the tank on the glass holds a gift note for the fish - it gave it away once) */
 enum { BOWL_ASK_OUT = 1, BOWL_ASK_IN };
 int  progression_move_why(const tank_t *t, int fish);
 int  progression_move_out(tank_t *t, int fish);
@@ -380,7 +385,9 @@ const char *const *progression_fry_tip(int kind);
 #define SD_TRIM_CM     250
 #define SD_PRICE_PLANT 40
 #define SD_PRICE_SNAIL 80
-#define SD_PRICE_CASTLE 150
+#define SD_PRICE_CASTLE 100        /* 0.4.3, Strato 11-21: the STARTER's (stage 1); stages 2 and 3: SD_PRICE_CASTLE_2 / _3. 150 for the whole castle until then */
+#define SD_PRICE_CASTLE_2 150
+#define SD_PRICE_CASTLE_3 300
 #define SD_PRICE_CORAL 100
 #define SD_PRICE_CLUSTER 240
 #define SD_PRICE_SHRIMP 180       /* 2026-09-29, Strato (first 300, then 180) */
@@ -389,11 +396,28 @@ const char *const *progression_fry_tip(int kind);
 #define SD_PRICE_PUMPKIN 75       /* 0.3.6, Strato 2026-10-17: the seasonal lantern, "affordable" */
 #define SD_PRICE_VOLCANO 190      /* 0.3.9: Strato 2026-10-24 (it was the castle's 150 until he named one) */
 #define SD_PRICE_CRAB 140         /* 0.3.9: the strawberry crab - Strato 2026-10-24 */
+#define SD_PRICE_OCTOPUS 300      /* 0.4.3: THE OCTOPUS - Strato 11-22: "300 for octopus please" (the dearest critter) */
+#define SD_OCTO_FIND 5             /* a sand dollar the octopus dug up and the keeper took (Strato 11-21: 5 a find) */
 #define SD_PRICE_BREED 1000        /* 0.4.2 SELECTIVE BREEDING: the unlock (Strato 11-07: late game, worth a lot) */
 #define SD_PRICE_PAIR  50          /* ... and each pair, paid at the pairing (refunded on UNPAIR or a broken pair) */
 /* SELECTIVE BREEDING (0.4.2): the keeper picks the next fry's two parents. The care gates still say WHEN; the pair says
    WHO, and wins over a visitor's courtship. A parent must be grown (an adult or elder) before the fry comes: until then
    nothing is staged. One payment, one fry. A pair whose fish leaves (sold, given, gone) is refunded */
+/* THE FISH LAB (0.4.3 item 10): the unlock (Strato 11-14: 1500, once for every tank), and each fry made in it - more
+   than the shop's lucky dip (SD_PRICE_FRY), and a fish sells for a fifth of nothing it cost, so there is nothing to
+   farm. The keeper sets what the fry SHOWS (body, fins, pattern, colors, name); what it carries is rolled, as a
+   founder's is. It has no parents: its story says THE FISH LAB. It is welcomed by the pour itself - no birth flow */
+#define SD_PRICE_LAB     1500
+#define SD_PRICE_LAB_FRY 250
+#define STORY_FROM_LAB   0x0000001bu       /* ITS STORY's FROM for a lab fish (no tank has an ID this small: they are 32 random bits) */
+enum { LAB_OK, LAB_NOT_OWNED, LAB_FULL, LAB_SHORT, LAB_WELCOME };
+bool progression_lab_owned(const tank_t *t);
+bool progression_lab_buy(tank_t *t);
+int  progression_lab_why(const tank_t *t);                 /* LAB_*: may a fry be poured now */
+/* the fry in `recipe` (its look and its name: shape, fins, pattern, colors, body and fin values) into the tank - it
+   drops in from the top (tank_plop): its slot, or -1 with nothing spent */
+int  progression_lab_pour(tank_t *t, const fish_t *recipe);
+bool progression_from_lab(const tank_t *t, int fish);
 enum { BREED_NONE, BREED_WAITING, BREED_FULL, BREED_READY };
 bool progression_breed_owned(const tank_t *t);
 bool progression_breed_buy(tank_t *t);
@@ -433,7 +457,19 @@ bool progression_pumpkin_offered(const tank_t *t);
  * full price and to its factory state; false = not owned or not for sale.
  * The refund is balance, not earnings; the toast shows it. */
 #define SD_SELL_PCT 20
-int  progression_sell_value(int item);
+int  progression_sell_value(int item);                    /* a piece's as bought (a staged piece: its first stage alone - the starter's 20) */
+int  progression_sell_value_of(const tank_t *t, int item);   /* ... as this tank has it: 20% of what its stages owned cost */
+/* A PIECE IN STAGES (0.4.3, Strato 11-21: the castle - the starter, then two upgrades): bought one stage after another. The
+ * shop's row keeps selling it until every stage is owned (progression_buy buys the next: its price from the wallet, the piece
+ * where it stands, shelved or not); SELL pays SD_SELL_PCT of all that was spent and takes the whole piece. A piece without
+ * stages has one: its price is SD_ITEMS[item].price, as ever. The table is general; the castle is its one row. */
+int  progression_stages(int item);                       /* how many stages the piece has (1: not staged) */
+int  progression_stage(const tank_t *t, int item);       /* the stages this tank owns, 0..progression_stages */
+int  progression_stage_price(int item, int stage);       /* what stage 1..n costs */
+int  progression_next_price(const tank_t *t, int item);  /* what the shop's button costs now: the next stage's (0: all owned) */
+const char *progression_stage_words(int item, int stage, int line);   /* the modal's two lines for stage 1..n (line 0 / 1) */
+/* a stored save's castle stage, 0..3 (0: no castle, or not a save; a castle from before 0.4.3: 1) - the shelf's REMOVE values it */
+int  progression_blob_castle_stage(const void *blob, size_t len);
 bool progression_sell(tank_t *t, int item);
 /* the decoration shelf (0.3.9, Strato 2026-10-19: "anything you can MOVE
  * you can SHELVE"; from the community: nothing bought ever disappears). A
@@ -472,6 +508,7 @@ bool progression_lock(tank_t *t, int item, bool on);
 #define SD_FISH_JUV    15
 #define SD_FISH_ADULT  30
 #define SD_FISH_ELDER  60
+#define SD_FISH_PARAGON 100             /* (0.4.3, Strato 11-21) an elder that has evolved */
 #define FISH_KEEP_MIN  2
 #define SELL_FRY_MEALS 12
 /* FRY FOR SALE (0.3.5, Strato: "when a player sells a fish for the first
@@ -496,6 +533,11 @@ bool progression_lock(tank_t *t, int item, bool on);
 #define FRY_OFFER_S    (24 * 3600.0f)
 typedef struct { uint32_t body, accent; bool sold; uint8_t shape, fins, pattern; } fry_offer_t;   /* (0.4, 11-01: its form - genetics in the shop) */
 bool  progression_fry_for_sale(const tank_t *t);   /* the first sale's badge is earned */
+int32_t progression_dbg_sale_need(void);                   /* (the selftests) the fry wait's mark: a sale moves it, a swap never (LK-8) */
+void  progression_breed_check(tank_t *t);                   /* (the selftests) a pair whose fish left: undone, its 50 back - as each tick */
+uint32_t progression_blob_tank_uid(const void *blob, size_t len);   /* a stored tank's tank ID (0: none) */
+bool  progression_swap_out(tank_t *t, int fish);             /* FISH SWAP (0.4.3): one of ours out for good, saved - a sale's fry books not run (LK-8) */
+bool  progression_fish_swappable(const tank_t *t, int fish);   /* FISH SWAP (0.4.3): may go in a swap (home, welcomed, in no gift or bowl) */
 bool  progression_welcome_owed(const tank_t *t, int fish);   /* this fry is not yet welcomed: it is not sold or given till then */
 bool  progression_fry_room_to_buy(const tank_t *t);  /* ... and no welcome owed: the shop may sell */
 void  progression_fry_offer(int k, fry_offer_t *o);
@@ -532,6 +574,15 @@ const char *const *progression_sd_earn_lines(void);
 #define STAGE_JUV_AGE    (2 * 3600)
 #define STAGE_ADULT_AGE  (12 * 3600)
 #define STAGE_ELDER_AGE  (96 * 3600)
+/* THE PARAGON (0.4.3, docs/elder-plus-0.4.3.md): an elder this old is READY TO EVOLVE - its three parts are rolled
+   (tank_evo_roll) the first moment it is at home, the light is on and it is not hungry. It stays an ELDER in every
+   byte and on the wire; it is a PARAGON once the keeper has kept a part (fish_t.evo). For the hour before, it sparkles */
+#define EVO_AGE          (120 * 3600)
+#define EVO_SPARKLE_S    3600
+#define EVO_HUNGER_MAX   7.0f
+bool progression_evo_sparkle(const tank_t *t, int idx);   /* in its last hour before EVO_AGE (drawn; its card says SOMETHING IS HAPPENING) */
+bool progression_evo_keep(tank_t *t, int idx, int place);  /* the keeper kept the part in place 0..2: it is a paragon */
+void progression_evo_shown(tank_t *t, int idx);            /* the reveal's spin has played: the three are shown open from now on */
 /* trait drift: one full unit (0.11 of the 0..1 trait) per this many hours of
  * sustained pressure */
 #define DRIFT_HOURS      2.0f

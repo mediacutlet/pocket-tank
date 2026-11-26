@@ -43,7 +43,7 @@ try:
         if not line:
             continue
         text = line.decode("utf-8", "replace").rstrip()
-        if a.watch or "director" in text or ") link: " in text or not a.cmd:   # the tank link answers under its own tag
+        if a.watch or "director" in text or ") link: " in text or ") blackbox: " in text or ") i2c: " in text or not a.cmd:   # the tank link, the black box and the I2C guard answer under their own tags
             print(text)
 except KeyboardInterrupt:
     pass

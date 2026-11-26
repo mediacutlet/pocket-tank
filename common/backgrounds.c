@@ -38,7 +38,11 @@ static const bg_water_t BG_W[BG_N] = {
 };
 static const char *const BG_NAME[BG_N] = { "OPEN WATER", "ATLANTIS", "KELP FOREST", "TWILIGHT DEEP", "LAGOON", "ROCK RIDGES", "REEF WALLS", "GROTTO",
                                              "SUNKEN SHIP", "EMBERS", "MANGROVES" };   /* (EMBERS: Strato's title, 11-11, for the volcanic vent - BG_VENT in the code) */
+#ifdef TANK_P4                                    /* (the wide kelp has its far stand: three) */
+static const uint8_t BG_LAYERS[BG_N] = { 0, 5, 3, 0, 1, 5, 5, 2, 4, 4, 3 };
+#else
 static const uint8_t BG_LAYERS[BG_N] = { 0, 5, 2, 0, 1, 5, 5, 2, 4, 4, 3 };
+#endif
 const char *bg_name(int bg) { return (unsigned)bg < BG_N ? BG_NAME[bg] : BG_NAME[0]; }
 static const char *const BG_WORDS[BG_N][2] = {     /* (approved by Strato 11-05) */
     { "THE TANK AS IT STARTED,", "CLEAR OPEN WATER" },
@@ -84,21 +88,64 @@ static inline uint32_t mix8(uint32_t a, uint32_t b, int t) {   /* t 0..256 */
     return (uint32_t)(ar + ((((int)(b >> 16) & 255) - ar) * t >> 8)) << 16 | (uint32_t)(ag + ((((int)(b >> 8) & 255) - ag) * t >> 8)) << 8 | (uint32_t)(ab + (((int)(b & 255) - ab) * t >> 8));
 }
 
+/* ---- THE WIDE FRAME (0.4.3, the big screens; docs/backgrounds-wide-0.4.3.md) ----
+   The scenes were composed for a pocket tank's glass and laid out as shares of its width. On the home tanks' glass
+   (1280 across: 2.9 times the 1.8's width for about twice its height) that stretched every one of them sideways
+   (Strato 11-21: "many backgrounds are stretched horizontally and distorted"). There a scene is laid out on its OWN
+   CANVAS - half the glass each way (640 x 400, the Tab5 640 x 360: within a tenth of the 1.8's height, so a column,
+   a plank, a root keeps the proportions it was approved with) - WIDENED with more of the scene, not scaled, and drawn
+   up to the glass two for one, softened (wide_row). BW/BH/BB are the canvas (the glass itself on a pocket tank: every
+   pocket build's code is what it was, token for token); BXU is the 1.8's width at the canvas's height, for sizes that
+   were shares of the width; BM_S the size of one of the 1.8's pixels. Lagoon, Rock Ridges and Twilight Deep keep the
+   glass's own rows. */
+#ifdef TANK_P4
+#define BW (TANK_W / 2)
+#define BH (TANK_H / 2)
+#define BB (TANK_BOT / 2)
+#define BXU (448.0f * BB / 368.0f)
+#define BM_S (BB / 368.0f)
+#define ROW_W (s_s->w)
+#else
+#define BW TANK_W
+#define BH TANK_H
+#define BB TANK_BOT
+#define BXU TANK_W
+#define BM_S (TANK_W / 448.0f)
+#define ROW_W TANK_W
+#endif
+
 /* ---- the scratch: one block for the bake, laid out per background ---- */
+#ifdef TANK_P4                                    /* (the wide reef: a cell is one of the canvas's pixels - twice the pocket reef's grain) */
+#define RW_CW (BW + 1)
+#define RW_CH (BH + 1)
+#define RG_GW 220
+#define RG_GH 190
+#define RL_MAX 96
+#define RF_FACES 10
+#define KELP_MAX 48
+#else
 #define RW_CW (TANK_W / 2 + 1)
 #define RW_CH (TANK_H / 2 + 1)
 #define RG_GW 100
 #define RG_GH 90
 #define RL_MAX 48
 #define KELP_MAX 18
+#endif
 #define CRUST_MAX 96
 #define SH_LN 12                                  /* (0.4.2) the ship's lines, weed, gunports; the vent's chimneys and worms; the mangroves' roots */
 #define SH_WD 28
 #define SH_PT 8
+#ifdef TANK_P4
+#define VE_N 15
+#define VE_WMAX 96
+#define MG_MAX 128
+#define MG_DMAX 32
+#else
 #define VE_N 10
 #define VE_WMAX 64
 #define MG_MAX 80
 #define MG_DMAX 24
+#endif
 typedef struct { float x0, amp, lean, wbase, haze, inv_h; int ytop, layer, s; uint8_t ph; uint32_t stalk, blade; } kelp_t;
 typedef struct { int j, side; float tip, root; } ledge_t;
 typedef struct { float x, y, r; uint32_t rgb; uint8_t lay; } disc_t;
@@ -106,7 +153,11 @@ typedef struct { float x, y, r; uint32_t rgb; uint8_t lay; } disc_t;
    bits 3..5), low bits 1..6 = coral (tone + 1, its color in bits 3..5, its group in bits 6..7) - and the per-row edges.
    None of it depends on the light, so while the reef is in use it is laid out once and kept (keep_take), and a light
    double-tap only colors its rows: the layout was ~70 ms of every rebuild on the 1.8. */
+#ifdef TANK_P4                                    /* (the wide reef: the far rock as its own shape - a wall's reach a row, a crest a column) */
+typedef struct { uint8_t mg[RW_CH][RW_CW]; int16_t farl[RW_CH], farr[RW_CH], fartop[RW_CW]; uint32_t tone[6][6]; } reef_keep_t;
+#else
 typedef struct { uint8_t mg[RW_CH][RW_CW]; float gle[RW_CH], gre[RW_CH]; int16_t fl[RW_CH], fr[RW_CH]; uint32_t tone[6][6]; } reef_keep_t;
+#endif
 typedef struct {
     uint32_t wrow[TANK_H];                        /* the water of each row */
     uint8_t  grow[TANK_H], gcol[TANK_W];          /* the glow's tables */
@@ -118,18 +169,31 @@ typedef struct {
     uint32_t lut[256];                            /* a row's colors by weight (the glow's, Grotto's walls): one mix a weight, not a pixel */
     int      ymin;                                /* the first row with anything of the background on it */
     const reef_keep_t *reef;                      /* the reef's layout the rows read: the kept one, or this scratch's own */
+#ifdef TANK_P4                                    /* THE WIDE FRAME: the canvas's rows kept to draw the glass's from (three: the one above, this, the one below) */
+    int      w; bool virt;                        /* the width the rows are laid on now (the canvas's, or the glass's); on the canvas */
+    uint32_t vc[3][TANK_W / 2], vv[TANK_W / 2]; uint8_t vl[3][TANK_W / 2], vt[3][TANK_W / 2]; int vj[3]; bool vany[3], vlit[3];
+    uint32_t dwrow[TANK_H]; uint8_t dgrow[TANK_H], dgcol[TANK_W];   /* the glass's own water and glow (wrow, grow, gcol are the canvas's then) */
+#endif
     union {
         struct { kelp_t k[KELP_MAX]; int n; uint32_t row[TANK_W]; int8_t sn[256]; float bl[24]; } ke;
         struct { uint8_t ph[TANK_W]; int16_t top[TANK_W]; int8_t sn[256]; } la;
         struct { int16_t top[5][TANK_W]; int fsc[5]; } ri;
         struct { int16_t edge[TANK_H][2], gtop[TANK_W]; uint8_t ta[TANK_W + TANK_H], tb[TANK_W + 3 * TANK_H + 1]; disc_t d[CRUST_MAX]; int nd; } gr;
+#ifdef TANK_P4
+        struct { reef_keep_t k; uint8_t ct[RW_CH][RW_CW], rg[RG_GH][RG_GW]; ledge_t L[RL_MAX]; int16_t face[RF_FACES][RW_CH]; float base[RW_CH]; } re;
+#else
         struct { reef_keep_t k; uint8_t ct[RW_CH][RW_CW], rg[RG_GH][RG_GW]; ledge_t L[RL_MAX]; } re;
+#endif
         struct { int16_t deck[TANK_W], keel[TANK_W], dep[TANK_W], mnd[TANK_W]; int32_t isd[TANK_W];                 /* (0.4.2) the ship */
                  uint8_t rail[TANK_W], hn[TANK_W], hz[TANK_W], sail[TANK_W], d7[TANK_H + 8], m7[TANK_H + 8], pk[1024], jag[32]; uint32_t tone[8];
                  struct { float x0, y0, y1, sl; uint8_t th; } ln[SH_LN]; struct { float x0, y0, x1, y1, w0, w1, inv; } ma[3];
                  struct { int16_t x, y0, y1; } wd[SH_WD]; struct { int16_t x0, x1, ya, yb; uint8_t at, open; } pt[SH_PT];
                  int nl, nw, np, xend, hy0, my0, mx0, post, bulw, bx0, bx1, bbeam, rat_a, rat_b, rat_y0, rat_y1, chx, chy0, chy1, plat_y, plat_x0, plat_x1;
-                 float bx, by, ibrx, ibry, yx, yy, yhalf, ysl; } sh;
+                 float bx, by, ibrx, ibry, yx, yy, yhalf, ysl;
+#ifdef TANK_P4                                    /* (the wide frame: her anchor, on the mound past the bow) */
+                 float anx, any, anc, ans; int an_x0, an_x1, an_y0, an_y1;
+#endif
+                 } sh;
         struct { int16_t cx[VE_N][TANK_H], hw[VE_N][TANK_H], mt[TANK_W], wx[VE_WMAX], wy0[VE_WMAX], wy1[VE_WMAX]; int yt[VE_N], ph[VE_N], hr[VE_N], hu[VE_N], hinv[VE_N], nw, wtop, mtop, mlow; int8_t sn[64]; uint8_t ed[256]; } ve;
         struct { struct { float x0, reach, inv, r0, r1; int16_t y0, y1; uint8_t lay, trunk, ph; } r[MG_MAX]; int n, nd, ybank[2];
                  int16_t bank[2][TANK_W], dx[MG_DMAX], dl[MG_DMAX]; uint8_t pen[2][TANK_W], dlay[MG_DMAX], dph[MG_DMAX]; int8_t sn[64]; } mg;
@@ -181,20 +245,20 @@ static void row_water(int y) {
     if (gk && s_s->glow_q) {                      /* (0.4.2: by fours - under the 565's own step and the dither's; by eights showed faint rings) */
         uint32_t *L = s_s->lut; const int qmax = gk * 255 >> 10;
         L[0] = w; for (int q = 1; q <= qmax; q++) L[q] = mix8(w, s_s->glow.rgb, q << 2);
-        for (int x = 0; x < TANK_W; x++) R[x] = L[gk * s_s->gcol[x] >> 10];
+        for (int x = 0; x < ROW_W; x++) R[x] = L[gk * s_s->gcol[x] >> 10];
     }
     else if (gk) {                                /* (the same mix as a pixel's, once per weight the row can reach) */
         uint32_t *L = s_s->lut; const int kmax = gk * 255 >> 8;
         L[0] = w; for (int k = 1; k <= kmax; k++) L[k] = mix8(w, s_s->glow.rgb, k);
-        for (int x = 0; x < TANK_W; x++) R[x] = L[gk * s_s->gcol[x] >> 8];
+        for (int x = 0; x < ROW_W; x++) R[x] = L[gk * s_s->gcol[x] >> 8];
     }
-    else for (int x = 0; x < TANK_W; x++) R[x] = w;
-    memset(s_s->lay, 0, TANK_W);
-    if (s_s->any_lit) { memset(s_s->lit, 0, TANK_W); s_s->any_lit = false; }
+    else for (int x = 0; x < ROW_W; x++) R[x] = w;
+    memset(s_s->lay, 0, ROW_W);
+    if (s_s->any_lit) { memset(s_s->lit, 0, ROW_W); s_s->any_lit = false; }
 }
 static inline void row_span(int x0, int x1, uint32_t c, uint8_t l) {
     if (x0 < 0) x0 = 0;
-    if (x1 > TANK_W - 1) x1 = TANK_W - 1;
+    if (x1 > ROW_W - 1) x1 = ROW_W - 1;
     for (int x = x0; x <= x1; x++) { s_s->row[x] = c; s_s->lay[x] = l; }
 }
 
@@ -206,7 +270,11 @@ static void glow_layout(int bg) {
     memset(s->grow, 0, sizeof s->grow); memset(s->gcol, 0, sizeof s->gcol);
     switch (bg) {
         case BG_TWILIGHT: rgb = 0x3c5a9a; cx = TANK_W * 0.58f; rx = TANK_W * 0.55f; cy0 = 0; ry = TANK_BOT * 0.55f; peak = 115; break;   /* far above, a little right */
+#ifdef TANK_P4                                    /* (the wide frame: the great chimney stands left of the middle, and the light round it is its own width) */
+        case BG_VENT:     rgb = 0x863618; cx = TANK_W * 0.455f; rx = TANK_W * 0.34f; cy0 = TANK_BOT * 0.36f; ry = TANK_BOT * 0.44f; peak = 160; break;
+#else
         case BG_VENT:     rgb = 0x863618; cx = TANK_W * 0.60f; rx = TANK_W * 0.44f; cy0 = TANK_BOT * 0.36f; ry = TANK_BOT * 0.44f; peak = 160; break;   /* (0.4.2) round the great chimney */
+#endif
         case BG_MANGROVE: {                                                 /* (0.4.2) the light between the trees: soft shafts, gone by the floor */
             static const struct { float c, w; int k; } SHAFT[4] = { { 0.235f, 0.060f, 235 }, { 0.50f, 0.095f, 255 }, { 0.585f, 0.035f, 150 }, { 0.80f, 0.055f, 215 } };
             for (int x = 0; x < TANK_W; x++) {
@@ -230,6 +298,75 @@ static void glow_layout(int bg) {
 }
 
 /* ================================ 1 ATLANTIS ================================ */
+#ifdef TANK_P4
+/* THE WIDE FRAME (0.4.3; Strato 11-21: "create more ruins and widen the scene"): the temple front on the left is three columns
+   on a stepped base, its lintel across all three and a block of the next course still on it; a far colonnade stands dim in
+   the middle distance under its own lintel; the broken column and the drum are where they were, a whole shaft lies fallen
+   beside them; a second pair under a lintel and two more on the right. Widths are the 1.8's (shares of BXU), places shares
+   of the canvas. Layers, far to near: the far colonnade, the right group, the temple, the broken one, what lies on the floor */
+static const struct { float x, w, h; int broken; float haze; uint8_t lay; } RU_COL[] = {
+    { 0.405f, 0.030f, 0.36f, 0, 0.78f, 1 }, { 0.455f, 0.030f, 0.36f, 0, 0.78f, 1 }, { 0.505f, 0.030f, 0.36f, 0, 0.78f, 1 }, { 0.555f, 0.030f, 0.36f, 0, 0.78f, 1 },
+    { 0.612f, 0.030f, 0.20f, 1, 0.78f, 1 },
+    { 0.672f, 0.050f, 0.50f, 0, 0.62f, 2 }, { 0.772f, 0.050f, 0.50f, 0, 0.62f, 2 }, { 0.868f, 0.050f, 0.28f, 1, 0.62f, 2 }, { 0.948f, 0.050f, 0.44f, 0, 0.64f, 2 },
+    { 0.062f, 0.055f, 0.62f, 0, 0.58f, 3 }, { 0.160f, 0.055f, 0.62f, 0, 0.58f, 3 }, { 0.258f, 0.055f, 0.62f, 0, 0.58f, 3 },
+    { 0.352f, 0.060f, 0.38f, 1, 0.45f, 4 },
+};
+/* the stones laid flat: lintels (measured down from a column's top), the temple's steps, the drum, the fallen shaft */
+static const struct { float x0, x1, top; int up, th; float haze; uint8_t lay, kind; } RU_SLAB[] = {   /* top: a share of the water above the floor; up: px above that */
+    { 0.385f, 0.575f, 0.36f, 7, 7, 0.82f, 1, 0 },    /* the far colonnade's lintel */
+    { 0.640f, 0.804f, 0.50f, 9, 9, 0.70f, 2, 0 },    /* the right pair's */
+    { 0.028f, 0.292f, 0.62f, 10, 10, 0.68f, 3, 0 },  /* the temple's, across all three */
+    { 0.028f, 0.150f, 0.62f, 19, 9, 0.70f, 3, 1 },   /* a block of the next course, broken off at a slant */
+    { 0.012f, 0.308f, 0.0f, 18, 18, 0.60f, 3, 0 },   /* the steps */
+    { 0.000f, 0.322f, 0.0f, 10, 10, 0.56f, 3, 0 },
+    { 0.420f, 0.492f, 0.0f, 26, 26, 0.50f, 5, 2 },   /* the drum, on its side */
+    { 0.560f, 0.660f, 0.0f, 22, 22, 0.52f, 5, 3 },   /* a shaft lying where it fell */
+};
+#define RU_N ((int)(sizeof RU_COL / sizeof RU_COL[0]))
+#define RU_NS ((int)(sizeof RU_SLAB / sizeof RU_SLAB[0]))
+static const uint32_t RU_STONE = 0x6a7a74;
+static void ruins_begin(void) {
+    int ymin = BB;
+    for (int k = 0; k < RU_N; k++) { int yt = (int)(BB * (1 - RU_COL[k].h)); if (yt < ymin) ymin = yt; }
+    for (int k = 0; k < RU_NS; k++) { int yt = (int)(BB * (1 - RU_SLAB[k].top)) - RU_SLAB[k].up; if (yt < ymin) ymin = yt; }
+    s_s->ymin = ymin < 0 ? 0 : ymin;
+}
+static const uint32_t *ruins_row(int y) {
+    if (y < s_s->ymin || y >= BB) return NULL;
+    row_water(y);
+    const uint32_t stone_dk = mix(RU_STONE, 0x000000, 0.35f);
+    for (int k = 0; k < RU_N; k++) {
+        int x0 = (int)(RU_COL[k].x * BW - RU_COL[k].w / 2 * BXU), x1 = (int)(RU_COL[k].x * BW + RU_COL[k].w / 2 * BXU), yt = (int)(BB * (1 - RU_COL[k].h));
+        if (y < yt) continue;
+        const int far = RU_COL[k].lay == 1, flute = far ? 3 : 4, cap = far ? 4 : 6;
+        uint32_t c = bd_far(RU_STONE, y, RU_COL[k].haze), dk = bd_far(stone_dk, y, RU_COL[k].haze + (far ? 0.06f : 0));
+        int a = x0, b = x1;
+        if (RU_COL[k].broken) { int cut = yt + (int)((x1 - x0) * 0.6f); if (y < cut) a = x0 + (cut - y) * 2; }   /* a slanted break */
+        if (y < yt + cap && !RU_COL[k].broken) { a -= far ? 2 : 4; b += far ? 2 : 4; }                            /* the capital */
+        if (y >= BB - 12 && !far) { a -= 2; b += 2; }                                                              /* its foot */
+        if (a < 0) a = 0;
+        if (b > BW - 1) b = BW - 1;
+        for (int x = a; x <= b; x++) { s_s->row[x] = ((x - x0) % flute == flute - 1 && y > yt + cap) ? dk : c; s_s->lay[x] = RU_COL[k].lay; }   /* fluting */
+    }
+    for (int k = 0; k < RU_NS; k++) {
+        const int y0 = (int)(BB * (1 - RU_SLAB[k].top)) - RU_SLAB[k].up, y1 = y0 + RU_SLAB[k].th;
+        if (y < y0 || y >= y1) continue;
+        int a = (int)(RU_SLAB[k].x0 * BW), b = (int)(RU_SLAB[k].x1 * BW); const int kind = RU_SLAB[k].kind, d = y - y0;
+        uint32_t c = bd_far(d < 2 ? mix(RU_STONE, 0xc0d0c8, 0.3f) : RU_STONE, y, RU_SLAB[k].haze), dk = bd_far(stone_dk, y, RU_SLAB[k].haze);
+        if (kind == 1) b -= (RU_SLAB[k].th - 1 - d) * 2;                       /* the broken course: a slant */
+        if (kind == 2) { const int in = d < 3 ? 3 - d : d >= RU_SLAB[k].th - 3 ? d - (RU_SLAB[k].th - 4) : 0; a += in; b -= in; }   /* the drum: rounded */
+        if (kind == 3) { if (d < 2 || d >= RU_SLAB[k].th - 2) { a += 2; b -= 6; } }                                                  /* the shaft: its round, its capital still on one end */
+        for (int x = a < 0 ? 0 : a; x <= b && x < BW; x++) {
+            uint32_t v = c;
+            if (kind == 2 && (x - a) % 9 == 8) v = dk;                         /* the drum's joints */
+            if (kind == 3 && (x > b - 5 ? 0 : d % 4 == 3)) v = dk;             /* the shaft's fluting, lying */
+            if (kind == 0 && d == RU_SLAB[k].th - 1) v = dk;                   /* a lintel's shaded underside */
+            s_s->row[x] = v; s_s->lay[x] = RU_SLAB[k].lay;
+        }
+    }
+    return s_s->row;
+}
+#else
 /* five columns, a lintel across the first pair, a drum fallen on its side. Layers, far to near: the right pair, then
    the left pair and the lintel, then the broken one and the drum - a column at a time */
 static const struct { float x, w, h; int broken; float haze; uint8_t lay; } RU_COL[] = {
@@ -239,31 +376,32 @@ static const struct { float x, w, h; int broken; float haze; uint8_t lay; } RU_C
 #define RU_N ((int)(sizeof RU_COL / sizeof RU_COL[0]))
 static const uint32_t RU_STONE = 0x6a7a74;
 static void ruins_begin(void) {
-    int ymin = TANK_BOT;
-    for (int k = 0; k < RU_N; k++) { int yt = (int)(TANK_BOT * (1 - RU_COL[k].h)); if (yt < ymin) ymin = yt; }
-    int ly = (int)(TANK_BOT * 0.38f) - 10; if (ly < ymin) ymin = ly;
+    int ymin = BB;
+    for (int k = 0; k < RU_N; k++) { int yt = (int)(BB * (1 - RU_COL[k].h)); if (yt < ymin) ymin = yt; }
+    int ly = (int)(BB * 0.38f) - 10; if (ly < ymin) ymin = ly;
     s_s->ymin = ymin;
 }
 static const uint32_t *ruins_row(int y) {
-    if (y < s_s->ymin || y >= TANK_BOT) return NULL;
+    if (y < s_s->ymin || y >= BB) return NULL;
     row_water(y);
     const uint32_t stone_dk = mix(RU_STONE, 0x000000, 0.35f);
     for (int k = 0; k < RU_N; k++) {
-        int x0 = (int)((RU_COL[k].x - RU_COL[k].w / 2) * TANK_W), x1 = (int)((RU_COL[k].x + RU_COL[k].w / 2) * TANK_W), yt = (int)(TANK_BOT * (1 - RU_COL[k].h));
+        int x0 = (int)((RU_COL[k].x - RU_COL[k].w / 2) * BW), x1 = (int)((RU_COL[k].x + RU_COL[k].w / 2) * BW), yt = (int)(BB * (1 - RU_COL[k].h));
         if (y < yt) continue;
         uint32_t c = bd_far(RU_STONE, y, RU_COL[k].haze), dk = bd_far(stone_dk, y, RU_COL[k].haze);
         int a = x0, b = x1;
         if (RU_COL[k].broken) { int cut = yt + (int)((x1 - x0) * 0.6f); if (y < cut) a = x0 + (cut - y) * 2; }   /* a slanted break */
         if (y < yt + 6 && !RU_COL[k].broken) { a -= 4; b += 4; }                                                 /* the capital */
         if (a < 0) a = 0;
-        if (b > TANK_W - 1) b = TANK_W - 1;
+        if (b > BW - 1) b = BW - 1;
         for (int x = a; x <= b; x++) { s_s->row[x] = ((x - x0) % 4 == 3 && y > yt + 6) ? dk : c; s_s->lay[x] = RU_COL[k].lay; }   /* fluting */
     }
-    int lx0 = (int)(0.10f * TANK_W), lx1 = (int)(0.34f * TANK_W), ly = (int)(TANK_BOT * 0.38f) - 10;     /* the lintel across the first pair */
+    int lx0 = (int)(0.10f * BW), lx1 = (int)(0.34f * BW), ly = (int)(BB * 0.38f) - 10;     /* the lintel across the first pair */
     if (y >= ly && y < ly + 10) row_span(lx0, lx1, bd_far(RU_STONE, y, 0.68f), 3);
-    if (y >= TANK_BOT - 22) row_span((int)(0.62f * TANK_W), (int)(0.74f * TANK_W), bd_far(y < TANK_BOT - 20 ? mix(RU_STONE, 0xc0d0c8, 0.3f) : RU_STONE, y, 0.5f), 5);   /* the drum */
+    if (y >= BB - 22) row_span((int)(0.62f * BW), (int)(0.74f * BW), bd_far(y < BB - 20 ? mix(RU_STONE, 0xc0d0c8, 0.3f) : RU_STONE, y, 0.5f), 5);   /* the drum */
     return s_s->row;
 }
+#endif
 
 /* ================================ 2 KELP FOREST (still) ================================ */
 static inline float cov(int x, float l, float r) { float a = x > l ? x : l, b = x + 1 < r ? x + 1 : r; return b > a ? b - a : 0; }
@@ -271,26 +409,48 @@ static void kelp_begin(void) {
     __typeof__(s_s->u.ke) *K = &s_s->u.ke;
     for (int i = 0; i < 256; i++) K->sn[i] = (int8_t)(sinf(i * 6.2832f / 256) * 127);
     for (int i = 0; i < 24; i++) K->bl[i] = i < 18 ? sinf(i / 18.0f * 3.14159f) : 0;
-    K->n = 0; s_s->ymin = TANK_BOT;
+    K->n = 0; s_s->ymin = BB;
+#ifdef TANK_P4
+    /* THE WIDE FRAME (Strato 11-21: "needs more kelp to fill the bigger display and some background kelp in the distance"):
+       the two stands as thick as on the 1.8 across the wider canvas (16 and 10 or so, not 11 and 7), and a THIRD behind
+       them - thin, dim stalks far off in the green, shorter, hardly leaning. Layers: far, the back stand, the near one */
+    for (int layer = -1; layer < 2; layer++) {
+        const int n = layer < 0 ? (int)(15 * BW / BXU + 0.5f) : (int)((layer ? 7 : 11) * BW / BXU + 0.5f);
+        for (int s = 0; s < n && K->n < KELP_MAX; s++) {
+            uint32_t h = bd_h(s, 40 + layer);
+            kelp_t *k = &K->k[K->n++];
+            k->layer = layer + 1; k->s = s;
+            k->x0 = (s + 0.5f + ((h & 255) / 255.0f - 0.5f) * (layer < 0 ? 0.8f : 0.6f)) * BW / n;
+            k->ytop = (int)(BB * (layer < 0 ? 0.16f + ((h >> 8) & 255) / 255.0f * 0.34f : 0.02f + ((h >> 8) & 255) / 255.0f * 0.30f));
+            k->amp = layer < 0 ? 2 + ((h >> 16) & 3) : 3 + ((h >> 16) & 7); k->ph = (uint8_t)(((h >> 20) & 63) * 256 / 6.2832f);
+            k->lean = (((h >> 26) & 31) - 15) * (layer < 0 ? 0.014f : 0.03f);
+            k->wbase = layer < 0 ? 1.1f : layer ? 2.6f : 1.8f; k->haze = layer < 0 ? 0.80f : layer ? 0.40f : 0.62f;
+            k->stalk = layer > 0 ? 0x34461c : 0x2c4426; k->blade = mix(k->stalk, 0x6a7a2a, 0.3f);
+            k->inv_h = 1.0f / (BB - k->ytop);
+            if (k->ytop < s_s->ymin) s_s->ymin = k->ytop;
+        }
+    }
+#else
     for (int layer = 0; layer < 2; layer++) {
         int n = layer ? 7 : 11;
         for (int s = 0; s < n; s++) {
             uint32_t h = bd_h(s, 40 + layer);
             kelp_t *k = &K->k[K->n++];
             k->layer = layer; k->s = s;
-            k->x0 = (s + 0.5f + ((h & 255) / 255.0f - 0.5f) * 0.6f) * TANK_W / n;
-            k->ytop = (int)(TANK_BOT * (0.02f + ((h >> 8) & 255) / 255.0f * 0.30f));
+            k->x0 = (s + 0.5f + ((h & 255) / 255.0f - 0.5f) * 0.6f) * BW / n;
+            k->ytop = (int)(BB * (0.02f + ((h >> 8) & 255) / 255.0f * 0.30f));
             k->amp = 3 + ((h >> 16) & 7); k->ph = (uint8_t)(((h >> 20) & 63) * 256 / 6.2832f);
             k->lean = (((h >> 26) & 31) - 15) * 0.03f;
             k->wbase = layer ? 2.6f : 1.8f; k->haze = layer ? 0.40f : 0.62f;
             k->stalk = layer ? 0x34461c : 0x2c4426; k->blade = mix(k->stalk, 0x6a7a2a, 0.3f);
-            k->inv_h = 1.0f / (TANK_BOT - k->ytop);
+            k->inv_h = 1.0f / (BB - k->ytop);
             if (k->ytop < s_s->ymin) s_s->ymin = k->ytop;
         }
     }
+#endif
 }
 static const uint32_t *kelp_row(int y) {
-    if (y < s_s->ymin || y >= TANK_BOT) return NULL;
+    if (y < s_s->ymin || y >= BB) return NULL;
     __typeof__(s_s->u.ke) *K = &s_s->u.ke;
     row_water(y);
     const uint32_t w = s_s->wrow[y];
@@ -298,18 +458,22 @@ static const uint32_t *kelp_row(int y) {
     for (int i = 0; i < K->n; i++) {
         const kelp_t *k = &K->k[i];
         if (y < k->ytop) continue;
-        int u = (int)((TANK_BOT - y) * k->inv_h * 255); if (u < 0) u = 0; if (u > 255) u = 255;
+        int u = (int)((BB - y) * k->inv_h * 255); if (u < 0) u = 0; if (u > 255) u = 255;
         float up = u / 255.0f;
-        float cx = k->x0 + k->amp * K->sn[(uint8_t)(((y * sstep) >> 16) + k->ph)] * (1 / 127.0f) + k->lean * (TANK_BOT - y), wd = k->wbase * (1 - 0.5f * up);
+        float cx = k->x0 + k->amp * K->sn[(uint8_t)(((y * sstep) >> 16) + k->ph)] * (1 / 127.0f) + k->lean * (BB - y), wd = k->wbase * (1 - 0.5f * up);
         float sl = cx - wd, sr = cx + wd, bl = 1, br = 0;
         int seg = (y - k->ytop) % 24, side = ((y - k->ytop) / 24 + k->s) & 1;
+#ifdef TANK_P4
+        float len = K->bl[seg] * (k->layer == 2 ? 10 : k->layer ? 7 : 4.5f) * (0.6f + 0.4f * up), off = seg / 18.0f * 4;
+#else
         float len = K->bl[seg] * (k->layer ? 10 : 7) * (0.6f + 0.4f * up), off = seg / 18.0f * 4;
+#endif
         if (len >= 0.5f) { if (side) { bl = cx + wd + off; br = bl + len; } else { br = cx - wd - off; bl = br - len; } }
         int ht = (int)((k->haze + 0.1f * up) * 256);
         uint32_t sc = mix8(k->stalk, w, ht), bc = mix8(k->blade, w, ht - 13);
         for (int pass = 0; pass < 2; pass++) {
             float l = pass ? bl : sl, r = pass ? br : sr; if (l > r) continue;
-            int p0 = (int)l, p1 = (int)r; if (p0 < 0) p0 = 0; if (p1 > TANK_W - 1) p1 = TANK_W - 1;
+            int p0 = (int)l, p1 = (int)r; if (p0 < 0) p0 = 0; if (p1 > BW - 1) p1 = BW - 1;
             for (int x = p0; x <= p1; x++) { float c = cov(x, l, r); if (c > 0) { s_s->row[x] = c >= 1 ? (pass ? bc : sc) : mix8(s_s->row[x], pass ? bc : sc, (int)(c * 256)); s_s->lay[x] = (uint8_t)(1 + k->layer); } }
         }
     }
@@ -357,7 +521,11 @@ static void ridges_begin(void) {
     s_s->ymin = TANK_BOT;
     for (int k = 0; k < RI_N; k++)
         for (int x = 0; x < TANK_W; x++) {
+#ifdef TANK_P4                                    /* (THE WIDE FRAME: the ranges run on at the slopes they had, more of them across) */
+            float u = (float)x / (448.0f * TANK_BOT / 368.0f);
+#else
             float u = (float)x / TANK_W;
+#endif
             float jag = k >= 2 ? (k - 1) * 0.012f * bd_n1(u * 40, 50 + k) : 0;      /* the near ranges are jagged */
             int t = (int)(TANK_BOT * (RI_BASE[k] - RI_AMP[k] * bd_n1(u * RI_FREQ[k], 31 + k) - RI_AMP[k] * 0.35f * bd_n1(u * RI_FREQ[k] * 3.3f, 41 + k) - jag));
             top[k][x] = (int16_t)t; if (t < s_s->ymin) s_s->ymin = t;
@@ -388,7 +556,10 @@ static const uint32_t *ridges_row(int y) {
             else {
                 int f = (d * fsc[k]) >> 16; if (f > FOG - 1) f = FOG - 1;
                 col = lut[k][f];
+#ifndef TANK_P4                                   /* (the big screens: none - Strato 11-21, "odd black vertical line artifacts extend from the rock peaks":
+                                                     a one-pixel rule up to 21 px long is a hairline on a pocket tank's glass and a stray black line on theirs) */
                 if (k >= 3 && d > 2 && m3 == 1) { uint32_t h = bd_h(x / 3, k); if ((h & 15) == 0 && d < (int)(h >> 8 & 15) + 6) col = mix8(col, 0x000000, 77); }   /* short cracks under the crest */
+#endif
             }
             s_s->row[x] = col; s_s->lay[x] = (uint8_t)(k + 1);
             break;
@@ -401,31 +572,31 @@ static const uint32_t GR_ROCK = 0x142022, GR_LIT = 0x4a6a66;
 static void grotto_begin(void) {
     __typeof__(s_s->u.gr) *G = &s_s->u.gr;
     /* the rock's lumps: two 1-D noises along skewed lines, as tables (bd_n1 per pixel, twice, was most of the mock-up's bake) */
-    for (int i = 0; i < TANK_W + TANK_H; i++) G->ta[i] = (uint8_t)(bd_n1(i * 0.08f, 21) * 255);                 /* along x + 5/8 y */
-    for (int i = 0; i < TANK_W + 3 * TANK_H + 1; i++) G->tb[i] = (uint8_t)(bd_n1((i - TANK_W) * 0.03f, 22) * 255);   /* along 3y - x */
-    for (int y = 0; y < TANK_BOT; y++) {                                  /* the walls, measured in from the glass's edge (the bowl: its circle) */
-        float v = (float)y / TANK_BOT, gl = 0, gr = TANK_W - 1;
+    for (int i = 0; i < BW + BH; i++) G->ta[i] = (uint8_t)(bd_n1(i * 0.08f, 21) * 255);                 /* along x + 5/8 y */
+    for (int i = 0; i < BW + 3 * BH + 1; i++) G->tb[i] = (uint8_t)(bd_n1((i - BW) * 0.03f, 22) * 255);   /* along 3y - x */
+    for (int y = 0; y < BB; y++) {                                  /* the walls, measured in from the glass's edge (the bowl: its circle) */
+        float v = (float)y / BB, gl = 0, gr = BW - 1;
 #ifdef TANK_ROUND
-        { float R = TANK_W * 0.5f, dy = y - TANK_H * 0.5f; float hw = dy * dy < R * R ? sqrtf(R * R - dy * dy) : 0; gl = TANK_W * 0.5f - hw; gr = TANK_W * 0.5f + hw; }
+        { float R = BW * 0.5f, dy = y - BH * 0.5f; float hw = dy * dy < R * R ? sqrtf(R * R - dy * dy) : 0; gl = BW * 0.5f - hw; gr = BW * 0.5f + hw; }
 #endif
-        float tk = TANK_W * (0.07f + 0.13f * (1 - v) * (1 - v));
-        G->edge[y][0] = (int16_t)(gl + tk + TANK_W * 0.05f * bd_n1(y * 0.06f, 12) + TANK_W * 0.015f * bd_n1(y * 0.21f, 13));
-        G->edge[y][1] = (int16_t)(gr - tk - TANK_W * 0.05f * bd_n1(y * 0.06f, 14) - TANK_W * 0.015f * bd_n1(y * 0.19f, 15));
+        float tk = BXU * (0.07f + 0.13f * (1 - v) * (1 - v));
+        G->edge[y][0] = (int16_t)(gl + tk + BXU * 0.05f * bd_n1(y * 0.06f, 12) + BXU * 0.015f * bd_n1(y * 0.21f, 13));
+        G->edge[y][1] = (int16_t)(gr - tk - BXU * 0.05f * bd_n1(y * 0.06f, 14) - BXU * 0.015f * bd_n1(y * 0.19f, 15));
     }
-    const float gx = TANK_W * 0.52f;
-    for (int x = 0; x < TANK_W; x++) {                                    /* the overhang across the top, from the glass's top edge */
-        float u = (x - gx) / (TANK_W * 0.5f), gt = 0;
+    const float gx = BW * 0.52f;
+    for (int x = 0; x < BW; x++) {                                    /* the overhang across the top, from the glass's top edge */
+        float u = (x - gx) / (BW * 0.5f), gt = 0;
 #ifdef TANK_ROUND
-        { float R = TANK_W * 0.5f, dx = x - TANK_W * 0.5f; gt = TANK_H * 0.5f - (dx * dx < R * R ? sqrtf(R * R - dx * dx) : 0); }
+        { float R = BW * 0.5f, dx = x - BW * 0.5f; gt = BH * 0.5f - (dx * dx < R * R ? sqrtf(R * R - dx * dx) : 0); }
 #endif
-        G->gtop[x] = (int16_t)(gt + TANK_H * (0.05f + 0.07f * u * u + 0.04f * bd_n1(x * 0.03f, 6) + 0.015f * bd_n1(x * 0.13f, 7)));
+        G->gtop[x] = (int16_t)(gt + BH * (0.05f + 0.07f * u * u + 0.04f * bd_n1(x * 0.03f, 6) + 0.015f * bd_n1(x * 0.13f, 7)));
     }
     static const uint32_t CR[4] = { 0xb0705a, 0x9a7aa8, 0xc0a060, 0x70a090 };   /* the crust: a few clumps low on the walls, where the light reaches */
     G->nd = 0;
     for (int i = 0; i < 9; i++) {
         uint32_t h = bd_h(i, 200);
-        int y = (int)(TANK_BOT * (0.45f + (h & 1023) / 1023.0f * 0.45f)), side = (h >> 10) & 1;
-        if (y >= TANK_BOT) continue;
+        int y = (int)(BB * (0.45f + (h & 1023) / 1023.0f * 0.45f)), side = (h >> 10) & 1;
+        if (y >= BB) continue;
         float x = side ? G->edge[y][1] + 3 : G->edge[y][0] - 3; uint32_t c = CR[(h >> 16) & 3];
         for (int k = 0; k < 5 && G->nd + 2 <= CRUST_MAX; k++) { uint32_t g = bd_h(i, k + 300); float r = 2.5f + (g & 3);
             float px = x + ((int)(g >> 4 & 15) - 7) * (side ? -1 : 1) * 0.8f, py = y - (float)(g >> 8 & 15);
@@ -435,14 +606,14 @@ static void grotto_begin(void) {
     s_s->ymin = 0;
 }
 static const uint32_t *grotto_row(int y) {
-    if (y >= TANK_BOT) return NULL;
+    if (y >= BB) return NULL;
     __typeof__(s_s->u.gr) *G = &s_s->u.gr;
     row_water(y);
     const uint32_t w = s_s->wrow[y], rk = mix8(GR_ROCK, w, 20), lk = mix8(GR_LIT, w, 20);
     uint32_t lip[12]; for (int d = 0; d < 12; d++) lip[d] = mix8(lk, rk, d * 256 / 12);   /* the lip catches the light from outside */
     uint32_t *wl = s_s->lut; for (int t = 0; t < 90; t++) wl[t] = mix8(rk, lk, t);        /* the lumps' 90 shades (255 * 255 * 90 >> 16 = 89) */
-    const int l = G->edge[y][0], r = G->edge[y][1], sk = (y * 5) >> 3, sb = 3 * y + TANK_W;
-    for (int x = 0; x < TANK_W; x++) {
+    const int l = G->edge[y][0], r = G->edge[y][1], sk = (y * 5) >> 3, sb = 3 * y + BW;
+    for (int x = 0; x < BW; x++) {
         int din = x < l ? l - x : x > r ? x - r : -1;
         if (din < 0) { if (r > x) x = r; continue; }                          /* (the open mouth: on to the far wall) */
         s_s->row[x] = din < 12 ? lip[din] : wl[(G->ta[x + sk] * G->tb[sb - x] * 90) >> 16];   /* rounded lumps */
@@ -453,7 +624,7 @@ static const uint32_t *grotto_row(int y) {
         if (w2 < 0) continue;
         float hw = sqrtf(w2); row_span((int)(d->x - hw + 0.5f), (int)(d->x + hw - 0.5f), bd_far(d->rgb, y, 0.3f), d->lay);
     }
-    for (int x = 0; x < TANK_W; x++) {                                      /* the overhang */
+    for (int x = 0; x < BW; x++) {                                      /* the overhang */
         int d = G->gtop[x] - y; if (d <= 0) continue;
         s_s->row[x] = d < 10 ? mix8(lk, rk, d * 256 / 10) : rk; s_s->lay[x] = 1;
     }
@@ -506,6 +677,12 @@ static void rg_branch(float x, float y, float ang, float len, float r, int depth
     }
 }
 enum { CK_ANTLER, CK_FAN, CK_FRONDS, CK_BUTTONS, CK_PLATES };
+#ifdef TANK_P4
+#define RF_S (2 * BM_S)                           /* (bg_reef_wide.inc: one of the pocket reef's cells, in the wide reef's) */
+#define FROND_NUB 4
+#else
+#define FROND_NUB 2
+#endif
 static void rg_colony(int kind, float sc) {
     const float bx = RG_GW * 0.5f, by = RG_GH - 2;
     switch (kind) {
@@ -517,12 +694,16 @@ static void rg_colony(int kind, float sc) {
         case CK_FAN: {                                                      /* sea fan: a short trunk under a dense ribbed half-disc, a pale rim (purple) */
             float R = (11 + 5 * rg_rnd()) * sc, cy = by - 3 * sc, ph = rg_rnd() * 6;
             rg_capsule(bx, by, bx, cy, 1.4f * sc, 1.1f * sc, RG_BODY);
-            enum { FA = 64 };                                               /* drawn by stepping along it: no trigonometry per cell */
+#ifdef TANK_P4                                    /* (the wide reef's finer cells: the fan's arcs unbroken at twice the radius, its mesh the 1.8's) */
+            enum { FA = 192, FA_RIB = 11 }; const float FA_ARC = 2.4f * RF_S * 0.62f;
+#else
+            enum { FA = 64, FA_RIB = 4 }; const float FA_ARC = 2.4f;        /* drawn by stepping along it: no trigonometry per cell */
+#endif
             float ca[FA], sa[FA], ed[FA];
             for (int k = 0; k < FA; k++) { float th = 0.25f + 2.64f * k / (FA - 1); ca[k] = cosf(th); sa[k] = sinf(th); ed[k] = R * (1 + 0.07f * sinf(th * 5 + ph) + 0.04f * sinf(th * 11 + ph * 2)); }
 #define FAN_SET(xx, yy, vv) do { int _i = (int)(xx), _j = (int)(yy); if ((unsigned)_j < RG_GH && (unsigned)_i < RG_GW && (vv == RG_TIP || !rg[_j][_i])) { rg[_j][_i] = vv; rg_grow(_i, _j); } } while (0)
-            for (int k = 0; k < FA; k += 4) for (float r = 0; r < ed[k]; r += 0.5f) { float bend = 0.15f * r / R; FAN_SET(bx + (ca[k] * (1 - bend) - sa[k] * bend) * r, cy - (sa[k] + ca[k] * bend) * r, RG_BODY); }   /* the ribs */
-            for (float r = 2.4f; r < R; r += 2.4f) for (int k = 0; k < FA; k++) if (r < ed[k]) {                                                                   /* the arcs */
+            for (int k = 0; k < FA; k += FA_RIB) for (float r = 0; r < ed[k]; r += 0.5f) { float bend = 0.15f * r / R; FAN_SET(bx + (ca[k] * (1 - bend) - sa[k] * bend) * r, cy - (sa[k] + ca[k] * bend) * r, RG_BODY); }   /* the ribs */
+            for (float r = FA_ARC; r < R; r += FA_ARC) for (int k = 0; k < FA; k++) if (r < ed[k]) {                                                                   /* the arcs */
                 float rr = r + 0.6f * ((k * 7 + (int)r) % 3 - 1) * 0.5f; FAN_SET(bx + ca[k] * rr, cy - sa[k] * rr, RG_BODY);
                 if (k + 1 < FA) FAN_SET(bx + (ca[k] + ca[k + 1]) * 0.5f * rr, cy - (sa[k] + sa[k + 1]) * 0.5f * rr, RG_BODY); }
             for (int k = 0; k < FA; k++) for (float d = 0; d < 1.3f; d += 0.5f) FAN_SET(bx + ca[k] * (ed[k] - d), cy - sa[k] * (ed[k] - d), RG_TIP);   /* the pale rim */
@@ -538,7 +719,7 @@ static void rg_colony(int kind, float sc) {
                 for (int s = 1; s <= (int)h; s++) {
                     float t = (float)s / h, nx = x + bend * s * t, ny = by - s;
                     rg_capsule(px, py, nx, ny, 0.85f * sc, 0.8f * sc, RG_BODY);
-                    if (s % 2 == 0 && s < h - 1) rg_disc(nx + ((s / 2) & 1 ? 1.4f : -1.4f) * sc, ny, 0.75f * sc, RG_BODY);
+                    if (s % FROND_NUB == 0 && s < h - 1) rg_disc(nx + ((s / FROND_NUB) & 1 ? 1.4f : -1.4f) * sc, ny, 0.75f * sc, RG_BODY);
                     px = nx; py = ny;
                 }
                 rg_disc(px, py, 1.0f * sc, RG_TIP);
@@ -576,17 +757,20 @@ static const uint32_t RF_COL[6] = { 0xe8508a, 0xe8642a, 0x8a48c8, 0x2ab8a0, 0xd8
 enum { T_RIM, T_BODY, T_SHADE, T_LIT, T_TIP, T_HOLE, T_N };
 #define CT(tone, col, grp) ((uint8_t)((1 + (tone)) | ((col) << 3) | ((grp) << 6)))   /* (0 = no coral) */
 static const uint32_t RK[7] = { 0x2e4e4c, 0x3e6460, 0x1e3436, 0x4a706a, 0x122224, 0x9aae4c, 0x6e8636 };   /* the rock: body, light, dark, face, under, moss lit, moss */
+#ifdef TANK_P4
+#include "bg_reef_wide.inc"                     /* (THE WIDE FRAME's reef: its own composition) */
+#else
 static void reef_begin(void) {
     if (s_keep && s_keep_bg == BG_REEF) { s_s->reef = s_keep; s_s->ymin = 0; return; }   /* laid out already: the light changes only its colors */
     __typeof__(s_s->u.re) *R = &s_s->u.re;
     uint8_t (*rw)[RW_CW] = R->k.mg;                                       /* first the rock's shape (and its boulders' shading), then its tone in place */
     rg = R->rg; memset(R->rg, 0, sizeof R->rg); memset(R->ct, 0, sizeof R->ct); memset(&R->k, 0, sizeof R->k);
-    const int gw = TANK_W / 2, gh = TANK_BOT / 2;
-    const float S = TANK_W / 448.0f;
+    const int gw = BW / 2, gh = BB / 2;
+    const float S = BW / 448.0f;
     for (int j = 0; j < gh; j++) {                                       /* the glass's edges per cell row (the bowl: its circle) */
-        R->k.gle[j] = 0; R->k.gre[j] = TANK_W - 1;
+        R->k.gle[j] = 0; R->k.gre[j] = BW - 1;
 #ifdef TANK_ROUND
-        { float Rr = TANK_W * 0.5f, dy = j * 2.0f - TANK_H * 0.5f; float hw = dy * dy < Rr * Rr ? sqrtf(Rr * Rr - dy * dy) : 0; R->k.gle[j] = TANK_W * 0.5f - hw; R->k.gre[j] = TANK_W * 0.5f + hw; }
+        { float Rr = BW * 0.5f, dy = j * 2.0f - BH * 0.5f; float hw = dy * dy < Rr * Rr ? sqrtf(Rr * Rr - dy * dy) : 0; R->k.gle[j] = BW * 0.5f - hw; R->k.gre[j] = BW * 0.5f + hw; }
 #endif
     }
     /* the walls, block by block: a ledge, a near-straight face, cut back under its foot; deep and shallow in turn */
@@ -599,7 +783,7 @@ static void reef_begin(void) {
             float p = ((k & 1) ? 4 + ((h >> 4) & 3) : 10 + ((h >> 4) & 7)) * S;
             for (int jj = j; jj < j + len && jj < gh; jj++) {
                 float v = jj / (float)gh, t = (float)(jj - j) / len;
-                float base = (TANK_W * (0.07f + 0.13f * v * v) + TANK_W * 0.025f * bd_n1(jj * 0.08f, 70 + side)) / 2;
+                float base = (BW * (0.07f + 0.13f * v * v) + BW * 0.025f * bd_n1(jj * 0.08f, 70 + side)) / 2;
                 float prot = p * (t < 0.6f ? 1 - 0.12f * t : 0.93f - 2.6f * (t - 0.6f)) + ((bd_h(jj, 450 + side) & 3) == 0 ? 0.6f : 0);
                 prot += 1.6f * bd_n1(jj * 0.22f + k * 5.1f, 470 + side) - 0.8f;  /* a ragged face, not a ruled line */
                 if (t < 0.1f) prot -= (1 - t / 0.1f) * 1.8f;                    /* the ledge's lip rounded over */
@@ -607,7 +791,7 @@ static void reef_begin(void) {
                 if (side == 0) { int edge = (int)(R->k.gle[jj] / 2 + base + prot); for (int i = 0; i <= edge && i < gw; i++) rw[jj][i] = RG_BODY; }
                 else { int edge = (int)(R->k.gre[jj] / 2 - base - prot); for (int i = edge < 0 ? 0 : edge; i < gw; i++) rw[jj][i] = RG_BODY; }
             }
-            { float v = j / (float)gh, base = (TANK_W * (0.07f + 0.13f * v * v)) / 2;
+            { float v = j / (float)gh, base = (BW * (0.07f + 0.13f * v * v)) / 2;
               float root = side ? R->k.gre[j] / 2 - base : R->k.gle[j] / 2 + base;
               R->L[nl++] = (ledge_t){ j, side, side ? root - p : root + p, root }; }
             j += len;
@@ -731,9 +915,9 @@ static void reef_begin(void) {
     s_s->ymin = 0;
 }
 static const uint32_t *reef_row(int y) {
-    if (y >= TANK_BOT) return NULL;
+    if (y >= BB) return NULL;
     const reef_keep_t *K = s_s->reef;
-    const int j = y >> 1, gh = TANK_BOT / 2;
+    const int j = y >> 1, gh = BB / 2;
     if (j >= gh) return NULL;
     row_water(y);
     const uint32_t w = s_s->wrow[y];
@@ -741,14 +925,14 @@ static const uint32_t *reef_row(int y) {
     uint32_t rk[7], cc[6][T_N];
     for (int k = 0; k < 7; k++) rk[k] = mix8(RK[k], w, 41);                 /* (the rock: 0.16 of the water) */
     for (int c = 0; c < 6; c++) for (int t = 0; t < T_N; t++) cc[c][t] = mix8(K->tone[c][t], w, 31);   /* (the coral: 0.12 of the water - saturated) */
-    float v = (float)y / TANK_BOT;                                          /* the faint far rock, beyond the near faces */
-    float fl = K->gle[j] + TANK_W * (0.20f + 0.10f * v + 0.06f * bd_n1(y * 0.02f, 61) + 0.03f * bd_n1(y * 0.09f, 62));
-    float fr = K->gre[j] - TANK_W * (0.20f + 0.10f * v + 0.06f * bd_n1(y * 0.02f, 63) + 0.03f * bd_n1(y * 0.09f, 64));
+    float v = (float)y / BB;                                          /* the faint far rock, beyond the near faces */
+    float fl = K->gle[j] + BW * (0.20f + 0.10f * v + 0.06f * bd_n1(y * 0.02f, 61) + 0.03f * bd_n1(y * 0.09f, 62));
+    float fr = K->gre[j] - BW * (0.20f + 0.10f * v + 0.06f * bd_n1(y * 0.02f, 63) + 0.03f * bd_n1(y * 0.09f, 64));
     const uint32_t fc = bd_far(0x163232, y, 0.72f), fe = bd_far(0x26464a, y, 0.72f);
-    for (int x = K->fl[j] * 2; x <= (int)fl && x < TANK_W; x++) { s_s->row[x] = x > fl - 2 ? fe : fc; s_s->lay[x] = 1; }
-    for (int x = (int)fr; x <= K->fr[j] * 2 + 1 && x < TANK_W; x++) if (x >= 0) { s_s->row[x] = x < fr + 2 ? fe : fc; s_s->lay[x] = 1; }
+    for (int x = K->fl[j] * 2; x <= (int)fl && x < BW; x++) { s_s->row[x] = x > fl - 2 ? fe : fc; s_s->lay[x] = 1; }
+    for (int x = (int)fr; x <= K->fr[j] * 2 + 1 && x < BW; x++) if (x >= 0) { s_s->row[x] = x < fr + 2 ? fe : fc; s_s->lay[x] = 1; }
     const uint8_t *mr = K->mg[j];
-    for (int i = 0; i < TANK_W / 2; i++) {
+    for (int i = 0; i < BW / 2; i++) {
         uint8_t m = mr[i]; if (!m) continue;
         uint32_t v2; uint8_t l;
         if ((m & 7) == 7) { v2 = rk[(m >> 3) & 7]; l = 2; }                                  /* the rock */
@@ -757,17 +941,67 @@ static const uint32_t *reef_row(int y) {
     }
     return s_s->row;
 }
+#endif
 
+#ifdef TANK_P4
+/* the drift's sines on the big screens, by table (0.4.3): three hundred specks a frame, two sinf each, were most of the
+   8 ms Twilight's frame drew longer than Open Water's on the 10.1 once its tiles were no longer the cost. A speck stands
+   on a whole pixel and its light goes in steps (render.c, THE DRIFT'S TILES): a 1024-step sine is all it can show */
+static float s_dsin[1024]; static bool s_dsin_ok;
+static inline float drift_sin(float a) {
+    if (!s_dsin_ok) { for (int i = 0; i < 1024; i++) s_dsin[i] = sinf(i * (6.2831853f / 1024)); s_dsin_ok = true; }
+    return s_dsin[(int)(a * (1024 / 6.2831853f)) & 1023];
+}
+static inline float drift_wrap(float v, float H) { return v - H * floorf(v * (1 / H)); }   /* (fmodf, for v >= 0) */
+#endif
+#ifdef TANK_TAB5
+/* THE DRIFT IN STRIPS (0.4.3, the Tab5; render.c THE DRIFT'S TILES). The Tab5's chip pays about a millisecond a turn
+   whatever its size, so its port turns changed tiles in a few merged boxes - and specks changing a tile here and a
+   tile there all over the glass merge into boxes that cover most of it (measured 11-21: Twilight's flush 42 ms a
+   frame with a fifth of the tiles changed, 14 ms on a background with no drift). So there a slow speck takes its
+   place from a clock that steps three times a second, and the glass is eight strips, each stepping at its own
+   eighth of that: a frame's changed specks stand in ONE strip, a box or two. A speck sinking 1 to 7 px a second
+   moves a pixel or two a step either way. x1024: where the speck lives across the glass, 0..1023 */
+static inline float speck_strip_clock(float T, int x1024) {
+    const float P = 0.32f, ph = (float)(x1024 >> 7) * (P / 8), q = floorf((T + ph) * (1 / P)) * P - ph;
+    return q > 0 ? q : 0;
+}
+#else
+static inline float speck_strip_clock(float T, int x1024) { (void)x1024; return T; }
+#endif
 /* ---- the entries ---- */
 #include "bg_more.inc"                            /* (the 0.4.2 three: Sunken Ship, Volcanic Vent, Mangroves) */
 
+#ifdef TANK_P4
+/* THE WIDE FRAME: which backgrounds are laid out on the canvas (the rest on the glass's own rows) */
+static bool wide_bg(int bg) { return bg == BG_RUINS || bg == BG_KELP || bg == BG_REEF || bg == BG_GROTTO || bg == BG_SHIP || bg == BG_VENT || bg == BG_MANGROVE; }
+static bool s_wide_hard;                          /* (the sim's comparison: the canvas drawn up two for one with no softening) */
+/* NEAR IS SHARP (Strato on the 10.1's glass, 11-21: Embers and Reef Walls "look blurry", not "out of focus in the distance
+   and intentional" as Atlantis does - "probably because of the muted colors"). The softening reads as distance where a
+   scene is far and hazed; on a near chimney's bright crust or a coral's saturated outline it reads as a blur. So a
+   background names the layer its near things start at: from there a pixel is its own canvas pixel, two for one, and takes
+   nothing from its neighbours - nor gives them anything: a soft pixel beside a sharp one stays its own too, so a near
+   edge is a clean edge. 0: every layer soft (the other five) */
+static const uint8_t WIDE_SHARP_FROM[BG_N] = { [BG_REEF] = 2, [BG_VENT] = 3 };   /* the reef: its rock and coral (the far rock soft); the vent: the two near ranks of chimneys */
+void bg_debug_wide_hard(bool on) { s_wide_hard = on; }
+#endif
 const bg_glow_t *bg_begin(int bg, void *scratch) {
     if (s_keep && bg != s_keep_bg) bg_keep_drop();                       /* another background: the kept layout goes */
     s_s = scratch;
     if (!scratch || bg <= BG_OPEN || bg >= BG_N) return NULL;
     for (int y = 0; y < TANK_H; y++) s_s->wrow[y] = bg_water_rgb(bg, y);
     glow_layout(bg);
-    s_s->ymin = TANK_BOT; s_s->any_lit = true;       /* (the first row clears the lit marks) */
+#ifdef TANK_P4
+    s_s->virt = wide_bg(bg); s_s->w = s_s->virt ? BW : TANK_W;
+    if (s_s->virt) {                                 /* the glass's water and glow kept; the canvas's are every second one of them */
+        memcpy(s_s->dwrow, s_s->wrow, sizeof s_s->dwrow); memcpy(s_s->dgrow, s_s->grow, sizeof s_s->dgrow); memcpy(s_s->dgcol, s_s->gcol, sizeof s_s->dgcol);
+        for (int j = 0; j < BH; j++) { s_s->wrow[j] = s_s->dwrow[2 * j]; s_s->grow[j] = s_s->dgrow[2 * j]; }
+        for (int i = 0; i < BW; i++) s_s->gcol[i] = s_s->dgcol[2 * i];
+        if (s_s->has_glow) { s_s->glow.row = s_s->dgrow; s_s->glow.col = s_s->dgcol; }
+        s_s->vj[0] = s_s->vj[1] = s_s->vj[2] = -1;
+    }
+#endif
+    s_s->ymin = BB; s_s->any_lit = true;             /* (the first row clears the lit marks) */
     s_s->glow_q = bg >= BG_SHIP;
     switch (bg) {
         case BG_RUINS:  ruins_begin(); break;
@@ -783,22 +1017,88 @@ const bg_glow_t *bg_begin(int bg, void *scratch) {
     }
     return s_s->has_glow ? &s_s->glow : NULL;
 }
+static const uint32_t *scene_row(int bg, int y) {
+    switch (bg) {
+        case BG_RUINS:  return ruins_row(y);
+        case BG_KELP:   return kelp_row(y);
+        case BG_LAGOON: return lagoon_row(y);
+        case BG_RIDGES: return ridges_row(y);
+        case BG_REEF:   return reef_row(y);
+        case BG_GROTTO: return grotto_row(y);
+        case BG_SHIP:     return ship_row(y);
+        case BG_VENT:     return vent_row(y);
+        case BG_MANGROVE: return mangrove_row(y);
+        default: return NULL;
+    }
+}
+#ifdef TANK_P4
+/* the canvas's row j, kept: its slot (never the slot `pin`). A row with nothing of the background on it is kept as its water */
+static int wide_get(int bg, int j, int pin) {
+    scratch_t *s = s_s;
+    for (int k = 0; k < 3; k++) if (s->vj[k] == j) return k;
+    int k = -1, far = -1;
+    for (int q = 0; q < 3; q++) { if (q == pin) continue; const int d = s->vj[q] < 0 ? 1 << 20 : s->vj[q] > j ? s->vj[q] - j : j - s->vj[q]; if (d > far) { far = d; k = q; } }
+    s->any_lit = true;                               /* (the row clears the lit marks, and says if it set any) */
+    const uint32_t *r = scene_row(bg, j);
+    if (!r) row_water(j);
+    memcpy(s->vc[k], s->row, sizeof(uint32_t) * BW); memcpy(s->vl[k], s->lay, BW);
+    s->vlit[k] = r && s->any_lit;
+    if (s->vlit[k]) memcpy(s->vt[k], s->lit, BW); else memset(s->vt[k], 0, BW);
+    s->vj[k] = j; s->vany[k] = r != NULL;
+    return k;
+}
+static inline uint32_t mix31(uint32_t a, uint32_t b) {   /* (3 a + b) / 4, a channel at a time */
+    return ((((a & 0xff00ffu) * 3 + (b & 0xff00ffu)) >> 2) & 0xff00ffu) | ((((a & 0x00ff00u) * 3 + (b & 0x00ff00u)) >> 2) & 0x00ff00u);
+}
+/* the glass's row y from the canvas: each of the glass's pixels lies a quarter of the way from its own canvas pixel toward
+   the next (across and down) and takes that share of each - but water stays the GLASS's own water and glow, to the bit
+   (a pixel none of whose four are anything of the background is left as the water pass would have made it) */
+static const uint32_t *wide_row(int bg, int y) {
+    scratch_t *s = s_s;
+    if (y >= TANK_BOT) return NULL;
+    const int j = y >> 1; int jn = (y & 1) ? j + 1 : j - 1;
+    if (jn < 0 || jn >= BB) jn = j;
+    const int a = wide_get(bg, j, -1), b = jn == j ? a : wide_get(bg, jn, a);
+    if (!s->vany[a] && !s->vany[b]) return NULL;
+    uint32_t *R = s->row; uint8_t *L = s->lay, *T = s->lit;
+    {                                                /* the glass's water for this row, its glow in (row_water's, on the glass's tables) */
+        const uint32_t w = s->dwrow[y]; const int gk = s->has_glow ? s->dgrow[y] : 0;
+        if (gk && s->glow_q) { uint32_t *U = s->lut; const int qmax = gk * 255 >> 10; U[0] = w; for (int q = 1; q <= qmax; q++) U[q] = mix8(w, s->glow.rgb, q << 2); for (int x = 0; x < TANK_W; x++) R[x] = U[gk * s->dgcol[x] >> 10]; }
+        else if (gk) { uint32_t *U = s->lut; const int kmax = gk * 255 >> 8; U[0] = w; for (int k = 1; k <= kmax; k++) U[k] = mix8(w, s->glow.rgb, k); for (int x = 0; x < TANK_W; x++) R[x] = U[gk * s->dgcol[x] >> 8]; }
+        else for (int x = 0; x < TANK_W; x++) R[x] = w;
+    }
+    memset(L, 0, TANK_W); memset(T, 0, TANK_W);
+    const uint32_t *A = s->vc[a], *B = s->vc[b]; const uint8_t *Al = s->vl[a], *Bl = s->vl[b], *At = s->vt[a], *Bt = s->vt[b];
+    uint32_t *V = s->vv;
+    if (!s_wide_hard) for (int i = 0; i < BW; i++) V[i] = mix31(A[i], B[i]);
+    const bool lit = s->vlit[a] || s->vlit[b];
+    const int sharp = WIDE_SHARP_FROM[bg] ? WIDE_SHARP_FROM[bg] : 256;
+    for (int x = 0; x < TANK_W; x++) {
+        const int i = x >> 1; int n = (x & 1) ? i + 1 : i - 1;
+        if (n < 0 || n >= BW) n = i;
+        if (s_wide_hard) { if (Al[i]) { R[x] = A[i]; L[x] = Al[i]; T[x] = At[i]; } continue; }
+        const int l0 = Al[i], l1 = Al[n], l2 = Bl[i], l3 = Bl[n];
+        if (!(l0 | l1 | l2 | l3)) continue;
+        if (l0 >= sharp || l1 >= sharp || l2 >= sharp || l3 >= sharp) {   /* NEAR IS SHARP: its own canvas pixel (water: the glass's own, as it stands) */
+            if (l0) { R[x] = A[i]; L[x] = (uint8_t)l0; T[x] = At[i]; }
+            continue;
+        }
+        R[x] = mix31(V[i], V[n]);
+        L[x] = (uint8_t)(l0 ? l0 : l2 ? l2 : l1 ? l1 : l3);
+        if (lit) T[x] = (uint8_t)((At[i] * 9 + At[n] * 3 + Bt[i] * 3 + Bt[n]) >> 4);
+    }
+    s->any_lit = lit;
+    return R;
+}
+#endif
 const uint32_t *bg_row(int bg, int y, void *scratch, const uint8_t **lay) {
     s_s = scratch;
     if (!scratch || (unsigned)y >= TANK_H) return NULL;
-    const uint32_t *r;
-    switch (bg) {
-        case BG_RUINS:  r = ruins_row(y); break;
-        case BG_KELP:   r = kelp_row(y); break;
-        case BG_LAGOON: r = lagoon_row(y); break;
-        case BG_RIDGES: r = ridges_row(y); break;
-        case BG_REEF:   r = reef_row(y); break;
-        case BG_GROTTO: r = grotto_row(y); break;
-        case BG_SHIP:     r = ship_row(y); break;
-        case BG_VENT:     r = vent_row(y); break;
-        case BG_MANGROVE: r = mangrove_row(y); break;
-        default: r = NULL; break;
-    }
+#ifdef TANK_P4
+    const uint32_t *r = s_s->virt ? wide_row(bg, y) : scene_row(bg, y);
+#else
+    const uint32_t *r = scene_row(bg, y);
+#endif
     if (lay) *lay = r ? s_s->lay : NULL;
     return r;
 }
@@ -806,14 +1106,51 @@ const uint8_t *bg_row_lit(void *scratch) { scratch_t *s = scratch; return s && s
 
 /* ---- THE DRIFT: specks in the water, each a function of the clock (Twilight Deep's marine snow; 0.4.2: the vent's
    embers, the mangroves' silt and leaves) ---- */
+#ifdef TANK_P4
+/* (the big screens: Twilight's snow is SPARSE, STEADY and DULL there. Strato on the glass, 11-21, of the first take - 301
+   specks, each one's light pulsing as on the pocket tanks: "the specks look like they are flashing now.. almost like
+   twinkling stars.. i dont really like the look"; then: "if you make the marine snow not blink or twinkle and reduce the
+   amount of snow and make it duller, not white we could find a balance". So: about half of them (one to 7000 px of
+   glass), no pulse at all - a speck's light is its own and holds - and a blue-grey of the water, not white. The
+   mangroves' silt by the canvas, twice over) */
+int bg_specks(int bg) { return bg == BG_TWILIGHT ? TANK_W * TANK_H / 7000 : bg == BG_VENT ? VE_EMBERS : bg == BG_MANGROVE ? BW * BH / 2100 : 0; }
+float bg_speck_clock(int bg, double clock) { (void)bg; return tank_anim(clock); }
+#else
 int bg_specks(int bg) { return bg == BG_TWILIGHT ? TANK_W * TANK_H / 2400 : bg == BG_VENT ? VE_EMBERS : bg == BG_MANGROVE ? TANK_W * TANK_H / 4200 : 0; }
 float bg_speck_clock(int bg, double clock) { return bg == BG_TWILIGHT ? (float)clock : tank_anim(clock); }
-bool bg_debug_vent_mouth(int k, int *x, int *y) { if (k < 0 || k >= VE_N) return false; float mx; ve_mouth(k, &mx, y); *x = (int)mx; return true; }
+#endif
+bool bg_debug_vent_mouth(int k, int *x, int *y) { if (k < 0 || k >= VE_N) return false; float mx; ve_mouth(k, &mx, y); *x = (int)mx;
+#ifdef TANK_P4
+    *x *= 2; *y *= 2;
+#endif
+    return true; }
 bool bg_debug_vent_worm(const void *scratch, int i, int *x, int *y0) {
     const scratch_t *s = scratch; if (!s || i < 0 || i >= s->u.ve.nw) return false;
-    *x = s->u.ve.wx[i]; *y0 = s->u.ve.wy0[i]; return true;
+    *x = s->u.ve.wx[i]; *y0 = s->u.ve.wy0[i];
+#ifdef TANK_P4
+    *x *= 2; *y0 *= 2;
+#endif
+    return true;
 }
 void bg_speck(int bg, int i, float T, float *x, float *y, int *alpha, bool *big, uint32_t *rgb, bool *lit) {
+#ifdef TANK_P4                                    /* (the drifts of the canvas's backgrounds are laid out on it: onto the glass) */
+    if (bg == BG_VENT) { vent_speck(i, T, x, y, alpha, big, rgb, lit); *x *= 2; *y *= 2; return; }
+    if (bg == BG_MANGROVE) { mangrove_speck(i, T, x, y, alpha, big, rgb, lit); *x *= 2; *y *= 2; return; }
+    {   /* Twilight's snow on the big screens (Strato 11-21: "reduce the marine snow a bit and have the particles fall at slightly
+           different rates"): T is tank_anim's lap, and each speck falls its height a whole number of times a lap - six rates,
+           about 1.2 to 7.4 px/s (the 1.8's 1.2 to 3.7, for a glass twice as tall), the slow ones the many - so nothing jumps
+           where the lap wraps. A slower fall is also fewer of the glass's tiles changed a frame (render.c, THE DRIFT'S TILES) */
+        *rgb = 0x7c8fbe; *lit = false;                  /* (duller: a blue-grey, not the pocket snow's near-white) */
+        const uint32_t h = bd_h(i, 91);
+        static const uint8_t LAPS[16] = { 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 4, 4, 4, 5, 5, 6 };
+        T = speck_strip_clock(T, (int)(h & 1023));
+        const float H = (float)TANK_BOT - 24, vy = H * LAPS[h >> 20 & 15] * (1 / 628.3185307f);
+        *y = drift_wrap((h >> 10 & 1023) * (H / 1024.0f) + vy * T, H);
+        *x = (h & 1023) * (TANK_W / 1024.0f) + 4.0f * drift_sin(T * (0.15f + (h >> 24 & 7) * 0.02f) + (float)(h >> 27));
+        *big = (h >> 13 & 3) == 0;
+        *alpha = (*big ? 170 : 128) + (int)(h >> 5 & 31);   /* (steady: each its own light, some fainter - no pulse) */
+    }
+#else
     if (bg == BG_VENT) { vent_speck(i, T, x, y, alpha, big, rgb, lit); return; }
     if (bg == BG_MANGROVE) { mangrove_speck(i, T, x, y, alpha, big, rgb, lit); return; }
     *rgb = BG_SPECK_RGB; *lit = false;
@@ -823,4 +1160,5 @@ void bg_speck(int bg, int i, float T, float *x, float *y, int *alpha, bool *big,
     *x = (h & 1023) * (TANK_W / 1024.0f) + 4.0f * sinf(T * (0.15f + (h >> 24 & 7) * 0.02f) + (h >> 27));
     *big = (h >> 13 & 3) == 0;
     *alpha = (int)((*big ? 255 : 210) * (0.7f + 0.3f * sinf(T * 0.9f + (h >> 5 & 63))));
+#endif
 }

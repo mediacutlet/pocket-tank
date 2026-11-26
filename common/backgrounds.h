@@ -75,4 +75,11 @@ void bg_speck(int bg, int i, float T, float *x, float *y, int *alpha, bool *big,
 bool bg_debug_vent_mouth(int k, int *x, int *y);
 bool bg_debug_vent_worm(const void *scratch, int i, int *x, int *y0);
 
+#ifdef TANK_P4
+/* THE WIDE FRAME (0.4.3, the big screens), for the sim's sheets only: the canvas drawn up with no softening; the reef's
+   composition (0 two walls, 1 walls and two pinnacles, 2 one wall and three) */
+void bg_debug_wide_hard(bool on);
+void bg_debug_reef_variant(int v);
+#endif
+
 #endif

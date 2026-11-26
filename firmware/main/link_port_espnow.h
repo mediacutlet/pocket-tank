@@ -22,3 +22,12 @@ void link_port_stop(void);
 void link_port_send(void *ctx, uint32_t to, const uint8_t *buf, int len);   /* link_host_t.send */
 void link_port_drain(link_t *L, uint32_t now_ms);
 void link_port_stats(uint32_t *tx, uint32_t *tx_fail, uint32_t *rx, uint32_t *stale, uint32_t *full);
+/* the big screens (11-24 audit, finding 2): their radio is a chip next door that can take seconds to answer, so the
+ * start runs on a radio task of the port's and LINK waits on a card meanwhile. begin() hands the start over (UP at once
+ * if the radio is up already); begin_poll() says how it went, from the tank task. alive(): up, and its bus has not
+ * failed since. The pocket tanks' own radio starts at once: link_port_start(). (link_port_hosted.c, link_port_stub.c) */
+enum { LP_BEGIN_IDLE, LP_BEGIN_WAIT, LP_BEGIN_UP, LP_BEGIN_FAIL };
+int  link_port_begin(void);
+int  link_port_begin_poll(void);
+bool link_port_alive(void);
+void link_port_settle(int ms);              /* wait (at most ms) for the radio task's handed-over jobs: the sleep's goodbye */

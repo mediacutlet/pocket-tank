@@ -123,6 +123,7 @@ bool advisor_core_init(const uint8_t *model_bin, size_t model_len,
     if (seed) g_rng = seed;
     return true;
 }
+void advisor_core_reseed(uint32_t seed) { if (seed) g_rng = seed; }   /* (the sim's paired runs: the same decisions from the same water) */
 int advisor_core_schema(void) { return g_model ? g_schema : 0; }
 q4_model_t *advisor_core_model(void) { return g_model; }
 const q4_config_t *advisor_core_config(void) { return g_model ? q4_model_config(g_model) : NULL; }

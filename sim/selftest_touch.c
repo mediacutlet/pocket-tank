@@ -21,12 +21,15 @@
  *     GIVE modal's GIVE and a visitor's DEPORT mashed at 5 Hz past their 2 s holds: nothing acts (a spent tap restarts
  *     the wait, touch_gate.h ONE RULE); after a pause as long as the wait one tap does.
  * PT_TOUCH_LOG=1 prints the port's own log lines. */
+#include "xt_notice.h"
+#include <unistd.h>   /* (mkdtemp: macOS declares it here) */
 #include "host_esp.h"
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #ifndef TOUCH_PORT_SRC
+#define TOUCH_PORT_HOST 1                 /* (the big screens: the stand-in chip here, not the GT911 / ST712x drivers) */
 #define TOUCH_PORT_SRC "../firmware/main/touch_port_ft3168.c"
 #endif
 #include TOUCH_PORT_SRC
@@ -116,6 +119,7 @@ static bool g_link_page; static int g_link_down, g_link_calls;
 bool link_dev_page_up(void) { return g_link_page; }
 void link_dev_page_open(tank_t *t) { (void)t; g_link_page = true; }
 static int g_link_ui;                                       /* what the real link page (render_link_touch) made of it - read by R2T-3's gate */
+void link_dev_touch_cancel(void) {}                         /* (the radio note: the big screens' firmware only) */
 int  link_dev_touch(float x, float y, bool down, float dt) {
     g_link_calls++; if (down) g_link_down++;
     static link_view_t v; int r = render_link_touch(&v, x, y, down, dt); if (r) g_link_ui = r;   /* (doors shut: DONE and the arrows) */
@@ -162,15 +166,17 @@ static bool aim(float x, float y) {
 }
 static bool g_draw;                                         /* frames drawn as main.c draws them (the GIVE modal's stamps live in its draw) */
 static uint16_t g_fb[TANK_W * TANK_H];
+static void (*g_frame_hook)(void);                         /* (0.4.3 audit r2) what main.c does after its polls, where a test needs it: notice_tick */
 static void frame(void) {
     adv_tick(FRAME_MS / 1000.0f);                           /* (main.c ticks the ADVANCED page every frame: its clocks - DONE's first moment) */
-    if (!g_draw) { g_now += FRAME_MS * 1000; T.clock += FRAME_MS / 1000.0; touch_port_poll(&T); return; }
+    if (!g_draw) { g_now += FRAME_MS * 1000; T.clock += FRAME_MS / 1000.0; touch_port_poll(&T); if (g_frame_hook) g_frame_hook(); return; }
     for (int k = 0; k < 3; k++) {                           /* main.c's tank task: poll, render_frame_begin + poll + the frame's draw, poll */
         g_now += FRAME_MS * 1000 / 3; T.clock += FRAME_MS / 3000.0;
         if (k == 1) render_frame_begin();
         touch_port_poll(&T);
         if (k == 1) { if (touch_port_milestones()) render_milestones(&T, g_fb, TANK_W); else if (!setup_active()) render_give_modal(&T, g_fb, TANK_W); }   /* (main.c: not under setup) */
     }
+    if (g_frame_hook) g_frame_hook();
 }
 static void hold_for(int ms) { for (int k = 0; k < (ms + FRAME_MS - 1) / FRAME_MS; k++) frame(); }
 static void lift(int ms) { g_down = false; hold_for(ms < FRAME_MS ? FRAME_MS : ms); }
@@ -2747,8 +2753,8 @@ static void more_pages_doubled(void) {
     bare();
 }
 static void crit_names_port(void) {
-    T.sd_unlocks |= SD_ITEM_SNAIL | SD_ITEM_SHRIMP | SD_ITEM_URCHIN | SD_ITEM_SEAHORSE | SD_ITEM_CRAB;
-    tank_snail_place(&T); tank_shrimp_place(&T, 4); tank_urchin_place(&T); tank_seahorse_place(&T); tank_crab_place(&T);
+    T.sd_unlocks |= SD_ITEM_SNAIL | SD_ITEM_SHRIMP | SD_ITEM_URCHIN | SD_ITEM_SEAHORSE | SD_ITEM_CRAB | SD_ITEM_OCTOPUS;   /* (0.4.3: the octopus is nameable too) */
+    tank_snail_place(&T); tank_shrimp_place(&T, 4); tank_urchin_place(&T); tank_seahorse_place(&T); tank_crab_place(&T); tank_octopus_place(&T);
     float dx, dy, ux, uy, cx, cy; int n = 0;
     for (int k = 0; k < CRIT_NAME_N; k++) {
         const int card = render_card_of_crit_name(k);
@@ -3446,6 +3452,53 @@ int selftest_back_overlap(void) {
            "CLOSE beside it act at once; WI-FI -> UPDATES -> settings by three taps, no link mode; the GRAPHICS page's BACK as on main\n", SET_UPD_BACK_S);
     return 0;
 }
+/* THE EXPERIMENTAL TANK'S THANK-YOU through the board's own port (0.4.3, common/xt_notice.h): a tap on it closes it and
+   the tank under it sees nothing of that tap; the next tap is the tank's; a press the tank already had when it came up
+   stays the tank's to its lift and leaves the notice up (THE TOUCH RULE, G1); a slow press on it closes it too. Its
+   record in a directory of its own (POCKET_TANK_FRAME, put back after) */
+static void xt_notice_port(void) {
+    char dir[] = "/tmp/pt-xtn-port-XXXXXX";
+    if (!mkdtemp(dir)) { TFAIL("xt notice: no directory for its record"); return; }
+    const char *was = getenv("POCKET_TANK_FRAME"); char keep[600] = ""; if (was) snprintf(keep, sizeof keep, "%s", was);
+    setenv("POCKET_TANK_FRAME", dir, 1);
+    const float x = TANK_W / 2.0f, y = TANK_H / 2.0f;
+    int n = 0;
+    bare(); touch_port_set_jelly(jelly_cb);
+    xt_notice_open(77, true);
+    for (int i = 0; i < 100 && !xt_notice_up(); i++) xt_notice_tick(FRAME_MS / 1000.0f, false);
+    if (!xt_notice_up()) TFAIL("xt notice: it did not come up over the bare experimental tank");
+    for (int i = 0; i < 10; i++) { xt_notice_tick(FRAME_MS / 1000.0f, false); frame(); }
+    int j0 = g_jelly_seen;
+    if (!tap(x, y, 90, FRAME_MS)) TFAIL("xt notice: the middle of the glass is past the panel's reach");
+    if (xt_notice_up() || g_jelly_seen != j0) TFAIL("xt notice: a tap on it - still up %d, the tank saw %d polls of it (want closed, none)", xt_notice_up(), g_jelly_seen - j0); else n++;
+    j0 = g_jelly_seen; tap(x, y, 90, FRAME_MS);
+    if (g_jelly_seen == j0) TFAIL("xt notice: closed, the next tap did not reach the tank"); else n++;
+    /* G1: the tank's press, the notice comes up under the finger */
+    xt_notice_open(78, true); j0 = g_jelly_seen;
+    press(x, y, 200);
+    for (int i = 0; i < 100 && !xt_notice_up(); i++) { xt_notice_tick(FRAME_MS / 1000.0f, false); frame(); }
+    for (int i = 0; i < 5; i++) { xt_notice_tick(FRAME_MS / 1000.0f, false); frame(); }
+    lift(FRAME_MS);
+    if (!xt_notice_up()) TFAIL("xt notice: a press begun before it came up closed it (G1)"); else n++;
+    if (g_jelly_seen - j0 < 10) TFAIL("xt notice: the tank lost its own press when the notice came (%d polls)", g_jelly_seen - j0); else n++;
+    j0 = g_jelly_seen;
+    if (aim(x, y)) { g_down = true; for (int i = 0; i < 1200 / FRAME_MS; i++) { xt_notice_tick(FRAME_MS / 1000.0f, false); frame(); } }   /* a slow press on it (the */
+    lift(FRAME_MS);                                                        /* notice's clock runs each frame, as main.c ticks it) */
+    if (xt_notice_up() || g_jelly_seen != j0) TFAIL("xt notice: a slow press on it - still up %d, the tank saw %d polls (want closed, none)", xt_notice_up(), g_jelly_seen - j0); else n++;
+    /* G1 at its edge (the 11-22 review): a finger that lands in the very poll that first finds it up - drawn, not yet on the
+       glass - is from before the keeper could see it: spent, whatever the clocks say */
+    xt_notice_open(79, true);
+    for (int i = 0; i < 100 && !xt_notice_up(); i++) xt_notice_tick(FRAME_MS / 1000.0f, false);
+    if (aim(x, y)) { g_down = true; for (int i = 0; i < 4; i++) { xt_notice_tick(FRAME_MS / 1000.0f, false); frame(); } }
+    xt_notice_tick(FRAME_MS / 1000.0f, false); lift(FRAME_MS);           /* (the lift's frame ticks first, as main.c's does) */
+    if (!xt_notice_up()) TFAIL("xt notice: a press in the first poll it was up closed it (G1's edge)"); else n++;
+    xt_notice_tick(FRAME_MS / 1000.0f, true);                             /* (MY TANKS over it: gone) */
+    touch_port_set_jelly(NULL); bare();
+    if (was) setenv("POCKET_TANK_FRAME", keep, 1); else unsetenv("POCKET_TANK_FRAME");
+    char cmd[700]; snprintf(cmd, sizeof cmd, "rm -rf '%s'", dir); if (system(cmd)) {}
+    printf("selftest-touch-port: the experimental tank's thank-you - %d of 6 (a tap closes it unseen by the tank, the next tap is the tank's, the tank's own press keeps it up, a slow press closes it, a press in the poll it first went up is spent)\n", n);
+}
+#include "reveal_touch_test.inc"   /* the reveal and the lab, 0.4.3 audit r1 (TP-1..6, TP-8, TP-9b, PE-3) */
 int selftest_touch_port(void) {
     g_log = getenv("PT_TOUCH_LOG") != NULL;
     char sav[96]; snprintf(sav, sizeof sav, "/tmp/pocket-tank-selftest-touchport-%s.sav", HB_ROUND ? "bowl" : HB_WATCH ? "watch" : HB_SQUARE ? "square" : "rect");
@@ -3497,6 +3550,8 @@ int selftest_touch_port(void) {
     calib_guided();
     wheel_feel_port();
     reset_pages_port();
+    xt_notice_port();
+    reveal_touch_port();
     if (getenv("PT_TOUCH_AUDIT")) audit_probes();
     if (getenv("PT_TOUCH_AUDIT2")) r2_probes();
     if (fails) { printf("selftest-touch-port: %d FAILED\n", fails); return 1; }

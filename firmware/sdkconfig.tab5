@@ -1,0 +1,21 @@
+# the SMALL HOME TANK build (M5Stack Tab5, 2026-10-19): on top of sdkconfig.defaults AND
+# sdkconfig.p4 (the home tank's world and display path), with ESP-IDF 5.5 - tools/flash_tab5.sh:
+#   idf.py -B <dir> -DIDF_TARGET=esp32p4 -DSDKCONFIG=<dir>/sdkconfig -DSDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.p4;sdkconfig.tab5" build
+# THE CHIP IS OLDER SILICON: the Tab5 on the bench is an ESP32-P4 v1.3 (the Waveshare 10.1 is v3.2).
+# ESP-IDF 5.5 cannot build one image for both ("revisions higher than 3.0 are not compatible with
+# 0.x and 1.x"): this image is the < v3 one, and the v3 image's bootloader refuses this chip.
+CONFIG_ESP32P4_SELECTS_REV_LESS_V3=y
+CONFIG_ESP32P4_REV_MIN_100=y
+CONFIG_ESP32P4_REV_MIN_300=n
+# v1.x runs at 360 MHz (400 is v3.x)
+CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_360=y
+CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_400=n
+# 16 MB of flash (the table ends at exactly 0x1000000)
+CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+CONFIG_ESPTOOLPY_FLASHSIZE_32MB=n
+CONFIG_ESPTOOLPY_FLASHSIZE="16MB"
+# the Tab5's ports: its Type-C is the P4's own USB serial/JTAG (the S3s' console path, not a UART bridge)
+CONFIG_POCKET_TANK_TAB5=y
+CONFIG_POCKET_TANK_CONSOLE_UART=n
+CONFIG_POCKET_TANK_AUDIO_ES8311=y
+# (the "ES8311" audio port drives the Tab5's ES8388 through codec_port.c)

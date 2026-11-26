@@ -13,6 +13,7 @@
  * system clock back into the chip once something has set it. The
  * progression save stamps clock_port_now_unix(); nothing else needs RTC. */
 #include "rtc_port.h"
+#include "rtc_judge.h"
 #include "driver/i2c_master.h"
 #include "esp_log.h"
 #include "esp_rom_sys.h"
@@ -27,20 +28,14 @@ static i2c_master_dev_handle_t s_dev;
 static bool s_stopped;                                /* the chip answered but had lost its time at this boot (stays set: the boot log tells it) */
 static bool s_unread;                                 /* the chip did not answer the read at this boot: its time unknown, never written over */
 
-static int bcd2bin(uint8_t b) { return (b >> 4) * 10 + (b & 0x0f); }
 static uint8_t bin2bcd(int v) { return (uint8_t)(((v / 10) << 4) | (v % 10)); }
 
-enum { RTC_NO_ANSWER = -1, RTC_STOPPED = 0, RTC_OK = 1 };
-static int rtc_read(struct tm *out) {
-    uint8_t reg = REG_SECONDS, b[7];
-    if (i2c_master_transmit_receive(s_dev, &reg, 1, b, 7, 100) != ESP_OK) return RTC_NO_ANSWER;
-    memset(out, 0, sizeof *out);
-    out->tm_sec = bcd2bin(b[0] & 0x7f); out->tm_min = bcd2bin(b[1] & 0x7f);
-    out->tm_hour = bcd2bin(b[2] & 0x3f); out->tm_mday = bcd2bin(b[3] & 0x3f);
-    out->tm_wday = b[4] & 0x07; out->tm_mon = bcd2bin(b[5] & 0x1f) - 1;
-    out->tm_year = bcd2bin(b[6]) + 100;                 /* 20xx */
-    return (b[0] & 0x80) ? RTC_STOPPED : RTC_OK;         /* OS flag set = clock invalid */
+static bool rtc_read_raw(void *ctx, uint8_t b[7]) {  /* (rtc_judge.h's reader: the seven registers, sec .. year, BCD) */
+    (void)ctx;
+    uint8_t reg = REG_SECONDS;
+    return i2c_master_transmit_receive(s_dev, &reg, 1, b, 7, 100) == ESP_OK;
 }
+static void rtc_read_pause(void) { esp_rom_delay_us(5000); }
 static bool rtc_write(const struct tm *t) {
     uint8_t w[8] = { REG_SECONDS, bin2bcd(t->tm_sec), bin2bcd(t->tm_min), bin2bcd(t->tm_hour),
                      bin2bcd(t->tm_mday), (uint8_t)t->tm_wday, bin2bcd(t->tm_mon + 1), bin2bcd(t->tm_year - 100) };
@@ -74,18 +69,22 @@ bool rtc_port_init(i2c_master_bus_handle_t bus) {
         return false;
     }
     if (!bus || i2c_master_bus_add_device(bus, &cfg, &s_dev) != ESP_OK) { ESP_LOGW(TAG, "no RTC"); return false; }
-    struct tm t;
-    int r = rtc_read(&t);
-    for (int k = 0; k < 2 && r == RTC_NO_ANSWER; k++) { esp_rom_delay_us(5000); r = rtc_read(&t); }   /* a bus hiccup: try again */
-    if (r == RTC_NO_ANSWER) {
-        /* no answer three times: UNKNOWN, not stopped (0.4 rc round two) - the clock stays unset as for a stopped
-           chip, but main.c never seeds the save's older stamp into it (rtc_port_unread): it may hold good time */
+    /* two reads that agree, the fields a real date (0.4.3, common/rtc_judge.h): one acknowledged read that came back wrong
+       no longer sets the clock, and one read with the stop flag up no longer has the save's stamp written over the chip */
+    int64_t u = 0; int reads = 0;
+    const int r = rtcj_boot(rtc_read_raw, NULL, rtc_read_pause, &u, &reads);
+    if (r == RTCJ_UNKNOWN) {
+        /* no answer three times, or reads that never agreed: UNKNOWN, not stopped (0.4 rc round two) - the clock stays unset
+           as for a stopped chip, but main.c never seeds the save's older stamp into it (rtc_port_unread): it may hold good time */
         s_unread = true;
-        ESP_LOGW(TAG, "RTC chip did not answer the read: the clock is unset at this boot, the chip is left as it is");
-    } else if (r == RTC_OK && t.tm_year + 1900 >= 2024) {
-        struct timeval tv = { .tv_sec = mktime(&t) };
+        if (reads < 3) ESP_LOGW(TAG, "RTC chip did not answer the read: the clock is unset at this boot, the chip is left as it is");
+        else ESP_LOGW(TAG, "RTC chip: three reads, no two alike: the clock is unset at this boot, the chip is left as it is");
+    } else if (r == RTCJ_OK) {
+        struct timeval tv = { .tv_sec = (time_t)u };
         settimeofday(&tv, NULL);
-        ESP_LOGI(TAG, "system clock set from RTC: %04d-%02d-%02d %02d:%02d", t.tm_year + 1900, t.tm_mon + 1, t.tm_mday, t.tm_hour, t.tm_min);
+        struct tm t; time_t tt = (time_t)u; gmtime_r(&tt, &t);
+        ESP_LOGI(TAG, "system clock set from RTC: %04d-%02d-%02d %02d:%02d%s", t.tm_year + 1900, t.tm_mon + 1, t.tm_mday, t.tm_hour, t.tm_min,
+                 reads > 2 ? " (one read of three disagreed)" : "");
     } else {
         /* the chip lost its power (no cell, the cable out; or a first power-up):
            the clock stays UNSET - the internet or the save's stamp sets it

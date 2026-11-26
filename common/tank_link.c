@@ -8,6 +8,7 @@
 #include "gift.h"
 #include "shelf.h"
 #include "sdgift.h"
+#include "swap.h"
 #include "tank_events.h"
 
 static float clampf_(float v, float lo, float hi) { return v < lo ? lo : v > hi ? hi : v; }
@@ -102,8 +103,9 @@ static int fry_hold(void *ctx, uint32_t peer, uint32_t parent, bool on) {
    visiting here is not ours until its GIVEN). Not a GIVEN note: a live one is a fish that LEFT here, maybe the very
    fish the late GIVEN brings back (given A -> B -> A): "we have it" then would leave it nowhere */
 static bool ours(void *ctx, uint32_t uid) { return uid && home_slot((const tank_t *)ctx, uid) >= 0; }
+static bool full(void *ctx) { return !progression_fry_room((const tank_t *)ctx); }   /* (FISH SWAP, 0.4.3: the beacon's BF_FULL) */
 link_host_t tank_link_host(tank_t *t, void (*send)(void *ctx, uint32_t to, const uint8_t *buf, int len)) {
-    link_host_t h = { t, send, tank_link_room, tank_link_visitor, fry_room, give_state, fry_hold, ours };
+    link_host_t h = { t, send, tank_link_room, tank_link_visitor, fry_room, give_state, fry_hold, ours, full };
     return h;
 }
 
@@ -147,15 +149,23 @@ static int edge_of(const link_t *L, uint32_t peer) {
 static void gift_said(tank_t *t, gift_book_t *g, uint32_t uid, int reason) { g->said_uid = uid; g->said_reason = (uint8_t)reason; g->said_until = t->clock + GIFT_SAID_S; }
 /* an accepted gift that never left: ours after all - the other tank has nothing alive until GIVEN, and its
    TAKE (now, or at the next link) is answered CANCEL. A fish on its way to the door turns back */
-static void gift_keep(tank_t *t, link_t *L, gift_book_t *g, int i) {
+static void gift_keep_why(tank_t *t, link_t *L, gift_book_t *g, int i, int why);
+static void gift_keep(tank_t *t, link_t *L, gift_book_t *g, int i) { gift_keep_why(t, L, g, i, LINK_GIVE_NO_OTHER); }
+static void gift_keep_why(tank_t *t, link_t *L, gift_book_t *g, int i, int why) {
     if (L) link_give_keep(L, g->leaving_uid, g->leaving_nonce);
     if (i >= 0) {
         fish_t *f = &t->fish[i];
         if (!f->away && f->door != DOOR_ENTERING) { f->door = DOOR_NONE; f->door_sent = false; f->door_refused = t->clock + TANK_LINK_REFUSED_S; }
         f->deported = false;
     }
-    gift_said(t, g, g->leaving_uid, LINK_GIVE_NO_OTHER);
+    gift_said(t, g, g->leaving_uid, why);
     g->leaving_uid = 0; g->leaving_here = false;
+}
+/* (0.4.3 audit r2, R2-3) the tank it would go to is older than 0.4.3 and this fish is now one it would lose part of (a part
+   KEPT, READY, ... : progression_fish_needs_new) - asked at every step, not only before the ask: a plain elder can turn READY,
+   and be KEPT, while it is asked or on its way out */
+static bool gift_too_new(const tank_t *t, const link_t *L, int i, uint32_t peer) {
+    return i >= 0 && progression_fish_needs_new(t, i) && !link_peer_swap(L, peer);
 }
 /* the gift leaves: its GIVEN note on the flash FIRST, the fish out in the same step, then GIVEN to the tank
    next door. The one moment it is theirs - so it comes only while that tank is linked and heard (gift_tick) */
@@ -165,6 +175,7 @@ static void gift_commit(tank_t *t, link_t *L, gift_book_t *g, int i, bool bubble
     passport_t pp = g->leaving_pp;                   /* (next door: the host's latest, as the engine had it) */
     if (!f->away) pp_of(t, &pp, f, t->uid, progression_age_s(t, i));
     if (!progression_keeps_two(t, i)) { gift_keep(t, L, g, i); return; }   /* (the last pair stays - checked again at the door: 11-02 sweep) */
+    if (gift_too_new(t, L, i, g->leaving_peer)) { gift_keep_why(t, L, g, i, GIFT_SAID_OLD); return; }   /* (R2-3: the last moment) */
     if (!gift_given_add(g, uid, nonce, g->leaving_peer, &pp)) { gift_keep(t, L, g, i); return; }   /* (no note on the flash: it stays) */
     g->leaving_uid = 0; g->leaving_here = false;
     if (bubbles) tank_poof(t, f->x, f->y);
@@ -243,6 +254,11 @@ static void gift_tick(tank_t *t, link_t *L, gift_book_t *g) {
             int e = f->away ? link_away_edge(L, uid)
                   : (f->door == DOOR_NONE || f->door == DOOR_HEADING) ? gift_door(t, L, g, f) : -2;
             if (e >= 0 && g->wait_peer && link_neighbor(L, (link_edge_t)e) != g->wait_peer) { g->wait_uid = 0; gift_said(t, g, uid, LINK_GIVE_NO_OTHER); }
+            else if (e >= 0 && gift_too_new(t, L, i, link_neighbor(L, (link_edge_t)e))) {
+                g->wait_uid = 0; gift_said(t, g, uid, GIFT_SAID_OLD);   /* (0.4.3 audit r1, SLB-3: an older tank would lose what it is -
+                                                     its part, THE LAB, its body. The GIVE card never asks it: render.c gm_door_ok.
+                                                     Its own words, r2 R2-L4: a fish turned READY in the doorway wait reaches this) */
+            }
             else if (e >= 0) {
                 g->wait_uid = 0;
                 if (!f->away && f->door == DOOR_HEADING) f->door = DOOR_NONE;   /* (on its way to a door: the gift calls it back) */
@@ -285,6 +301,10 @@ static void gift_tick(tank_t *t, link_t *L, gift_book_t *g) {
     }
 }
 
+static void swap_glue(tank_t *t, link_t *L, swap_book_t *sb);
+static link_t *s_sw_L;                         /* the engine the swap's host calls ask (swap_glue / LEV_SWAP set it; NULL at a boot) */
+static swap_host_t swap_host(tank_t *t);
+static uint32_t swap_ms_L(const tank_t *t, const link_t *L);
 static void sd_expire_tick(tank_t *t, link_t *L);
 static bool sd_save(tank_t *t);
 void tank_link_tick(tank_t *t, link_t *L) {
@@ -292,6 +312,8 @@ void tank_link_tick(tank_t *t, link_t *L) {
     gift_book_t *gb = gift_of(t);
     progression_cap_check(t, "tank_link_tick");      /* (the link's paths, once a tick: every tank here, host or home) */
     if (gb) gift_tick(t, L, gb);
+    swap_book_t *sb = swap_of(t);
+    if (sb) swap_glue(t, L, sb);                     /* FISH SWAP (0.4.3) */
     /* a boot that found fish away: home from bubbles once the host's lease is
        surely over (they may come back by the door before that, if linked) */
     if (t->link_restore_at > 0 && t->clock >= t->link_restore_at) {
@@ -380,8 +402,12 @@ void tank_link_tick(tank_t *t, link_t *L) {
         if (!tank_swims(t, i)) continue;
         fish_t *f = &t->fish[i];
         if (gb && gb->leaving_uid && f->uid == gb->leaving_uid) continue;   /* (a given fish: gift_tick sees it out) */
+        if (sb && sb->steer_uid && f->uid == sb->steer_uid) continue;   /* (a fish swimming to its door for a swap: swap_glue sees it out) */
         if (i < N_FISH_MAX) {                            /* ours */
-            if (f->door == DOOR_ASKED && !f->door_sent) {
+            if (f->door == DOOR_ASKED && !f->door_sent && sb && swap_holds(sb, f->uid)) {   /* a fish in a swap makes no trip of its own (a third
+                                                     door, the partner's - 0.4.3 audit r1, LK-7): it turns back */
+                f->door = DOOR_NONE; f->door_refused = t->clock + TANK_LINK_REFUSED_S;
+            } else if (f->door == DOOR_ASKED && !f->door_sent) {
                 passport_t pp; pp_of(t, &pp, f, t->uid, progression_age_s(t, i));
                 link_offer(L, (link_edge_t)f->door_edge, &pp, depth_of(f), f->heading, f->speed);
                 f->door_sent = true;
@@ -588,6 +614,13 @@ bool tank_link_event(tank_t *t, link_t *L, const link_ev_t *e) {
         sd_news(back ? TL_SD_BACK : TL_SD_SENT, e->edge, e->amount, e->reason);
         if (back) progression_sd_toast(back); else tank_emit(TEV_CRAB_COIN, -1);
         return true; }
+    case LEV_SWAP: {                                     /* FISH SWAP (0.4.3, swap.h): its protocol is swap.c's */
+        swap_book_t *sb = swap_of(t);
+        if (!sb) return true;
+        swap_host_t h = swap_host(t);
+        s_sw_L = L;
+        swap_rx(sb, L, &h, t->uid, e->peer, e->reason, e->nonce, e->uid, (int)e->amount, e->ms_left ? &e->pp : NULL, swap_ms_L(t, L), t->clock);
+        return true; }
     /* GIVE (phase 6) */
     case LEV_GIVE_ASK: {                                 /* a gift offered to us: the question on our glass (one at a time) */
         gift_book_t *g = gift_of(t);
@@ -612,6 +645,11 @@ bool tank_link_event(tank_t *t, link_t *L, const link_ev_t *e) {
                                                                      way out, or the last pair would go: it stays) */
             if (L) link_give_keep(L, e->uid, e->nonce);
             gift_said(t, g, e->uid, LINK_GIVE_NO_OTHER);
+            return true;
+        }
+        if (gift_too_new(t, L, i, e->peer)) {           /* (R2-3: READY or KEPT while it was asked - it never swims out) */
+            if (L) link_give_keep(L, e->uid, e->nonce);
+            gift_said(t, g, e->uid, GIFT_SAID_OLD);
             return true;
         }
         g->leaving_uid = e->uid; g->leaving_nonce = e->nonce; g->leaving_peer = e->peer; g->leaving_pp = e->pp;
@@ -639,6 +677,7 @@ bool tank_link_event(tank_t *t, link_t *L, const link_ev_t *e) {
             fish_t *f = &t->fish[i];
             f->x = was.x; f->y = was.y; f->heading = was.heading; f->facing = was.facing; f->speed = was.speed; f->target_speed = was.target_speed;
             f->yaw = was.yaw; f->yaw_tail = was.yaw_tail; f->gdepth = was.gdepth; f->pdepth = was.pdepth;
+        f->pitch_q = was.pitch_q; f->pitch_hold = was.pitch_hold; f->pitch_sg = was.pitch_sg; f->pitch_b = was.pitch_b; f->pitch_t = was.pitch_t; f->pitch_bv = was.pitch_bv; f->pitch_tv = was.pitch_tv;   /* (its tilt as it was: THE NOD's steadied climb) */
             collection_left(t, e->uid);
             t->vis_used[k] = false;
         } else if (i < 0) {
@@ -680,4 +719,158 @@ bool tank_link_event(tank_t *t, link_t *L, const link_ev_t *e) {
     default:
         return false;
     }
+}
+
+/* ---- FISH SWAP (0.4.3, swap.h, docs/fish-swap-0.4.3.md): the tank's side - who may go, out, in, the swim to the door ---- */
+/* where one of ours is, for a swap with `peer`: 0 home, 1 a settled visit AT the peer, 2 a trip of its own under way (offered,
+   accepted, crossing), 3 visiting another tank (Strato 11-22: the partner's visitor can be swapped, a third's not) */
+static int sw_where(const tank_t *t, int i, uint32_t peer) {
+    const fish_t *f = &t->fish[i];
+    if (!f->away) return s_sw_L && link_swap_outward(s_sw_L, f->uid) ? 2 : 0;   /* (home: settled unless a trip of its own is under way -
+                                                     the swap's own walk to the door is no trip: it never offers) */
+    if (!s_sw_L) return 2;
+    uint32_t at = link_swap_away_peer(s_sw_L, f->uid);   /* (the visit's own record: a door paused by a nudge changes nothing - review 11-22) */
+    return at ? (at == peer ? 1 : 3) : 2;             /* (no visit on record yet: on its way out) */
+}
+static bool sw_can_go(void *ctx, uint32_t uid, uint32_t peer) {
+    tank_t *t = ctx; int i = home_slot(t, uid);
+    return i >= 0 && progression_fish_swappable(t, i) && sw_where(t, i, peer) != 3;
+}
+static bool sw_settled(void *ctx, uint32_t uid, uint32_t peer) {
+    tank_t *t = ctx; int i = home_slot(t, uid);
+    if (i < 0) return false;
+    int w = sw_where(t, i, peer);
+    return w == 0 || w == 1;
+}
+static bool sw_pp(void *ctx, uint32_t uid, passport_t *pp) {
+    tank_t *t = ctx; int i = home_slot(t, uid);
+    if (i < 0) return false;
+    pp_of(t, pp, &t->fish[i], t->uid, progression_age_s(t, i));
+    return true;
+}
+static bool sw_saved(tank_t *t) { if (progression_dirty()) progression_save(t); return !progression_dirty(); }
+static bool sw_out(void *ctx, uint32_t uid, bool bubbles) {      /* (not here: gone already - true once its save has landed) */
+    tank_t *t = ctx; int i = home_slot(t, uid);
+    if (i < 0) return sw_saved(t);
+    const bool away = t->fish[i].away;
+    if (bubbles && !away) tank_poof(t, t->fish[i].x, t->fish[i].y);
+    progression_swap_out(t, i);                      /* (not a sale's books: the count never moves - LK-8) */
+    if (away && s_sw_L) link_swap_let_go(s_sw_L, uid);   /* (swapped where it is: no lease, no restore. Belt and braces - a restore of a fish
+                                                     no longer here is ignored anyway: the selftest's planted version of this changed nothing) */   /* (swapped where it is, next door: no lease, no restore - theirs now) */
+    return sw_saved(t);
+}
+static bool sw_in(void *ctx, const passport_t *pp, int edge) {   /* (here already: true once its save has landed) */
+    tank_t *t = ctx;
+    if (home_slot(t, pp->uid) >= 0) return sw_saved(t);
+    int vs = vis_slot(t, pp->uid);
+    if (vs >= 0) {                                   /* visiting here: it stays, ours from now on - just where it swims (GIVE's way) */
+        const int k = vs - N_FISH_MAX;
+        fish_t was = t->fish[vs];
+        passport_t vp; pp_of(t, &vp, &was, t->vis_home[k], t->vis_age[k]);   /* (its live self here, not the note's older copy) */
+        int i = progression_gift_adopt(t, &vp);
+        if (i < 0) { printf("tank_link: swap in %08x: no slot (%d fish)\n", (unsigned)pp->uid, t->n_fish); return false; }
+        fish_t *f = &t->fish[i];
+        f->x = was.x; f->y = was.y; f->heading = was.heading; f->facing = was.facing; f->speed = was.speed; f->target_speed = was.target_speed;
+        f->yaw = was.yaw; f->yaw_tail = was.yaw_tail; f->gdepth = was.gdepth; f->pdepth = was.pdepth;
+        f->pitch_q = was.pitch_q; f->pitch_hold = was.pitch_hold; f->pitch_sg = was.pitch_sg; f->pitch_b = was.pitch_b; f->pitch_t = was.pitch_t; f->pitch_bv = was.pitch_bv; f->pitch_tv = was.pitch_tv;   /* (its tilt as it was: THE NOD's steadied climb) */
+        if (s_sw_L) link_swap_settle(s_sw_L, pp->uid, t->vis_home[k]);   /* (its visit ends: no lease runs out under it) */
+        collection_left(t, pp->uid);
+        t->vis_used[k] = false;
+        progression_cap_check(t, "swap in (visitor kept)");
+        return sw_saved(t);
+    }
+    int i = progression_gift_adopt(t, pp);
+    if (i < 0) { printf("tank_link: swap in %08x: no slot (%d fish)\n", (unsigned)pp->uid, t->n_fish); return false; }
+    fish_t *f = &t->fish[i];
+    if (edge >= 0 && edge < LINK_EDGES && t->door_open[edge]) arrive_at(f, edge, 0.5f, 30);   /* through the door it was traded at */
+    else { f->x = TANK_W * 0.5f; f->y = DOOR_Y; tank_glass_clamp(&f->x, &f->y, 30); tank_poof(t, f->x, f->y); }   /* (no door: from bubbles) */
+    progression_cap_check(t, "swap in");
+    return sw_saved(t);
+}
+static bool sw_at_door(void *ctx, uint32_t uid) {   /* (next door already: nothing swims - sw_settled says when it may go) */
+    tank_t *t = ctx; int i = home_slot(t, uid);
+    return i < 0 || t->fish[i].away || (t->fish[i].door == DOOR_PASSING && beyond(&t->fish[i]));
+}
+static bool sw_near_door(void *ctx, uint32_t uid) {
+    tank_t *t = ctx; int i = home_slot(t, uid);
+    return i >= 0 && (t->fish[i].door == DOOR_ASKED || t->fish[i].door == DOOR_PASSING);
+}
+uint32_t (*tank_link_swap_hour)(void);           /* the selftest's clock in hours (NULL: the clock port's) */
+static uint32_t sw_hour(void *ctx) {
+    (void)ctx;
+    if (tank_link_swap_hour) return tank_link_swap_hour();
+    int64_t u = clock_port_now_unix();
+    return u > 1600000000 && u < 4000000000ll ? (uint32_t)(u / 3600) : 0;   /* (a clock that is set) */
+}
+int64_t (*tank_link_swap_wall)(const void *tank);            /* the selftest's wall clock, unix s (NULL: the clock port's) */
+static int64_t sw_wall(void *ctx) {
+    (void)ctx;
+    int64_t u = tank_link_swap_wall ? tank_link_swap_wall(ctx) : clock_port_now_unix();
+    return u > 1600000000 && u < 4000000000ll ? u : 0;   /* (a clock that is set: the day apart runs on it, sleep included - R2-2) */
+}
+bool (*tank_link_swap_gone)(uint32_t tank);     /* the selftest's shelf (NULL: the board's) */
+static bool sw_tank_gone(void *ctx, uint32_t tank) {
+    const tank_t *t = ctx;
+    if (!tank || tank == t->uid) return false;
+    return tank_link_swap_gone ? tank_link_swap_gone(tank) : shelf_has_tank(tank) == 0;
+}
+static int sw_home_now(void *ctx, uint32_t uid) {   /* (Q1's finish: only a fish home and still - never one next door, at a door, unborn) */
+    const tank_t *t = ctx; int i = home_slot(t, uid);
+    if (i < 0) return 0;
+    const fish_t *f = &t->fish[i];
+    return f->away || f->born_away || f->door != DOOR_NONE ? -1 : 1;
+}
+static bool sw_room(void *ctx) { tank_t *t = ctx; return progression_fish_held(t) < POP_CAP; }
+static swap_host_t swap_host(tank_t *t) {
+    swap_host_t h = { t, sw_can_go, sw_settled, sw_pp, sw_out, sw_in, sw_at_door, sw_near_door, sw_hour, sw_wall, sw_tank_gone, sw_home_now, sw_room };
+    return h;
+}
+void tank_link_swap_park(tank_t *t) { swap_park(swap_of(t)); }
+/* the swap's ms clock: the link engine's (the platform's ms - never tank_t.clock, which is saved and passes 2^32 ms in 50
+   days, 0.4.3 review); no engine: the last one seen (nothing is timed without one) */
+static uint32_t swap_ms_L(const tank_t *t, const link_t *L) { swap_book_t *sb = swap_of(t); return L ? link_now(L) : sb ? sb->now : 0; }
+void tank_link_swap_boot_fresh(tank_t *t) {      /* a boot whose save did not load: a fresh tank, a new ID - no sweep (the old tank's save
+                                                    may read at the next boot: its notes stay - review r2) */
+    swap_book_t *sb = swap_of(t);
+    if (!sb) return;
+    swap_host_t h = swap_host(t); h.tank_gone = NULL;
+    s_sw_L = NULL;
+    swap_boot(sb, &h, t->uid);
+}
+void tank_link_swap_boot(tank_t *t) {
+    swap_book_t *sb = swap_of(t);
+    if (!sb) return;
+    swap_host_t h = swap_host(t);
+    s_sw_L = NULL;                                   /* (a boot: no engine yet - the save's fish away come home by restore) */
+    swap_boot(sb, &h, t->uid);
+}
+/* the fish a swap sends: briskly to its door (the gift's swim). I's a goes through; R's b waits at the door until the
+   trade takes it. A swap that ends before then: it turns back, the door glass a while */
+static void swap_glue(tank_t *t, link_t *L, swap_book_t *sb) {
+    s_sw_L = L;
+    for (int i = 0; i < 8; i++) {                    /* the tank each fish of ours is visiting (the cards' VISITING) */
+        uint32_t at = L && i < t->n_fish && t->fish[i].away ? link_swap_away_peer(L, t->fish[i].uid) : 0;
+        sb->away_peer[i] = i < t->n_fish && t->fish[i].away ? (at ? at : 0xffffffffu) : 0;
+    }
+    swap_host_t h = swap_host(t);
+    if (!L) { if (sb->out.st != SO_COMMITTED && sb->out.peer) swap_unlinked(sb, sb->out.peer, t->clock); if (sb->in.from) swap_unlinked(sb, sb->in.from, t->clock); }
+    for (int e = 0; e < LINK_EDGES; e++) {          /* who is at each door: the GIVE card offers SWAP to a full tank that takes swaps */
+        uint32_t p = L ? link_neighbor(L, (link_edge_t)e) : 0;
+        sb->door_peer[e] = p; sb->door_swap[e] = p && link_peer_swap(L, p); sb->door_full[e] = p && link_peer_full(L, p);
+    }
+    swap_tick(sb, L, &h, t->uid, swap_ms_L(t, L), t->clock);
+    uint32_t want = L ? swap_leaving_uid(sb) : 0;
+    if (sb->steer_uid && sb->steer_uid != want) {    /* off: back to its own swimming (or gone - traded) */
+        int i = home_slot(t, sb->steer_uid);
+        if (i >= 0) { fish_t *f = &t->fish[i]; if (f->door != DOOR_ENTERING) { f->door = DOOR_NONE; f->door_sent = false; f->door_refused = t->clock + TANK_LINK_REFUSED_S; } f->deported = false; }
+        sb->steer_uid = 0;
+    }
+    if (!want) return;
+    int i = home_slot(t, want), e = sb->peer_edge;
+    if (i < 0 || e < 0 || e >= LINK_EDGES || !t->door_open[e]) return;   /* (a door paused by a drift: the walk's time runs out, bubbles) */
+    sb->steer_uid = want;
+    fish_t *f = &t->fish[i];
+    if (f->away) return;                             /* (next door already: it stays where it is) */
+    if (f->door == DOOR_NONE || f->door == DOOR_HEADING) { f->door = DOOR_HEADING; f->door_edge = (int8_t)e; f->goal.id = GOAL_EXPLORE; f->deported = true; f->door_refused = 0; }
+    else if (f->door == DOOR_ASKED && sb->out.st == SO_LEAVING && sb->out.a.uid == want) { f->door = DOOR_PASSING; f->door_sent = true; }
 }

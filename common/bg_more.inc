@@ -10,7 +10,7 @@
  * ribs through the breach, a broken rail, rigging, growth, haze with distance); mangroves stand dim in the distance
  * in murky water; the vents glow and spit.
  */
-#define BM_S (TANK_W / 448.0f)                    /* sizes in the 1.8's pixels, scaled to the glass's width */
+/* (BM_S - sizes in the 1.8's pixels, scaled to the canvas - is backgrounds.c's, with THE WIDE FRAME) */
 /* the grain: a random byte a pixel from a 1 KB table, each row from its own random offset (a hash a pixel was the
    costliest thing in these rows on the S3's numbers) */
 static void nz_fill(void) { for (int i = 0; i < 1024; i++) s_s->nz[i] = (uint8_t)bd_h(i, 7); }
@@ -37,18 +37,25 @@ static void sh_line(float x0, float y0, float x1, float y1, int th) {
 }
 static void sh_weed(float x, float y0, float len) {
     __typeof__(s_s->u.sh) *H = &s_s->u.sh;
-    if (H->nw >= SH_WD || x < 1 || x >= TANK_W - 2) return;
+    if (H->nw >= SH_WD || x < 1 || x >= BW - 2) return;
     H->wd[H->nw].x = (int16_t)x; H->wd[H->nw].y0 = (int16_t)y0; H->wd[H->nw].y1 = (int16_t)(y0 + len); H->nw++;
 }
 static void ship_begin(void) {
     __typeof__(s_s->u.sh) *H = &s_s->u.sh;
-    const float W = TANK_W, B = TANK_BOT, xs = -0.14f * W, xb = 0.86f * W, iL = 1 / (xb - xs);
+#ifdef TANK_P4                                    /* THE WIDE FRAME: the ship her own length (the 1.8's width at this height), more of her stern on the
+                                                     glass, the mound and open water running on past her bow */
+    const float W = BXU, X0 = (BW - BXU) * 0.30f;
+#else
+    const float W = BW, X0 = 0;
+#endif
+#define SX(f) (X0 + (f) * W)
+    const float B = BB, xs = SX(-0.14f), xb = SX(0.86f), iL = 1 / (xb - xs);
     const int up_q = 7 * (int)(0.075f * B / 7 + 0.5f), up_f = 7 * (int)(0.045f * B / 7 + 0.5f);   /* the castles stand whole strakes higher */
     H->nl = 0; H->nw = 0; H->np = 0;
-    H->xend = (int)xb < TANK_W - 1 ? (int)xb : TANK_W - 1; H->hy0 = TANK_BOT; H->my0 = TANK_BOT; H->mx0 = TANK_W;
-    for (int x = 0; x < TANK_W; x++) {
-        const float t = (x - 0.68f * W) / (x < 0.68f * W ? 0.30f * W : 0.62f * W), b = 1 - t * t;   /* the mound under the bow, off the glass on the right */
-        H->mnd[x] = TANK_BOT;
+    H->xend = (int)xb < BW - 1 ? (int)xb : BW - 1; H->hy0 = BB; H->my0 = BB; H->mx0 = BW;
+    for (int x = 0; x < BW; x++) {
+        const float t = (x - SX(0.68f)) / (x < SX(0.68f) ? 0.30f * W : 0.62f * W), b = 1 - t * t;   /* the mound under the bow, off the glass on the right */
+        H->mnd[x] = BB;
         if (b > 0) {
             H->mnd[x] = (int16_t)(B * (1.0f - 0.215f * b * b - 0.018f * bd_n1(x * 0.05f, 83) - 0.010f * bd_n1(x * 0.31f, 84)) + 3);
             if (H->mnd[x] < H->my0) H->my0 = H->mnd[x];
@@ -60,7 +67,7 @@ static void ship_begin(void) {
         const float yb = B * (0.72f - 0.20f * u - 0.04f * u4);                 /* listing: the stern down, the bow up */
         const float d = B * 0.30f * (1 - u4 * u2);                             /* the hull's depth, to a raked stem */
         const int up = u < 0.34f ? up_q : u > 0.86f ? up_f : 0;
-        int k = (int)(yb + d); if (k > TANK_BOT - 1) k = TANK_BOT - 1;
+        int k = (int)(yb + d); if (k > BB - 1) k = BB - 1;
         H->deck[x] = (int16_t)((int)yb - up); H->keel[x] = (int16_t)k;
         H->dep[x] = (int16_t)(k - H->deck[x] + 1); H->isd[x] = (8 << 16) / (H->dep[x] + 1);
         if (H->deck[x] < H->hy0) H->hy0 = H->deck[x];
@@ -68,7 +75,7 @@ static void ship_begin(void) {
         const int q = (int)(u * 4.6f) - 1; H->hz[x] = (uint8_t)(q < 0 ? 0 : q > 3 ? 3 : q);
     }
     for (int k = 0; k < 8; k++) H->tone[k] = mix(SH_WOOD, SH_WOOD_DK, k / 7.0f * 0.9f);   /* lit at the deck, dark at the keel */
-    for (int i = 0; i < TANK_H + 8; i++) { H->m7[i] = (uint8_t)(i % 7); H->d7[i] = (uint8_t)(i / 7); }
+    for (int i = 0; i < BH + 8; i++) { H->m7[i] = (uint8_t)(i % 7); H->d7[i] = (uint8_t)(i / 7); }
     for (int i = 0; i < 1024; i++) H->pk[i] = (uint8_t)(((i / 84) & 31) | (i % 10 == 0 ? 0x20 : i % 10 < 3 ? 0x40 : 0) | (i % 84 == 0 ? 0x80 : 0));   /* the plank, a rib, a butt joint */
     for (int i = 0; i < 32; i++) H->jag[i] = (uint8_t)bd_h(i, 87);
     H->post = (int)(6 * BM_S); H->bulw = (int)(8 * BM_S);
@@ -81,7 +88,7 @@ static void ship_begin(void) {
         const uint32_t h = bd_h(i, 82);
         if ((h & 3) == 0) continue;                                           /* a post gone */
         for (int q = 0; q < 2; q++) H->rail[x + q] = 2;
-        if ((h >> 4 & 3) != 0) for (int q = 2; q < gap && x + q < TANK_W; q++) if (!H->rail[x + q]) H->rail[x + q] = 1;
+        if ((h >> 4 & 3) != 0) for (int q = 2; q < gap && x + q < BW; q++) if (!H->rail[x + q]) H->rail[x + q] = 1;
     }
     H->hy0 -= H->bulw + 6;
     {                                                                         /* the breach, amidships */
@@ -101,9 +108,9 @@ static void ship_begin(void) {
     /* the masts: main (leaning back, its top broken), the foremast's stump, the mizzen on the quarterdeck */
     static const struct { float xb, xt, top, w0, w1; } MA[3] = { { 0.36f, 0.295f, 0.055f, 1.6f, 3.2f }, { 0.64f, 0.626f, -0.15f, 2.2f, 2.9f }, { 0.085f, 0.05f, 0.24f, 1.2f, 2.4f } };
     for (int m = 0; m < 3; m++) {
-        const int mb = (int)(MA[m].xb * W);
+        const int mb = (int)SX(MA[m].xb);
         H->ma[m].x1 = (float)mb; H->ma[m].y1 = (float)H->deck[mb];
-        H->ma[m].x0 = MA[m].xt * W; H->ma[m].y0 = MA[m].top < 0 ? H->ma[m].y1 + MA[m].top * B : MA[m].top * B;   /* (a stump: so far above the deck) */
+        H->ma[m].x0 = SX(MA[m].xt); H->ma[m].y0 = MA[m].top < 0 ? H->ma[m].y1 + MA[m].top * B : MA[m].top * B;   /* (a stump: so far above the deck) */
         H->ma[m].w0 = MA[m].w0 * BM_S; H->ma[m].w1 = MA[m].w1 * BM_S; H->ma[m].inv = 1 / (H->ma[m].y1 - H->ma[m].y0);
     }
     s_s->ymin = (int)H->ma[0].y0;
@@ -112,18 +119,18 @@ static void ship_begin(void) {
     H->plat_y = (int)pcy; H->plat_x0 = (int)(pcx - 6 * BM_S); H->plat_x1 = (int)(pcx + 6 * BM_S);
     H->yx = mx0 + mdx * 0.42f; H->yy = my0 + mdy * 0.42f; H->yhalf = 0.088f * W; H->ysl = 0.26f;   /* the yard, hanging askew */
     for (int x = (int)(H->yx - H->yhalf); x <= (int)(H->yx + H->yhalf); x++) {  /* what is left of the sail: rags of it */
-        if (x < 0 || x >= TANK_W) continue;
+        if (x < 0 || x >= BW) continue;
         const float n = bd_n1(x * 0.10f, 88);
         if (n > 0.40f) { int l = (int)((n - 0.28f) * 0.27f * B) + (int)(bd_h(x, 89) & 3); H->sail[x] = (uint8_t)(l > 250 ? 250 : l); }
     }
-    const float tipx = 0.972f * W, tipy = 0.360f * B;                         /* the bowsprit's end */
+    const float tipx = SX(0.972f), tipy = 0.360f * B;                         /* the bowsprit's end */
     sh_line(mx0 + 1, my0 + 4, tipx, tipy, 0);                                 /* the forestay */
     { const int bxi = H->xend; sh_line(tipx, tipy, (float)bxi - 2, (float)H->deck[bxi] + 1, 2); }   /* the bowsprit */
     H->rat_a = H->nl;
-    for (int i = 0; i < 3; i++) { const int rx = (int)((0.425f + 0.034f * i) * W); sh_line(pcx + 4 * BM_S, pcy + 2, (float)rx, (float)(H->deck[rx] - H->post), 0); }   /* the shrouds, to the rail */
-    H->rat_b = H->nl - 1; H->rat_y0 = (int)pcy + 8; H->rat_y1 = H->deck[(int)(0.425f * W)] - H->post - 3;
-    { const int rx = (int)(0.262f * W); sh_line(pcx - 4 * BM_S, pcy + 2, (float)rx, (float)(H->deck[rx] - H->post), 0); }
-    { const float ex = 0.225f * W, ey = (float)(H->deck[(int)(0.225f * W)] - H->post), sx = pcx - 5 * BM_S, sy = pcy + 2;   /* ... one parted, hanging */
+    for (int i = 0; i < 3; i++) { const int rx = (int)SX(0.425f + 0.034f * i); sh_line(pcx + 4 * BM_S, pcy + 2, (float)rx, (float)(H->deck[rx] - H->post), 0); }   /* the shrouds, to the rail */
+    H->rat_b = H->nl - 1; H->rat_y0 = (int)pcy + 8; H->rat_y1 = H->deck[(int)SX(0.425f)] - H->post - 3;
+    { const int rx = (int)SX(0.262f); sh_line(pcx - 4 * BM_S, pcy + 2, (float)rx, (float)(H->deck[rx] - H->post), 0); }
+    { const float ex = SX(0.225f), ey = (float)(H->deck[(int)SX(0.225f)] - H->post), sx = pcx - 5 * BM_S, sy = pcy + 2;   /* ... one parted, hanging */
       sh_line(sx, sy, sx + (ex - sx) * 0.52f, sy + (ey - sy) * 0.52f, 0); sh_weed(sx + (ex - sx) * 0.52f, sy + (ey - sy) * 0.52f, 20 * BM_S); }
     H->chx = (int)(xs + 0.93f / iL); H->chy0 = H->deck[H->chx] + 8; H->chy1 = H->mnd[H->chx];   /* the anchor chain, from the hawse to the rock */
     /* weed: off the yard's ends, the top, the mizzen, the bowsprit, the stay, the rail */
@@ -133,19 +140,32 @@ static void ship_begin(void) {
     for (int i = 0; i < 4; i++) { const float f = 0.22f + 0.2f * i, x = (mx0 + 1) + (tipx - mx0 - 1) * f; const uint32_t h = bd_h(i, 92); sh_weed(x, (my0 + 4) + (tipy - my0 - 4) * f, (5 + (float)(h & 15)) * BM_S); }
     sh_weed(tipx - 6 * BM_S, tipy + 4, 15 * BM_S); sh_weed(tipx - 22 * BM_S, tipy + 11, 10 * BM_S);
     for (int i = 0; i < 9; i++) {
-        const uint32_t h = bd_h(i, 93); const int x = (int)((0.03f + 0.092f * i + 0.03f * ((h & 255) / 255.0f)) * W);
+        const uint32_t h = bd_h(i, 93); const int x = (int)SX(0.03f + 0.092f * i + 0.03f * ((h & 255) / 255.0f));
         if (x <= H->xend && H->deck[x] >= 0) sh_weed((float)x, (float)(H->deck[x] - (H->rail[x] ? H->post : 0)), (6 + (float)(h >> 8 & 15)) * BM_S);
     }
+#ifdef TANK_P4
+#define AN_K (1.4f * BM_S)                         /* the anchor's size: one of its units, in the canvas's pixels */
+    {   /* THE ANCHOR (0.4.3, the wide frame; Strato 11-21, of the open water past her bow: "an anchor would be nice over there"):
+           an old iron anchor fallen on the mound's far slope, leaning, one arm dug in - its crown at (anx, any), its shank
+           along (ans, -anc) - and the chain run on from the hawse's foot over the rock to its ring */
+        const int ax = (int)(X0 + 1.03f * W) < BW - 40 ? (int)(X0 + 1.03f * W) : BW - 40;
+        H->anx = (float)ax; H->any = (float)H->mnd[ax] + 3; H->anc = 0.921f; H->ans = 0.390f;   /* (leaning 23 degrees) */
+        const int r = (int)(60 * AN_K);
+        H->an_x0 = ax - r < 0 ? 0 : ax - r; H->an_x1 = ax + r > BW - 1 ? BW - 1 : ax + r; H->an_y0 = (int)H->any - r; H->an_y1 = (int)H->any + 6;
+        sh_weed(H->anx + 40 * AN_K * H->ans - 12 * AN_K * H->anc, H->any - 40 * AN_K * H->anc - 12 * AN_K * H->ans + 2, 11 * BM_S);
+    }
+#endif
+#undef SX
 }
 static const uint32_t *ship_row(int y) {
-    if (y < s_s->ymin || y >= TANK_BOT) return NULL;
+    if (y < s_s->ymin || y >= BB) return NULL;
     __typeof__(s_s->u.sh) *H = &s_s->u.sh;
     uint32_t *const R = s_s->row; uint8_t *const L = s_s->lay;
     row_water(y);
     const int ro = nz_row(y);
     if (y >= H->my0) {                                                       /* the mound */
         const uint32_t m = bd_far8(SH_ROCK, y, 132), ml = bd_far8(SH_ROCK_LT, y, 132), mg = bd_far8(0x464a40, y, 132);
-        for (int x = H->mx0; x < TANK_W; x++) { const int d = y - H->mnd[x]; if (d < 0) continue; R[x] = d < 2 ? ml : (NZ(x, ro) & 15) == 0 ? mg : m; L[x] = 1; }
+        for (int x = H->mx0; x < BW; x++) { const int d = y - H->mnd[x]; if (d < 0) continue; R[x] = d < 2 ? ml : (NZ(x, ro) & 15) == 0 ? mg : m; L[x] = 1; }
     }
     if (y >= H->hy0) {                                                       /* the hull */
         static const int HZ[4] = { 70, 90, 110, 130 };                      /* the water takes more of her toward the bow */
@@ -217,7 +237,7 @@ static const uint32_t *ship_row(int y) {
         const float t = (y - H->ma[m].y0) * H->ma[m].inv, cx = H->ma[m].x0 + (H->ma[m].x1 - H->ma[m].x0) * t, w = H->ma[m].w0 + (H->ma[m].w1 - H->ma[m].w0) * t;
         int a = (int)(cx - w + 0.5f), b = (int)(cx + w - 0.5f);
         if (y < H->ma[m].y0 + 5) a = b - (y - (int)H->ma[m].y0) * (b - a) / 5;   /* the broken top */
-        row_span(a, b, mast, 4); if (a >= 0 && a < TANK_W) R[a] = mlit;
+        row_span(a, b, mast, 4); if (a >= 0 && a < BW) R[a] = mlit;
     }
     if (y >= H->plat_y - 4 && y <= H->plat_y + 2) {                            /* the top */
         if (y >= H->plat_y) row_span(H->plat_x0 + (y - H->plat_y), H->plat_x1 - (y - H->plat_y), y == H->plat_y ? mlit : mast, 4);
@@ -227,7 +247,7 @@ static const uint32_t *ship_row(int y) {
         const float half = H->yhalf, sl = H->ysl, y0 = H->yy - half * sl, th = 1.4f * BM_S;
         if (y >= y0 - 3 && y <= H->yy + half * sl + 70 * BM_S) {
             const uint32_t cl = bd_far8(SH_CLOTH, y, 150), cd = bd_far8(0x8a8672, y, 150);
-            int xa = (int)(H->yx - half), xb = (int)(H->yx + half); if (xa < 0) xa = 0; if (xb > TANK_W - 1) xb = TANK_W - 1;
+            int xa = (int)(H->yx - half), xb = (int)(H->yx + half); if (xa < 0) xa = 0; if (xb > BW - 1) xb = BW - 1;
             float yl = H->yy + (xa - H->yx) * sl;
             for (int x = xa; x <= xb; x++, yl += sl) {
                 const float d = y - yl;
@@ -236,6 +256,37 @@ static const uint32_t *ship_row(int y) {
             }
         }
     }
+#ifdef TANK_P4
+    if (y >= H->an_y0 && y <= H->an_y1) {                                    /* the anchor: iron, a lit edge up its shank, rust */
+        const uint32_t iron = bd_far8(0x4e5048, y, 84), ilit = bd_far8(0xa2a898, y, 84), rust = bd_far8(0x8a5632, y, 84);
+        const float k = AN_K, c = H->anc, sn = H->ans;
+        for (int x = H->an_x0; x <= H->an_x1; x++) {
+            if (y > H->mnd[x] + 1) continue;                                 /* (what is under the rock's line is buried) */
+            const float dx = x - H->anx, dy = H->any - y, u = (dx * sn + dy * c) / k, v = (dx * c - dy * sn) / k, av = v < 0 ? -v : v;   /* u up the shank, v across it */
+            bool in = false, edge = false;
+            if (u >= 0 && u <= 46 && av <= 1.5f) { in = true; edge = v < -0.4f; }                       /* the shank */
+            else if (u >= 38.6f && u <= 41.4f && av <= 14) { in = true; edge = u > 40.4f; }               /* the stock */
+            else if (av >= 12.5f && av <= 15 && u >= 38 && u <= 42) in = true;                            /* ... its ends' knobs */
+            else { const float ru = u - 50.5f, d2 = ru * ru + v * v; if (d2 <= 20.3f && d2 >= 7.3f) in = true; }   /* the ring */
+            if (!in && u >= -1.5f && u <= 17) {                                                        /* the arms: a curve up and out from the crown, a fluke on each */
+                const float t = u < 0 ? 0 : u / 16.0f, armv = 19 * (t < 1 ? t * (2 - t) : 1) , d = av - armv;
+                if (u <= 16 && d >= -1.6f && d <= 1.6f) { in = true; edge = d > 0.6f; }
+                else if (u >= 9 && u <= 17 && av <= armv + 1 && av >= armv - (u - 9) * 0.75f - 1) in = true;   /* the fluke's palm, inside the arm's end */
+            }
+            if (!in) continue;
+            R[x] = edge ? ilit : (NZ(x, ro) & 7) == 0 ? rust : iron; L[x] = 3;
+        }
+    }
+    if (y >= H->my0) {                                                       /* the chain, lying over the rock from under the hawse to the ring */
+        const float rx = H->anx + 50.5f * AN_K * H->ans, ry = H->any - 50.5f * AN_K * H->anc;
+        const uint32_t ch = bd_far8(0x9a9a8c, y, 120);
+        for (int x = H->chx + 1; x < (int)rx && x < BW; x++) {
+            const float t = (float)(x - H->chx) / (rx - H->chx);
+            const int yc = H->mnd[x] - 1 + (int)((ry + 4 - H->mnd[x]) * t * t * t * (t > 0.82f ? 1 : 0));   /* (on the rock, lifting to the ring at its end) */
+            if (y == yc || (y == yc - 1 && ((x >> 1) & 1))) { R[x] = ch; L[x] = 3; }   /* (links: every second pair a row higher) */
+        }
+    }
+#endif
     {                                                                        /* the weed, hanging */
         const uint32_t wc = bd_far8(SH_MOSS, y, 120);
         for (int k = 0; k < H->nw; k++) if (y >= H->wd[k].y0 && y <= H->wd[k].y1) { const int x = H->wd[k].x + (((y - H->wd[k].y0) >> 2) & 1); R[x] = wc; L[x] = 3; }
@@ -250,6 +301,32 @@ static const uint32_t *ship_row(int y) {
    red glow hugging the rim, the rim hot under it, cracks running down, all self-lit - and a smoky plume, dull red at its root, leans off it with the
    current. A warm light round the great chimney. The embers are the drift's (bg_speck). Layers: the far shapes and
    the mound, far, mid, near */
+#ifdef TANK_P4
+/* THE WIDE FRAME (0.4.3; Strato 11-21: "the volcano stacks are distorted and stretched wide"): each chimney the width it
+   has on the 1.8 (shares of BXU), and fifteen of them across the wider canvas, not ten spread thin - five far shapes, the
+   great chimney left of the middle with its two young spires, more of the field running off to the right */
+#define VE_FAR 5
+static const struct { float x, wb, wt, h, haze, lean; uint8_t lay, emb; } VE_C[VE_N] = {
+    { 0.030f, 0.050f, 0.016f, 0.33f, 0.80f,  0.010f, 1, 0 },
+    { 0.205f, 0.055f, 0.016f, 0.56f, 0.82f, -0.010f, 1, 0 },
+    { 0.335f, 0.050f, 0.015f, 0.47f, 0.80f,  0.010f, 1, 0 },
+    { 0.652f, 0.050f, 0.015f, 0.52f, 0.82f, -0.008f, 1, 0 },
+    { 0.842f, 0.052f, 0.016f, 0.42f, 0.80f,  0.010f, 1, 0 },
+    { 0.112f, 0.085f, 0.030f, 0.46f, 0.58f,  0.020f, 2, 6 },
+    { 0.768f, 0.080f, 0.028f, 0.40f, 0.58f, -0.020f, 2, 6 },
+    { 0.958f, 0.075f, 0.026f, 0.34f, 0.58f, -0.015f, 2, 0 },
+    { 0.268f, 0.100f, 0.034f, 0.32f, 0.38f,  0.010f, 3, 7 },
+    { 0.596f, 0.090f, 0.030f, 0.30f, 0.38f, -0.010f, 3, 0 },
+    { 0.398f, 0.042f, 0.014f, 0.46f, 0.20f,  0.012f, 4, 4 },   /* a young spire */
+    { 0.470f, 0.140f, 0.042f, 0.66f, 0.16f, -0.030f, 4, 14 },  /* the great chimney */
+    { 0.548f, 0.046f, 0.016f, 0.36f, 0.18f, -0.010f, 4, 4 },   /* another */
+    { 0.700f, 0.110f, 0.036f, 0.24f, 0.12f,  0.000f, 4, 7 },
+    { 0.885f, 0.060f, 0.020f, 0.30f, 0.14f,  0.008f, 4, 0 },
+};
+/* (48 embers from seven mouths, the pocket vent's own: the other three mouths glow and throw none - embers from ten
+   mouths marked more of the glass a frame, about a frame a second on the Tab5, measured 11-21) */
+#define VE_EMBERS (6 + 6 + 7 + 4 + 14 + 4 + 7)
+#else
 #define VE_FAR 3                                  /* (the first few: shapes only, behind the mound) */
 static const struct { float x, wb, wt, h, haze, lean; uint8_t lay, emb; } VE_C[VE_N] = {
     { 0.045f, 0.050f, 0.016f, 0.33f, 0.80f,  0.010f, 1, 0 },
@@ -264,30 +341,31 @@ static const struct { float x, wb, wt, h, haze, lean; uint8_t lay, emb; } VE_C[V
     { 0.930f, 0.110f, 0.036f, 0.24f, 0.12f,  0.000f, 4, 7 },
 };
 #define VE_EMBERS (6 + 6 + 7 + 4 + 14 + 4 + 7)
+#endif
 static const uint32_t VE_ROCK = 0x36322e, VE_LIT = 0x6a6258, VE_CRUST = 0xa8a08a, VE_SMOKE = 0x2a2826, VE_EMBER = 0xc83c14, VE_LIP = 0xffb24a, VE_MAGMA = 0xee5c1c, VE_DEEP = 0x8c1c08;
 static void ve_mouth(int k, float *mx, int *yt) {                           /* a chimney's mouth: the layout's and the embers' */
-    *yt = (int)(TANK_BOT * (1 - VE_C[k].h));
-    *mx = TANK_W * (VE_C[k].x + VE_C[k].lean) + 2 * BM_S * (bd_n1(*yt * 0.05f, 102 + k * 8) - 0.5f);
+    *yt = (int)(BB * (1 - VE_C[k].h));
+    *mx = BW * VE_C[k].x + BXU * VE_C[k].lean + 2 * BM_S * (bd_n1(*yt * 0.05f, 102 + k * 8) - 0.5f);
 }
 static void vent_begin(void) {
     __typeof__(s_s->u.ve) *V = &s_s->u.ve;
-    s_s->ymin = TANK_BOT;
-    for (int x = 0; x < TANK_W; x++)                                          /* the rubble mound */
-        V->mt[x] = (int16_t)(TANK_BOT * (0.84f - 0.07f * bd_n1(x * 0.018f, 77) - 0.02f * bd_n1(x * 0.09f, 78) - 0.012f * bd_n1(x * 0.33f, 76)));
-    V->mtop = TANK_BOT; V->mlow = 0;
-    for (int x = 0; x < TANK_W; x++) { if (V->mt[x] < V->mtop) V->mtop = V->mt[x]; if (V->mt[x] + 2 > V->mlow) V->mlow = V->mt[x] + 2; }
+    s_s->ymin = BB;
+    for (int x = 0; x < BW; x++)                                          /* the rubble mound */
+        V->mt[x] = (int16_t)(BB * (0.84f - 0.07f * bd_n1(x * 0.018f, 77) - 0.02f * bd_n1(x * 0.09f, 78) - 0.012f * bd_n1(x * 0.33f, 76)));
+    V->mtop = BB; V->mlow = 0;
+    for (int x = 0; x < BW; x++) { if (V->mt[x] < V->mtop) V->mtop = V->mt[x]; if (V->mt[x] + 2 > V->mlow) V->mlow = V->mt[x] + 2; }
     for (int k = 0; k < VE_N; k++) {
-        const int yt = (int)(TANK_BOT * (1 - VE_C[k].h)); V->yt[k] = yt;
-        for (int y = 0; y < TANK_H; y++) { V->cx[k][y] = -1; V->hw[k][y] = 0; }
-        for (int y = yt; y < TANK_BOT; y++) {
-            float v = (float)(y - yt) / (TANK_BOT - yt);
+        const int yt = (int)(BB * (1 - VE_C[k].h)); V->yt[k] = yt;
+        for (int y = 0; y < BH; y++) { V->cx[k][y] = -1; V->hw[k][y] = 0; }
+        for (int y = yt; y < BB; y++) {
+            float v = (float)(y - yt) / (BB - yt);
             float knob = 0.34f * (bd_n1(y * 0.09f, 100 + k * 8) - 0.5f) + 0.16f * (bd_n1(y * 0.31f, 101 + k * 8) - 0.5f);
             uint32_t g = bd_h(y / 5, 103 + k * 8); if ((g & 15) == 0 && v > 0.15f) knob += 0.35f;       /* a ledge */
-            float hw = TANK_W * (VE_C[k].wt + (VE_C[k].wb - VE_C[k].wt) * v * v) * (1 + knob);
-            V->cx[k][y] = (int16_t)(TANK_W * (VE_C[k].x + VE_C[k].lean * (1 - v)) + 2 * BM_S * (bd_n1(y * 0.05f, 102 + k * 8) - 0.5f));
+            float hw = BXU * (VE_C[k].wt + (VE_C[k].wb - VE_C[k].wt) * v * v) * (1 + knob);
+            V->cx[k][y] = (int16_t)(BW * VE_C[k].x + BXU * VE_C[k].lean * (1 - v) + 2 * BM_S * (bd_n1(y * 0.05f, 102 + k * 8) - 0.5f));
             V->hw[k][y] = (int16_t)(hw + 1);
         }
-        int ph = (int)((TANK_BOT - yt) * 0.48f + TANK_BOT * 0.11f); if (ph > yt) ph = yt;   /* the plume's height */
+        int ph = (int)((BB - yt) * 0.48f + BB * 0.11f); if (ph > yt) ph = yt;   /* the plume's height */
         V->ph[k] = k < VE_FAR ? 0 : ph;
         if (yt - V->ph[k] < s_s->ymin) s_s->ymin = yt - V->ph[k];
         const float R = V->hw[k][yt] * 1.5f + 4 * BM_S;                       /* the mouth's glow: wide, and low */
@@ -296,19 +374,23 @@ static void vent_begin(void) {
     s_s->ymin = 0;                                                            /* (every row its own: the glow by the row's table, not a mix a pixel in the water pass) */
     for (int i = 0; i < 64; i++) V->sn[i] = (int8_t)(sinf(i * 6.2832f / 64) * 127);
     for (int i = 0; i < 256; i++) V->ed[i] = (uint8_t)(bd_n1(i * 0.35f, 79) * 255);         /* the plume's ragged edge */
+#ifdef TANK_P4
+    static const float WX[] = { 0.060f, 0.165f, 0.225f, 0.330f, 0.365f, 0.520f, 0.640f, 0.735f, 0.815f, 0.925f };   /* the tube worms' clumps */
+#else
     static const float WX[] = { 0.075f, 0.235f, 0.295f, 0.455f, 0.50f, 0.775f, 0.875f };   /* the tube worms' clumps */
-    V->nw = 0; V->wtop = TANK_BOT;
+#endif
+    V->nw = 0; V->wtop = BB;
     for (int c = 0; c < (int)(sizeof WX / sizeof WX[0]); c++) {
         const uint32_t h = bd_h(c, 75); const int n = 5 + (int)(h & 3);
         for (int i = 0; i < n && V->nw < VE_WMAX; i++) {
             const uint32_t g = bd_h(c * 16 + i, 74);
-            const int x = (int)(WX[c] * TANK_W + (i - n * 0.5f) * 3 * BM_S + (g & 1)); if (x < 0 || x >= TANK_W) continue;
+            const int x = (int)(WX[c] * BW + (i - n * 0.5f) * 3 * BM_S + (g & 1)); if (x < 0 || x >= BW) continue;
             V->wx[V->nw] = (int16_t)x; V->wy1[V->nw] = (int16_t)(V->mt[x] + 2); V->wy0[V->nw] = (int16_t)(V->mt[x] - (6 + (int)(g >> 4 & 7) + (i == n / 2 ? 4 : 0)) * BM_S); if (V->wy0[V->nw] < V->wtop) V->wtop = V->wy0[V->nw]; V->nw++;
         }
     }
 }
 static const uint32_t *vent_row(int y) {
-    if (y >= TANK_BOT) return NULL;
+    if (y >= BB) return NULL;
     __typeof__(s_s->u.ve) *V = &s_s->u.ve;
     uint32_t *const R = s_s->row; uint8_t *const L = s_s->lay;
     row_water(y);
@@ -322,8 +404,8 @@ static const uint32_t *vent_row(int y) {
     if (y >= V->mtop) {                                                       /* the mound */
         const uint32_t m = bd_far8(VE_ROCK, y, 128), mk = bd_far8(0x55504a, y, 128), crust = bd_far8(VE_CRUST, y, 141);
         const int ro = nz_row(y);
-        if (y >= V->mlow) { for (int x = 0; x < TANK_W; x++) R[x] = m; for (int x = (ro & 31); x < TANK_W; x += 29 + (NZ(x, ro) & 7)) R[x] = crust; memset(L, 1, TANK_W); }   /* (under every crest: a fill, the crust sown) */
-        else for (int x = 0; x < TANK_W; x++) { int d = y - V->mt[x]; if (d < 0) continue; R[x] = d < 2 ? mk : (NZ(x, ro) & 31) == 0 ? crust : m; L[x] = 1; }
+        if (y >= V->mlow) { for (int x = 0; x < BW; x++) R[x] = m; for (int x = (ro & 31); x < BW; x += 29 + (NZ(x, ro) & 7)) R[x] = crust; memset(L, 1, BW); }   /* (under every crest: a fill, the crust sown) */
+        else for (int x = 0; x < BW; x++) { int d = y - V->mt[x]; if (d < 0) continue; R[x] = d < 2 ? mk : (NZ(x, ro) & 31) == 0 ? crust : m; L[x] = 1; }
     }
     if (y >= V->wtop) {                                                       /* the tube worms: pale stalks, a soft tip - each one whole, from its own
                                                                                  tip above the crest (not from the mound's highest row: the review's 2) */
@@ -343,7 +425,7 @@ static const uint32_t *vent_row(int y) {
             const uint32_t warm = d < 13 ? mix8(VE_SMOKE, 0x8e2c12, (13 - d) * 18) : VE_SMOKE;   /* lit dull red from below at its root, soon gone */
             const float Wd = pw * (0.55f + 0.45f * V->ed[(d + k * 40) & 255] / 255.0f);   /* ragged */
             const int c = (int)pcx, hw = (int)Wd, inv = (int)(65536.0f / (Wd * Wd + 1));
-            int x0 = c - hw, x1 = c + hw; if (x0 < 0) x0 = 0; if (x1 > TANK_W - 1) x1 = TANK_W - 1;
+            int x0 = c - hw, x1 = c + hw; if (x0 < 0) x0 = 0; if (x1 > BW - 1) x1 = BW - 1;
             for (int x = x0; x <= x1; x++) {                                  /* (integers: a float a pixel was most of the vent's bake) */
                 const int dx = x - c, q = 65536 - dx * dx * inv; if (q <= 0) continue;
                 R[x] = mix8(R[x], warm, (amax * (q >> 8)) >> 8); L[x] = lay;
@@ -362,7 +444,7 @@ static const uint32_t *vent_row(int y) {
             if (hot) { lit = mix8(lit, VE_EMBER, hot); body = mix8(body, VE_EMBER, hot * 2 / 3); }
             const bool band = V->ed[(y * 2 + k * 53) & 255] > 178;              /* broken bands of crust */
             const int w = r - l + 1, xa = l + (2 * w + 7) / 8, xb = l + (6 * w + 7) / 8, ro = nz_row(y + k * 97), rb = nz_row(y / 2 + k * 97);
-            for (int x = l < 0 ? 0 : l; x <= r && x < TANK_W; x++) {
+            for (int x = l < 0 ? 0 : l; x <= r && x < BW; x++) {
                 if (dy < 4 && dy < (V->ed[(x * 5 + k * 37) & 255] >> 6)) continue;   /* the rim's broken edge */
                 uint32_t c = x < xa ? lit : x >= xb ? dk : body;
                 if (x < xb) { if (band && (NZ(x / 3, rb) & 3)) c = x < xa ? crust : crd; else if ((NZ(x, ro) & 63) == 0) c = crust; }
@@ -374,7 +456,7 @@ static const uint32_t *vent_row(int y) {
                 const int wgt = 230 - dy * 230 / (V->hr[k] * 3);
                 for (int c = 0; c < (hw > 9 ? 2 : 1); c++) {
                     const int x = cx + (c ? hw / 3 : -hw / 5) + ((V->sn[(y * (5 + c * 2) + k * 11 + c * 23) & 63] * hw) >> 9);
-                    if (x >= 0 && x < TANK_W && (!c || dy < V->hr[k] * 2)) { R[x] = mix8(R[x], dy < 10 ? VE_MAGMA : VE_EMBER, wgt); lit_px(x, wgt); s_s->any_lit = true; }
+                    if (x >= 0 && x < BW && (!c || dy < V->hr[k] * 2)) { R[x] = mix8(R[x], dy < 10 ? VE_MAGMA : VE_EMBER, wgt); lit_px(x, wgt); s_s->any_lit = true; }
                 }
             }
         }
@@ -385,7 +467,7 @@ static const uint32_t *vent_row(int y) {
             if (dy >= -hu && dy <= 3) {
                 const int inv = V->hinv[k], sc = (int)((1 - 0.55f * hz) * 256);
                 const int fy = dy <= 0 ? 256 + dy * 256 / (hu + 1) : 256 - dy * 64;      /* gone a few rows above the lip, sooner below it */
-                int x0 = cx - hr, x1 = cx + hr; if (x0 < 0) x0 = 0; if (x1 > TANK_W - 1) x1 = TANK_W - 1;
+                int x0 = cx - hr, x1 = cx + hr; if (x0 < 0) x0 = 0; if (x1 > BW - 1) x1 = BW - 1;
                 for (int x = x0; x <= x1; x++) {
                     const int dx = x - cx, q = 65536 - dx * dx * inv; if (q <= 0) continue;
                     int a = ((q >> 8) * fy >> 8) * (120 + (V->ed[(x * 7 + y * 3 + k * 19) & 255] >> 1)) >> 8;   /* an uneven edge, column by column */
@@ -397,7 +479,7 @@ static const uint32_t *vent_row(int y) {
             }
             if (dy >= -2 && dy <= 3) {                                        /* the lip: where the rim's broken edge meets the opening */
                 const int sc = (int)((1 - 0.55f * hz) * 256);
-                for (int x = cx - mh < 0 ? 0 : cx - mh; x <= cx + mh && x < TANK_W; x++) {
+                for (int x = cx - mh < 0 ? 0 : cx - mh; x <= cx + mh && x < BW; x++) {
                     const int e = V->ed[(x * 5 + k * 37) & 255] >> 6;
                     const int dx = x < cx ? cx - x : x - cx, t = dx * 256 / (mh + 1);    /* hottest (and thickest) in the middle, red at the ends */
                     if (dy != e && dy != e - 1 && !(dy == e - 2 && t < 150)) continue;
@@ -413,7 +495,7 @@ static const uint32_t *vent_row(int y) {
 /* the embers (the drift): each chimney's mouth throws a few - white-hot as they leave it, then orange, then a grey
    mote the current carries off; they light themselves while they glow. A function of the clock alone. */
 /* a speck fades out before the glass's side (render.c drops one whole within 3 px of it: it would pop) */
-static inline int speck_edge(float x, int a) { const float m = x < TANK_W * 0.5f ? x - 3.5f : TANK_W - 5.5f - x; return m <= 0 ? 0 : m < 8 ? (int)(a * m * 0.125f) : a; }
+static inline int speck_edge(float x, int a) { const float m = x < BW * 0.5f ? x - 3.5f : BW - 5.5f - x; return m <= 0 ? 0 : m < 8 ? (int)(a * m * 0.125f) : a; }
 static void vent_speck(int i, float T, float *x, float *y, int *alpha, bool *big, uint32_t *rgb, bool *lit) {
     /* T is tank_anim's lap (200 pi s): every period here goes into it a whole number of times - 300..112 lives a lap (2.1 .. 5.6 s),
        the wobbles whole hundredths of a radian a second - so nothing jumps where the lap wraps, on a tank of any age */
@@ -425,7 +507,7 @@ static void vent_speck(int i, float T, float *x, float *y, int *alpha, bool *big
     float p = T * INVP[h & 7] + (h >> 3 & 255) * (1 / 256.0f); p -= floorf(p);
     const float sz = VE_C[k].lay >= 4 ? 1.0f : 0.7f, rise = (30 + (float)(h >> 11 & 31)) * BM_S * sz * (VE_C[k].emb > 10 ? 1.5f : 1.0f), d = p * rise;
     *y = yt - 1 - d;
-    *x = mx + ((int)(h >> 16 & 15) - 7.5f) * (VE_C[k].wt * TANK_W * 0.11f) + d * 0.16f + (1.0f + 3.5f * p) * BM_S * sinf(T * (1.2f + (h >> 20 & 7) * 0.22f) + (float)(h >> 23 & 63));
+    *x = mx + ((int)(h >> 16 & 15) - 7.5f) * (VE_C[k].wt * BXU * 0.11f) + d * 0.16f + (1.0f + 3.5f * p) * BM_S * sinf(T * (1.2f + (h >> 20 & 7) * 0.22f) + (float)(h >> 23 & 63));
     const float e = 1 - p;
     *big = (h >> 30) == 0 && p < 0.5f;
     *lit = p < 0.62f;
@@ -447,16 +529,16 @@ static void mg_root(float x0, float y0, float y1, float reach, float r0, float r
     __typeof__(s_s->u.mg) *M = &s_s->u.mg;
     if (M->n >= MG_MAX || y1 - y0 < 2) return;
     M->r[M->n].x0 = x0; M->r[M->n].reach = reach; M->r[M->n].inv = 1 / (y1 - y0); M->r[M->n].r0 = r0 * BM_S; M->r[M->n].r1 = r1 * BM_S;
-    M->r[M->n].y0 = (int16_t)y0; M->r[M->n].y1 = (int16_t)(y1 > TANK_BOT - 1 ? TANK_BOT - 1 : y1); M->r[M->n].lay = (uint8_t)lay; M->r[M->n].trunk = (uint8_t)trunk;
+    M->r[M->n].y0 = (int16_t)y0; M->r[M->n].y1 = (int16_t)(y1 > BB - 1 ? BB - 1 : y1); M->r[M->n].lay = (uint8_t)lay; M->r[M->n].trunk = (uint8_t)trunk;
     M->r[M->n].ph = (uint8_t)bd_h(id, 96); M->n++;
 }
 static void mangrove_begin(void) {
     __typeof__(s_s->u.mg) *M = &s_s->u.mg;
-    const float W = TANK_W, B = TANK_BOT;
+    const float W = BW, B = BB;
     M->n = 0; M->nd = 0; s_s->ymin = 0;
     for (int i = 0; i < 64; i++) M->sn[i] = (int8_t)(sinf(i * 6.2832f / 64) * 127);
-    M->ybank[0] = M->ybank[1] = TANK_BOT;
-    for (int x = 0; x < TANK_W; x++) {                                        /* the mud banks, and the pencil roots standing out of them */
+    M->ybank[0] = M->ybank[1] = BB;
+    for (int x = 0; x < BW; x++) {                                        /* the mud banks, and the pencil roots standing out of them */
         const uint32_t h = bd_h(x, 99);
         M->bank[0][x] = (int16_t)(B * (0.872f - 0.014f * bd_n1(x * 0.021f, 97)));
         M->bank[1][x] = (int16_t)(B * (0.935f - 0.018f * bd_n1(x * 0.016f, 98)));
@@ -464,6 +546,60 @@ static void mangrove_begin(void) {
         M->pen[1][x] = (uint8_t)((h >> 8 & 7) == 0 ? (4 + (h >> 11 & 7)) * BM_S : 0);
         for (int b = 0; b < 2; b++) if (M->bank[b][x] - M->pen[b][x] < M->ybank[b]) M->ybank[b] = M->bank[b][x] - M->pen[b][x];
     }
+#ifdef TANK_P4
+    /* THE WIDE FRAME (0.4.3; Strato 11-21): every root's reach is the 1.8's (a share of BXU, not of the wider canvas), and the
+       wood is wider - nine far trees, three in the middle distance, the near pair a root's reach in from each side. The far
+       trees' roots leave the stem WHERE THE STEM IS at their height (they left the line it started on, and a leaning stem stood
+       a root's width off them: "some branches do not line up with the root mast") */
+    const float XU = BXU;
+    for (int t = 0; t < 9; t++) {                                             /* FAR: nine small trees across the back */
+        const uint32_t h = bd_h(t, 94);
+        const float tx = (t + 0.5f + ((h & 255) / 255.0f - 0.5f) * 0.6f) * W / 9, ys = B * (0.36f + 0.10f * ((h >> 8 & 255) / 255.0f));
+        const float lean = ((int)(h >> 16 & 15) - 7.5f) * BM_S, yend = ys + B * 0.10f;
+        for (int j = 0; j < 4; j++) {
+            const uint32_t g = bd_h(t * 8 + j, 95); const float side = (j & 1) ? 1.0f : -1.0f, y0 = ys + B * 0.028f * j;
+            mg_root(tx + lean * (y0 + 4) / (yend + 4), y0, B * 0.90f, side * XU * (0.085f - 0.014f * j) * (0.75f + 0.5f * ((g & 255) / 255.0f)), 1.7f, 0.8f, 1, 0, t * 5 + 1 + j);
+        }
+        mg_root(tx + lean, yend, B * 0.90f, lean * 0.5f, 1.7f, 0.8f, 1, 2, 100 + t);
+        mg_root(tx, -4, yend, lean, 2.0f, 1.7f, 1, 1, t * 5);
+    }
+    static const float MIDX[3] = { 0.315f, 0.535f, 0.735f };
+    for (int t = 0; t < 3; t++) {                                             /* MID: three trees */
+        const float tx = MIDX[t] * W;
+        const float lean = ((t & 1) ? -5 : 4) * BM_S, yend = B * 0.36f;
+        for (int j = 0; j < 6; j++) {
+            const uint32_t g = bd_h(t * 8 + j, 90); const float side = ((j + t) & 1) ? 1.0f : -1.0f, y0 = B * (0.15f + 0.036f * j);
+            mg_root(tx + lean * (y0 + 4) / (yend + 4), y0, B * (0.95f + 0.03f * ((g >> 8 & 255) / 255.0f)), side * XU * (0.135f - 0.017f * j) * (0.75f + 0.5f * ((g & 255) / 255.0f)), 3.2f, 1.4f, 2, 0, 30 + t * 7 + 1 + j);
+        }
+        mg_root(tx + lean, yend, B * 0.96f, lean * 1.5f, 3.2f, 1.4f, 2, 2, 110 + t);
+        mg_root(tx, -4, yend, lean, 4.4f, 3.2f, 2, 1, 30 + t * 7);
+    }
+    const float NEARX[2] = { 0.105f * XU, W - 0.095f * XU };
+    for (int t = 0; t < 2; t++) {                                             /* NEAR: a tree at each side of the glass */
+        const float tx = NEARX[t], in = t ? -1.0f : 1.0f;
+        static const uint8_t ID[7] = { 1, 3, 4, 6, 7, 8, 9 };
+        for (int j = 0; j < 7; j++) {
+            const uint32_t g = bd_h(t * 8 + j, 91); const float side = (j & 1) ? -in : in;   /* (the first, the widest, arches IN over the tank) */
+            const float y0 = B * (0.03f + 0.046f * j), reach = side * XU * (0.235f - 0.027f * j) * (0.8f + 0.4f * ((g & 255) / 255.0f)), y1 = B * (0.99f + 0.06f * ((g >> 8 & 255) / 255.0f));
+            if (j == 0 || j == 2) {                                           /* a fork: a second root leaving it half way down (laid first: its parent lies over where it leaves) */
+                const float s = 0.42f, fy = y0 + (y1 - y0) * s, fx = tx + reach * (1 - (1 - s) * (1 - s));
+                mg_root(fx, fy, B * 1.02f, -side * XU * 0.05f, 3.0f, 1.8f, 3, 0, 44 + t * 10 + ID[j] + 1);
+            }
+            mg_root(tx, y0, y1, reach, 5.4f, 2.2f, 3, 0, 44 + t * 10 + ID[j]);
+        }
+        mg_root(tx + in * 4 * BM_S, B * 0.34f, B * 1.02f, in * 0.02f * XU, 5.4f, 2.2f, 3, 2, 120 + t);   /* the trunk's own end, on down into the mud */
+        mg_root(tx, -4, B * 0.34f, in * 4 * BM_S, 8.0f, 5.4f, 3, 1, 44 + t * 10);   /* the trunk LAST: every root comes out from behind it */
+    }
+    const struct { float x; uint8_t n, lay; } HANG[5] = { { MIDX[0] * W, 5, 2 }, { MIDX[1] * W, 5, 2 }, { MIDX[2] * W, 5, 2 }, { NEARX[0], 7, 3 }, { NEARX[1], 7, 3 } };   /* the fine roots, hanging straight */
+    for (int t = 0; t < 5; t++)
+        for (int j = 0; j < HANG[t].n && M->nd < MG_DMAX; j++) {
+            const uint32_t h = bd_h(t * 16 + j, 92);
+            M->dx[M->nd] = (int16_t)(HANG[t].x + (((int)(h & 255) - 128) / 128.0f) * 0.15f * XU);
+            M->dl[M->nd] = (int16_t)(B * (0.12f + 0.40f * ((h >> 8 & 255) / 255.0f)));
+            M->dlay[M->nd] = HANG[t].lay; M->dph[M->nd] = (uint8_t)(h >> 16); M->nd++;
+        }
+}
+#else
     for (int t = 0; t < 6; t++) {                                             /* FAR: six small trees across the back */
         const uint32_t h = bd_h(t, 94);
         const float tx = (t + 0.5f + ((h & 255) / 255.0f - 0.5f) * 0.6f) * W / 6, ys = B * (0.36f + 0.10f * ((h >> 8 & 255) / 255.0f));
@@ -512,20 +648,26 @@ static void mangrove_begin(void) {
             M->dlay[M->nd] = HANG[t].lay; M->dph[M->nd] = (uint8_t)(h >> 16); M->nd++;
         }
 }
+#endif
 static const uint32_t *mangrove_row(int y) {
-    if (y >= TANK_BOT) return NULL;
+    if (y >= BB) return NULL;
     __typeof__(s_s->u.mg) *M = &s_s->u.mg;
     uint32_t *const R = s_s->row; uint8_t *const L = s_s->lay;
     row_water(y);
     const int ro = nz_row(y);
     static const int HZ[4] = { 0, 152, 116, 26 };                             /* the murk takes the far ones */
     for (int lay = 1; lay <= 3; lay++) {
+#ifdef TANK_P4
+        const uint32_t lit = bd_far8(MG_LIT, y, HZ[lay]), body = bd_far8(MG_ROOT, y, HZ[lay]), dk = bd_far8(MG_DARK, y, HZ[lay]), oy = mix8(bd_far8(MG_OYST, y, HZ[lay] + 40), body, 120);
+        const uint32_t ringl = mix8(lit, body, 110), ringb = mix8(body, dk, 110);
+#else
         const uint32_t lit = bd_far8(MG_LIT, y, HZ[lay]), body = bd_far8(MG_ROOT, y, HZ[lay]), dk = bd_far8(MG_DARK, y, HZ[lay]), oy = bd_far8(MG_OYST, y, HZ[lay] + 40);
+#endif
         if (lay >= 2) for (int d = 0; d < M->nd; d++) {
             if (M->dlay[d] != lay || y > M->dl[d]) continue;
             const int x = M->dx[d] + (int)(1.5f * BM_S * M->sn[((y * 46) / 100 + M->dph[d]) & 63] / 127.0f);
-            if (x >= 0 && x < TANK_W) { R[x] = body; L[x] = (uint8_t)lay; }
-            if (lay == 3 && x + 1 < TANK_W && x >= 0) { R[x + 1] = dk; L[x + 1] = (uint8_t)lay; }
+            if (x >= 0 && x < BW) { R[x] = body; L[x] = (uint8_t)lay; }
+            if (lay == 3 && x + 1 < BW && x >= 0) { R[x + 1] = dk; L[x + 1] = (uint8_t)lay; }
         }
         for (int k = 0; k < M->n; k++) {
             if (M->r[k].lay != lay || y < M->r[k].y0 || y > M->r[k].y1) continue;
@@ -540,22 +682,27 @@ static const uint32_t *mangrove_row(int y) {
             const float hw = trunk ? (s < 0.9f ? M->r[k].r0 : M->r[k].r0 + (M->r[k].r1 - M->r[k].r0) * (s - 0.9f) * 10)   /* (wider than any shoulder till its last root has left) */
                                    : M->r[k].r0 + (M->r[k].r1 - M->r[k].r0) * s + 0.35f * M->r[k].r0 * fl * fl;
             int l = (int)((xa < xb ? xa : xb) - hw + 0.5f), r = (int)((xa < xb ? xb : xa) + hw - 0.5f); if (r < l) r = l;
-            if (r < 0 || l > TANK_W - 1) continue;
+            if (r < 0 || l > BW - 1) continue;
             const int w = r - l + 1;
             if (lay == 1) { row_span(l, r, body, 1); continue; }              /* far: a shape */
             const bool ring = lay == 3 && fl == 0 && ((y + M->r[k].ph) & 31) == 0, oyst = lay == 3 && !trunk && s > 0.70f;
             int xl = l + (2 * w + 7) / 8, xd = l + (6 * w + 7) / 8;
             if (fl > 0) { if (M->r[k].reach > 0) xd -= (int)((xd - l) * fl); else xl += (int)((r + 1 - xl) * fl); }   /* out of the stem's dark side, or its lit one */
-            for (int x = l < 0 ? 0 : l; x <= r && x < TANK_W; x++) {
+            for (int x = l < 0 ? 0 : l; x <= r && x < BW; x++) {
+#ifdef TANK_P4                                    /* (the big screens, Strato 11-21: the bark's rings a soft shade, not a ruled line; the oysters "too bright and white" - duller, and fewer) */
+                uint32_t c = x < xl ? (ring ? ringl : lit) : x >= xd ? dk : (ring ? ringb : body);
+                if (oyst && (NZ(x, ro) & 31) == 0) c = oy;
+#else
                 uint32_t c = x < xl ? (ring ? body : lit) : x >= xd ? dk : (ring ? dk : body);
                 if (oyst && (NZ(x, ro) & 15) == 0) c = oy;
+#endif
                 R[x] = c; L[x] = (uint8_t)lay;
             }
         }
         if (lay <= 2 && y >= M->ybank[lay - 1]) {                             /* the mud bank, its crest a little lit, pencil roots out of it */
             const int16_t *bk = M->bank[lay - 1]; const uint8_t *pn = M->pen[lay - 1];
             const uint32_t mud = bd_far8(MG_MUD, y, lay == 1 ? 190 : 120), crest = bd_far8(0x4a4a34, y, lay == 1 ? 190 : 120), pr = lay == 1 ? body : dk;
-            for (int x = 0; x < TANK_W; x++) {
+            for (int x = 0; x < BW; x++) {
                 const int d = y - bk[x];
                 if (d >= 0) { R[x] = d < 2 ? crest : mud; L[x] = (uint8_t)lay; }
                 else if (d >= -pn[x]) { R[x] = pr; L[x] = (uint8_t)lay; }
@@ -568,12 +715,23 @@ static const uint32_t *mangrove_row(int y) {
 static void mangrove_speck(int i, float T, float *x, float *y, int *alpha, bool *big, uint32_t *rgb, bool *lit) {
     const uint32_t h = bd_h(i, 95);
     const bool leaf = (h >> 13 & 7) == 0;
-    const float H = (float)TANK_BOT - 24;                                    /* (T is tank_anim's lap: each falls its height a whole number of times a lap -
+    const float H = (float)BB - 24;                                    /* (T is tank_anim's lap: each falls its height a whole number of times a lap -
                                                                                 on the 1.8 silt at 0.5 .. 2.2 px/s, a leaf at 5 .. 9 - and sways in whole hundredths of a radian a second) */
+#ifdef TANK_TAB5                                  /* (THE DRIFT IN STRIPS, backgrounds.c: the silt - a leaf falls too fast to step) */
+    if (!leaf) T = speck_strip_clock(T, (int)(h & 1023));
+#endif
     const float vy = H * (leaf ? 9 + (int)(h >> 20 & 7) : 1 + (int)(h >> 20 & 3)) * (1 / 628.3185307f);
+#ifdef TANK_P4                                    /* (the big screens: the sines by table - backgrounds.c, drift_sin) */
+    *y = drift_wrap((h >> 10 & 1023) * (H / 1024.0f) + vy * T, H);
+    *x = (h & 1023) * (BW / 1024.0f) + (leaf ? 9.0f : 3.0f) * drift_sin(T * (leaf ? 0.9f : 0.17f + (h >> 24 & 7) * 0.02f) + (float)(h >> 27));
+    *big = leaf; *lit = false;
+    *rgb = leaf ? 0xe0cc7a : 0xccd0a8;
+    *alpha = speck_edge(*x, leaf ? 235 : (int)(150 * (0.65f + 0.35f * drift_sin(T * 0.7f + (float)(h >> 5 & 63)))));
+#else
     *y = fmodf((h >> 10 & 1023) * (H / 1024.0f) + vy * T, H);
-    *x = (h & 1023) * (TANK_W / 1024.0f) + (leaf ? 9.0f : 3.0f) * sinf(T * (leaf ? 0.9f : 0.17f + (h >> 24 & 7) * 0.02f) + (float)(h >> 27));
+    *x = (h & 1023) * (BW / 1024.0f) + (leaf ? 9.0f : 3.0f) * sinf(T * (leaf ? 0.9f : 0.17f + (h >> 24 & 7) * 0.02f) + (float)(h >> 27));
     *big = leaf; *lit = false;
     *rgb = leaf ? 0xe0cc7a : 0xccd0a8;
     *alpha = speck_edge(*x, leaf ? 235 : (int)(150 * (0.65f + 0.35f * sinf(T * 0.7f + (h >> 5 & 63)))));
+#endif
 }

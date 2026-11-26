@@ -12,6 +12,7 @@
 static void begin(bat_t *b, int64_t now, int pct, bool pw) {
     bat_hist_t *h = &b->h;
     h->since_unix = now; h->since_pct = (int16_t)pct; h->on_power = pw;
+    h->since_owed = b->owed && now > 0;
     h->awake_s = 0; h->drop_pct = 0;
     b->low = -1; b->dirty = true;
 }
@@ -33,6 +34,24 @@ void battery_init(bat_t *b, const bat_hist_t *saved) {
 }
 
 void battery_woke(bat_t *b) { b->low = -1; }
+
+void battery_clock_owed(bat_t *b, bool owed) { b->owed = owed; }
+void battery_clock_moved(bat_t *b, int64_t delta_s, int how) {
+    bat_hist_t *h = &b->h;
+    if (!delta_s) return;
+    if (b->chg_pct >= 0 && b->chg_unix > 0) b->chg_unix += delta_s;
+    if (h->since_unix > 0 && (how == BAT_CLOCK_REBASE || h->since_owed)) {
+        h->since_unix += delta_s;
+        if (h->since_unix < 1) h->since_unix = 1;           /* (0 means never seen) */
+        b->dirty = true;
+    }
+    if (how != BAT_CLOCK_STEP && h->since_owed) { h->since_owed = 0; b->dirty = true; }   /* paid, or the clock is another clock now: the stamp is on it */
+}
+void battery_clock_unknown(bat_t *b) {
+    bat_hist_t *h = &b->h;
+    if (!h->since_owed) return;
+    h->since_unix = 0; h->since_owed = 0; b->dirty = true;
+}
 
 int battery_tick(bat_t *b, int64_t now, float dt, int pct, int state) {
     if (pct < 0 || pct > 100) return 0;

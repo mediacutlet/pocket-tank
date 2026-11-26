@@ -22,6 +22,14 @@
 #define TANK_LINK_SWIM_MAX (POP_CAP + TANK_LINK_VISIT_PLACES)   /* fish swimming in one tank at once, home + visitors: 7 */
 #if TANK_LINK_VISIT_PLACES > N_VISIT_MAX
 #error "the visitor places live in tank.h's visitor slots: N_VISIT_MAX must hold them"
+/* FISH SWAP (0.4.3, swap.h): a boot finishes what the swap note says was started (progression's load calls it) */
+void tank_link_swap_boot(tank_t *t);
+extern uint32_t (*tank_link_swap_hour)(void);   /* the selftest's clock in hours (NULL = the clock port's) */
+extern int64_t (*tank_link_swap_wall)(const void *tank);    /* the selftest's wall clock, unix s (NULL = the clock port's) */
+extern bool (*tank_link_swap_gone)(uint32_t tank);   /* the selftest's shelf: that tank is gone (NULL = the board's) */
+void tank_link_swap_park(tank_t *t);
+void tank_link_swap_boot_fresh(tank_t *t);      /* (the save did not load: no sweep of other tanks' notes) */            /* a sleep or a power-off: the swap notes' waits saved (R2-2) */
+
 #endif
 #define TANK_LINK_CURIOUS  2.0f    /* curiosity a door opening gives every fish here ("something new over there") */
 #define TANK_LINK_REFUSED_S 10.0f  /* a door that refused a fish is glass for it this long ... */
@@ -35,6 +43,14 @@
 #define TANK_LINK_FRY_HOLD_S  120
 #if TANK_LINK_FRY_FRESH_S + LINK_CROSS_MS / 1000 >= TANK_LINK_FRY_HOLD_S || TANK_LINK_FRY_ASK_S >= TANK_LINK_FRY_FRESH_S
 #error "a held fry place must outlast a fresh yes and its hand-off, and the host must ask again before its yes goes stale"
+/* FISH SWAP (0.4.3, swap.h): a boot finishes what the swap note says was started (progression's load calls it) */
+void tank_link_swap_boot(tank_t *t);
+extern uint32_t (*tank_link_swap_hour)(void);   /* the selftest's clock in hours (NULL = the clock port's) */
+extern int64_t (*tank_link_swap_wall)(const void *tank);    /* the selftest's wall clock, unix s (NULL = the clock port's) */
+extern bool (*tank_link_swap_gone)(uint32_t tank);   /* the selftest's shelf: that tank is gone (NULL = the board's) */
+void tank_link_swap_park(tank_t *t);
+void tank_link_swap_boot_fresh(tank_t *t);      /* (the save did not load: no sweep of other tanks' notes) */            /* a sleep or a power-off: the swap notes' waits saved (R2-2) */
+
 #endif
 
 link_host_t tank_link_host(tank_t *t, void (*send)(void *ctx, uint32_t to, const uint8_t *buf, int len));
@@ -77,5 +93,13 @@ extern uint32_t (*tank_link_sd_clock)(void);   /* the nonce's floor in seconds (
 int  tank_link_sd_news(int *edge, int *amount, int *verdict);
 bool tank_link_sd_pending(const tank_t *t);
 extern bool (*tank_link_sd_save)(tank_t *t);   /* the save after a gift's change (NULL = progression_save; the selftest's own) */
+
+/* FISH SWAP (0.4.3, swap.h): a boot finishes what the swap note says was started (progression's load calls it) */
+void tank_link_swap_boot(tank_t *t);
+extern uint32_t (*tank_link_swap_hour)(void);   /* the selftest's clock in hours (NULL = the clock port's) */
+extern int64_t (*tank_link_swap_wall)(const void *tank);    /* the selftest's wall clock, unix s (NULL = the clock port's) */
+extern bool (*tank_link_swap_gone)(uint32_t tank);   /* the selftest's shelf: that tank is gone (NULL = the board's) */
+void tank_link_swap_park(tank_t *t);
+void tank_link_swap_boot_fresh(tank_t *t);      /* (the save did not load: no sweep of other tanks' notes) */            /* a sleep or a power-off: the swap notes' waits saved (R2-2) */
 
 #endif

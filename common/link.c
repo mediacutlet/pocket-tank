@@ -3,6 +3,7 @@
 #include <string.h>
 #include <math.h>
 #include "link.h"
+#include "version.h"
 
 /* ---- frames: a 12-byte header, then the type's body. Little-endian. ---- */
 #define LINK_MAGIC 0x4b4cu   /* "LK" */
@@ -13,16 +14,19 @@ enum {
     FR_GIVE, FR_GIVE_TAKE, FR_GIVE_NO, FR_GIVE_CANCEL, FR_GIVEN, FR_GIVEN_OK, FR_GIVEN_LOST,   /* phase 6 (an older tank drops them: NO ANSWER) */
     FR_SD_GIFT, FR_SD_ANSWER,          /* sand dollar gifts, 0.4.2 (a 0.4.1 tank drops them: type >= its FR_TYPES; and it never
                                           sets BF_SD, so no gift is ever sent to it) */
+    FR_SWAP,                           /* FISH SWAP, 0.4.3 (swap.h): kind, sid, uid, reason, a passport or none (a 0.4.2 tank drops it,
+                                          and never sets BF_SWAP, so none is sent to it) */
     FR_TYPES
 };
 #define HDR 12
-enum { BF_MODE = 1, BF_DRIFT = 2, BF_SD = 4 };   /* beacon flags (BF_SD: takes sand dollar gifts, 0.4.2 - a 0.4.1 tank masks it off) */
+enum { BF_MODE = 1, BF_DRIFT = 2, BF_SD = 4, BF_SWAP = 8, BF_FULL = 16 };   /* (BF_SWAP: takes swaps; BF_FULL: its own fish at POP_CAP - 0.4.3) */   /* beacon flags (BF_SD: takes sand dollar gifts, 0.4.2 - a 0.4.1 tank masks it off) */
 enum { RF_POOF = 1 };                        /* return flags */
 
 typedef struct {
     bool used, announced; uint32_t tank, heard; int rssi;   /* announced: a beacon of it has been read (the NEARBY row knows it) */
     uint8_t badge, flags, armed, room, drift_s;
     uint32_t edge_peer[LINK_EDGES];          /* what its own beacon says it is linked to */
+    uint32_t release;                        /* its beacon's release, 0xMMmmpp00 (0.4.3 on); 0 = not known (older, or none sent) */
 } peer_t;
 
 typedef enum { AW_FREE, AW_OFFERING, AW_ACCEPTED, AW_AWAY } aw_state_t;
@@ -54,6 +58,7 @@ struct link {
     uint8_t badge;
     peer_t peer[LINK_PEERS_MAX];
     uint32_t armed_until[LINK_EDGES], join_sent[LINK_EDGES];
+    uint8_t stamped;                /* (R3b-2) stamps link_mode / link_arm / link_deny made at a stale L->now: ST_* bits, moved on in clock_to */
     uint32_t edge_peer[LINK_EDGES], mismatch_since[LINK_EDGES];
     uint32_t asking[LINK_EDGES]; uint8_t asking_n[LINK_EDGES];
     bool moving; uint32_t move_since, still_since;
@@ -71,15 +76,22 @@ struct link {
     give_out_t gout[LINK_GIVE_MAX];          /* GIVE: ours, going */
     give_in_t  gin[LINK_GIVE_MAX];           /* ... theirs, coming */
     struct { bool on; uint32_t peer, nonce, sent; int amount; } sd;   /* SAND DOLLAR GIFTS (0.4.2): ours in flight */
+    bool old_042;                            /* the selftest's 0.4.2 tank: no BF_SWAP, FR_SWAP dropped */
     bool old_041;                            /* the selftest's 0.4.1 tank: no BF_SD, the SD frames dropped as its FR_TYPES did */
     link_ev_t evq[LINK_EVQ]; int ev_head, ev_n;
     uint32_t ev_lost;
 };
 
 int link_size(void) { return (int)sizeof(link_t); }
+enum { ST_MODE = 1, ST_BEACON = 2, ST_ARM = 4 /* << edge */, ST_DENY = 16 /* << slot */ };   /* link_t.stamped (R3b-2, clock_to) */
 
 static link_edge_t opp(link_edge_t e) { return e == LINK_LEFT ? LINK_RIGHT : LINK_LEFT; }
-static bool after(uint32_t now, uint32_t t) { return (int32_t)(now - t) >= 0; }
+/* now is at or past t. The board's ms is its uptime, and a stamp can be weeks old (a tank on a cable is never restarted): no timer
+   here is set more than LINK_AHEAD_MAX_MS ahead (the longest is LINK_DEPORT_MS), so a t further ahead than that is the past -
+   up to 49.7 days less those 10 minutes (the uint32 wrap). A plain signed compare read a stamp 24.86 days old as the future
+   (0.4.3: never linked again) */
+#define LINK_AHEAD_MAX_MS 600000u
+static bool after(uint32_t now, uint32_t t) { return (uint32_t)(t - now) - 1u >= LINK_AHEAD_MAX_MS; }
 
 /* ---- events ---- */
 static link_ev_t *ev_push(link_t *L, link_ev_type_t type) {
@@ -145,7 +157,7 @@ static peer_t *peer_get(link_t *L, uint32_t tank) {
     for (int i = 0; i < LINK_PEERS_MAX; i++) {
         if (!L->peer[i].used) { oldest = i; break; }
         if (linked_to(L, L->peer[i].tank)) continue;
-        if (oldest < 0 || !after(L->peer[i].heard, L->peer[oldest].heard)) oldest = i;
+        if (oldest < 0 || (uint32_t)(L->now - L->peer[i].heard) > (uint32_t)(L->now - L->peer[oldest].heard)) oldest = i;   /* (heard longest ago) */
     }
     if (oldest < 0) return NULL;
     p = &L->peer[oldest]; memset(p, 0, sizeof *p); p->used = true; p->tank = tank; p->heard = L->now;
@@ -195,9 +207,12 @@ static void send_beacon(link_t *L) {
     int room = L->host.room ? room_left(L) : 0;
     room = room > 255 ? 255 : room;
     uint32_t ds = L->drifting ? (L->now - L->drift_since) / 1000 : 0;
-    w8(&w, L->badge); w8(&w, (L->mode ? BF_MODE : 0) | (L->drifting ? BF_DRIFT : 0) | (L->old_041 ? 0 : BF_SD)); w8(&w, armed);
+    w8(&w, L->badge); w8(&w, (L->mode ? BF_MODE : 0) | (L->drifting ? BF_DRIFT : 0) | (L->old_041 ? 0 : BF_SD)
+                          | (L->old_041 || L->old_042 ? 0 : BF_SWAP | (L->host.full && L->host.full(L->host.ctx) ? BF_FULL : 0))); w8(&w, armed);
     w8(&w, (uint32_t)room); w8(&w, ds > 255 ? 255 : ds);
     w32(&w, L->edge_peer[LINK_LEFT]); w32(&w, L->edge_peer[LINK_RIGHT]);
+    if (!L->old_041 && !L->old_042) { w8(&w, PT_RELEASE_MAJOR); w8(&w, PT_RELEASE_MINOR); w8(&w, PT_RELEASE_PATCH); }   /* (0.4.3: the release,
+                                                 version.h - an older reader stops at the edge peers and never reads these) */
     tx(L, &w, 0);
 }
 static void send_offer(link_t *L, const away_t *a) {
@@ -283,16 +298,29 @@ void link_init(link_t *L, uint32_t my_tank, const link_host_t *host, uint32_t tr
     L->now = now_ms; L->trip = (uint16_t)(trip_seed ^ (trip_seed >> 16));
     L->badge = (uint8_t)(my_tank % LINK_BADGES);
 }
+/* The engine knows the time only from link_tick and link_rx. A keeper's call between them (the LINK page opening after the radio was
+   down: nothing ticked the engine) stamps the last tick's time, maybe minutes or days old - and the next tick ended link mode at once
+   (R3b-2: the page flashed shut). Each such stamp sets its bit, and clock_to moves it on by the gap when the time comes: as if
+   stamped then. A new caller-facing stamp must set a bit too */
+static void clock_to(link_t *L, uint32_t now) {
+    const uint32_t gap = now - L->now;
+    if (L->stamped & ST_MODE) L->mode_active += gap;
+    if (L->stamped & ST_BEACON) L->beacon_at += gap;
+    for (int e = 0; e < LINK_EDGES; e++) if (L->stamped & (ST_ARM << e)) L->armed_until[e] += gap;
+    for (int i = 0; i < 4; i++) if (L->stamped & (ST_DENY << i)) L->deny[i].until += gap;
+    L->stamped = 0; L->now = now;
+}
 void link_mode(link_t *L, bool on) {
-    if (on && !L->mode) { pick_badge(L, -1); L->beacon_at = L->now; }
-    L->mode = on; L->mode_active = L->now;
-    if (!on) L->armed_until[0] = L->armed_until[1] = 0;
+    if (on && !L->mode) { pick_badge(L, -1); L->beacon_at = L->now; L->stamped |= ST_BEACON; }
+    L->mode = on; L->mode_active = L->now; L->stamped |= ST_MODE;
+    if (!on) { L->armed_until[0] = L->armed_until[1] = 0; L->stamped &= (uint8_t)~(ST_ARM | ST_ARM << 1); }
 }
 bool link_in_mode(const link_t *L) { return L->mode; }
 void link_arm(link_t *L, link_edge_t e) {
     if (e >= LINK_EDGES || !L->mode || L->edge_peer[e]) return;
     L->armed_until[e] = L->now + LINK_ARM_MS; L->mode_active = L->now;
     L->beacon_at = L->now;                   /* tell everyone at once */
+    L->stamped |= (uint8_t)(ST_MODE | ST_BEACON | (ST_ARM << e));
 }
 void link_close(link_t *L, link_edge_t e) { if (e < LINK_EDGES) unlink_edge(L, e, LINK_WHY_KEEPER, true); }
 void link_moving(link_t *L, bool moving) { L->moving = moving; }
@@ -388,7 +416,7 @@ void link_deny(link_t *L, uint32_t uid, uint32_t ms) {
         if (L->deny[i].uid == uid) { w = i; break; }
         if (!L->deny[i].uid || after(L->now, L->deny[i].until)) w = i;
     }
-    L->deny[w].uid = uid; L->deny[w].until = L->now + ms;
+    L->deny[w].uid = uid; L->deny[w].until = L->now + ms; L->stamped |= (uint8_t)(ST_DENY << w);
 }
 static bool denied(const link_t *L, uint32_t uid) {
     for (int i = 0; i < 4; i++) if (L->deny[i].uid == uid && !after(L->now, L->deny[i].until)) return true;
@@ -475,12 +503,16 @@ static void rx_beacon(link_t *L, peer_t *p, rd_t *r) {
     uint8_t badge = (uint8_t)r8(r), flags = (uint8_t)r8(r), arm = (uint8_t)r8(r), room = (uint8_t)r8(r), ds = (uint8_t)r8(r);
     uint32_t le = r32(r), re = r32(r);
     if (r->bad) return;
+    {   uint32_t ma = 0, mi = 0, pa = 0;              /* (0.4.3) its release, when the beacon has all three bytes; else not known */
+        if (r->n - r->p >= 3) { ma = r8(r); mi = r8(r); pa = r8(r); }
+        p->release = ma << 24 | mi << 16 | pa << 8;
+    }
     /* (a first beacon used to be guessed from all-zero fields - a circle with
        link mode off and nothing armed looked new on every beacon: a NEARBY a
        second, 2026-10-05) */
     bool was_mode = (p->flags & BF_MODE) != 0, was_new = !p->announced;
     p->announced = true;
-    p->badge = badge < LINK_BADGES ? badge : 0; p->flags = flags & (BF_MODE | BF_DRIFT | BF_SD); p->armed = arm & 3;
+    p->badge = badge < LINK_BADGES ? badge : 0; p->flags = flags & (BF_MODE | BF_DRIFT | BF_SD | BF_SWAP | BF_FULL); p->armed = arm & 3;
     p->room = room; p->drift_s = ds; p->edge_peer[LINK_LEFT] = le; p->edge_peer[LINK_RIGHT] = re;
     /* two tanks the same badge: the one in link mode picks again - always, when
        the other is not in link mode (it is showing its badge as somebody's
@@ -874,6 +906,58 @@ bool link_peer_sd(const link_t *L, uint32_t tank) {
 bool link_sd_busy(const link_t *L) { return L->sd.on; }
 void link_sd_forget(link_t *L, uint32_t nonce) { if (L->sd.on && L->sd.nonce == nonce) L->sd.on = false; }
 void link_test_as_041(link_t *L, bool on) { L->old_041 = on; }
+/* ---- FISH SWAP (0.4.3, swap.h): the engine carries the frames, nothing more ---- */
+void link_test_as_042(link_t *L, bool on) { L->old_042 = on; }
+uint32_t link_now(const link_t *L) { return L->now; }
+/* FISH SWAP (0.4.3): one of ours swapped where it is, next door - home lets go of it: no lease, no restore. Its host's
+   VISITs are answered DROP from now on (a DROP before the trade takes it there only sends it to bubbles: the trade brings
+   it in from its passport), and a RETURN of it is answered HOME and nothing more */
+bool link_swap_outward(const link_t *L, uint32_t uid) {   /* a trip of it under way or on: offered, accepted, or next door */
+    for (int i = 0; i < LINK_AWAY_MAX; i++) if (L->away[i].st != AW_FREE && L->away[i].uid == uid) return true;
+    return false;
+}
+uint32_t link_swap_away_peer(const link_t *L, uint32_t uid) {   /* the tank one of ours is visiting (0: none) - a paused door changes nothing */
+    for (int i = 0; i < LINK_AWAY_MAX; i++) if (L->away[i].st == AW_AWAY && L->away[i].uid == uid) return L->away[i].peer;
+    return 0;
+}
+void link_swap_poof(link_t *L, uint32_t uid, uint32_t home) {   /* a visitor from `home` to bubbles here, now (an ABORT's first step) */
+    visit_t *v = visit_find(L, uid);
+    if (v && v->home == home && v->st == VS_ACTIVE) visitor_poof(L, v);
+}
+void link_swap_let_go(link_t *L, uint32_t uid) {
+    away_t *a = away_find(L, uid);
+    if (a) a->st = AW_FREE;
+}
+/* ... and the host keeps a visitor as its own: the visit ends here, no lease runs out under it */
+void link_swap_settle(link_t *L, uint32_t uid, uint32_t home) { visit_settle(L, uid, home); }
+bool link_frame_is_swap(const uint8_t *buf, int len) { return buf && len > 3 && buf[3] == FR_SWAP; }
+static const peer_t *peer_cfind(const link_t *L, uint32_t tank) {
+    for (int i = 0; i < LINK_PEERS_MAX; i++) if (L->peer[i].used && L->peer[i].tank == tank) return &L->peer[i];
+    return NULL;
+}
+uint32_t link_peer_release(const link_t *L, uint32_t tank) { const peer_t *p = peer_cfind(L, tank); return p ? p->release : 0; }
+bool link_peer_swap(const link_t *L, uint32_t tank) { const peer_t *p = peer_cfind(L, tank); return p && !L->old_041 && !L->old_042 && (p->flags & BF_SWAP); }
+bool link_peer_full(const link_t *L, uint32_t tank) { const peer_t *p = peer_cfind(L, tank); return p && (p->flags & BF_FULL); }
+bool link_swap_send(link_t *L, uint32_t peer, int kind, uint32_t sid, uint32_t uid, int reason, const passport_t *pp) {
+    if (!linked_to(L, peer) || L->old_041 || L->old_042) return false;
+    wr_t w; hdr(L, &w, FR_SWAP, peer);
+    w8(&w, (uint32_t)kind); w32(&w, sid); w32(&w, uid); w8(&w, (uint32_t)reason);
+    if (pp && pp->uid) wpp(&w, pp); else w8(&w, 0);
+    tx(L, &w, peer);
+    return true;
+}
+static void rx_swap(link_t *L, uint32_t from, rd_t *r) {
+    uint32_t kind = r8(r), sid = r32(r), uid = r32(r), reason = r8(r);
+    if (r->bad || !sid || !kind || !linked_to(L, from)) return;   /* (only from a tank we are linked to) */
+    passport_t pp; bool has = false;
+    int n = (int)r8(r);
+    if (!r->bad && n > 0) { r->p--; has = rpp(r, &pp); if (!has) return; }   /* (a passport that does not read: the frame never came) */
+    link_ev_t *e = ev_push(L, LEV_SWAP);
+    if (!e) return;
+    e->peer = from; e->reason = (uint8_t)kind; e->nonce = sid; e->uid = uid; e->amount = (int32_t)reason;
+    e->edge = L->edge_peer[LINK_LEFT] == from ? LINK_LEFT : LINK_RIGHT;
+    if (has) { e->pp = pp; e->ms_left = 1; }
+}
 static void send_sd(link_t *L) {
     wr_t w; hdr(L, &w, FR_SD_GIFT, L->sd.peer); w32(&w, L->sd.nonce); w16(&w, (uint32_t)L->sd.amount); tx(L, &w, L->sd.peer);
 }
@@ -948,7 +1032,7 @@ static void homeward(link_t *L, uint32_t home) {
 }
 
 void link_rx(link_t *L, const uint8_t *buf, int len, int rssi, uint32_t now_ms) {
-    L->now = now_ms;
+    clock_to(L, now_ms);
     if (!buf || len < HDR || len > LINK_FRAME_MAX) return;
     rd_t r = { buf, len, 0, false };
     uint32_t magic = r16(&r), proto = r8(&r), type = r8(&r), from = r32(&r), to = r32(&r);
@@ -972,6 +1056,7 @@ void link_rx(link_t *L, const uint8_t *buf, int len, int rssi, uint32_t now_ms) 
     case FR_RETURN: rx_return(L, from, &r); break;
     case FR_FRY: rx_fry(L, from, &r); break;
     case FR_SD_GIFT: case FR_SD_ANSWER: if (!L->old_041) rx_sd(L, (int)type, from, &r); break;
+    case FR_SWAP: if (!L->old_041 && !L->old_042) rx_swap(L, from, &r); break;
     case FR_GIVE: case FR_GIVE_TAKE: case FR_GIVE_NO: case FR_GIVE_CANCEL: case FR_GIVEN: case FR_GIVEN_OK: case FR_GIVEN_LOST: {
         uint32_t uid = r32(&r), nonce = r32(&r);
         if (r.bad || !uid || !nonce) return;
@@ -1016,7 +1101,7 @@ void link_rx(link_t *L, const uint8_t *buf, int len, int rssi, uint32_t now_ms) 
 
 /* ---- time ---- */
 void link_tick(link_t *L, uint32_t now) {
-    L->now = now;
+    clock_to(L, now);
     bool any_link = L->edge_peer[0] || L->edge_peer[1];
     if (L->mode && after(now, L->mode_active + LINK_MODE_IDLE_MS)) link_mode(L, false);
 
@@ -1039,7 +1124,7 @@ void link_tick(link_t *L, uint32_t now) {
             L->asking[e] = who; L->asking_n[e] = nn;
             link_ev_t *ev = ev_push(L, LEV_ASKING); if (ev) { ev->edge = (link_edge_t)e; ev->peer = who; ev->reason = nn; }
         }
-        if (n == 1 && armed(L, (link_edge_t)e) && after(now, L->join_sent[e] + LINK_JOIN_RESEND_MS)) {
+        if (n == 1 && armed(L, (link_edge_t)e) && (!L->join_sent[e] || after(now, L->join_sent[e] + LINK_JOIN_RESEND_MS))) {   /* (0: never) */
             send_edge(L, FR_JOIN, one, (link_edge_t)e, 0); L->join_sent[e] = now;
         }
     }

@@ -64,10 +64,13 @@ extern const icon_t icon_ms_tank_changed_someone;
 extern const icon_t icon_settings_link;
 extern const icon_t icon_settings_updates;
 extern const icon_t icon_shop_breed;
-extern const icon_t icon_shop_castle;
+extern const icon_t icon_shop_castle_1;
+extern const icon_t icon_shop_castle_2;
+extern const icon_t icon_shop_castle_3;
 extern const icon_t icon_shop_cluster;
 extern const icon_t icon_shop_coral;
 extern const icon_t icon_shop_crab;
+extern const icon_t icon_shop_octopus;
 extern const icon_t icon_shop_plant;
 extern const icon_t icon_shop_pumpkin;
 extern const icon_t icon_shop_sand_dollar_16;
@@ -87,8 +90,8 @@ extern const icon_t icon_tool_give;
 extern const icon_t icon_tool_scissors;
 extern const icon_t icon_tool_sponge;
 
-#define ICONS_N 73
-#define ICONS_PIXEL_HASH 0xfa969183u
+#define ICONS_N 76
+#define ICONS_PIXEL_HASH 0x0a4524f4u
 extern const icon_t *const icons_all[ICONS_N];   /* every icon, for the sim's check (the firmware's linker drops it) */
 
 #endif

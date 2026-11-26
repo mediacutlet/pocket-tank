@@ -1,0 +1,52 @@
+now 1795480450
+glass 2 shelf 2
+tank id 2 type 1 variant 1 time 0 name JELLIES
+sd balance 4390 earned 0 unlocks 00000000 shelved 00000000 locked 00000000 bg 0
+critter 0 name 
+critter 1 name 
+critter 2 name 
+critter 3 name 
+breed owned 0 slot0 -1 slot1 -1
+pieces castle 0.0 2 coral 0.0 2 000000 plant 0.0 volcano 0.0 cluster 0.0
+fish 0
+collection 0
+tank id 3 type 2 variant 0 time 0 name PIRANHA
+sd balance 4390 earned 0 unlocks 00000000 shelved 00000000 locked 00000000 bg 0
+critter 0 name 
+critter 1 name 
+critter 2 name 
+critter 3 name 
+breed owned 0 slot0 -1 slot1 -1
+pieces castle 0.0 2 coral 0.0 2 000000 plant 0.0 volcano 0.0 cluster 0.0
+fish 2
+fish 0 name mira uid 3cc108da parents 00000000 00000000 preset 0 stage 0 genes 0 0 0 color 38dcc7 fin 1d9f98 away 0 eaten 0 ms 00000001 trust 5.000 from 0 lived 0
+fish 1 name nori uid 9eb79b65 parents 00000000 00000000 preset 3 stage 0 genes 0 0 0 color a799ff fin 6b5ed6 away 0 eaten 0 ms 00000001 trust 5.000 from 0 lived 0
+collection 0
+tank id 1 type 0 variant 0 time 0 name MY TANK
+sd balance 4390 earned 5000 unlocks 00000611 shelved 00000011 locked 00000200 bg 0
+critter 0 name 
+critter 1 name 
+critter 2 name sid
+critter 3 name 
+breed owned 0 slot0 -1 slot1 -1
+pieces castle 0.0 2 coral 0.0 2 000000 plant 0.0 volcano 0.0 cluster 0.0
+fish 3
+fish 0 name otto uid 94090d33 parents 00000000 00000000 preset 4 stage 0 genes 0 0 0 color ffd166 fin c98a1e away 0 eaten 0 ms 00000101 trust 5.000 from 0 lived 30
+fish 1 name mira uid 096982c3 parents 00000000 00000000 preset 5 stage 0 genes 0 0 0 color f48fb1 fin b0456f away 0 eaten 0 ms 00000021 trust 5.000 from 0 lived 30
+fish 2 name pip uid ad0bec31 parents 096982c3 94090d33 preset 3 stage 0 genes 0 0 0 color 38dcc7 fin 1d9f98 away 0 eaten 0 ms 00000000 trust 4.000 from 0 lived 30
+collection 14
+visitor 0 uid 77000000 visits 1 color 102030
+visitor 1 uid 77000001 visits 1 color 204060
+visitor 2 uid 77000002 visits 1 color 306090
+visitor 3 uid 77000003 visits 1 color 4080c0
+visitor 4 uid 77000004 visits 1 color 50a0f0
+visitor 5 uid 77000005 visits 1 color 60c120
+visitor 6 uid 77000006 visits 1 color 70e150
+visitor 7 uid 77000007 visits 1 color 102030
+visitor 8 uid 77000008 visits 1 color 204060
+visitor 9 uid 77000009 visits 1 color 306090
+visitor 10 uid 7700000a visits 1 color 4080c0
+visitor 11 uid 7700000b visits 1 color 50a0f0
+visitor 12 uid 7700000c visits 1 color 60c120
+visitor 13 uid 7700000d visits 1 color 70e150
+back on 2

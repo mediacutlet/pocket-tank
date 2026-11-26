@@ -88,6 +88,8 @@ typedef struct gift_book {
     int8_t   peer_badge;                    /* the tank it is offered / going to: its badge (-1 = not known), for the card's words */
     double   leaving_since;
     uint32_t said_uid; uint8_t said_reason; double said_until;   /* the other tank's NO (LINK_GIVE_NO_*), on the card */
+#define GIFT_SAID_OLD 5   /* said_reason, ours alone (never on the air, after LINK_GIVE_NO_OTHER): the tank it would go to is older
+                             than 0.4.3 and would lose what this fish is - THEIR TANK NEEDS AN UPDATE (0.4.3 audit r2, R2-L4) */
     struct {                                /* a gift offered to us: the question on our glass */
         bool on; uint32_t uid, nonce, peer; passport_t pp; int8_t badge; double since;
         int8_t answer;                      /* the keeper's tap: 0 = none yet, 1 = ACCEPT, -1 = NO THANKS */

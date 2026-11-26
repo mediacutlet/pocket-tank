@@ -68,6 +68,7 @@ CUES = [
     ("welcome", 0), ("arrival", 0), ("milestone", 0), ("stage_up", 0),
     ("sleep", 0), ("wake", 0), ("low_battery", 0), ("error", 0),
     ("crab_find", 0), ("crab_coin", 0),
+    ("plop", 0),        # a fish dropped in from the top: THE FISH LAB's fry (0.4.3; Strato's drop-in-water-7-edit, the home tank's plop)
 ]
 CUE_IDS = [c for c, _ in CUES]
 LOOPS = {c for c, l in CUES if l}

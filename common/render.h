@@ -90,6 +90,42 @@ const uint16_t *render_scene_buf(unsigned *epoch);
 #define RENDER_DIRTY_WORDS (TANK_H * ((TANK_W + 31) / 32))
 void render_set_dirty_mask(uint32_t *buf);
 void render_fb_primed(const uint16_t *fb, unsigned epoch);
+#ifdef TANK_P4
+int  render_changed_rects(const short **xy);   /* the big screens: this frame's changed tiles as rectangles (x0 y0 x1 y1 each), -1 = the whole frame (render.c) */
+#endif
+#ifdef TANK_P4
+/* THE OVERLAY TILES (render.c): the big screens' display port turns only the
+ * tiles that changed, and what is drawn over the live tank after render_tank
+ * (the toast, a card, an announcement, the setup flow, the prompt, the chip)
+ * marks its own tiles as it is drawn - and signs them: `sig` is the tile's
+ * drawing (where, with what, in order), so two frames with the same sig on a
+ * tile the tank did not touch are the same pixels there. The port's tile
+ * grid is this one. render_overlay_begin starts a frame's marks without a
+ * render_tank (a page that covers the glass, drawn with no tank under it). */
+#define RENDER_TILE 32
+#define RENDER_TILES_X (TANK_W / RENDER_TILE)
+#define RENDER_TILES_Y ((TANK_H + RENDER_TILE - 1) / RENDER_TILE)   /* 25 on the 10.1; 23 on the Tab5 (720 = 22.5 tiles: the last row is 16 px) */
+#define RENDER_TILE_H(ty) ((ty) * RENDER_TILE + RENDER_TILE <= TANK_H ? RENDER_TILE : TANK_H - (ty) * RENDER_TILE)   /* a tile row's height on the glass */
+typedef struct {
+    uint8_t  drawn[RENDER_TILES_Y][RENDER_TILES_X];   /* drawn on since the tank was */
+    uint32_t sig[RENDER_TILES_Y][RENDER_TILES_X];     /* ... and what was drawn there, signed */
+} render_overlay_t;
+const render_overlay_t *render_overlay(void);
+void render_overlay_begin(const uint16_t *fb);
+/* THE DRY PASS (render.c): a page that covers the glass is drawn dry first
+ * (signed, nothing written), then for real only into the tiles this buffer
+ * does not already hold:
+ *     render_overlay_dry(fb); draw the page;
+ *     if (render_overlay_redraw()) { draw the page again; render_overlay_unmask(); }
+ *     ... whatever else is drawn over it this frame, whole ...
+ *     render_overlay_keep();
+ * The page's drawing must be the same both times (no state moved by a draw). */
+void render_overlay_dry(const uint16_t *fb);
+int  render_overlay_redraw(void);
+void render_overlay_unmask(void);
+void render_overlay_keep(void);
+void render_overlay_stats(unsigned *kept, unsigned *redrawn, unsigned *drift);   /* tiles kept / drawn by the dry pass's verdict; drift = tiles the two passes signed differently (must be 0) */
+#endif
 
 /* Stats overlay for one selected fish: selection ring + a small card of
  * visual bars (drives + personality) and stage pips. No text, no digits —
@@ -123,6 +159,8 @@ void render_fb_primed(const uint16_t *fb, unsigned epoch);
  * it and a centred card: the crab facing the glass at 2x, the pellets it has
  * found and what it is doing. */
 #define RENDER_CARD_CRAB 95
+/* fish_idx == RENDER_CARD_OCTOPUS (0.4.3): the octopus's card - the crab's layout (its size, its sand dollars, COLLECT) */
+#define RENDER_CARD_OCTOPUS 94
 /* the critter cards' arrows (0.3.9.3, Strato: "cycle through all the
  * critters from this UI"): two small boxes inside a critter card's top
  * corners, in the NEXT FISH arrow's dress - the left one steps back, the
@@ -328,6 +366,8 @@ void render_battery_info(uint16_t *fb, int stride, const bat_info_t *bi, double 
  * is earned, a stage reached, low battery, lights out), in the milestones page's modal
  * style; frac_left (1 -> 0) is its remaining time, drawn as a thin bar */
 void render_notice(const tank_t *t, uint16_t *fb, int stride, int kind, int fish, uint32_t bit, float frac_left);
+void render_xt_notice(uint16_t *fb, int stride);
+void render_debug_card2x_fail(bool on);     /* (TANK_P4, the sim) the 2x card's scratch refused: the card stays at 1x */   /* THE EXPERIMENTAL TANK'S THANK-YOU (0.4.3, xt_notice.h) */
 
 /* Milestones page (separate screen, never on the tank; 2026-09-13 redesign
  * on Strato's pixel-art badges): one row per fish - its sprite at its real
@@ -360,6 +400,7 @@ void render_frame_begin(void);
 enum { MS_WHY_NEW, MS_WHY_ZONE, MS_WHY_CHANGED, MS_WHY_OVER, MS_WHY_GAP, MS_WHY_OUT, MS_WHY_N };   /* drawn whole: not this buffer's page, a box
                                                                          out of its zone then, the page changed, drawn over since, a frame without it, a box out now */
 void render_milestones_counts(int *kept, int *whole, int why[MS_WHY_N]);   /* since boot (why may be NULL) */
+float render_debug_stretch_worst(void);  /* (the tests, 0.4.3 item 10) the named bodies through the values against the table */
 void render_debug_page_whole(bool on);   /* (the selftest's reference: the page drawn whole, nothing kept) */
 /* a tap on the page (2026-09-13, Strato: with this much to tap, a stray tap
  * must not drop the whole page): MS_TAP_CLOSE = the CLOSE button, bottom
@@ -373,7 +414,8 @@ enum { MS_TAP_NONE = 0, MS_TAP_KEPT = 1, MS_TAP_CLOSE = 2, MS_TAP_SETTINGS = 3, 
        MS_TAP_VISITORS = 5,                                                        /* the foot's plane: the VISITOR COLLECTION (2026-10-06; the icon foot, 0.4) */
        MS_TAP_TANKS = 6,                                                           /* the foot's shelf: MY TANKS (0.4; on the settings page in 0.3.9.3) */
        MS_TAP_RENAME = 16, MS_TAP_SELL = 32,                                       /* a fish's card (2026-10-01): + the fish's index */
-       MS_TAP_ABOUT = 48 };                                                        /* ... its MORE (0.4.2): + the fish's index */
+       MS_TAP_ABOUT = 48,                                                          /* ... its MORE (0.4.2): + the fish's index */
+       MS_TAP_EVOLVE = 64 };                                                       /* ... its EVOLVE (0.4.3): + the fish's index - the caller leaves the page and calls setup_begin_evolve */
 /* MS_TAP_RENAME + fish: the card's RENAME - the caller leaves the page (ack +
  * leave, as for CLOSE) and opens setup_begin_rename; when that flow ends
  * (setup_take_renamed) it brings the page back with render_milestones_show_fish.
@@ -457,6 +499,11 @@ enum { SHF_EARN, SHF_DECOR, SHF_CRIT, SHF_BG, SHF_CLOSE, SHF_N };
 #define SHOP_ROW_FRY (-1)
 #define SHOP_ROW_BG  100
 #define SHOP_ROW_BREED 90          /* SELECTIVE BREEDING's row (0.4.2): CRITTERS' last; its UNLOCK answers SHOP_TAP_BUY + SHOP_ITEM_BREED */
+#define SHOP_ROW_LAB   91          /* THE FISH LAB's row (0.4.3): after it; UNLOCK answers SHOP_TAP_BUY + SHOP_ITEM_LAB, OPEN answers SHOP_TAP_LAB */
+const char *render_shop_row_word(const tank_t *t, int row);
+const char *render_shop_why_line(const tank_t *t, int row);   /* (R2-L13 / L14) the LAB / FRY modal's reason line, as drawn */   /* (0.4.3 audit r2 R2-L14) the FRY / LAB row's button word, as drawn */
+#define SHOP_ITEM_LAB  (SD_ITEM_COUNT + 1)
+#define SHOP_TAP_LAB   4096        /* the lab's OPEN: the platform leaves the shop and calls setup_begin_lab */
 #define SHOP_ITEM_BREED SD_ITEM_COUNT   /* (past the SD_ITEMS rows: progression_breed_buy, never progression_buy) */
 bool render_shop_find(const tank_t *t, int code, int *area, int *page, int *row);
 int  render_shop_area_rows(const tank_t *t, int area);
@@ -495,6 +542,17 @@ void     render_set_grass_cache_on(bool on, int period_ms);
 void     render_set_bake_scratch(void *(*alloc)(size_t), void (*release)(void *));
 void     render_set_grass_loop(void *(*alloc)(size_t), void (*release)(void *), size_t budget);
 void     render_grass_loop_on(bool on);
+#ifdef TANK_P4
+/* THE GRASS ON TWO CORES (p4-perf 0.4.3): the platform's second core for the back grass pass - go starts fn(arg) there
+   (false: not now), wait returns when it is done. Not set: one core draws it all. */
+void     render_set_second_core(bool (*go)(void (*fn)(void *), void *arg), void (*wait)(void));
+void     render_split_on(bool on);              /* (director `split on|off`: the A/B; on by default) */
+bool     render_split_is_on(void);
+void     render_debug_split_seq(bool on);
+void     render_debug_split_frac(float f);      /* (the sim: the render core's share of the frond rows, 0.15..0.85 - where the split falls) */        /* (the sim: both shares drawn on one core in turn, the second core's block for its share) */
+int      render_split_x(void);                   /* the last frame's split column, px (0: one core) */
+void     render_split_counts(uint32_t *frames, uint32_t *phases);   /* frames and phases drawn split since the last call (the log) */
+#endif
 bool     render_grass_loop_is_on(void);
 bool     render_grass_loop_parts(double clock, const uint16_t **scene, size_t *top_bytes, const uint16_t **band, size_t *band_off, size_t *band_bytes, unsigned *ep);
 void     render_grass_loop_prof(int *n, int *bakes, int64_t *us, int *rows);   /* moments, bakes and their time since the last call, the band's rows */
@@ -788,6 +846,51 @@ void render_glyph(uint16_t *fb, int stride, int x, int y, int scale, uint32_t rg
  * fits the room a CLASSIC fish takes, times `room` (0.4): a bigger form is
  * drawn smaller, centred the same, so no page's layout changes; a classic is
  * exact. */
+/* THE PARAGON'S REVEAL (0.4.3, docs/elder-plus-0.4.3.md; working-assets/elder-plus/13_reveal_storyboard.png): a dark
+   page - the title, the fish, three tiles (a closed shell, a spinning tile, a landed part), the foot's buttons. The
+   page's state lives in setup.c (setup_begin_evolve); this is what it hands the drawing. Page coordinates. */
+#define EVP_TILE_W   120
+#define EVP_TILE_H   112                  /* (11-21, Strato: the page's words were small - the name under a tile is two lines at scale 2) */
+#define EVP_TILE_GAP 8
+#define EVP_TILE_Y   156
+#define EVP_TILE_X(k) ((PAGE_W - 3 * EVP_TILE_W - 2 * EVP_TILE_GAP) / 2 + (k) * (EVP_TILE_W + EVP_TILE_GAP))
+#define EVP_BTN_Y    278
+#define EVP_BTN_H    42
+#define EVP_BACK_X   48
+#define EVP_BACK_W   110
+#define EVP_KEEP_W   150
+#define EVP_KEEP_X   (PAGE_W - 48 - EVP_KEEP_W)
+#define EVP_FISH_Y0  40                   /* THE REVEAL KEPT: the fish's moving box, the page's width, under the title */
+#define EVP_FISH_Y1  (EVP_TILE_Y - 7)     /* ... to just above the KEEP box (6 px over the tiles) */
+enum { EVP_CLOSED, EVP_SPIN, EVP_LANDED };
+typedef struct {
+    int      fish;
+    uint8_t  state[3], part[3], ghost[3][2];   /* each tile: EVP_*, the part it shows now, the parts just above and below a spinning one */
+    float    landed_s[3];                      /* seconds since it landed (its bubbles) */
+    bool     family[3]; const char *from[3];   /* a parent's part: the two-fish mark, and FROM <NAME> when the parent is here */
+    int8_t   sel;                              /* the tile being tried on (-1: none) */
+    bool     choosing, confirm;                /* all three are known; KEEP THIS was tapped (the second ask) */
+    bool     away;                             /* the fish is visiting next door (0.4.3 audit r1 TP-7): kept only at home - no KEEP THIS, no YES */
+    float    hold;                             /* KEEP?'s YES held: 0..1 of its hold (0.4.3 audit r2, R2-L32) */
+} evo_page_t;
+void render_evo_page(const tank_t *t, uint16_t *fb, int stride, double clock, const evo_page_t *pg);
+/* THE REVEAL KEPT (0.4.3, Strato 11-22 on the square: "frame rate is rough on the CHOOSE ONE paragon feature picker ...
+ * it also feels worse when the frame rate is already low on the tank in the background"). The reveal's pages are a page
+ * of their own - its own dark ground, no tank drawn under them (it was, every frame, hidden) - held as the lab's are
+ * (render_lab_page): drawn whole while nothing else drew into the buffer and its still part is the same (setup_evo_key),
+ * and each frame after only its moving boxes drawn again: the fish being dressed (it swims), and each tile that is not a
+ * closed shell (its fish swims, the spin flicks, the bubbles rise). Everything that moves is in a box, drawn from this
+ * frame's clock; the still part holds nothing that moves. */
+int  render_evo_boxes(const evo_page_t *pg, int box[4][4]);    /* the moving boxes, page coords incl.: the fish's, then the open tiles' */
+void render_evo_bands(const tank_t *t, uint16_t *fb, int stride, double clock, const evo_page_t *pg);   /* ... each cleared and drawn again */
+void render_evo_held(const tank_t *t, uint16_t *fb, int stride, double clock);
+void render_evo_held_counts(int *band, int *whole);            /* frames that drew the boxes alone / the page whole */
+#ifdef TANK_P4
+int  render_evo_changed(const short **xy);   /* (the big screens, after render_evo_held) the boxes put on the glass at 2x, or -1: put whole */
+#endif
+/* a tap at (x, y), tank coordinates, while the READY TO EVOLVE card is up: the fish whose reveal it opens if the tap is ON
+   the card (the caller closes the card and calls setup_begin_evolve_tank), -1 otherwise (a tap beside it only closes it) */
+int  render_notice_evolve_tap(const tank_t *t, float x, float y);
 #define FISH_ROOM_ROW  1.0f            /* a classic's own box: the milestones rows, badges, small glyphs */
 #define FISH_ROOM_FAM  1.3f            /* the birth flow's family portrait */
 #define FISH_ROOM_CARD 1.5f            /* a modal: the fish card, the notices */
@@ -796,10 +899,61 @@ void render_fish_preview(uint16_t *fb, int stride, float x, float y, float size,
 /* the same, but AS THE FISH IS: its own stage (a fry shows no markings yet,
  * an elder its long tail), calm and fed - the birth flow's portrait */
 void render_fish_portrait(uint16_t *fb, int stride, float x, float y, float size, const fish_t *who, float room, double clock);
+/* THE CREATOR'S STAGE (0.4.3 item 10; setup.c's BODY and FINS pages, page coords): the grown fish large on a dark plate
+ * with its handles - beside the nose and over the back (BODY: length, height), at the tail's, the top fin's and the
+ * bottom fin's tip (FINS). A handle is a PICTURE of what a drag does, never a target: a fingertip is three of them
+ * across, so a drag anywhere on the stage works (setup.c) and the handle only shows which way, lit while it is held
+ * (held: 0 none, 1 length / tail, 2 height / top fin, 3 bottom fin). */
+/* THE LAB'S GRID (0.4.3, Strato 11-22: "align the buttons better with the lines in the UI ... we need more clean lines").
+ * Every lab page - and the first run's BODY, FINS and COLORS, which are the same pages - keeps one left and one right
+ * margin: buttons, tiles, swatch rows, the stage and the tube's rack begin on LAB_L and end on LAB_R, and the last row
+ * of controls stands on the bench's top line (LAB_BENCH_Y) and is as tall as the bench's top (LAB_BENCH_H). */
+#define LAB_L        44
+#define LAB_R        404           /* (incl. + 1: a control's right edge) */
+#define LAB_BENCH_Y  300
+#define LAB_BENCH_H  42
+#define STG_X      244             /* the fish's centre */
+#define STG_Y      188
+#define STG_SCALE  2.2f            /* the longest tail and the tallest sail still fit the plate */
+#define STG_PLATE_X 84             /* (the fry's ring fills LAB_L .. here; the plate ends on LAB_R) */
+#define STG_PLATE_Y 92
+#define STG_PLATE_W (LAB_R - STG_PLATE_X)
+#define STG_PLATE_H 174
+void render_stretch_stage(uint16_t *fb, int stride, const fish_t *who, bool fins_pg, int held, double clock, bool solid);   /* solid: the plate filled, not blended (the lab's black page: nothing under it) */
+/* THE LAB KEPT (0.4.3, Strato 11-22: "instead of showing the live tank in the background for the lab can we show a black
+ * background like the other UI menus and apply what we've learned about improving frame rate in the menus"). The lab's
+ * pages are a PAGE of their own - black, no tank drawn under them - held as MORE's pages are (render_keeper_about): a
+ * buffer drawn whole is kept while nothing else drew into it and what the still page shows is the same (setup_lab_key),
+ * and each frame after only the page's moving boxes (setup_lab_bands: the fish on its stage and the fry; the tube) are
+ * cleared and drawn again. The pour is not a page: it plays over the live tank. The first run's creator is untouched:
+ * the tank swims behind it. */
+void render_lab_page(const tank_t *t, uint16_t *fb, int stride, double clock);
+void render_lab_page_counts(int *band, int *whole);            /* frames that drew the boxes alone / the page whole */
+bool render_lab_page_last(int box[4]);                         /* the last boxes-only frame's bounding box (page coords incl.); false: none, or nothing drawn */
+/* THE FISH LAB's pictures (0.4.3 item 10; Strato approved the look 11-21, working-assets/fish-creator/fish-lab-tube-
+ * page.png). Page coords, procedural as every creature and prop is.
+ * render_lab_tube: a corked glass tube in a wooden rack, the fry floating in it, bubbles rising, `name` on the rack's
+ * brass plate. (The tube tipping over the tank was scrapped 11-22: the fry drops in from the top - tank_plop.) */
+#define LAB_TUBE_X  72             /* the glass: its left, width, top, height (a round foot). Its rack spans LAB_L .. 172, */
+#define LAB_TUBE_W  72             /* BACK's own width over it; the rack's foot stands on the bench's top line */
+#define LAB_TUBE_Y  (LAB_BENCH_Y + 2 - LAB_TUBE_H)
+#define LAB_TUBE_H  168
+#define LAB_COL2_X  190            /* the tube page's right column: its words, the recipe and POUR IT IN all begin here */
+/* THE LAB'S ROOM (Strato's art, working-assets/fish-lab/, drawn here in code - no picture in the app): a dark wall, a
+ * wooden bench across the foot of the glass from LAB_BENCH_Y down, and - scene: the tube's page - a little aquarium on
+ * the wall at the upper right with its pipes. clip: a page box (x0, y0, x1, y1 incl.) to draw inside, or NULL: the whole
+ * glass. It is part of the lab's STILL page: drawn once into the held buffer, and again only inside a moving box. */
+void render_lab_bg(uint16_t *fb, int stride, bool scene, const int *clip);
+void render_price(uint16_t *fb, int stride, int x, int y, int price, uint32_t rgb);   /* the shop's price: its sand dollar coin and the number (page coords) */
+int  render_price_w(int price);
+void render_lab_tube(uint16_t *fb, int stride, const fish_t *fry, const char *name, double clock);
+
 void render_hearts(uint16_t *fb, int stride, int x, int y, int lit, int scale);
 void render_stamp(uint16_t *fb, int stride, int cx, int cy, float deg, uint32_t rgb, const char *l1, const char *l2, int scale);   /* a turned stamp (0.4.2), page coords */   /* five hearts, `lit` filled, the rest hollow (11 x 10 px at scale 1) */
 /* the portrait at its true size, no fit (the sim's --genes boards compare the forms) */
 void render_fish_sample(uint16_t *fb, int stride, float x, float y, float size, const fish_t *who, double clock);
+void render_debug_gaze(bool on, float gx, float gy);   /* MOVING EYES (0.4.3): a fixed gaze for every fish drawn (the sheet, the tests) */
+void render_debug_gaze_still(bool on);                 /* (golden-frame tests: the eye as 0.4.2 drew it, whatever the fish looks at) */
 
 /* ---- the pages' layouts (2026-10-01). These lived in render.c; they are here
  * so the sim's selftests tap where the layout says on every board instead of
@@ -839,6 +993,17 @@ bool render_gift_up(const tank_t *t);        /* a card to show now: it has the g
 bool render_card_over_tank(const tank_t *t); /* the GIVE modal or a gift card up: the live tank's own holds and swipes stop (the evening sweep) */
 int  render_gift_take_cue(void);             /* SND_* the frame it is first seen, else -1 */
 int  render_gift_hit(float x, float y);
+/* FISH SWAP (0.4.3, swap.h): its cards, in the gift card's place - render_gift draws one when no gift card is up, and
+   render_gift_up counts it, so it comes over any page as that card does. render_swap_tap: every tap while it is up */
+enum { RENDER_SW_TAP_NONE, RENDER_SW_TAP_CARD, RENDER_SW_TAP_HELD, RENDER_SW_TAP_YES, RENDER_SW_TAP_NO, RENDER_SW_TAP_BACK,
+       RENDER_SW_TAP_CALLOFF, RENDER_SW_TAP_OK, RENDER_SW_TAP_FISH };
+enum { RENDER_SW_BTN_LEFT, RENDER_SW_BTN_RIGHT, RENDER_SW_BTN_MID, RENDER_SW_BTN_TILE0 };   /* render_swap_button: + k for tile k */
+bool render_swap_up(const tank_t *t);
+void render_swap(const tank_t *t, uint16_t *fb, int stride);
+int  render_swap_tap(const tank_t *t, float x, float y);
+int  render_swap_card(const tank_t *t);                 /* which card (0 = none): the tests */
+bool render_swap_button(const tank_t *t, int which, int *x, int *y);   /* a button's middle (tests, the director); false: not shown */
+void render_swap_forget(void);                          /* the tests: the card's own state back to nothing */
 /* the VISITOR COLLECTION page (2026-10-06): a grid of the collected, a tap
  * on one its passport with its history here; CLOSE goes back to the
  * milestones page. render_collection_tap: COLL_TAP_* */
@@ -857,7 +1022,10 @@ enum { MSF_UPG, MSF_SET, MSF_TANKS, MSF_VIS, MSF_CLOSE, MSF_N };
 void render_ms_foot_box(int which, int *x, int *y);   /* a foot square's top left, page coordinates */
 #define CRAB_CARD_W 336          /* the strawberry crab's (0.3.9): the urchin's size */
 #define CRAB_CARD_H (194 + CRIT_NAME_ROW_H)
-bool render_crab_collect_hit(const tank_t *t, float x, float y);   /* the crab card's COLLECT (a sand dollar held up, 0.3.9.4) */
+#define OCTO_CARD_W CRAB_CARD_W     /* the octopus's (0.4.3): the crab's card, to the pixel - its COLLECT stands where the crab's does */
+#define OCTO_CARD_H CRAB_CARD_H
+bool render_crab_collect_hit(const tank_t *t, float x, float y);
+bool render_octo_collect_hit(const tank_t *t, float x, float y);   /* the octopus card's COLLECT (0.4.3): the crab's box */   /* the crab card's COLLECT (a sand dollar held up, 0.3.9.4) */
 #define SEAHORSE_CARD_W 336
 #define SEAHORSE_CARD_H (188 + CRIT_NAME_ROW_H)
 /* the milestones page (the bowl has its own rows and buttons: render.c) */
@@ -870,9 +1038,87 @@ bool render_crab_collect_hit(const tank_t *t, float x, float y);   /* the crab c
 #define MSP_ROW_BADGE 1                 /* ... the badges' top ... */
 #define MSP_ROW_BAR   33                /* ... the bar under a gate still owed */
 #else
+#ifdef TANK_P4
+/* THE BIG SCREENS' KEEPER PAGE (0.4.3): ten fish live there, and the page was laid out for six rows. Past six the rows
+ * grow out of the page both ways - half the extra rows above it, and the TANK row and the icon foot moved down by the
+ * other half - so the page stays in the middle of the glass: twelve rows (ten fish, the NEW FRY row or a visitor, THE
+ * WAITING ROW) stand 120 px higher and the foot 120 px lower, inside the Tab5's 720. Up to six rows it is the pocket
+ * tanks' page to the pixel. render_ms_rows: the rows in use, set from the tank each time the page is drawn or tapped. */
+void render_overlay_taint(void);         /* THE TAINT, said by the frame loop (a page it drew whole) */
+void render_overlay_forget(const uint16_t *fb);
+bool render_overlay_tainted(void);       /* ... this frame met a writer the signs do not cover: draw and turn it whole */
+bool render_page_dry_ok(bool own_ink);   /* THE DRY PASS: may this page be taken dry (render.c) */
+int render_milestones_changed(const short **xy);   /* THE KEPT PAGE'S BOXES: this frame's changed boxes (frame px), or -1 = drawn whole */
+void render_p4_restored(const uint16_t *fb, int x0, int y0, int w, int h);   /* THE FILM KEPT: the port put the scene back there (w < 0: everywhere) */
+void render_film_kept_stats(unsigned *cells, unsigned *skipped);
+/* THE BIG SCREENS' UPGRADES PAGE (render_big.c): its rail's other pages answer these (the touch port goes there) */
+enum { SHOP_TAP_TO_TANK = 3, SHOP_TAP_TO_SETTINGS = 4, SHOP_TAP_TO_VISITORS = 5, SHOP_TAP_TO_TANKS = 6 };
+void render_big_pocket_pages(bool on);      /* the pocket shop and settings pages instead (the suites written for them) */
+/* THE BIG SCREENS' SETTINGS PAGE (render_big.c): render_settings_touch's answers for its rail (the touch port goes there) */
+enum { SET_TAP_TO_TANK = 20, SET_TAP_TO_KEEPER = 21, SET_TAP_TO_SHOP = 22, SET_TAP_TO_VISITORS = 23, SET_TAP_TO_TANKS = 24 };
+enum { BIGSET_BRIGHT, BIGSET_VOLUME, BIGSET_LIGHT_PREV, BIGSET_LIGHT_NEXT, BIGSET_VIG_ON, BIGSET_VIG_OFF, BIGSET_FEED_ON, BIGSET_FEED_OFF, BIGSET_UPDATES, BIGSET_LINK };
+void render_big_settings_where(int what, int pct, int *x, int *y);   /* (the tests) a slider at a percent, a button's middle: frame px */
+void render_big_shop_pick(const tank_t *t, int area, int code, bool earn);   /* (the director, the shots) that area, that row picked */
+bool render_big_shop_where(const tank_t *t, int code, int btn, int *x, int *y);   /* (the tests) a row's middle (btn < 0), the pane's button btn */
+void render_big_shop_tab(int area, int *x, int *y);
+/* THE BIG SCREENS' MY TANKS: the rail's other pages (main.c acts), the place whose card is open and whether the tank on
+   the glass has a keeper page (render_big_shelf_state, before render_shelf), where its controls are (the tests) */
+enum { SHELF_TAP_TO_KEEPER = 7, SHELF_TAP_TO_SHOP = 8, SHELF_TAP_TO_VISITORS = 9 };
+enum { BIGSH_SLOT0 = 0, BIGSH_LIB = 8, BIGSH_LOCK, BIGSH_PREV, BIGSH_NEXT, BIGSH_DORMANT, BIGSH_PAUSED, BIGSH_SWAP, BIGSH_RENAME, BIGSH_MORE, BIGSH_GLASS_RENAME, BIGSH_RAIL0 = 20 };
+void render_big_shelf_state(int sel, bool fish_glass);
+void render_big_shelf_where(int what, int *x, int *y);
+/* THE BIG SCREENS' VISITORS: the rail's other pages (KEEPER is COLL_TAP_CLOSE); a visitor's cell on the page (the tests) */
+enum { COLL_TAP_TO_TANK = 3, COLL_TAP_TO_SHOP = 4, COLL_TAP_TO_SETTINGS = 5, COLL_TAP_TO_TANKS = 6 };
+void render_big_visitor_where(int j, int *x, int *y);
+enum { BIGLIB_ROW0 = 0, BIGLIB_BACK = 2, BIGLIB_NEW = 3, BIGLIB_THEME0 = 4 };   /* THE LIBRARY's row buttons, BACK; PICK A THEME's NEW TANK, its tanks */
+void render_big_library_where(int what, int *x, int *y);
+/* THE EXPERIMENTAL TANKS ON THE BIG SCREENS (0.4.3, Strato 11-23 "yes build the note, move the tanks to 0.4.4"): THE
+   LIBRARY's row on page `page` (0, 1) that opens the note (NOT AVAILABLE ON / HOME TANK YET.), never the tank - the jelly
+   tank, the piranhas, the minnows (main.c asks); the note's OK and its card's corners at 2x (the tests) */
+bool render_big_library_row_note(int page, int row);
+enum { BIGLN_OK = 0, BIGLN_TL = 1, BIGLN_BR = 2 };
+void render_big_library_note_where(int what, int *x, int *y);
+/* THE WIDE FRAME for a page drawn in another file (update.c's UPDATES): its places (frame px), the rail with one button lit
+   and the rest dim, a pane, the rail's hit (a button's index, 5 = CLOSE, -1 = not the rail); A STILL PAGE: begin says
+   "this buffer holds it" (draw nothing), else draw it whole and say end; drawn = this frame's page is a still page */
+#define BIG_WC_X 264
+#define BIG_WC_Y 32
+#define BIG_WC_W 984
+#define BIG_WC_H (TANK_H - 64)
+#define BIG_WL_X 264
+#define BIG_WL_W 480
+#define BIG_WD_X 776
+#define BIG_WD_W 472
+#define BIG_RAIL_SETTINGS 4
+bool render_big_pocket(void);
+void render_big_frame_sub(uint16_t *fb, int stride, int lit);
+void render_big_pane(uint16_t *fb, int stride, int x, int w, bool strong);
+int  render_big_rail_hit(float x, float y);
+bool render_big_still_begin(uint16_t *fb, int stride, uint32_t key);
+void render_big_still_end(uint16_t *fb, uint32_t key);
+bool render_big_still_drawn(void);
+void render_big_advanced_where(int hit, int *x, int *y);
+enum { BIGUPD_CHECK, BIGUPD_BACK, BIGUPD_ADD, BIGUPD_FORGET0 };
+void updates_big_where(int what, int *x, int *y);   /* (update.c, the tests) the wide UPDATES page's controls */
+enum { BIGUM_MID, BIGUM_L, BIGUM_R, BIGUM_A_L, BIGUM_A_R, BIGUM_A_MID, BIGUM_LIST_L, BIGUM_LIST_R, BIGUM_PG_UP, BIGUM_PG_DOWN,
+       BIGUM_ROW0 = 100, BIGUM_KEY0 = 200 };       /* row B's three places, row A's, the list's foot, its arrows, a row on the page shown, a key */
+void update_big_where(int what, int *x, int *y);    /* (update.c, the tests) update mode's wide pages' controls */
+int  update_big_rows(void);                         /* the wide network list's rows a page */
+void render_big_tab(int k);                 /* THE BIG SCREENS' KEEPER PAGE (render_big.c): the fish pane's tab - 0 MILESTONES, 1 STORY, 2 TRAITS */
+void render_big_select_fish(int slot);      /* ... a fish's pane by slot, a visitor's too (the tests) */
+const char *render_big_stage_line(const tank_t *t);   /* ... its stage line as drawn: ELDER, SOMETHING IS HAPPENING, PARAGON - <part> (NULL: no own fish's pane) */
+bool render_big_evolve_box(const tank_t *t, int *x, int *y, int *w, int *h);   /* ... its EVOLVE button (frame px), when the pane shows it */
+const char *render_big_list_word(const tank_t *t, int slot);   /* ... a home fish's word in the list: its stage, or PARAGON once evolved */
+int render_ms_rows(void);
+int render_ms_up(void);
+int render_ms_down(void);
+#define MSP_ROW_Y0    (4 - render_ms_up())
+#define MSP_TANK_Y    (254 + render_ms_down())
+#else
 #define MSP_ROW_Y0    4
-#define MSP_ROW_H     40
 #define MSP_TANK_Y    254
+#endif
+#define MSP_ROW_H     40
 #define MSP_ROW_MID   20
 #define MSP_ROW_STRIP 30
 #define MSP_ROW_BADGE 4
@@ -915,6 +1161,8 @@ bool render_crab_collect_hit(const tank_t *t, float x, float y);   /* the crab c
 #define MSP_FOOT_Y    371               /* the arcs: the outer corners (frame x 33, 376) at 6 px in; 35 px off the bottom at the middle */
 #elif defined(TANK_SQUARE)
 #define MSP_FOOT_Y    382               /* flat: the last row at frame y 467, 12 above the glass's 480 (the 40 px corners end before the buttons) */
+#elif defined(TANK_P4)
+#define MSP_FOOT_Y    (326 + render_ms_down())   /* (THE BIG SCREENS' KEEPER PAGE: down with the TANK row past six rows) */
 #else
 #define MSP_FOOT_Y    326               /* flat: the last row at y 355, 12 above the glass's 368 (was 312) */
 #endif
@@ -1188,6 +1436,13 @@ void render_debug_crab_stack_old(bool on);   /* (tests: THE CRAB'S STACK off - t
 void render_debug_climb_stack_old(bool on);   /* (tests: --selftest-crab-climb's control - the crab climbing the volcano out of THE CRAB'S STACK, over every piece, as before 0.4.2) */
 void render_debug_climb_grass_old(bool on);   /* (tests: --selftest-crab-depth's control - the crab climbing a volcano BEHIND at its own swim depth against the grass and its old place in the animal pass, as before the fix) */
 void render_debug_gl_hold(bool on);   /* (tests: the grass loop locked holds its moment - the frames after are the last frame's moment, to compare) */
+int  render_debug_den_px(void);              /* (the sim's: pixels the den's shade changed on an animal inside since the last call) */
+void render_debug_den_shade(int v);           /* (the sim's: 0 = the flat tint over the opening, as before 0.4.3's fix; 1 = by what is inside) */
+void render_debug_den_lit(float g);           /* (the sim's: the lamp on, what is inside the den brightened x g at the back wall; 0 = not) */
+void render_debug_den_glow(float k);         /* (the sim's: the den lamp's strength; 0.95 was the first) */
+void render_debug_arch_shade_off(bool on);   /* (the sim's control, 0.4.3: no den shade) */
+void render_debug_den_open(bool on);        /* (tests: --selftest-den's control - the castle's den not painted, its arch open as before 0.4.3) */
+void render_debug_castle_042(bool on);      /* (the audit's, PT_CASTLE_042: the den open and no lights - the castle as 0.4.2 drew it, to compare frames with an older build) */
 void render_debug_roost_pass_old(bool on);   /* (tests: --selftest-roost-pass's control - a piece behind an animal comes back over the crab in its shelter from the scene, as before 0.4) */
 void render_debug_gl_skip_old(bool on);   /* (tests: the pieces a bed keeps off - its order - out of the grass loop's look, as before 0.4: a re-ranked plant served the old order) */
 void render_debug_gl_odd_refuse(bool on);   /* (tests: the grass loop's plan never gets its odd-frond masks, as a plan held by PSRAM - set before it is planned) */
@@ -1201,6 +1456,7 @@ void render_debug_gl_through_old(bool on);   /* (tests: a fine moment of the gra
 void render_debug_gl_ceil_old(bool on);   /* (tests: THE CEILING off - the grass loop's band keeps its room to grow past the tallest the grass grows, as before 0.4.1) */
 void render_depth_off(bool off);
 void render_debug_front_keep_old(bool on);   /* (tests: --selftest-front-keep's control, the 0.3.9.5 restore) */
+void render_debug_badge_old(bool on);        /* (tests: --selftest-badge-depth's control, a visitor's badge drawn after its fish as before 0.4.3) */
 void render_debug_seahorse_stack_off(bool on);   /* (tests: --selftest-seahorse-stack's control, the seahorse over the pieces before its bed as 0.3.9.6 drew it) */
 void render_debug_castle_row_only(bool on);   /* (tests / director keeptest old: 0.3.9.6's castle, the front row alone over an animal behind the grass) */
 void render_debug_fish_slot_order(bool on);   /* (tests: the animal pass by the old ranks and slots again, whatever their depths - the control of --selftest-fish-pair) */
@@ -1272,6 +1528,22 @@ enum { LIB_TAP_NONE, LIB_TAP_BACK, LIB_TAP_PREV, LIB_TAP_NEXT, LIB_TAP_ROW0 = 10
 void render_library_set_page(int page, int pages);   /* (0.4.2) the pager under the rows: page 1.., of pages */
 /* a locked row's note (J6): what the tank is and who has it for now, over the library; OK closes it */
 void render_library_note(uint16_t *fb, int stride);
+/* THE LINK DID NOT START (0.4.3, the big screens only: render_big.c): link mode's page when the radio can't start */
+void render_link_nostart(uint16_t *fb, int stride);
+int  render_link_nostart_tap(float x, float y);                   /* LNOTE_TAP_* */
+void render_big_link_note_where(int what, int *x, int *y);        /* BIGLN_*: OK's middle, the card's corners (the tests) */
+const char *render_big_link_note_line(int i);                     /* its words, title first; NULL past the last */
+/* STARTING THE LINK (0.4.3, the 11-24 audit): the same card while the big screen's radio starts (link_note.h); its taps are
+   render_link_nostart_tap's */
+void render_link_wait(uint16_t *fb, int stride);
+void render_link_escape(uint16_t *fb, int stride);                /* the restart chain's card: STARTING LINK (its OK: render_link_nostart_tap) */
+const char *render_big_link_esc_line(int i);                      /* its lines as drawn, title first (line 1 wrapped); NULL past the last */
+const char *render_big_link_wait_line(int i);                     /* its words, title first; NULL past the last */
+/* the one install's handover cards (0.4.3): UPDATING YOUR DEVICE with a bar (pct 0..100, no button) and THE LINK UPDATE
+   STOPPED (OK closes it: render_link_nostart_tap) - retry: TAP LINK TO TRY AGAIN, else GET HELP AT POCKETANK.COM/HELP */
+void render_link_updating(uint16_t *fb, int stride, int pct);
+void render_link_update_failed(uint16_t *fb, int stride, bool retry);
+const char *render_big_link_upd_line(int fail, int i);           /* fail 0: UPDATING, 1: STOPPED (a try left), 2: STOPPED (none left) */
 void render_library_note_name(const char *name);   /* whose note: the row's name over it (NULL: JELLY TANK) */
 enum { LNOTE_TAP_NONE, LNOTE_TAP_OK, LNOTE_TAP_OUTSIDE };
 int  render_library_note_tap(float x, float y);
@@ -1291,6 +1563,9 @@ void render_shelf_set_xt(const char *creatures);
 /* PICK A THEME: GET on the jelly row opens it - three tanks (a picture each, JELLY_THEMES order), the
  * picked one ringed and the others dimmed (-1: none yet, NEW TANK dim); the pick is the tank's for good */
 void render_jelly_pick(uint16_t *fb, int stride, const char *const names[3], const uint16_t *const thumbs[3], int picked);
+/* (0.4.3, up to three jelly tanks, one a theme) the themes the board has already (bit k): each dim, INSTALLED under its
+   name, never the pick - set before render_jelly_pick / _pic / _loading (0 = none, as before 0.4.3) */
+void render_jelly_pick_set_have(unsigned themes);
 enum { JP_TAP_NONE, JP_TAP_BACK, JP_TAP_NEW, JP_TAP_THEME0 = 10 };
 int  render_jelly_pick_tap(float x, float y);
 void render_jelly_pick_loading(uint16_t *fb, int stride, unsigned themes, int picked, float t);

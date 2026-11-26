@@ -34,6 +34,7 @@ goal_t advisor_core_infer(const char *state, int *tokens_out);
  * T = 1) or greedy. Never a fallback - the model owns the decision either
  * way; sampling just stops collapsing its variety into the mode. */
 extern bool  advisor_core_sample;
+void  advisor_core_reseed(uint32_t seed);   /* the sampler's stream from here (0: unchanged) */
 extern bool advisor_core_two_pass;             /* the goal + " urgency" as one batched pass (default on); off = the old three passes */
 extern float advisor_core_temp;
 /* last decision's full goal distribution (for debug / narration) */

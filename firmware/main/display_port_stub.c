@@ -13,6 +13,9 @@ void display_port_sleep(void) {}
 void display_port_wake(void) {}
 bool display_port_panel_power_check(void) { return false; }
 uint32_t display_port_panel_heals(void) { return 0; }
+int  display_port_boot_reg90(void) { return -1; }
+bool display_port_panel_up(void) { return false; }
+bool display_port_board_back(void) { return false; }
 void display_port_panel_rail_test_off(void) {}
 void display_port_set_inverted(bool inverted) { (void)inverted; }
 void display_port_set_quarter(int q) { (void)q; }

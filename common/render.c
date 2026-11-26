@@ -10842,14 +10842,20 @@ static void passport_card_draw(ctx_t *c, uint16_t *fb, int stride, const tank_t 
     /* this tank's stamp: two rings, our badge, VISITED */
     if (t->link_badge >= 0) {
 #ifdef CONFIG_POCKET_TANK_320X240
-        /* (this fork) the word keeps its 41 px at scale 1, so the rings stay wide enough to hold it under the badge */
-        enum { R1 = 28, R0 = 25, BADGE_DY = -6, WORD_DY = 3 };
-        _Static_assert(R0 * R0 > (21 + 1) * (21 + 1) + (WORD_DY + 7) * (WORD_DY + 7) && UI(142) + R1 < PP_M1_Y && UI(52) > R1 + 2,
-                       "(this fork) the passport's VISITED stamp: its word inside the inner ring, the rings over the machine lines and on the card");
+        /* (this fork) the word keeps its 41 px at scale 1, so the rings stay wide enough to hold it under the badge; and
+           the stamp stands 3 px under UI(142), where its outer ring ran through the last letter of a 15-letter FORM (every
+           CLASSIC-finned one: BULBOUS CLASSIC). The FORM value's corner - the longest form's right edge, the row under its
+           letters - stays outside that ring */
+        enum { R1 = 28, R0 = 25, BADGE_DY = -6, WORD_DY = 3, STAMP_DY = 3 };
+        enum { FORM_X1 = UI(12) + UI(100) + UI(12) + 15 * 6 * UI_TEXT(2) - UI_TEXT(2), FORM_Y1 = UI(33) + 2 * UI(26) + 7 + UI(3) + 7 * UI_TEXT(2),
+               STAMP_X = PASSPORT_CARD_W - UI(52), STAMP_Y = UI(142) + STAMP_DY };   /* (card coordinates) */
+        _Static_assert(R0 * R0 > (21 + 1) * (21 + 1) + (WORD_DY + 7) * (WORD_DY + 7) && STAMP_Y + R1 < PP_M1_Y && UI(52) > R1 + 2 &&
+                       (STAMP_X - FORM_X1) * (STAMP_X - FORM_X1) + (STAMP_Y - FORM_Y1) * (STAMP_Y - FORM_Y1) > R1 * R1,
+                       "(this fork) the passport's VISITED stamp: its word inside the inner ring, the rings over the machine lines, clear of the FORM value and on the card");
 #else
-        enum { R1 = 30, R0 = 27, BADGE_DY = -5, WORD_DY = 9 };
+        enum { R1 = 30, R0 = 27, BADGE_DY = -5, WORD_DY = 9, STAMP_DY = 0 };
 #endif
-        const float sx = X + W - UI(52), sy = Y + UI(142);
+        const float sx = X + W - UI(52), sy = Y + UI(142) + STAMP_DY;
         for (int a = 0; a < 360; a += 2) {
             float r = a * 0.0174533f;
             px_blend(c, (int)(sx + cosf(r) * R1), (int)(sy + sinf(r) * R1), GOLD, 170);

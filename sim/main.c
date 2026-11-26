@@ -6720,6 +6720,20 @@ static int shop_shot(const char *prefix) {
         tank.clock += 5; render_shop_tap(&tank, PAGE_X + 100, PAGE_Y + SHP_ROW_Y0 + 20 + SHP_ROW_DY * k); SHOT(NM[k]);
         tank.clock += 5; render_shop_tap(&tank, PAGE_X + 10, PAGE_Y + 10);
     }
+#ifdef CONFIG_POCKET_TANK_320X240
+    {   /* (this fork) THE FISH LAB's pop-up short of a price, not owned and owned (the owned one says so in its button's
+           place): this world's pop-up has no room under the price for upstream's YOU HAVE line with its coin (render.c,
+           shop_lab_modal) - pages for this world alone */
+        const uint32_t u0 = tank.sd_unlocks; const int bal0 = tank.sd_balance;
+        for (int own = 0; own < 2; own++) {
+            tank.sd_unlocks = own ? (u0 | SD_ITEM_LAB) : (u0 & ~(uint32_t)SD_ITEM_LAB); tank.sd_balance = 120;
+            int a_, pg_, r_ = 0; render_shop_leave(); render_shop_find(&tank, SHOP_ROW_LAB, &a_, &pg_, &r_);
+            FOOT(SHF_DECOR + a_); for (int k = 0; k < pg_; k++) NEXT();
+            tank.clock += 5; render_shop_tap(&tank, PAGE_X + 100, PAGE_Y + SHP_ROW_Y0 + 20 + SHP_ROW_DY * r_); SHOT(own ? "lab_modal_owned_short" : "lab_modal_short");
+        }
+        render_shop_leave(); tank.sd_unlocks = u0; tank.sd_balance = bal0;
+    }
+#endif
     render_shop_leave();
     FOOT(0); SHOT("earn");
     #undef SHOT

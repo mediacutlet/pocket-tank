@@ -1875,6 +1875,21 @@ _Static_assert(MSP_CARD_SUB_Y + 7 * UI_TEXT(2) <= MSP_CARD_H - UI(10) - MSP_CARD
 #define SHP_ARROW_X1  (CYD_GLASS_X(TANK_W - UI(28)) - SHP_ARROW_W)   /* next */
 #undef  SHP_ARROW_X0
 #define SHP_ARROW_X0  (SHP_ARROW_X1 - SHP_ARROW_W - UI(8))         /* previous */
+/* the shop's foot (0.4.1) is the keeper page's squares (render_ms_foot_box), 22 px with the
+   half-size sprites; the area showing keeps its bar under its square at that half size, 8 x 2
+   and 2 px under it, in the MSP_FOOT_GAP the glass leaves there (upstream's 16 x 2, 4 px under
+   a 44 px square, would start on the glass's last row and end past it). The fourth row - its
+   art the lowest thing it draws - ends above the squares, and its tap band (to UI(8) over the
+   next row's top) above the room the squares' taps are given (UI(8) over them, shp_tap) */
+#define SHF_BAR_W     8
+#define SHF_BAR_H     2
+#define SHF_BAR_DY    2
+_Static_assert(SHF_BAR_DY + SHF_BAR_H <= MSP_FOOT_GAP && SHP_ROW_Y0 + (SHP_PER_PAGE - 1) * SHP_ROW_DY + SHP_ROW_ICON < MSP_FOOT_TOP &&
+               SHP_ROW_Y0 + SHP_PER_PAGE * SHP_ROW_DY - UI(8) <= MSP_FOOT_TOP - UI(8),
+               "the shop: the area's bar on the glass, the fourth row and its taps clear of the foot");
+_Static_assert(SHP_MODAL_X >= 0 && SHP_MODAL_X + SHP_MODAL_W <= PAGE_W && SHP_MODAL_Y + SHP_MODAL_H <= PAGE_H &&
+               SHP_EARN_MODAL_Y + SHP_EARN_MODAL_H <= PAGE_H && 3 * SHP_FRY_BOX_W + 2 * SHP_FRY_BOX_GAP <= SHP_MODAL_W - 4,
+               "the shop's pop-ups on the page, the fry's three boxes inside the double edge of theirs");
 /* settings at a 28 px pitch, which filled the glass with no slack: the title,
    BRIGHTNESS, VOLUME, LIGHTS OUT, AUTO FEED, the tile row (0.4.2) - its first
    tile chosen at run time, SCREEN with no IMU, ROTATION with one

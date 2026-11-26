@@ -15210,7 +15210,17 @@ static void price_tag(ctx_t *c, int x, int y, int price, uint32_t rgb) {   /* th
 /* (0.4.3, THE FISH LAB's last page) the shop's own price - its coin and the number - for a page outside the shop: one
    draw, one spacing. render_price_w: how wide it is */
 void render_price(uint16_t *fb, int stride, int x, int y, int price, uint32_t rgb) { ctx_t c = ctx_page(fb, stride); price_tag(&c, x, y, price, rgb); }
-int  render_price_w(int price) { char n[16]; snprintf(n, sizeof n, "%d", price); return 20 + text_w(n, 2); }
+int  render_price_w(int price) { char n[16]; snprintf(n, sizeof n, "%d", price); return 16 + UI(4) + text_w(n, UI_TEXT(2)); }   /* (this fork: price_tag's own gap and scale) */
+/* (this fork) a pop-up's price line: upstream's Y + 164, 20 px over the line under it (YOU HAVE). Its 16 px coin keeps its
+   size (ui.h), and on a 320 x 240 board that line comes UI(20), 13 px, under it: the coin reached into the line. There the
+   price rises UI(4), as the fry's does (shop_fry_modal), its coin clear of the line under it and that line of the button */
+#ifdef CONFIG_POCKET_TANK_320X240
+#define SHP_PRICE_Y   UI(160)
+_Static_assert(SHP_PRICE_Y - 1 + 16 < UI(184) && UI(184) + 7 * UI_TEXT(2) < SHP_MODAL_H - UI(12) - MSP_HOW_H,
+               "a pop-up's price coin clear of the line under it, and that line clear of the pop-up's button");
+#else
+#define SHP_PRICE_Y   164
+#endif
 /* the FRY row (0.3.5): the first row once a fish has been sold. Rows are
  * numbered across the pages; row 0 is FRY when it shows, the items after */
 #define SHP_MODAL_FRY 99             /* g_shp_modal: the fry's modal */
@@ -15254,15 +15264,16 @@ static const icon_t *bg_thumb(int bg) {
 static bool shp_bg_owned(const tank_t *t, int bg) { return bg == BG_OPEN || (t->sd_unlocks & SD_ITEM_BG(bg)); }
 static void shop_bg_row(ctx_t *c, const tank_t *t, int bg, int top) {   /* a background's row: its picture, its name, IN USE / OWNED / its price, the button */
     const bool owned = shp_bg_owned(t, bg), now = t->bg_now == bg, can = t->sd_balance >= SD_PRICE_BG;
-    blit_icon(c, 32, top, bg_thumb(bg), 255);
-    draw_text(c, 76, top + 2, 2, 0xffffff, bg_name(bg));
-    if (now) draw_text(c, 76, top + 20, 2, MSP_TEAL, "IN USE");
-    else if (owned) draw_text(c, 76, top + 20, 2, MSP_TEAL, "OWNED");
-    else price_tag(c, 76, top + 20, SD_PRICE_BG, can ? MSP_TEAL : MSP_QUIET);
+    const int by = top + SHP_BTN_DY;                         /* (this fork) the item rows' columns, scale and button (render.h): the literals elsewhere */
+    blit_icon(c, SHP_ROW_X, top, bg_thumb(bg), 255);         /* (the 32 px picture at 1x on every board: pixel art) */
+    draw_text(c, SHP_TEXT_X, top + UI(2), UI_TEXT(2), 0xffffff, bg_name(bg));
+    if (now) draw_text(c, SHP_TEXT_X, top + UI(20), UI_TEXT(2), MSP_TEAL, "IN USE");
+    else if (owned) draw_text(c, SHP_TEXT_X, top + UI(20), UI_TEXT(2), MSP_TEAL, "OWNED");
+    else price_tag(c, SHP_TEXT_X, top + UI(20), SD_PRICE_BG, can ? MSP_TEAL : MSP_QUIET);
     const char *lab = now ? "IN USE" : owned ? "USE" : "UNLOCK";
-    if (now || (!owned && !can)) button(c, SHP_BTN_X, top, SHP_BTN_W, SHP_BTN_H, now ? MSP_INK : 0x1c2f36, MSP_DIM, lab, 2);
-    else { button(c, SHP_BTN_X, top, SHP_BTN_W, SHP_BTN_H, MSP_TEAL, MSP_TEAL, lab, 2);
-           draw_text(c, SHP_BTN_X + (SHP_BTN_W - text_w(lab, 2)) / 2, top + (SHP_BTN_H - 14) / 2, 2, MSP_INK, lab); }
+    if (now || (!owned && !can)) button(c, SHP_BTN_X, by, SHP_BTN_W, SHP_BTN_H, now ? MSP_INK : 0x1c2f36, MSP_DIM, lab, UI_TEXT(2));
+    else { button(c, SHP_BTN_X, by, SHP_BTN_W, SHP_BTN_H, MSP_TEAL, MSP_TEAL, lab, UI_TEXT(2));
+           draw_text(c, SHP_BTN_X + (SHP_BTN_W - text_w(lab, UI_TEXT(2))) / 2, by + (SHP_BTN_H - 7 * UI_TEXT(2)) / 2, UI_TEXT(2), MSP_INK, lab); }
 }
 /* THE SHOP'S FOOT: five squares where the keeper page has its five (render_ms_foot_box) - ?, the three areas, X. The bowl
    puts the ? in the cap, as the keeper page puts its cog */
@@ -15282,12 +15293,21 @@ static void shop_foot(ctx_t *c) {
         if (sel) {                                            /* the area showing: a brighter panel, a double edge, a small bar under it */
             button(c, x, y, MSP_FOOT_SQ, MSP_FOOT_SQ, 0x26444e, MSP_TEAL, "", 2);
             rect_edge(c, x + 2, y + 2, MSP_FOOT_SQ - 4, MSP_FOOT_SQ - 4, MSP_TEAL);
+#ifdef CONFIG_POCKET_TANK_320X240
+            rect_fill(c, x + (MSP_FOOT_SQ - SHF_BAR_W) / 2, y + MSP_FOOT_SQ + SHF_BAR_DY, SHF_BAR_W, SHF_BAR_H, MSP_TEAL);   /* (this fork) the bar at
+                                                                                  the half-size foot's scale, inside the glass (render.h) */
+#else
             rect_fill(c, x + MSP_FOOT_SQ / 2 - 8, y + MSP_FOOT_SQ + 4, 16, 2, MSP_TEAL);
+#endif
         } else button(c, x, y, MSP_FOOT_SQ, MSP_FOOT_SQ, 0x1c2f36, MSP_TEAL, "", 2);
         const icon_t *ic = b == SHF_EARN ? &icon_shop_tab_earn : b == SHF_DECOR ? &icon_shop_tab_decor : b == SHF_CRIT ? &icon_shop_crab
                          : b == SHF_BG ? &icon_shop_tab_bg : &icon_foot_close;   /* (the crab: our own shop sprite, Strato 11-04 - it fills
                                                                                   *  the square like the 36 px glyphs; the snail read small) */
+#ifdef CONFIG_POCKET_TANK_320X240
+        const int lift = b == SHF_CRIT ? 2 : 0;                  /* (this fork) the half-size crab stands on rows 5..15 of 16: half the lift */
+#else
         const int lift = b == SHF_CRIT ? 5 : 0;                  /* (the crab's sprite stands on rows 11..31 of 32: centered by its body) */
+#endif
         ic = foot_art(ic);   /* (this fork) the half-size copy on a 320 x 240 board */
         blit_icon(c, x + (MSP_FOOT_SQ - ic->w) / 2, y + (MSP_FOOT_SQ - ic->h) / 2 - lift, ic, 255);
     }
@@ -15312,33 +15332,35 @@ static int fry_first_left(void) {
 static const char *const BREED_NAME = "SELECTIVE BREEDING", *const BREED_W1 = "A TOOL TO CHOOSE THE TWO", *const BREED_W2 = "PARENTS OF YOUR NEXT FRY";
 static void shop_breed_row(ctx_t *c, const tank_t *t, int top) {
     const bool owned = progression_breed_owned(t), can = t->sd_balance >= SD_PRICE_BREED;
-    if (owned) blit_icon(c, 32, top, &icon_shop_breed, 255); else blit_icon_locked(c, 32, top, &icon_shop_breed);
-    draw_text(c, 76, top + 2, 2, 0xffffff, BREED_NAME);
-    if (owned) draw_text(c, 76, top + 20, 2, MSP_TEAL, "IN THE TOOLBOX");
-    else price_tag(c, 76, top + 20, SD_PRICE_BREED, can ? MSP_TEAL : MSP_QUIET);
-    if (owned) button(c, SHP_BTN_X, top, SHP_BTN_W, SHP_BTN_H, MSP_INK, MSP_DIM, "OWNED", 2);
-    else if (can) { button(c, SHP_BTN_X, top, SHP_BTN_W, SHP_BTN_H, MSP_TEAL, MSP_TEAL, "UNLOCK", 2);
-                    draw_text(c, SHP_BTN_X + (SHP_BTN_W - text_w("UNLOCK", 2)) / 2, top + (SHP_BTN_H - 14) / 2, 2, MSP_INK, "UNLOCK"); }
-    else button(c, SHP_BTN_X, top, SHP_BTN_W, SHP_BTN_H, 0x1c2f36, MSP_DIM, "UNLOCK", 2);
+    const int by = top + SHP_BTN_DY;                         /* (this fork) the item rows' columns, scale and button (render.h): the literals elsewhere */
+    if (owned) blit_icon(c, SHP_ROW_X, top, &icon_shop_breed, 255); else blit_icon_locked(c, SHP_ROW_X, top, &icon_shop_breed);
+    draw_text(c, SHP_TEXT_X, top + UI(2), UI_TEXT(2), 0xffffff, BREED_NAME);
+    if (owned) draw_text(c, SHP_TEXT_X, top + UI(20), UI_TEXT(2), MSP_TEAL, "IN THE TOOLBOX");
+    else price_tag(c, SHP_TEXT_X, top + UI(20), SD_PRICE_BREED, can ? MSP_TEAL : MSP_QUIET);
+    if (owned) button(c, SHP_BTN_X, by, SHP_BTN_W, SHP_BTN_H, MSP_INK, MSP_DIM, "OWNED", UI_TEXT(2));
+    else if (can) { button(c, SHP_BTN_X, by, SHP_BTN_W, SHP_BTN_H, MSP_TEAL, MSP_TEAL, "UNLOCK", UI_TEXT(2));
+                    draw_text(c, SHP_BTN_X + (SHP_BTN_W - text_w("UNLOCK", UI_TEXT(2))) / 2, by + (SHP_BTN_H - 7 * UI_TEXT(2)) / 2, UI_TEXT(2), MSP_INK, "UNLOCK"); }
+    else button(c, SHP_BTN_X, by, SHP_BTN_W, SHP_BTN_H, 0x1c2f36, MSP_DIM, "UNLOCK", UI_TEXT(2));
 }
 static void shop_breed_modal(ctx_t *c, const tank_t *t) {
     const int X = SHP_MODAL_X, W = SHP_MODAL_W, Y = SHP_MODAL_Y, H = SHP_MODAL_H;
     const bool owned = progression_breed_owned(t), can = t->sd_balance >= SD_PRICE_BREED;
     rect_fill(c, X, Y, W, H, 0x04141a);
     rect_edge(c, X, Y, W, H, MSP_TEAL); rect_edge(c, X + 1, Y + 1, W - 2, H - 2, 0x1c2f36);
-    blit_icon_scaled(c, X + (W - 64) / 2, Y + 14, &icon_shop_breed, 2, true);
-    draw_text(c, X + (W - text_w(BREED_NAME, 3)) / 2, Y + 88, 3, 0xffffff, BREED_NAME);
-    draw_text(c, X + (W - text_w(BREED_W1, 2)) / 2, Y + 118, 2, MSP_TEAL, BREED_W1);
-    draw_text(c, X + (W - text_w(BREED_W2, 2)) / 2, Y + 138, 2, MSP_TEAL, BREED_W2);
-    const int bx = X + (W - MSP_HOW_W) / 2, by = Y + H - 12 - MSP_HOW_H;
-    if (owned) { draw_text(c, X + (W - text_w("IN THE TOOLBOX", 2)) / 2, by + 8, 2, MSP_TEAL, "IN THE TOOLBOX"); return; }
+    blit_icon_scaled(c, X + (W - SHP_ROW_ICON * UI_TEXT(2)) / 2, Y + UI(14), &icon_shop_breed, UI_TEXT(2), true);   /* (this fork) the art at the page's
+                                                                                  text scale, as an item's: 1x on a 320 x 240 board */
+    draw_text(c, X + (W - text_w(BREED_NAME, UI_TEXT(3))) / 2, Y + UI(88), UI_TEXT(3), 0xffffff, BREED_NAME);
+    draw_text(c, X + (W - text_w(BREED_W1, UI_TEXT(2))) / 2, Y + UI(118), UI_TEXT(2), MSP_TEAL, BREED_W1);
+    draw_text(c, X + (W - text_w(BREED_W2, UI_TEXT(2))) / 2, Y + UI(138), UI_TEXT(2), MSP_TEAL, BREED_W2);
+    const int bx = X + (W - MSP_HOW_W) / 2, by = Y + H - UI(12) - MSP_HOW_H;
+    if (owned) { draw_text(c, X + (W - text_w("IN THE TOOLBOX", UI_TEXT(2))) / 2, by + UI(8), UI_TEXT(2), MSP_TEAL, "IN THE TOOLBOX"); return; }
     char line[32]; snprintf(line, sizeof line, "%d", SD_PRICE_BREED);
-    int pw = 20 + text_w(line, 2);
-    price_tag(c, X + (W - pw) / 2, Y + 164, SD_PRICE_BREED, can ? 0xffffff : MSP_QUIET);
-    if (!can) { snprintf(line, sizeof line, "YOU HAVE %d", (int)t->sd_balance); draw_text(c, X + (W - text_w(line, 2)) / 2, Y + 184, 2, MSP_QUIET, line); }
-    if (can) { button(c, bx, by, MSP_HOW_W, MSP_HOW_H, MSP_TEAL, MSP_TEAL, "UNLOCK", 2);
-               draw_text(c, bx + (MSP_HOW_W - text_w("UNLOCK", 2)) / 2, by + (MSP_HOW_H - 14) / 2, 2, MSP_INK, "UNLOCK"); }
-    else button(c, bx, by, MSP_HOW_W, MSP_HOW_H, 0x1c2f36, MSP_DIM, "UNLOCK", 2);
+    int pw = 16 + UI(4) + text_w(line, UI_TEXT(2));          /* (price_tag's coin and gap) */
+    price_tag(c, X + (W - pw) / 2, Y + SHP_PRICE_Y, SD_PRICE_BREED, can ? 0xffffff : MSP_QUIET);
+    if (!can) { snprintf(line, sizeof line, "YOU HAVE %d", (int)t->sd_balance); draw_text(c, X + (W - text_w(line, UI_TEXT(2))) / 2, Y + UI(184), UI_TEXT(2), MSP_QUIET, line); }
+    if (can) { button(c, bx, by, MSP_HOW_W, MSP_HOW_H, MSP_TEAL, MSP_TEAL, "UNLOCK", UI_TEXT(2));
+               draw_text(c, bx + (MSP_HOW_W - text_w("UNLOCK", UI_TEXT(2))) / 2, by + (MSP_HOW_H - 7 * UI_TEXT(2)) / 2, UI_TEXT(2), MSP_INK, "UNLOCK"); }
+    else button(c, bx, by, MSP_HOW_W, MSP_HOW_H, 0x1c2f36, MSP_DIM, "UNLOCK", UI_TEXT(2));
 }
 /* THE FISH LAB's row and modal (0.4.3 item 10): the board's, as SELECTIVE BREEDING is. Not owned: UNLOCK. Owned: OPEN
    leads to the creator's pages (a fry made there is SD_PRICE_LAB_FRY, said on the row and asked for at the tube) */
@@ -15372,49 +15394,57 @@ const char *render_shop_why_line(const tank_t *t, int row) {
 }
 static void shop_lab_row(ctx_t *c, const tank_t *t, int top) {
     const bool owned = progression_lab_owned(t), can = t->sd_balance >= SD_PRICE_LAB;
-    lab_icon(c, 32, top, 1, owned);
-    draw_text(c, 76, top + 2, 2, 0xffffff, LAB_NAME);
-    if (owned) { draw_text(c, 76, top + 20, 2, MSP_TEAL, "A FRY"); price_tag(c, 76 + text_w("A FRY ", 2), top + 20, SD_PRICE_LAB_FRY, MSP_TEAL); }
-    else price_tag(c, 76, top + 20, SD_PRICE_LAB, can ? MSP_TEAL : MSP_QUIET);
+    const int by = top + SHP_BTN_DY;                         /* (this fork) the item rows' columns, scale and button (render.h): the literals elsewhere */
+    lab_icon(c, SHP_ROW_X, top, 1, owned);
+    draw_text(c, SHP_TEXT_X, top + UI(2), UI_TEXT(2), 0xffffff, LAB_NAME);
+    if (owned) { draw_text(c, SHP_TEXT_X, top + UI(20), UI_TEXT(2), MSP_TEAL, "A FRY"); price_tag(c, SHP_TEXT_X + text_w("A FRY ", UI_TEXT(2)), top + UI(20), SD_PRICE_LAB_FRY, MSP_TEAL); }
+    else price_tag(c, SHP_TEXT_X, top + UI(20), SD_PRICE_LAB, can ? MSP_TEAL : MSP_QUIET);
     /* owned: OPEN - or, said on the button as the fry's row says it, why not now (a full tank; short of a fry's price) */
     const int why = owned ? progression_lab_why(t) : LAB_OK;
     const char *b = render_shop_row_word(t, SHOP_ROW_LAB);
-    if (owned ? why == LAB_OK : can) { button(c, SHP_BTN_X, top, SHP_BTN_W, SHP_BTN_H, MSP_TEAL, MSP_TEAL, b, 2);
-                        draw_text(c, SHP_BTN_X + (SHP_BTN_W - text_w(b, 2)) / 2, top + (SHP_BTN_H - 14) / 2, 2, MSP_INK, b); }
-    else button(c, SHP_BTN_X, top, SHP_BTN_W, SHP_BTN_H, 0x1c2f36, MSP_DIM, b, 2);
+    if (owned ? why == LAB_OK : can) { button(c, SHP_BTN_X, by, SHP_BTN_W, SHP_BTN_H, MSP_TEAL, MSP_TEAL, b, UI_TEXT(2));
+                        draw_text(c, SHP_BTN_X + (SHP_BTN_W - text_w(b, UI_TEXT(2))) / 2, by + (SHP_BTN_H - 7 * UI_TEXT(2)) / 2, UI_TEXT(2), MSP_INK, b); }
+    else button(c, SHP_BTN_X, by, SHP_BTN_W, SHP_BTN_H, 0x1c2f36, MSP_DIM, b, UI_TEXT(2));
 }
 static void shop_lab_modal(ctx_t *c, const tank_t *t) {
     const int X = SHP_MODAL_X, W = SHP_MODAL_W, Y = SHP_MODAL_Y, H = SHP_MODAL_H;
     const bool owned = progression_lab_owned(t), can = t->sd_balance >= SD_PRICE_LAB;
     rect_fill(c, X, Y, W, H, 0x04141a);
     rect_edge(c, X, Y, W, H, MSP_TEAL); rect_edge(c, X + 1, Y + 1, W - 2, H - 2, 0x1c2f36);
-    lab_icon(c, X + (W - 64) / 2, Y + 14, 2, true);
-    draw_text(c, X + (W - text_w(LAB_NAME, 3)) / 2, Y + 88, 3, 0xffffff, LAB_NAME);
-    draw_text(c, X + (W - text_w(LAB_W1, 2)) / 2, Y + 118, 2, MSP_TEAL, LAB_W1);
-    draw_text(c, X + (W - text_w(LAB_W2, 2)) / 2, Y + 138, 2, MSP_TEAL, LAB_W2);
-    const int bx = X + (W - MSP_HOW_W) / 2, by = Y + H - 12 - MSP_HOW_H;
+    lab_icon(c, X + (W - SHP_ROW_ICON * UI_TEXT(2)) / 2, Y + UI(14), UI_TEXT(2), true);   /* (this fork) at the page's text scale, as an item's art:
+                                                                                  1x on a 320 x 240 board */
+    draw_text(c, X + (W - text_w(LAB_NAME, UI_TEXT(3))) / 2, Y + UI(88), UI_TEXT(3), 0xffffff, LAB_NAME);
+    draw_text(c, X + (W - text_w(LAB_W1, UI_TEXT(2))) / 2, Y + UI(118), UI_TEXT(2), MSP_TEAL, LAB_W1);
+    draw_text(c, X + (W - text_w(LAB_W2, UI_TEXT(2))) / 2, Y + UI(138), UI_TEXT(2), MSP_TEAL, LAB_W2);
+    const int bx = X + (W - MSP_HOW_W) / 2, by = Y + H - UI(12) - MSP_HOW_H;
     char line[32]; const int price = owned ? SD_PRICE_LAB_FRY : SD_PRICE_LAB;
     snprintf(line, sizeof line, "%d", price);
-    int pw = 20 + text_w(line, 2) + (owned ? text_w("EACH FRY ", 2) : 0), x0 = X + (W - pw) / 2;
-    if (owned) { draw_text(c, x0, Y + 164, 2, 0xffffff, "EACH FRY"); x0 += text_w("EACH FRY ", 2); }
-    price_tag(c, x0, Y + 164, price, owned || can ? 0xffffff : MSP_QUIET);
+    int pw = 16 + UI(4) + text_w(line, UI_TEXT(2)) + (owned ? text_w("EACH FRY ", UI_TEXT(2)) : 0), x0 = X + (W - pw) / 2;
+    if (owned) { draw_text(c, x0, Y + SHP_PRICE_Y, UI_TEXT(2), 0xffffff, "EACH FRY"); x0 += text_w("EACH FRY ", UI_TEXT(2)); }
+    price_tag(c, x0, Y + SHP_PRICE_Y, price, owned || can ? 0xffffff : MSP_QUIET);
+#ifdef CONFIG_POCKET_TANK_320X240
+    if (!owned && !can) { snprintf(line, sizeof line, "YOU HAVE %d", (int)t->sd_balance);   /* (this fork) the balance as the other pop-ups give it:
+                                                                       a second 16 px coin under the price's would reach the button here */
+                          draw_text(c, X + (W - text_w(line, UI_TEXT(2))) / 2, Y + UI(184), UI_TEXT(2), MSP_QUIET, line); }
+#else
     if (!owned && !can) { const int w = text_w("YOU HAVE ", 2) + render_price_w((int)t->sd_balance), x1 = X + (W - w) / 2;   /* (a balance is sand dollars: its coin says so) */
                           draw_text(c, x1, Y + 184, 2, MSP_QUIET, "YOU HAVE"); price_tag(c, x1 + text_w("YOU HAVE ", 2), Y + 184, (int)t->sd_balance, MSP_QUIET); }
+#endif
     /* owned, and it cannot be opened now: no button at all - the card says why, in the button's place, in plain words
        (Strato on the glass, 11-21: a full tank dropped him back in the tank without a word; then: no OPEN when it is full) */
     const int why = owned ? progression_lab_why(t) : LAB_OK;
     if (why == LAB_FULL || why == LAB_SHORT || why == LAB_WELCOME) {
-        const int ty = by + (MSP_HOW_H - 14) / 2;
+        const int ty = by + (MSP_HOW_H - 7 * UI_TEXT(2)) / 2;
         if (why != LAB_SHORT) { snprintf(line, sizeof line, "%s", render_shop_why_line(t, SHOP_ROW_LAB));   /* (PE-3: the fry card's words) */
-                                draw_text(c, X + (W - text_w(line, 2)) / 2, ty, 2, 0xffffff, line); }
-        else { const int w = text_w("YOU HAVE ", 2) + render_price_w((int)t->sd_balance), x1 = X + (W - w) / 2;
-               draw_text(c, x1, ty, 2, 0xffffff, "YOU HAVE"); price_tag(c, x1 + text_w("YOU HAVE ", 2), ty, (int)t->sd_balance, 0xffffff); }
+                                draw_text(c, X + (W - text_w(line, UI_TEXT(2))) / 2, ty, UI_TEXT(2), 0xffffff, line); }
+        else { const int w = text_w("YOU HAVE ", UI_TEXT(2)) + render_price_w((int)t->sd_balance), x1 = X + (W - w) / 2;
+               draw_text(c, x1, ty, UI_TEXT(2), 0xffffff, "YOU HAVE"); price_tag(c, x1 + text_w("YOU HAVE ", UI_TEXT(2)), ty, (int)t->sd_balance, 0xffffff); }
         return;
     }
     const char *b = owned ? "OPEN" : "UNLOCK";
-    if (owned || can) { button(c, bx, by, MSP_HOW_W, MSP_HOW_H, MSP_TEAL, MSP_TEAL, b, 2);
-                        draw_text(c, bx + (MSP_HOW_W - text_w(b, 2)) / 2, by + (MSP_HOW_H - 14) / 2, 2, MSP_INK, b); }
-    else button(c, bx, by, MSP_HOW_W, MSP_HOW_H, 0x1c2f36, MSP_DIM, b, 2);
+    if (owned || can) { button(c, bx, by, MSP_HOW_W, MSP_HOW_H, MSP_TEAL, MSP_TEAL, b, UI_TEXT(2));
+                        draw_text(c, bx + (MSP_HOW_W - text_w(b, UI_TEXT(2))) / 2, by + (MSP_HOW_H - 7 * UI_TEXT(2)) / 2, UI_TEXT(2), MSP_INK, b); }
+    else button(c, bx, by, MSP_HOW_W, MSP_HOW_H, 0x1c2f36, MSP_DIM, b, UI_TEXT(2));
 }
 static void shop_fry_row(ctx_t *c, const tank_t *t, uint16_t *fb, int stride, int top) {
     int k = fry_first_left();
@@ -15658,7 +15688,7 @@ static bool shp_upgradable(const tank_t *t, int i) {
 }
 static void shp_stage_squares(ctx_t *c, int x, int y, int sq, const tank_t *t, int i) {
     for (int q = 0; q < progression_stages(i); q++) {
-        const int qx = x + q * (sq + 4);
+        const int qx = x + q * (sq + UI(4));                 /* (this fork: the gap at the page's scale, as the squares) */
         if (q < progression_stage(t, i)) rect_fill(c, qx, y, sq, sq, MSP_TEAL); else rect_edge(c, qx, y, sq, sq, MSP_QUIET);
     }
 }
@@ -15694,7 +15724,8 @@ void render_shop(const tank_t *t, uint16_t *fb, int stride) {
         const int by = top + SHP_BTN_DY;                     /* (this fork) the row's button, centred on its art (render.h) */
         draw_text(&c, SHP_TEXT_X, top + UI(2), UI_TEXT(2), 0xffffff, it->name);
         const bool up = shp_upgradable(t, i), up_can = up && t->sd_balance >= progression_next_price(t, i);   /* (A PIECE IN STAGES, above) */
-        if (progression_stages(i) > 1) shp_stage_squares(&c, SHP_TEXT_X + text_w(it->name, UI_TEXT(2)) + UI(10), top + UI(4), UI(9), t, i);
+        if (progression_stages(i) > 1) shp_stage_squares(&c, SHP_TEXT_X + text_w(it->name, UI_TEXT(2)) + UI(10), top + UI(2) + (7 * UI_TEXT(2) - UI(9)) / 2, UI(9), t, i);   /* (this
+                                                                   fork: centred on the name's line, as upstream's top + 4 is - the text is not scaled as the squares are) */
         if (shelved) draw_text(&c, SHP_TEXT_X, top + UI(20), UI_TEXT(2), MSP_TEAL, "ON THE SHELF");
         else if (up) price_tag(&c, SHP_TEXT_X, top + UI(20), progression_next_price(t, i), up_can ? MSP_TEAL : MSP_QUIET);
         else if (owned) draw_text(&c, SHP_TEXT_X, top + UI(20), UI_TEXT(2), MSP_TEAL, "IN THE TANK");
@@ -15736,22 +15767,23 @@ void render_shop(const tank_t *t, uint16_t *fb, int stride) {
         const char *w1, *w2; bg_words(bg, &w1, &w2);
         rect_fill(&c, X, Y, W, H, 0x04141a);
         rect_edge(&c, X, Y, W, H, MSP_TEAL); rect_edge(&c, X + 1, Y + 1, W - 2, H - 2, 0x1c2f36);
-        blit_icon_scaled(&c, X + (W - 64) / 2, Y + 14, bg_thumb(bg), 2, true);
-        draw_text(&c, X + (W - text_w(bg_name(bg), 3)) / 2, Y + 88, 3, 0xffffff, bg_name(bg));
-        draw_text(&c, X + (W - text_w(w1, 2)) / 2, Y + 118, 2, MSP_TEAL, w1);
-        draw_text(&c, X + (W - text_w(w2, 2)) / 2, Y + 138, 2, MSP_TEAL, w2);
-        const int bx = X + (W - MSP_HOW_W) / 2, by = Y + H - 12 - MSP_HOW_H;
-        if (now) draw_text(&c, X + (W - text_w("IN USE", 2)) / 2, by + 8, 2, MSP_TEAL, "IN USE");
-        else if (owned) { button(&c, bx, by, MSP_HOW_W, MSP_HOW_H, MSP_TEAL, MSP_TEAL, "USE", 2);
-                          draw_text(&c, bx + (MSP_HOW_W - text_w("USE", 2)) / 2, by + (MSP_HOW_H - 14) / 2, 2, MSP_INK, "USE"); }
+        blit_icon_scaled(&c, X + (W - SHP_ROW_ICON * UI_TEXT(2)) / 2, Y + UI(14), bg_thumb(bg), UI_TEXT(2), true);   /* (this fork) at the page's text
+                                                                                  scale, as an item's art: 1x on a 320 x 240 board */
+        draw_text(&c, X + (W - text_w(bg_name(bg), UI_TEXT(3))) / 2, Y + UI(88), UI_TEXT(3), 0xffffff, bg_name(bg));
+        draw_text(&c, X + (W - text_w(w1, UI_TEXT(2))) / 2, Y + UI(118), UI_TEXT(2), MSP_TEAL, w1);
+        draw_text(&c, X + (W - text_w(w2, UI_TEXT(2))) / 2, Y + UI(138), UI_TEXT(2), MSP_TEAL, w2);
+        const int bx = X + (W - MSP_HOW_W) / 2, by = Y + H - UI(12) - MSP_HOW_H;
+        if (now) draw_text(&c, X + (W - text_w("IN USE", UI_TEXT(2))) / 2, by + UI(8), UI_TEXT(2), MSP_TEAL, "IN USE");
+        else if (owned) { button(&c, bx, by, MSP_HOW_W, MSP_HOW_H, MSP_TEAL, MSP_TEAL, "USE", UI_TEXT(2));
+                          draw_text(&c, bx + (MSP_HOW_W - text_w("USE", UI_TEXT(2))) / 2, by + (MSP_HOW_H - 7 * UI_TEXT(2)) / 2, UI_TEXT(2), MSP_INK, "USE"); }
         else {
             char line[32]; snprintf(line, sizeof line, "%d", SD_PRICE_BG);
-            int pw = 20 + text_w(line, 2);
-            price_tag(&c, X + (W - pw) / 2, Y + 164, SD_PRICE_BG, can ? 0xffffff : MSP_QUIET);
-            if (!can) { snprintf(line, sizeof line, "YOU HAVE %d", (int)t->sd_balance); draw_text(&c, X + (W - text_w(line, 2)) / 2, Y + 184, 2, MSP_QUIET, line); }
-            if (can) { button(&c, bx, by, MSP_HOW_W, MSP_HOW_H, MSP_TEAL, MSP_TEAL, "UNLOCK", 2);
-                       draw_text(&c, bx + (MSP_HOW_W - text_w("UNLOCK", 2)) / 2, by + (MSP_HOW_H - 14) / 2, 2, MSP_INK, "UNLOCK"); }
-            else button(&c, bx, by, MSP_HOW_W, MSP_HOW_H, 0x1c2f36, MSP_DIM, "UNLOCK", 2);
+            int pw = 16 + UI(4) + text_w(line, UI_TEXT(2));      /* (price_tag's coin and gap) */
+            price_tag(&c, X + (W - pw) / 2, Y + SHP_PRICE_Y, SD_PRICE_BG, can ? 0xffffff : MSP_QUIET);
+            if (!can) { snprintf(line, sizeof line, "YOU HAVE %d", (int)t->sd_balance); draw_text(&c, X + (W - text_w(line, UI_TEXT(2))) / 2, Y + UI(184), UI_TEXT(2), MSP_QUIET, line); }
+            if (can) { button(&c, bx, by, MSP_HOW_W, MSP_HOW_H, MSP_TEAL, MSP_TEAL, "UNLOCK", UI_TEXT(2));
+                       draw_text(&c, bx + (MSP_HOW_W - text_w("UNLOCK", UI_TEXT(2))) / 2, by + (MSP_HOW_H - 7 * UI_TEXT(2)) / 2, UI_TEXT(2), MSP_INK, "UNLOCK"); }
+            else button(&c, bx, by, MSP_HOW_W, MSP_HOW_H, 0x1c2f36, MSP_DIM, "UNLOCK", UI_TEXT(2));
         }
         return;
     }
@@ -15766,7 +15798,7 @@ void render_shop(const tank_t *t, uint16_t *fb, int stride) {
     const int ax = X + (W - art->w * UI_TEXT(2)) / 2, ay = Y + UI(14);   /* (this fork) the art at the page's text scale: 1x on the CYD */
     blit_icon_scaled(&c, ax, ay, art, UI_TEXT(2), true);
     if (nst > 1) {                                            /* A PIECE IN STAGES: its squares after its name, the two centred together */
-        const int sqw = nst * (UI(9) + 4) - 4, tw = text_w(it->name, UI_TEXT(3)), x0 = X + (W - tw - UI(12) - sqw) / 2;   /* (this fork: the squares' own pitch, shp_stage_squares') */
+        const int sqw = nst * (UI(9) + UI(4)) - UI(4), tw = text_w(it->name, UI_TEXT(3)), x0 = X + (W - tw - UI(12) - sqw) / 2;   /* (this fork: the squares' own pitch, shp_stage_squares') */
         draw_text(&c, x0, Y + UI(88), UI_TEXT(3), 0xffffff, it->name);
         shp_stage_squares(&c, x0 + tw + UI(12), Y + UI(94), UI(9), t, g_shp_modal);
     } else
@@ -15777,7 +15809,7 @@ void render_shop(const tank_t *t, uint16_t *fb, int stride) {
         draw_text(&c, X + (W - text_w(w1, UI_TEXT(2))) / 2, Y + UI(118), UI_TEXT(2), MSP_TEAL, w1);
         draw_text(&c, X + (W - text_w(w2, UI_TEXT(2))) / 2, Y + UI(138), UI_TEXT(2), MSP_TEAL, w2);
         char line[32]; snprintf(line, sizeof line, "%d", price);
-        price_tag(&c, X + (W - (16 + UI(4) + text_w(line, UI_TEXT(2)))) / 2, Y + UI(164), price, ok ? 0xffffff : MSP_QUIET);   /* (price_tag's coin and gap) */
+        price_tag(&c, X + (W - (16 + UI(4) + text_w(line, UI_TEXT(2)))) / 2, Y + SHP_PRICE_Y, price, ok ? 0xffffff : MSP_QUIET);   /* (price_tag's coin and gap) */
         if (!ok) { snprintf(line, sizeof line, "YOU HAVE %d", (int)t->sd_balance); draw_text(&c, X + (W - text_w(line, UI_TEXT(2))) / 2, Y + UI(184), UI_TEXT(2), MSP_QUIET, line); }
         const int ux = X + (W - SHP_BTN_W) / 2, uy = Y + H - UI(12) - MSP_HOW_H;   /* (the row's width: UPGRADE fits it) */
         if (ok) { button(&c, ux, uy, SHP_BTN_W, MSP_HOW_H, MSP_TEAL, MSP_TEAL, "UPGRADE", UI_TEXT(2));
@@ -15839,7 +15871,7 @@ void render_shop(const tank_t *t, uint16_t *fb, int stride) {
     } else {
         char line[32]; snprintf(line, sizeof line, "%d", it->price);
         int pw = 16 + UI(4) + text_w(line, UI_TEXT(2));
-        price_tag(&c, X + (W - pw) / 2, Y + UI(164), it->price, can ? 0xffffff : MSP_QUIET);
+        price_tag(&c, X + (W - pw) / 2, Y + SHP_PRICE_Y, it->price, can ? 0xffffff : MSP_QUIET);
         if (!can) { snprintf(line, sizeof line, "YOU HAVE %d", (int)t->sd_balance);
                     draw_text(&c, X + (W - text_w(line, UI_TEXT(2))) / 2, Y + UI(184), UI_TEXT(2), MSP_QUIET, line); }
         if (can) { button(&c, bx, by, MSP_HOW_W, MSP_HOW_H, MSP_TEAL, MSP_TEAL, "UNLOCK", UI_TEXT(2));
@@ -15890,13 +15922,13 @@ static int shp_tap(const tank_t *t, float x, float y) {
         return SHOP_TAP_KEPT;
     }
     if (g_shp_modal == SHP_MODAL_BREED) {                      /* SELECTIVE BREEDING's modal: UNLOCK, elsewhere closes */
-        const int bx = SHP_MODAL_X + (SHP_MODAL_W - MSP_HOW_W) / 2, by = SHP_MODAL_Y + SHP_MODAL_H - 12 - MSP_HOW_H;
+        const int bx = SHP_MODAL_X + (SHP_MODAL_W - MSP_HOW_W) / 2, by = SHP_MODAL_Y + SHP_MODAL_H - UI(12) - MSP_HOW_H;
         bool on_btn = y >= by - MSP_HOW_SLOP_UP && y < by + MSP_HOW_H + MSP_HOW_SLOP_DN && x >= bx - MSP_HOW_SLOP_X && x < bx + MSP_HOW_W + MSP_HOW_SLOP_X;
         g_shp_modal = -1;
         return on_btn && !progression_breed_owned(t) && t->sd_balance >= SD_PRICE_BREED ? SHOP_TAP_BUY + SHOP_ITEM_BREED : SHOP_TAP_KEPT;
     }
     if (g_shp_modal == SHP_MODAL_LAB) {                        /* THE FISH LAB's modal: UNLOCK, or OPEN once it is ours; elsewhere closes */
-        const int bx = SHP_MODAL_X + (SHP_MODAL_W - MSP_HOW_W) / 2, by = SHP_MODAL_Y + SHP_MODAL_H - 12 - MSP_HOW_H;
+        const int bx = SHP_MODAL_X + (SHP_MODAL_W - MSP_HOW_W) / 2, by = SHP_MODAL_Y + SHP_MODAL_H - UI(12) - MSP_HOW_H;
         bool on_btn = y >= by - MSP_HOW_SLOP_UP && y < by + MSP_HOW_H + MSP_HOW_SLOP_DN && x >= bx - MSP_HOW_SLOP_X && x < bx + MSP_HOW_W + MSP_HOW_SLOP_X;
         g_shp_modal = -1;
         if (!on_btn) return SHOP_TAP_KEPT;
@@ -15905,7 +15937,7 @@ static int shp_tap(const tank_t *t, float x, float y) {
     }
     if (g_shp_modal >= SHP_MODAL_BG) {                         /* a background's modal: its button, elsewhere closes */
         const int bg = g_shp_modal - SHP_MODAL_BG;
-        const int bx = SHP_MODAL_X + (SHP_MODAL_W - MSP_HOW_W) / 2, by = SHP_MODAL_Y + SHP_MODAL_H - 12 - MSP_HOW_H;
+        const int bx = SHP_MODAL_X + (SHP_MODAL_W - MSP_HOW_W) / 2, by = SHP_MODAL_Y + SHP_MODAL_H - UI(12) - MSP_HOW_H;
         bool on_btn = y >= by - MSP_HOW_SLOP_UP && y < by + MSP_HOW_H + MSP_HOW_SLOP_DN && x >= bx - MSP_HOW_SLOP_X && x < bx + MSP_HOW_W + MSP_HOW_SLOP_X;
         g_shp_modal = -1;
         if (!on_btn || t->bg_now == bg) return SHOP_TAP_KEPT;
@@ -15955,7 +15987,7 @@ static int shp_tap(const tank_t *t, float x, float y) {
     }
     for (int b = 0; b < SHF_N; b++) {                         /* the foot (0.4.1): ?, the three areas, X - each square with a little room round it */
         int bx, by; shop_foot_box(b, &bx, &by);
-        if (x < bx - 6 || x >= bx + MSP_FOOT_SQ + 6 || y < by - 8 || y >= by + MSP_FOOT_SQ + 12) continue;
+        if (x < bx - UI(6) || x >= bx + MSP_FOOT_SQ + UI(6) || y < by - UI(8) || y >= by + MSP_FOOT_SQ + UI(12)) continue;   /* (this fork: the room at the page's scale) */
         if (b == SHF_EARN) { g_shp_earn = true; return SHOP_TAP_KEPT; }
         if (b == SHF_CLOSE) return SHOP_TAP_CLOSE;
         if (g_shp_area != b - SHF_DECOR) { g_shp_area = b - SHF_DECOR; g_shp_page = 0; }

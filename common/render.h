@@ -1726,12 +1726,14 @@ _Static_assert(SET_TAP_FLIP > SET_TAP_TO_TANK && SET_TAP_FLIP > SET_TAP_TO_KEEPE
    of 2026-09-26/28, checked on the board), so it stays where MSP_CLOSE_Y put it. Since 0.4
    it is five icon squares, their bottoms where the text buttons' were (MSP_FOOT_TOP); here
    they are no taller than those buttons, so the rows above keep their places. Upstream's
-   foot sprites are 36 px and pixel art keeps its size (ui.h): what fits inside a square's
-   2 px double edge is an 18 px copy, which this foot needs and nothing generates yet (the
-   shop's foot and the settings foot are these squares too). The TANK row's last drawn
-   line is a fresh badge's outer ring, 4 px under the badge (its coin and balance went to
-   the foot's UPGRADES in 0.4). MSP_FOOT_SLOP, the text foot's split between two buttons,
-   keeps the fork's UI(8), though the icon foot taps by the nearest square and reads none */
+   foot sprites are 36 px and pixel art keeps its size (ui.h): a square holds their 18 px
+   half-size copies (foot_art) edge to edge inside its 2 px double edge, and the five spread
+   from glass x 8 to 312 (render_ms_foot_box; the shop's foot and the settings foot are
+   these squares too). The TANK row's last drawn line is its page pips, under the arrow's
+   rings (MSP_TPIP_Y; its coin and balance went to the foot's UPGRADES in 0.4), so the
+   foot's tap strip starts at glass y 211, half way down to the squares (MSP_FOOT_HIT_Y).
+   MSP_FOOT_SLOP, the text foot's split between two buttons, keeps the fork's UI(8), though
+   the icon foot taps by the nearest square and reads none */
 #undef  MSP_FOOT_GAP
 #define MSP_FOOT_GAP  4
 #undef  MSP_FOOT_Y
@@ -1739,7 +1741,7 @@ _Static_assert(SET_TAP_FLIP > SET_TAP_TO_TANK && SET_TAP_FLIP > SET_TAP_TO_KEEPE
 #undef  MSP_FOOT_SQ
 #define MSP_FOOT_SQ   MSP_CLOSE_H    /* so MSP_FOOT_TOP is MSP_FOOT_Y: glass y 214..236 */
 #undef  MSP_TANK_BOT
-#define MSP_TANK_BOT  (MSP_TANK_Y + MSP_TANK_BADGE + MSP_ICON + 4)
+#define MSP_TANK_BOT  (MSP_TPIP_Y + 2)   /* (the pips are 2 px tall: upstream's MSP_TANK_Y + 42) */
 #undef  MSP_FOOT_SLOP
 #define MSP_FOOT_SLOP UI(8)
 #undef  MSP_TPG_X
@@ -1750,11 +1752,14 @@ _Static_assert(SET_TAP_FLIP > SET_TAP_TO_TANK && SET_TAP_FLIP > SET_TAP_TO_KEEPE
    its label 4 px in from the divider's start, as on the 1.8 - glass x 20, 40 px left of
    this page's name column (upstream's 64 is from its own column, which its MSP_TNAME_X
    writes as the literal 92) - and its badges from glass x 72, the seventh ending at 282,
-   short of the page arrow; the population strip, UI(14) a fish, ends near glass x 62 */
+   short of the page arrow; the population strip, UI(14) a fish, ends near glass x 62. The
+   arrow's page pips stand right under its rings, as on the 1.8 (MSP_TANK_Y + 40 there):
+   UI(40) stood them on the chevron's last step, glass y 204 */
 #undef  MSP_TSLIDE
 #define MSP_TSLIDE    40
 #undef  MSP_TNAME_X
 #define MSP_TNAME_X   (MSP_NAME_X - MSP_TSLIDE)
+#define MSP_TPIP_Y    (MSP_TANK_Y + MSP_TANK_BADGE + MSP_ICON + UI(4))   /* glass y 207..208 */
 /* the dividers and the rows' left tap edge, on the glass as the columns are
    (on the page they would start 14 px further in: glass x 30, not 16, and a
    shop row would answer only from x 27, not 13, though its art starts at 8) */

@@ -11483,6 +11483,13 @@ static int give_look(const tank_t *t, int fish);
 #define TILE_H 54
 #define TILE_GAP 6
 #define TILE_PAD 8
+#ifdef CONFIG_POCKET_TANK_320X240
+/* (this fork) a 320 x 240 board takes the 1.8's one row under its two-column card (tools_layout's last branch): with all
+   four tiles the box ends at y 234 and x 244. It is drawn through the clipped context, but a box past the frame would
+   lose its bottom row of tiles. (render.h's assert held this for the toolbox until 0.4.2 took RENDER_TOOLS_Y/H away) */
+_Static_assert(RENDER_CARD_Y + RENDER_CARD_H + RENDER_TOOLS_GAP + 2 * TILE_PAD + TILE_H <= TANK_H &&
+               RENDER_CARD_X + 2 * TILE_PAD + 4 * TILE_W + 3 * TILE_GAP <= TANK_W, "the toolbox's four tiles must fit under the card");
+#endif
 static int tools_layout(const tank_t *t, int fish, int *tile, int *tx, int *ty, int *bx, int *by, int *bw, int *bh) {
     int n = 0;
     tile[n++] = TOOL_SPONGE; tile[n++] = TOOL_SCISSORS;
@@ -13902,6 +13909,11 @@ static void ms_rows_set(const tank_t *t, int nreq) { const int r = t->n_fish + (
 #define MSP_ROWS     N_FISH_MAX
 #define MSP_WAIT_ROW (N_FISH_MAX - 1)
 #endif
+#ifdef CONFIG_POCKET_TANK_320X240
+#define MSP_WAIT_HIT_X0 MSP_HIT_X0   /* (this fork) THE WAITING ROW's tap from the rows' own edge: its bowl starts left of the divider here */
+#else
+#define MSP_WAIT_HIT_X0 MSP_RULE_X0  /* (the divider's start, 24: upstream's literal) */
+#endif
 typedef struct { short x0, y0, x1, y1; } ms_box_t;           /* page coordinates, inclusive; x0 > x1: nothing drawn */
 typedef struct { const uint16_t *fb; int stride; uint32_t key; unsigned frame, other; bool ok; int n; ms_box_t b[MS_ANIM_MAX]; } ms_kept_t;
 static ms_kept_t g_ms_kept[2];
@@ -14178,10 +14190,14 @@ void render_milestones(const tank_t *t, uint16_t *fb, int stride) {
             if (k / MSP_TANK_PER_ROW != g_ms_tpage && (t->tank_ms_bits & ~t->tank_ms_seen & tank_badge(t, k)->bit)) fresh = true;
         int ax = MSP_TPG_X + 4, ay = MSP_TANK_Y + MSP_TANK_BADGE, aw = 16;
         ms_chevron(&c, last ? ax + 2 : ax + aw - 2, ay + MSP_ICON / 2, last, 0xffffff);
-        if (fresh) { rect_edge(&c, ax - 3, ay - 3, aw + 6, MSP_ICON + 6, MSP_TEAL);
-                     rect_edge(&c, ax - 4, ay - 4, aw + 8, MSP_ICON + 8, 0x3f6a72); }
+        if (fresh) { rect_edge(&c, ax - UI(3), ay - UI(3), aw + 2 * UI(3), MSP_ICON + 2 * UI(3), MSP_TEAL);   /* (the badges' rings: badge()) */
+                     rect_edge(&c, ax - UI(4), ay - UI(4), aw + 2 * UI(4), MSP_ICON + 2 * UI(4), 0x3f6a72); }
         for (int p = 0; p < np; p++)        /* a pip per page under it, the current one lit */
-            rect_fill(&c, ax + aw / 2 - np * 3 + p * 6 + 1, MSP_TANK_Y + UI(40), 4, 2, p == g_ms_tpage ? MSP_TEAL : MSP_DIM);
+#ifdef CONFIG_POCKET_TANK_320X240
+            rect_fill(&c, ax + aw / 2 - np * 3 + p * 6 + 1, MSP_TPIP_Y, 4, 2, p == g_ms_tpage ? MSP_TEAL : MSP_DIM);   /* (this fork: render.h) */
+#else
+            rect_fill(&c, ax + aw / 2 - np * 3 + p * 6 + 1, MSP_TANK_Y + 40, 4, 2, p == g_ms_tpage ? MSP_TEAL : MSP_DIM);
+#endif
     }
     /* the way out: a CLOSE button in the prompt's calm dress (a tap anywhere
        else never drops the page - too much to tap for that) */
@@ -14525,7 +14541,7 @@ int render_milestones_tap(const tank_t *t, float x, float y) {
         row = (int)((y - MSP_ROW_Y0) / MSP_ROW_H);
         if (row < 0) row = 0;
         if (row == t->n_fish && nreq > 0) fry_row = true;   /* the NEW FRY row */
-        else if (row == MSP_WAIT_ROW && row >= t->n_fish && progression_bowl_has() && x >= 24 && x < PAGE_W - 24) {
+        else if (row == MSP_WAIT_ROW && row >= t->n_fish && progression_bowl_has() && x >= MSP_WAIT_HIT_X0 && x < MSP_RULE_X1) {
             bm_open_bowl(t, true); return MS_TAP_KEPT; }   /* THE WAITING ROW (0.4.2): the travel bowl's card */
         else if (row >= t->n_fish) return MS_TAP_NONE;      /* an empty row */
     } else if (y >= MSP_TANK_Y - UI(6) && y < MSP_FOOT_HIT_Y) tank_row = true;    /* down to the button strip: fingers near the
@@ -14883,9 +14899,9 @@ bool render_milestones_move(const tank_t *t, int *x, int *y) {   /* MOVE: the tr
 #define MSP_BOWL_ROW_Y (MSP_ROW_Y0 + MSP_WAIT_ROW * MSP_ROW_H)
 bool render_bowl_row(int *x, int *y, int *w, int *h) {
     if (!progression_bowl_has()) return false;
-    if (x) *x = PAGE_X + 24;
+    if (x) *x = PAGE_X + MSP_WAIT_HIT_X0;        /* (its tap: render_milestones_tap) */
     if (y) *y = PAGE_Y + MSP_BOWL_ROW_Y;
-    if (w) *w = PAGE_W - 48;
+    if (w) *w = MSP_RULE_X1 - MSP_WAIT_HIT_X0;
     if (h) *h = MSP_ROW_H;
     return true;
 }

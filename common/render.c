@@ -18317,6 +18317,11 @@ int render_shelf_card_tap(float x, float y) {
 #else
 #define SH_LIB_ROW SH_BOX_H
 #endif
+/* (this fork) THE LIBRARY's rows, one rule for the page, its taps, the bubbles and a late picture: the first row's top, the
+   pitch, row i's top - upstream's SH_TITLE_Y + 46 + i * (SH_BOX_H + 22), written in each of them, there */
+#define SH_LIB_Y0    (SH_TITLE_Y + UI(46))
+#define SH_LIB_PITCH (SH_LIB_ROW + UI(22))
+#define SH_LIB_Y(i)  (SH_LIB_Y0 + (i) * SH_LIB_PITCH)
 static int sh_wrap(ctx_t *c, int x, int y, int maxw, int pitch, int max_lines, uint32_t rgb, const char *s) {
     char line[64]; int n = 0, lines = 0, maxc = maxw / 6;
     if (maxc > 63) maxc = 63;
@@ -18340,7 +18345,7 @@ void render_library(uint16_t *fb, int stride, const library_row_t *row, int n, i
     draw_text(&c, (TANK_W - text_w("THE LIBRARY", UI_TEXT(3))) / 2, SH_TITLE_Y, UI_TEXT(3), 0xffffff, "THE LIBRARY");
     draw_text(&c, (TANK_W - text_w(checked, 1)) / 2, SH_TITLE_Y + UI(27), 1, MSP_QUIET, checked);
     int x0 = SH_LIB_X0, x1 = TANK_W - SH_LIB_X0, bw = UI(116);
-    int y = SH_TITLE_Y + UI(46), pitch = SH_LIB_ROW + UI(22);
+    int y = SH_LIB_Y0, pitch = SH_LIB_PITCH;
     for (int i = 0; i < n && i < 2; i++, y += pitch) {
         const library_row_t *r = &row[i];
         sh_tank(&c, x0, y, SH_TW, SH_IH, r->thumb, r->locked);
@@ -18354,15 +18359,15 @@ void render_library(uint16_t *fb, int stride, const library_row_t *row, int n, i
         const char *act = r->installed ? "NEW TANK" : "GET";
         if (r->locked) {                                   /* not this board's yet (J6): an outline, dim words, CREW ONLY under it (words, not hue) */
             rect_edge(&c, bx, by, bw, MSP_CLOSE_H, MSP_DIM);
-            draw_text(&c, bx + (bw - text_w("GET", 2)) / 2, by + (MSP_CLOSE_H - 14) / 2, 2, MSP_DIM, "GET");
-            draw_text(&c, bx + (bw - text_w("CREW ONLY", 2)) / 2, by + MSP_CLOSE_H + 9, 2, MSP_QUIET, "CREW ONLY");
-            if (i + 1 < n) rect_fill(&c, x0, y + pitch - 11, x1 - x0, 1, MSP_DIM);
+            draw_text(&c, bx + (bw - text_w("GET", UI_TEXT(2))) / 2, by + (MSP_CLOSE_H - 7 * UI_TEXT(2)) / 2, UI_TEXT(2), MSP_DIM, "GET");
+            draw_text(&c, bx + (bw - text_w("CREW ONLY", UI_TEXT(2))) / 2, by + MSP_CLOSE_H + UI(9), UI_TEXT(2), MSP_QUIET, "CREW ONLY");
+            if (i + 1 < n) rect_fill(&c, x0, y + pitch - UI(11), x1 - x0, 1, MSP_DIM);
             continue;
         }
         if (r->full) {                                     /* one is all a board keeps (the jelly tank, J3): nothing to tap */
             rect_edge(&c, bx, by, bw, MSP_CLOSE_H, MSP_DIM);
-            draw_text(&c, bx + (bw - text_w("INSTALLED", 2)) / 2, by + (MSP_CLOSE_H - 14) / 2, 2, MSP_DIM, "INSTALLED");
-            if (i + 1 < n) rect_fill(&c, x0, y + pitch - 11, x1 - x0, 1, MSP_DIM);
+            draw_text(&c, bx + (bw - text_w("INSTALLED", UI_TEXT(2))) / 2, by + (MSP_CLOSE_H - 7 * UI_TEXT(2)) / 2, UI_TEXT(2), MSP_DIM, "INSTALLED");
+            if (i + 1 < n) rect_fill(&c, x0, y + pitch - UI(11), x1 - x0, 1, MSP_DIM);
             continue;
         }
         if (r->price > wallet) {                           /* not enough yet: an outline with dim words (fill, not hue) */
@@ -18400,7 +18405,7 @@ int render_library_tap(float x, float y, int n) {
             if (x >= pcx + UI(30) && x < pcx + UI(100)) return LIB_TAP_NEXT;
         }
     }
-    int x1 = TANK_W - SH_LIB_X0, bw = UI(116), pitch = SH_LIB_ROW + UI(22), y0 = SH_TITLE_Y + UI(46);
+    int x1 = TANK_W - SH_LIB_X0, bw = UI(116), pitch = SH_LIB_PITCH, y0 = SH_LIB_Y0;
     for (int i = 0; i < n && i < 2; i++) {
         int by = y0 + i * pitch + UI(10);
         if (x >= x1 - bw - 8 && x < x1 + 8 && y >= by - UI(24) && y < by + MSP_CLOSE_H + UI(30)) return LIB_TAP_ROW0 + i;   /* the button and the price under it */
@@ -18434,16 +18439,16 @@ static void sh_loading(ctx_t *c, int x, int y, int w, int h, float t, bool dim) 
 void render_library_loading(uint16_t *fb, int stride, unsigned rows, unsigned locked, float t) {
     ctx_t c = ctx_frame(fb, stride);
     for (int i = 0; i < 2; i++)
-        if (rows >> i & 1) sh_loading(&c, SH_LIB_X0 + 2, SH_TITLE_Y + 46 + i * (SH_BOX_H + 22) + SH_LID, SH_PIC_W, SH_IH, t, locked >> i & 1);
+        if (rows >> i & 1) sh_loading(&c, SH_LIB_X0 + 2, SH_LIB_Y(i) + SH_LID, SH_PIC_W, SH_IH, t, locked >> i & 1);
 }
 /* a picture just made, put into the kept page: the row's little tank drawn again, as render_library draws it (the page
    is not drawn again for it) */
 void render_library_pic(uint16_t *fb, int stride, int row, const uint16_t *pic, bool locked) {
     ctx_t c = ctx_frame(fb, stride);
-    sh_tank(&c, SH_LIB_X0, SH_TITLE_Y + 46 + row * (SH_BOX_H + 22), SH_TW, SH_IH, pic, locked);
+    sh_tank(&c, SH_LIB_X0, SH_LIB_Y(row), SH_TW, SH_IH, pic, locked);
 }
 void render_library_pic_rect(int row, int *x, int *y, int *w, int *h) {
-    *x = SH_LIB_X0 + 2; *y = SH_TITLE_Y + 46 + row * (SH_BOX_H + 22) + SH_LID; *w = SH_PIC_W; *h = SH_IH;
+    *x = SH_LIB_X0 + 2; *y = SH_LIB_Y(row) + SH_LID; *w = SH_PIC_W; *h = SH_IH;
 }
 
 /* ---- PICK A THEME (the jelly tank, 2026-11-07, docs/jelly-tank-0.6.md J2) ----
@@ -18532,8 +18537,8 @@ void render_jelly_pick_loading(uint16_t *fb, int stride, unsigned themes, int pi
 static const char *const LNOTE[] = { "AN EXPERIMENTAL TANK,", "STILL BEING BUILT.", "", "FOR NOW IT'S FOR", "HATCHERY CREW MEMBERS", "ON PATREON", "PATREON.COM/STRATOBUILDS", "", "IT COMES LATER TO", "EVERYONE.", "", "THANK YOU FOR YOUR", "SUPPORT!" };   /* (Strato's words, 11-07) */
 #define LNOTE_LINK 6                                   /* (the link: lit, Strato 11-07 "make sure to display the link") */
 #define LNOTE_N   ((int)(sizeof LNOTE / sizeof LNOTE[0]))
-#define LNOTE_LH  18
-#define LNOTE_H   (16 + 22 + 10 + LNOTE_N * LNOTE_LH + 12 + MSP_CLOSE_H + 16)
+#define LNOTE_LH  UI(18)
+#define LNOTE_H   (UI(16) + UI(22) + UI(10) + LNOTE_N * LNOTE_LH + UI(12) + MSP_CLOSE_H + UI(16))
 static void lnote_box(int *mx, int *my) { *mx = (TANK_W - SHC_W) / 2; *my = (TANK_H - LNOTE_H) / 2; }
 static const char *g_lnote_name = "JELLY TANK";      /* the row the note is for (0.4.2: the piranhas and the minnows have it too) */
 void render_library_note_name(const char *name) { g_lnote_name = name ? name : "JELLY TANK"; }
@@ -18543,40 +18548,53 @@ void render_library_note(uint16_t *fb, int stride) {
     int mx, my; lnote_box(&mx, &my);
     rect_fill(&c, mx, my, SHC_W, LNOTE_H, MSP_INK);
     rect_edge(&c, mx, my, SHC_W, LNOTE_H, MSP_TEAL); rect_edge(&c, mx + 1, my + 1, SHC_W - 2, LNOTE_H - 2, MSP_TEAL);
-    int y = my + 16, tw = text_w(g_lnote_name, 2) + 12;
-    sh_flask(&c, mx + (SHC_W - tw) / 2, y + 2, 0xffffff);
-    draw_text(&c, mx + (SHC_W - tw) / 2 + 12, y, 2, 0xffffff, g_lnote_name); y += 22 + 10;
+    int y = my + UI(16), tw = text_w(g_lnote_name, UI_TEXT(2)) + 12;
+    sh_flask(&c, mx + (SHC_W - tw) / 2, y + UI(2), 0xffffff);
+    draw_text(&c, mx + (SHC_W - tw) / 2 + 12, y, UI_TEXT(2), 0xffffff, g_lnote_name); y += UI(22) + UI(10);
     for (int k = 0; k < LNOTE_N; k++, y += LNOTE_LH)
-        if (LNOTE[k][0]) draw_text(&c, mx + (SHC_W - text_w(LNOTE[k], 2)) / 2, y, 2, k == LNOTE_LINK ? MSP_TEAL : 0xffffff, LNOTE[k]);
-    y += 12;
-    lit_button(&c, mx + (SHC_W - 98) / 2, y, 98, MSP_CLOSE_H, "OK");
+        if (LNOTE[k][0]) draw_text(&c, mx + (SHC_W - text_w(LNOTE[k], UI_TEXT(2))) / 2, y, UI_TEXT(2), k == LNOTE_LINK ? MSP_TEAL : 0xffffff, LNOTE[k]);
+    y += UI(12);
+    lit_button(&c, mx + (SHC_W - UI(98)) / 2, y, UI(98), MSP_CLOSE_H, "OK");
 }
 int render_library_note_tap(float x, float y) {
     int mx, my; lnote_box(&mx, &my);
     if (x < mx || x >= mx + SHC_W || y < my || y >= my + LNOTE_H) return LNOTE_TAP_OUTSIDE;
-    int by = my + LNOTE_H - 16 - MSP_CLOSE_H, bx = mx + (SHC_W - 98) / 2;
-    return x >= bx - 8 && x < bx + 98 + 8 && y >= by - 8 && y < by + MSP_CLOSE_H + 8 ? LNOTE_TAP_OK : LNOTE_TAP_NONE;
+    int by = my + LNOTE_H - UI(16) - MSP_CLOSE_H, bx = mx + (SHC_W - UI(98)) / 2;
+    return x >= bx - 8 && x < bx + UI(98) + 8 && y >= by - 8 && y < by + MSP_CLOSE_H + 8 ? LNOTE_TAP_OK : LNOTE_TAP_NONE;
 }
 
 /* THE TOUCH LOCK'S NOTE (0.4.2, Strato 11-11: "a small dialogue modal when the lock is tapped to communicate what it does?
    thats a mystery to most people until the turn it on and then go back to their tank" - his words on it). Over MY TANKS as
    the padlock is turned ON (never as it is turned off); a tap anywhere closes it. */
+#ifdef CONFIG_POCKET_TANK_320X240
+/* (this fork) BOOT can be out of reach (the CYD in its case): there a finger held still 5 s opens MY TANKS (touch_port_ft3168.c),
+   as the lock's own hint says (render_touch_lock_hint) */
+static const char *const TLNOTE[] = { "TOUCH LOCK IS NOW ACTIVE", "ON YOUR TANK.", "", "HOLD A FINGER 5 S", "TO RETURN HERE." };
+#else
 static const char *const TLNOTE[] = { "TOUCH LOCK IS NOW ACTIVE", "ON YOUR TANK.", "", "DOUBLE TAP BOOT", "TO RETURN HERE." };
+#endif
 #define TLNOTE_N ((int)(sizeof TLNOTE / sizeof TLNOTE[0]))
-#define TLNOTE_H (16 + 20 + 12 + TLNOTE_N * LNOTE_LH + 10 + 8 + 14)
+#define TLNOTE_H (UI(16) + 20 + UI(12) + TLNOTE_N * LNOTE_LH + UI(10) + 8 + UI(14))   /* (the padlock's 20 and the small line's 8 at their own size) */
 void render_shelf_lock_note(uint16_t *fb, int stride) {
     ctx_t c = ctx_frame(fb, stride);
     for (int y = 0; y < TANK_H; y++) for (int x = 0; x < TANK_W; x++) px565_blend(&c, x, y, 0, 150);
     const int mx = (TANK_W - SHC_W) / 2, my = (TANK_H - TLNOTE_H) / 2;
     rect_fill(&c, mx, my, SHC_W, TLNOTE_H, MSP_INK);
     rect_edge(&c, mx, my, SHC_W, TLNOTE_H, MSP_TEAL); rect_edge(&c, mx + 1, my + 1, SHC_W - 2, TLNOTE_H - 2, MSP_TEAL);
-    int y = my + 16;
-    sh_padlock(&c, TANK_W / 2, y + 10, true, MSP_TEAL, MSP_INK); y += 20 + 12;
+    int y = my + UI(16);
+    sh_padlock(&c, TANK_W / 2, y + 10, true, MSP_TEAL, MSP_INK); y += 20 + UI(12);
     for (int k = 0; k < TLNOTE_N; k++, y += LNOTE_LH)
-        if (TLNOTE[k][0]) draw_text(&c, mx + (SHC_W - text_w(TLNOTE[k], 2)) / 2, y, 2, k >= 3 ? MSP_TEAL : 0xffffff, TLNOTE[k]);
-    y += 10;
+        if (TLNOTE[k][0]) draw_text(&c, mx + (SHC_W - text_w(TLNOTE[k], UI_TEXT(2))) / 2, y, UI_TEXT(2), k >= 3 ? MSP_TEAL : 0xffffff, TLNOTE[k]);
+    y += UI(10);
     draw_text(&c, mx + (SHC_W - text_w("TAP ANYWHERE TO CLOSE", 1)) / 2, y, 1, MSP_QUIET, "TAP ANYWHERE TO CLOSE");
 }
+#ifdef CONFIG_POCKET_TANK_320X240
+/* (this fork) on a 320 x 240 board: THE LIBRARY's two rows above its foot; the notes on the glass, their lines (24 characters
+   at most: the link) inside the card */
+_Static_assert(SH_LIB_Y(1) + SH_LIB_ROW <= SH_FOOT_Y, "THE LIBRARY's rows above its foot");
+_Static_assert(LNOTE_H <= TANK_H && TLNOTE_H <= TANK_H && 24 * 6 * UI_TEXT(2) <= SHC_W - 2 * UI(16),
+               "the library's and the touch lock's notes on the glass, their lines inside the card");
+#endif
 
 /* the PAIR card: the two fish, the heart between them, and PAIR THEM - 50 / CANCEL; or, a pair already set (the tool
    picked up again), where it stands and UNPAIR / DONE */

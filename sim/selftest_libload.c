@@ -205,7 +205,14 @@ int selftest_libload(void) {
             diff_page(fc, H.page, 1, q, &out, &in, &bright);
             if (out || bright < 8) LF("B: the bubbles at %.2f s: %d pixels outside the glass, %d light inside", f * 0.04f, out, bright);
             seen[f] = fnv(fc, NPX);
+#ifdef CONFIG_POCKET_TANK_320X240
+            /* (this fork) a 320 x 240 board's glass is 44 px tall: a bubble crossing it in 2.4 s, as on every board, rises
+               0.83 to 0.9 px a 25 fps frame, so two frames running can fall on the same pixels (frames 29 and 30 do). Two
+               frames apart every bubble has moved: alike there, they stood still */
+            for (int g = 0; g + 1 < f; g++) if (seen[g] == seen[f] && f - g < 30) LF("B: the bubbles stood still (frames %d and %d alike)", g, f);
+#else
             for (int g = 0; g < f; g++) if (seen[g] == seen[f] && f - g < 30) LF("B: the bubbles stood still (frames %d and %d alike)", g, f);
+#endif
             for (int y = q[0][1]; y < q[0][1] + q[0][3]; y++) for (int x = q[0][0]; x < q[0][0] + q[0][2]; x++)
                 if (fc[y * TANK_W + x] != H.page[y * TANK_W + x]) rows_hit[(y - q[0][1]) * 3 / q[0][3]] = 1;
         }
@@ -214,6 +221,14 @@ int selftest_libload(void) {
         render_library_pic_rect(0, &q[1][0], &q[1][1], &q[1][2], &q[1][3]);
         diff_page(fc, H.page, 1, &q[1], &out, &in, &bright);
         if (out || !bright) LF("B: row 0's bubbles: %d outside its glass, %d light", out, bright);
+#ifdef CONFIG_POCKET_TANK_320X240
+        /* (this fork) ... and that row is where the page draws row 0: its little tank drawn again by render_library_pic, as a
+           late picture is, changes nothing. A 320 x 240 board's rows are taller than their pictures (SH_LIB_ROW), and the
+           bubbles and a late picture once stood 16 px under the row's glass */
+        memcpy(fc, H.page, sizeof fc); render_library_pic(fc, TANK_W, 0, fish, false);
+        diff_page(fc, H.page, 0, NULL, &out, &in, &bright);
+        if (out) LF("B: row 0's little tank drawn again (render_library_pic) is not where the page drew it (%d pixels differ)", out);
+#endif
     }
     int ticks_before = 0, frames = 1;
     while (!H.pics->have && frames < 200) {

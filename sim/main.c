@@ -13672,7 +13672,8 @@ static int shelf_shot(const char *prefix, const char *jelly_ppm) {
     snprintf(path, sizeof path, "%s_lock_hint.ppm", prefix); write_ppm(path, fb);
 #ifdef CONFIG_POCKET_TANK_320X240
     {   /* (this fork) a page the set above never shows: the locked shelves with the tank on the glass in the top row's
-           fourth place, where its NOW tag stands nearest the padlock */
+           fourth place, where its NOW tag stood nearest the padlock while that was by the title (until 0.4.2 put it in
+           the icon foot): the NOW tank wearing the padlock at the glass's right edge */
         shelf_slot_t s3[8]; memcpy(s3, s, sizeof s3);
         s3[0].state = SHELF_DORMANT; s3[3].state = SHELF_NOW;
         render_shelf_set_touch_lock(true); render_shelf(fb, TANK_W, s3, 1, 1); render_shelf_set_touch_lock(false);

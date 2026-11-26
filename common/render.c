@@ -17658,7 +17658,19 @@ void render_shelf_thumb(const uint16_t *frame, uint16_t *thumb) {
  * on a locked tank shows how to get back (render_touch_lock_hint) */
 static bool g_sh_touch_lock;
 void render_shelf_set_touch_lock(bool on) { g_sh_touch_lock = on; }
-#define SH_LOCK_W UI(44)
+#ifdef CONFIG_POCKET_TANK_320X240
+/* (this fork) the icon foot's buttons on a 320 x 240 board hold their drawings whole: those are pixel art at their own size
+   (ui.h) - the library's little tank and its plus 30 px wide, the cog 20 px, the padlock lifted open 19 rows - and UI(44) x
+   MSP_CLOSE_H (29 x 22) cut the plus and laid the shackle on the button's edge. 38 x 26 leaves each a pixel clear of the
+   double edge: the 1.8's 44 x 30 at 0.86. Four of them SHI_GAP apart, from the glass's edges (SH_FOOT_X0), leave the pager
+   the middle 112 px; they stand centred on its line (SH_ICON_Y), 2 px over the plank's shadow and 2 px off the glass's foot */
+#define SH_LOCK_W 38
+#define SH_ICON_H 26
+#else
+#define SH_LOCK_W 44
+#define SH_ICON_H MSP_CLOSE_H                            /* (this fork) the icon foot's height: its own on a 320 x 240 board */
+#endif
+#define SH_ICON_Y (SH_FOOT_Y - (SH_ICON_H - MSP_CLOSE_H) / 2)   /* (this fork) ... and its top: SH_FOOT_Y on every other board */
 static void sh_padlock(ctx_t *c, int cx, int cy, bool shut, uint32_t ink, uint32_t hole) {   /* 12 x 16: the body, its keyhole, the shackle */
     rect_fill(c, cx - 6, cy - 1, 12, 9, ink);
     rect_fill(c, cx - 1, cy + 1, 2, 4, hole);
@@ -17668,9 +17680,9 @@ static void sh_padlock(ctx_t *c, int cx, int cy, bool shut, uint32_t ink, uint32
     rect_fill(c, cx + 3, top + 1, 2, shut ? cy - 1 - top - 1 : 4, ink);
 }
 static void sh_lock_btn(ctx_t *c, int x, int y, bool locked) {
-    if (locked) button(c, x, y, SH_LOCK_W, MSP_CLOSE_H, MSP_TEAL, MSP_TEAL, "", 2);
-    else        button(c, x, y, SH_LOCK_W, MSP_CLOSE_H, 0x1c2f36, MSP_TEAL, "", 2);
-    sh_padlock(c, x + SH_LOCK_W / 2, y + MSP_CLOSE_H / 2 + 1, locked, locked ? MSP_INK : MSP_TEAL, locked ? MSP_TEAL : 0x1c2f36);
+    if (locked) button(c, x, y, SH_LOCK_W, SH_ICON_H, MSP_TEAL, MSP_TEAL, "", 2);
+    else        button(c, x, y, SH_LOCK_W, SH_ICON_H, 0x1c2f36, MSP_TEAL, "", 2);
+    sh_padlock(c, x + SH_LOCK_W / 2, y + SH_ICON_H / 2 + 1, locked, locked ? MSP_INK : MSP_TEAL, locked ? MSP_TEAL : 0x1c2f36);
 }
 void render_touch_lock_hint(uint16_t *fb, int stride) {    /* a tap on a locked tank: what happened and the way back */
     ctx_t c = ctx_frame(fb, stride);
@@ -17708,10 +17720,23 @@ static void sh_foot_xy(int which, int *x, int *y) {
 #if PAGE_BOWL || defined(TANK_WATCH)
     *x = (TANK_W - (SHI_N * SH_LOCK_W + (SHI_N - 1) * SHI_GAP)) / 2 + which * (SH_LOCK_W + SHI_GAP);
 #else
-    *x = which < 2 ? SH_X0 + which * (SH_LOCK_W + SHI_GAP) : TANK_W - SH_X0 - SH_LOCK_W - (SHI_N - 1 - which) * (SH_LOCK_W + SHI_GAP);
+    *x = which < 2 ? SH_FOOT_X0 + which * (SH_LOCK_W + SHI_GAP) : TANK_W - SH_FOOT_X0 - SH_LOCK_W - (SHI_N - 1 - which) * (SH_LOCK_W + SHI_GAP);   /* (this fork: sh_footer's x) */
 #endif
-    *y = SH_FOOT_Y;
+    *y = SH_ICON_Y;
 }
+#ifdef CONFIG_POCKET_TANK_320X240
+/* (this fork) the icon foot on a 320 x 240 board: each drawing a pixel clear of its button's double edge - the library's
+   tank and plus (14 px left of the button's middle, 15 right), the cog (10 over, 9 under), the padlock lifted open (drawn
+   a pixel under the middle: its shackle 11 over that, its body 7 under) - the row on the glass under the second plank's
+   face, and the pager at its widest, "15 OF 15" (SHELF_POS_MAX's fifteen pages), between the buttons */
+#define SHI_PAGER_W (2 * (SH_ARW_W + UI(12)) + (8 * 6 - 1) * UI_TEXT(2))
+_Static_assert(SH_LOCK_W / 2 - 14 >= 3 && SH_LOCK_W - SH_LOCK_W / 2 - 1 - 15 >= 3 && SH_ICON_H / 2 - 10 >= 3 &&
+               SH_ICON_H - SH_ICON_H / 2 - 1 - 9 >= 3 && SH_ICON_H / 2 + 1 - 11 >= 3 && SH_ICON_H - SH_ICON_H / 2 - 2 - 7 >= 3,
+               "the icon foot's drawings inside their buttons");
+_Static_assert(SH_ICON_Y >= SH_ROW1_Y + 2 * SH_SHELF_H + SH_ROW_GAP && SH_ICON_Y + SH_ICON_H <= TANK_H &&
+               SH_FOOT_X0 + 2 * SH_LOCK_W + SHI_GAP <= (TANK_W - SHI_PAGER_W) / 2,
+               "the icon foot on the glass: under the shelves, its buttons clear of the pager");
+#endif
 static void sh_ic_px(ctx_t *c, int x, int y, uint32_t ink, int n16) { if (n16 > 0) px_blend(c, x, y, ink, n16 >= 16 ? 255 : n16 * 16); }
 static void sh_ic_cog(ctx_t *c, int cx, int cy, uint32_t ink) {            /* 20 px: eight teeth round a ring (4 x 4 samples a pixel; the page is drawn once and kept) */
     for (int j = -10; j < 10; j++) for (int i = -10; i < 10; i++) {
@@ -17750,11 +17775,11 @@ static void sh_icon_foot(ctx_t *c, int page, int pages) {
 #endif
     for (int b = 0; b < SHI_N; b++) {
         int x, y; sh_foot_xy(b, &x, &y);
-        const int cx = x + SH_LOCK_W / 2, cy = y + MSP_CLOSE_H / 2;
+        const int cx = x + SH_LOCK_W / 2, cy = y + SH_ICON_H / 2;
         if (b == SHI_LOCK) { sh_lock_btn(c, x, y, g_sh_touch_lock); continue; }
         if (b == SHI_SET && g_sh_touch_lock) {             /* a locked board opens no settings page (it would take no touch): the cog dim, its edge too */
-            button(c, x, y, SH_LOCK_W, MSP_CLOSE_H, 0x1c2f36, 0x2c4a52, "", 2); sh_ic_cog(c, cx, cy, 0x2c4a52); continue; }
-        button(c, x, y, SH_LOCK_W, MSP_CLOSE_H, 0x1c2f36, MSP_TEAL, "", 2);
+            button(c, x, y, SH_LOCK_W, SH_ICON_H, 0x1c2f36, 0x2c4a52, "", 2); sh_ic_cog(c, cx, cy, 0x2c4a52); continue; }
+        button(c, x, y, SH_LOCK_W, SH_ICON_H, 0x1c2f36, MSP_TEAL, "", 2);
         if (b == SHI_LIB) sh_ic_library(c, cx, cy, MSP_TEAL, 0x1c2f36);
         else if (b == SHI_SET) sh_ic_cog(c, cx, cy, MSP_TEAL);
         else sh_ic_x(c, cx, cy, MSP_TEAL);

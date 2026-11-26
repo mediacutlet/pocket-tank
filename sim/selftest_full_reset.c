@@ -223,8 +223,14 @@ static bool btn_at(int btn, float *ox, float *oy) {   /* the middle of a button'
 }
 static int tap_btn(int btn) { float x, y; if (!btn_at(btn, &x, &y)) return -99; return render_reset_tap(x, y, x, y); }
 static int pages_drawn(void) {
+#ifdef CONFIG_POCKET_TANK_320X240
+    /* (this fork) a 320 x 240 board never saves a network (no update channel): ERASE EVERYTHING? has no ALSO FORGET WI-FI */
+    static const uint8_t WANT[7] = { 0, 1u << RESET_BTN_BACK | 1u << RESET_BTN_TANK | 1u << RESET_BTN_ERASE, 1u << RESET_BTN_BACK | 1u << RESET_BTN_YES,
+                                     1u << RESET_BTN_BACK | 1u << RESET_BTN_NEXT, 1u << RESET_BTN_BACK | 1u << RESET_BTN_HOLD, 1u << RESET_BTN_BACK, 0 };
+#else
     static const uint8_t WANT[7] = { 0, 1u << RESET_BTN_BACK | 1u << RESET_BTN_TANK | 1u << RESET_BTN_ERASE, 1u << RESET_BTN_BACK | 1u << RESET_BTN_YES,
                                      1u << RESET_BTN_BACK | 1u << RESET_BTN_WIFI | 1u << RESET_BTN_NEXT, 1u << RESET_BTN_BACK | 1u << RESET_BTN_HOLD, 1u << RESET_BTN_BACK, 0 };
+#endif
     if (!render_reset_text_fits()) FR_FAIL("a line of the prompt is wider than its panel or button, or the panel is off this glass");
     for (int pg = RESET_PG_CHOOSE; pg <= RESET_PG_ERASING; pg++)
         for (int wifi = 0; wifi < 2; wifi++) {
@@ -257,6 +263,25 @@ static int pages_drawn(void) {
                 if (fa[(int)y * TANK_W + (int)x] == SENT) FR_FAIL("%s: %s answers at %.0f,%.0f where nothing is drawn", PG_NAME[pg], BTN_NAME[b], x, y);
                 if (x < px || x >= px + pw || y < py || y >= py + ph) FR_FAIL("%s: %s's middle %.0f,%.0f is outside the panel", PG_NAME[pg], BTN_NAME[b], x, y);
             }
+#ifdef CONFIG_POCKET_TANK_320X240
+            /* (this fork) a 320 x 240 board says nothing of the Wi-Fi: the box - which the director can still tick - changes no pixel
+               of either page; a hold under way is SEEN */
+            if (pg == RESET_PG_ERASE || pg == RESET_PG_HOLD) {
+                static uint16_t fo[TANK_W * TANK_H];
+                render_reset_set_wifi(!wifi);
+                for (int i = 0; i < TANK_W * TANK_H; i++) fo[i] = SENT;
+                render_frame_begin(); render_reset_prompt(fo, TANK_W, 0.5f);
+                int diff = 0; for (int i = 0; i < TANK_W * TANK_H; i++) diff += fo[i] != fa[i];
+                if (diff) FR_FAIL("%s: the Wi-Fi box %s changes %d pixels, on a board with no Wi-Fi to forget", PG_NAME[pg], wifi ? "unticked" : "ticked", diff);
+                if (pg == RESET_PG_HOLD) {
+                    render_reset_set_wifi(wifi); render_reset_set_hold(0);
+                    for (int i = 0; i < TANK_W * TANK_H; i++) fo[i] = SENT;
+                    render_frame_begin(); render_reset_prompt(fo, TANK_W, 0.5f);
+                    diff = 0; for (int i = 0; i < TANK_W * TANK_H; i++) diff += fo[i] != fa[i];
+                    if (diff < 200) FR_FAIL("%s: a hold half way changes only %d pixels - it would not be seen", PG_NAME[pg], diff);
+                }
+            }
+#else
             /* the box and the hold's bar change the picture: a ticked box, a hold under way, are SEEN */
             if (pg == RESET_PG_ERASE || pg == RESET_PG_HOLD) {
                 static uint16_t fo[TANK_W * TANK_H];
@@ -266,6 +291,7 @@ static int pages_drawn(void) {
                 int diff = 0; for (int i = 0; i < TANK_W * TANK_H; i++) diff += fo[i] != fa[i];
                 if (diff < 200) FR_FAIL("%s: %s changes only %d pixels - it would not be seen", PG_NAME[pg], pg == RESET_PG_ERASE ? "the box ticked" : "a hold half way", diff);
             }
+#endif
         }
     render_reset_close();
     return 0;
@@ -334,7 +360,11 @@ static int page_erasing(void) {
     if (render_reset_erase_ready() || render_reset_erase_armed()) FR_FAIL("ERASING staged by name (the director's), drawn three times: it asked for an erase");
     if (render_reset_tap(TANK_W / 2.0f, TANK_H / 2.0f, TANK_W / 2.0f, TANK_H / 2.0f) != RESET_ANS_NO || render_reset_page() != RESET_PG_NONE)
         FR_FAIL("ERASING staged by name: a tap did not take it down (page %d) - it would hold the glass until a command", render_reset_page());
+#ifdef CONFIG_POCKET_TANK_320X240
+    for (int wifi = 0; wifi < 1; wifi++) {                /* (this fork: no box to tick on a 320 x 240 board - pages_drawn) */
+#else
     for (int wifi = 0; wifi < 2; wifi++) {
+#endif
         /* the whole way: the choice, the page, the box, the hold - its answer arms the erase and brings ERASING */
         render_reset_open(RESET_PG_CHOOSE); tap_btn(RESET_BTN_ERASE); if (wifi) tap_btn(RESET_BTN_WIFI); tap_btn(RESET_BTN_NEXT);
         float hx, hy; btn_at(RESET_BTN_HOLD, &hx, &hy);
@@ -352,7 +382,13 @@ static int page_erasing(void) {
         }
         page_frame(fa, 0);
         int px = 0; for (int i = 0; i < TANK_W * TANK_H; i++) px += fa[i] != SENT;
+#ifdef CONFIG_POCKET_TANK_320X240
+        /* (this fork) 50000 is half the 1.8's panel (336 x 288); a 320 x 240 board's whole panel is 240 x 188 = 45120 px, and the
+           page fills it: every pixel of it, or the page is not on the frame */
+        if (px < RESET_PANEL_W * RESET_PANEL_H) FR_FAIL("ERASING's frame before the erase holds %d drawn pixels of its panel's %d - the page is not on it", px, RESET_PANEL_W * RESET_PANEL_H);
+#else
         if (px < 50000) FR_FAIL("ERASING's frame before the erase holds %d drawn pixels - the page is not on it", px);
+#endif
         if ((r = render_reset_erase_ready()) != want) FR_FAIL("ERASING drawn %d times: the erase handed over is %d (want %d)", RESET_ERASING_FRAMES, r, want);
         if (render_reset_erase_ready() || render_reset_erase_armed()) FR_FAIL("the erase was handed over twice");
         if (render_reset_page() != RESET_PG_ERASING) FR_FAIL("ERASING left the glass before the erase (page %d): the board goes quiet under it", render_reset_page());
@@ -393,10 +429,17 @@ static int pages_work(void) {
         if (render_reset_tap(x, y, bx, by) != RESET_ANS_NONE || render_reset_page() != RESET_PG_CHOOSE) FR_FAIL("the choice: a press on one button lifted on the other did something"); }
     if (tap_btn(RESET_BTN_ERASE) != RESET_EV_PAGE || render_reset_page() != RESET_PG_ERASE) FR_FAIL("the choice: ERASE EVERYTHING did not bring its page (%d)", render_reset_page());
     if (render_reset_wifi()) FR_FAIL("ERASE EVERYTHING?: ALSO FORGET WI-FI came ticked");
+#ifdef CONFIG_POCKET_TANK_320X240
+    /* (this fork) a 320 x 240 board never saves a network: no point of the page reads a box; BACK and the choice again bring it back */
+    {   float x, y; if (btn_at(RESET_BTN_WIFI, &x, &y)) FR_FAIL("ERASE EVERYTHING?: a Wi-Fi box answers at %.0f,%.0f, on a board with no Wi-Fi to forget", x, y); }
+    if (tap_btn(RESET_BTN_BACK) != RESET_EV_PAGE || tap_btn(RESET_BTN_ERASE) != RESET_EV_PAGE || render_reset_wifi() || render_reset_page() != RESET_PG_ERASE)
+        FR_FAIL("ERASE EVERYTHING?: BACK, then ERASE EVERYTHING again - not its page (%d), or the box ticked", render_reset_page());
+#else
     if (tap_btn(RESET_BTN_WIFI) != RESET_EV_PAGE || !render_reset_wifi() || render_reset_page() != RESET_PG_ERASE) FR_FAIL("the Wi-Fi box: a tap did not tick it");
     if (tap_btn(RESET_BTN_WIFI) != RESET_EV_PAGE || render_reset_wifi()) FR_FAIL("the Wi-Fi box: a second tap did not untick it");
     tap_btn(RESET_BTN_WIFI);
     if (tap_btn(RESET_BTN_BACK) != RESET_EV_PAGE || tap_btn(RESET_BTN_ERASE) != RESET_EV_PAGE || render_reset_wifi()) FR_FAIL("the Wi-Fi box: ticked, BACK, ERASE EVERYTHING again - it came back ticked");
+#endif
     {   float x, y; btn_at(RESET_BTN_NEXT, &x, &y);
         if (render_reset_hold(true, x, y, x, y, 30) || render_reset_page() != RESET_PG_ERASE) FR_FAIL("ERASE EVERYTHING?: NEXT held 30 s answered"); render_reset_hold(false, 0, 0, 0, 0, 0); }
     if (tap_btn(RESET_BTN_NEXT) != RESET_EV_PAGE || render_reset_page() != RESET_PG_HOLD) FR_FAIL("ERASE EVERYTHING?: NEXT did not bring the last page (%d)", render_reset_page());
@@ -438,9 +481,19 @@ static int pages_work(void) {
     r = 0; for (k = 0; k < HOLD_N(RESET_HOLD_S + 0.2f) && !r; k++) r = render_reset_hold(true, hx, hy, hx, hy, 0.04f);
     if (r != RESET_ANS_ERASE || render_reset_page() != RESET_PG_NONE) FR_FAIL("the full hold, the box unticked: answer %d (want %d), page %d", r, RESET_ANS_ERASE, render_reset_page());
     if (k < HOLD_N(RESET_HOLD_S - 0.1f)) FR_FAIL("the hold answered after %.2f s (want %.1f)", k * 0.04f, RESET_HOLD_S);
+#ifdef CONFIG_POCKET_TANK_320X240
+    /* (this fork) no box to tick on a 320 x 240 board: the way through it again, a tap where the box stands elsewhere and all, answers ERASE */
+    render_reset_open(RESET_PG_CHOOSE); tap_btn(RESET_BTN_ERASE);
+    {   const float wx = PAGE_X + RESET_PANEL_X + RESET_PANEL_W / 2.0f, wy = PAGE_Y + RESET_PANEL_Y + RESET_PANEL_H * 0.45f;   /* (mid-panel: upstream's box) */
+        if (render_reset_tap(wx, wy, wx, wy) != RESET_ANS_NONE || render_reset_wifi()) FR_FAIL("ERASE EVERYTHING?: a tap mid-panel ticked a box that is not drawn"); }
+    tap_btn(RESET_BTN_NEXT);
+    r = 0; for (k = 0; k < HOLD_N(RESET_HOLD_S + 0.2f) && !r; k++) r = render_reset_hold(true, hx, hy, hx, hy, 0.04f);
+    if (r != RESET_ANS_ERASE) FR_FAIL("the full hold, past the page that has no box: answer %d (want %d)", r, RESET_ANS_ERASE);
+#else
     render_reset_open(RESET_PG_CHOOSE); tap_btn(RESET_BTN_ERASE); tap_btn(RESET_BTN_WIFI); tap_btn(RESET_BTN_NEXT);
     r = 0; for (k = 0; k < HOLD_N(RESET_HOLD_S + 0.2f) && !r; k++) r = render_reset_hold(true, hx, hy, hx, hy, 0.04f);
     if (r != RESET_ANS_ERASE_WIFI) FR_FAIL("the full hold, the box ticked: answer %d (want %d)", r, RESET_ANS_ERASE_WIFI);
+#endif
     /* the prompt down: nothing answers */
     if (render_reset_hold(true, hx, hy, hx, hy, 60) || render_reset_tap(hx, hy, hx, hy) || render_reset_hit(hx, hy)) FR_FAIL("the prompt closed still answers");
     return 0;

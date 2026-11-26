@@ -12428,21 +12428,33 @@ int render_confirm_hit(float x, float y) {
 #define RP_Y   RESET_PANEL_Y
 #define RP_W   RESET_PANEL_W
 #define RP_H   RESET_PANEL_H
-#define RP_BX  (RP_X + 16)                         /* the wide buttons */
-#define RP_BW  (RP_W - 32)
-#define RP_CH_TANK_Y  (RP_Y + 50)                  /* the choice: two named buttons of RP_CH_BH, BACK under them */
-#define RP_CH_BH      78
-#define RP_CH_ERASE_Y (RP_CH_TANK_Y + RP_CH_BH + 8)
-#define RP_CH_BACK_Y  (RP_Y + 224)
-#define RP_CH_BACK_H  44
-#define RP_ER_BOX_Y   (RP_Y + 118)                 /* ERASE EVERYTHING?: the Wi-Fi row, then BACK / NEXT where NO / YES are */
-#define RP_ER_BOX_H   48
-#define RP_ER_BTN_Y   (RP_Y + 200)
-#define RP_HO_BTN_Y   (RP_Y + 118)                 /* ARE YOU SURE?: the hold button, NO under it */
-#define RP_HO_BTN_H   64
-#define RP_HO_NO_Y    (RP_Y + 196)
-#define RP_HO_NO_H    56
-#define RP_RF_OK_Y    (RP_Y + 196)                 /* COULD NOT ERASE: OK where NO is */
+#define RP_BX  (RP_X + UI(16))                     /* the wide buttons */
+#define RP_BW  (RP_W - UI(32))
+#define RP_CH_TANK_Y  (RP_Y + UI(50))              /* the choice: two named buttons of RP_CH_BH, BACK under them */
+#define RP_CH_BH      UI(78)
+#define RP_CH_ERASE_Y (RP_CH_TANK_Y + RP_CH_BH + UI(8))
+#define RP_CH_BACK_Y  (RP_Y + UI(224))
+#define RP_CH_BACK_H  UI(44)
+#define RP_ER_BOX_Y   (RP_Y + UI(118))             /* ERASE EVERYTHING?: the Wi-Fi row, then BACK / NEXT where NO / YES are */
+#define RP_ER_BOX_H   UI(48)
+#define RP_ER_BTN_Y   (RP_Y + UI(200))
+#define RP_HO_BTN_Y   (RP_Y + UI(118))             /* ARE YOU SURE?: the hold button, NO under it */
+#define RP_HO_BTN_H   UI(64)
+#define RP_HO_NO_Y    (RP_Y + UI(196))
+#define RP_HO_NO_H    UI(56)
+#define RP_RF_OK_Y    (RP_Y + UI(196))             /* COULD NOT ERASE: OK where NO is */
+#ifdef CONFIG_POCKET_TANK_320X240
+/* (this fork) the choice's buttons on a 320 x 240 board: UI() rounds the design's 78 px buttons 8 apart to 51 and 5,
+   closer than the two slops of UI(4), 3 px each, that the hit test puts between them - a point there would answer
+   both. A row off each button keeps BACK where the design has it and the three two slops apart */
+#undef  RP_CH_BH
+#define RP_CH_BH      (UI(78) - 1)
+#undef  RP_CH_ERASE_Y
+#define RP_CH_ERASE_Y (RP_CH_TANK_Y + RP_CH_BH + 2 * UI(4))
+#endif
+_Static_assert(RP_CH_ERASE_Y >= RP_CH_TANK_Y + RP_CH_BH + 2 * UI(4) && RP_CH_BACK_Y >= RP_CH_ERASE_Y + RP_CH_BH + 2 * UI(4) &&
+               RP_HO_NO_Y >= RP_HO_BTN_Y + RP_HO_BTN_H + UI(6) && RP_CH_BACK_Y + RP_CH_BACK_H <= RP_Y + RP_H - UI(16),
+               "the reset prompt's buttons: no point answers two (render_reset_hit's slops), BACK over the timeout's bar");
 static struct { uint8_t page, drawn, armed; bool wifi, spent, live; float hold; } s_rp;   /* live: a finger is holding (a staged picture's bar is not) */
 void  render_reset_open(int page) { s_rp.page = page >= RESET_PG_CHOOSE && page <= RESET_PG_ERASING ? (uint8_t)page : RESET_PG_CHOOSE; s_rp.drawn = 0; s_rp.armed = 0; s_rp.wifi = false; s_rp.spent = s_rp.live = false; s_rp.hold = 0; }
 void  render_reset_close(void) { s_rp.page = RESET_PG_NONE; s_rp.hold = 0; s_rp.armed = 0; s_rp.spent = s_rp.live = false; }   /* (an armed erase goes with
@@ -12474,21 +12486,23 @@ int render_reset_hit(float x, float y) {
     x -= PAGE_X; y -= PAGE_Y;
     switch (s_rp.page) {
     case RESET_PG_CHOOSE:                           /* (a fingertip's slop of 4: the two choices are 8 apart, and never share a point) */
-        if (rp_in(x, y, RP_BX, RP_CH_TANK_Y,  RP_BW, RP_CH_BH, 4)) return RESET_BTN_TANK;
-        if (rp_in(x, y, RP_BX, RP_CH_ERASE_Y, RP_BW, RP_CH_BH, 4)) return RESET_BTN_ERASE;
-        if (rp_in(x, y, RP_BX, RP_CH_BACK_Y,  RP_BW, RP_CH_BACK_H, 4)) return RESET_BTN_BACK;
+        if (rp_in(x, y, RP_BX, RP_CH_TANK_Y,  RP_BW, RP_CH_BH, UI(4))) return RESET_BTN_TANK;
+        if (rp_in(x, y, RP_BX, RP_CH_ERASE_Y, RP_BW, RP_CH_BH, UI(4))) return RESET_BTN_ERASE;
+        if (rp_in(x, y, RP_BX, RP_CH_BACK_Y,  RP_BW, RP_CH_BACK_H, UI(4))) return RESET_BTN_BACK;
         break;
     case RESET_PG_ERASE:
+#ifndef CONFIG_POCKET_TANK_320X240                  /* (this fork) no ALSO FORGET WI-FI on a 320 x 240 board: it never saves a network (rp_paint) */
         if (rp_in(x, y, RP_BX, RP_ER_BOX_Y, RP_BW, RP_ER_BOX_H, 6)) return RESET_BTN_WIFI;
-        if (rp_in(x, y, RP_X + 24, RP_ER_BTN_Y, RENDER_CONFIRM_BTN_W, RENDER_CONFIRM_BTN_H, 10)) return RESET_BTN_BACK;
-        if (rp_in(x, y, RP_X + RP_W - 24 - RENDER_CONFIRM_BTN_W, RP_ER_BTN_Y, RENDER_CONFIRM_BTN_W, RENDER_CONFIRM_BTN_H, 10)) return RESET_BTN_NEXT;
+#endif
+        if (rp_in(x, y, RP_X + UI(24), RP_ER_BTN_Y, RENDER_CONFIRM_BTN_W, RENDER_CONFIRM_BTN_H, UI(10))) return RESET_BTN_BACK;
+        if (rp_in(x, y, RP_X + RP_W - UI(24) - RENDER_CONFIRM_BTN_W, RP_ER_BTN_Y, RENDER_CONFIRM_BTN_W, RENDER_CONFIRM_BTN_H, UI(10))) return RESET_BTN_NEXT;
         break;
     case RESET_PG_REFUSED:
-        if (rp_in(x, y, RP_BX, RP_RF_OK_Y, RP_BW, RP_HO_NO_H, 6)) return RESET_BTN_BACK;
+        if (rp_in(x, y, RP_BX, RP_RF_OK_Y, RP_BW, RP_HO_NO_H, UI(6))) return RESET_BTN_BACK;
         break;
     case RESET_PG_HOLD:                             /* (HOLD TO ERASE takes no slop: a finger must be ON it) */
         if (rp_in(x, y, RP_BX, RP_HO_BTN_Y, RP_BW, RP_HO_BTN_H, 0)) return RESET_BTN_HOLD;
-        if (rp_in(x, y, RP_BX, RP_HO_NO_Y,  RP_BW, RP_HO_NO_H, 6)) return RESET_BTN_BACK;
+        if (rp_in(x, y, RP_BX, RP_HO_NO_Y,  RP_BW, RP_HO_NO_H, UI(6))) return RESET_BTN_BACK;
         break;
     }
     return RESET_BTN_NONE;
@@ -12537,23 +12551,27 @@ int render_reset_hold(bool down, float px, float py, float x, float y, float dt_
 static void rp_panel(ctx_t *c, const char *title) {
     rect_fill(c, RP_X, RP_Y, RP_W, RP_H, 0x04141a);
     rect_edge(c, RP_X, RP_Y, RP_W, RP_H, 0x9fd8e2); rect_edge(c, RP_X + 1, RP_Y + 1, RP_W - 2, RP_H - 2, 0x1c2f36);
-    draw_text(c, RP_X + (RP_W - text_w(title, 3)) / 2, RP_Y + 16, 3, 0xffffff, title);
+    draw_text(c, RP_X + (RP_W - text_w(title, UI_TEXT(3))) / 2, RP_Y + UI(16), UI_TEXT(3), 0xffffff, title);
 }
-static void rp_line(ctx_t *c, int y, uint32_t rgb, const char *l) { draw_text(c, RP_X + (RP_W - text_w(l, 2)) / 2, y, 2, rgb, l); }
+static void rp_line(ctx_t *c, int y, uint32_t rgb, const char *l) { draw_text(c, RP_X + (RP_W - text_w(l, UI_TEXT(2))) / 2, y, UI_TEXT(2), rgb, l); }
 /* a choice: its name large, what it does in two lines under it. `heavy`: an edge twice as thick - ERASE EVERYTHING's
    box is drawn heavier as well as worded (never by its color alone) */
 static void rp_choice(ctx_t *c, int y, uint32_t fill, uint32_t edge, bool heavy, const char *name, const char *l1, const char *l2) {
     rect_fill(c, RP_BX, y, RP_BW, RP_CH_BH, fill);
     rect_edge(c, RP_BX, y, RP_BW, RP_CH_BH, edge); rect_edge(c, RP_BX + 1, y + 1, RP_BW - 2, RP_CH_BH - 2, edge);
     if (heavy) { rect_edge(c, RP_BX + 2, y + 2, RP_BW - 4, RP_CH_BH - 4, edge); rect_edge(c, RP_BX + 3, y + 3, RP_BW - 6, RP_CH_BH - 6, edge); }
-    draw_text(c, RP_BX + (RP_BW - text_w(name, 3)) / 2, y + 10, 3, 0xffffff, name);
-    draw_text(c, RP_BX + (RP_BW - text_w(l1, 2)) / 2, y + 38, 2, 0xdcecef, l1);
-    draw_text(c, RP_BX + (RP_BW - text_w(l2, 2)) / 2, y + 56, 2, 0xdcecef, l2);
+    draw_text(c, RP_BX + (RP_BW - text_w(name, UI_TEXT(3))) / 2, y + UI(10), UI_TEXT(3), 0xffffff, name);
+    draw_text(c, RP_BX + (RP_BW - text_w(l1, UI_TEXT(2))) / 2, y + UI(38), UI_TEXT(2), 0xdcecef, l1);
+    draw_text(c, RP_BX + (RP_BW - text_w(l2, UI_TEXT(2))) / 2, y + UI(56), UI_TEXT(2), 0xdcecef, l2);
 }
-#define RP_HO_TX (RP_BX + 12)                       /* the hold's track along the button's foot */
-#define RP_HO_TY (RP_HO_BTN_Y + RP_HO_BTN_H - 22)
-#define RP_HO_TW (RP_BW - 24)
-#define RP_HO_TH 12
+#define RP_HO_TX (RP_BX + UI(12))                   /* the hold's track along the button's foot */
+#define RP_HO_TY (RP_HO_BTN_Y + RP_HO_BTN_H - UI(22))
+#define RP_HO_TW (RP_BW - UI(24))
+#define RP_HO_TH UI(12)
+_Static_assert(UI(56) + 7 * UI_TEXT(2) <= RP_CH_BH - 4 && RP_HO_BTN_Y + UI(12) + 7 * UI_TEXT(3) < RP_HO_TY &&
+               UI(124) + 7 * UI_TEXT(2) < UI(196) && UI(206) + 7 * UI_TEXT(2) <= RP_H - UI(16),
+               "the reset prompt's words in height: a choice's last line inside its heavy edge, HOLD TO ERASE over its track, "
+               "COULD NOT ERASE's over OK, ERASING's last over the panel's foot");
 /* a page's picture: everything on it that does not move while it stands (what it shows by: the page, the box, the hold's
    label). The timeout's bar and the hold's fill are rp_live's */
 static void rp_paint(ctx_t *c) {
@@ -12562,9 +12580,16 @@ static void rp_paint(ctx_t *c) {
         rp_panel(c, RP_CH_TITLE);
         rp_choice(c, RP_CH_TANK_Y,  0x1c2f36, 0x9fd8e2, false, RP_CH_TANK,  RP_CH_TANK1,  RP_CH_TANK2);
         rp_choice(c, RP_CH_ERASE_Y, 0x7a2028, 0xf25b65, true,  RP_CH_ERASE, RP_CH_ERASE1, RP_CH_ERASE2);
-        button(c, RP_BX, RP_CH_BACK_Y, RP_BW, RP_CH_BACK_H, 0x1c2f36, 0x9fd8e2, "BACK", 3);
+        button(c, RP_BX, RP_CH_BACK_Y, RP_BW, RP_CH_BACK_H, 0x1c2f36, 0x9fd8e2, "BACK", UI_TEXT(3));
     } else if (s_rp.page == RESET_PG_ERASE) {
         rp_panel(c, RP_ER_TITLE);
+#ifdef CONFIG_POCKET_TANK_320X240
+        /* (this fork) a 320 x 240 board never saves a network (no update channel, CYD.md): no ALSO FORGET WI-FI and no
+           word of the Wi-Fi - render_reset_hit has no box either. The three lines stand in the middle of the room the
+           box leaves between the title and BACK / NEXT, a line's pitch (UI(20)) apart as the design has them */
+        {   const int top = RP_Y + UI(16) + 7 * UI_TEXT(3), y = (top + RP_ER_BTN_Y - UI(40) - 7 * UI_TEXT(2)) / 2;
+            rp_line(c, y, 0x9fd8e2, RP_ER_L1); rp_line(c, y + UI(20), 0x9fd8e2, RP_ER_L2); rp_line(c, y + UI(40), 0xffffff, RP_ER_L3); }
+#else
         rp_line(c, RP_Y + 50, 0x9fd8e2, RP_ER_L1); rp_line(c, RP_Y + 70, 0x9fd8e2, RP_ER_L2); rp_line(c, RP_Y + 90, 0xffffff, RP_ER_L3);
         /* the Wi-Fi row: a box, empty or with a tick drawn in it, and its words; under it what will happen, in words */
         rect_fill(c, RP_BX, RP_ER_BOX_Y, RP_BW, RP_ER_BOX_H, 0x0b2229);
@@ -12578,31 +12603,34 @@ static void rp_paint(ctx_t *c) {
         }
         draw_text(c, bx + bs + 14, RP_ER_BOX_Y + (RP_ER_BOX_H - 14) / 2, 2, 0xffffff, RP_ER_BOX);
         rp_line(c, RP_Y + 174, 0x9fd8e2, s_rp.wifi ? RP_WIFI_GONE : RP_WIFI_KEPT);
-        button(c, RP_X + 24, RP_ER_BTN_Y, RENDER_CONFIRM_BTN_W, RENDER_CONFIRM_BTN_H, 0x1c2f36, 0x9fd8e2, "BACK", 3);
-        button(c, RP_X + RP_W - 24 - RENDER_CONFIRM_BTN_W, RP_ER_BTN_Y, RENDER_CONFIRM_BTN_W, RENDER_CONFIRM_BTN_H, 0x7a2028, 0xf25b65, "NEXT", 3);
+#endif
+        button(c, RP_X + UI(24), RP_ER_BTN_Y, RENDER_CONFIRM_BTN_W, RENDER_CONFIRM_BTN_H, 0x1c2f36, 0x9fd8e2, "BACK", UI_TEXT(3));
+        button(c, RP_X + RP_W - UI(24) - RENDER_CONFIRM_BTN_W, RP_ER_BTN_Y, RENDER_CONFIRM_BTN_W, RENDER_CONFIRM_BTN_H, 0x7a2028, 0xf25b65, "NEXT", UI_TEXT(3));
     } else if (s_rp.page == RESET_PG_REFUSED) {      /* the board refused the erase's first write: said plainly, nothing touched */
         rp_panel(c, RP_RF_TITLE);
-        rp_line(c, RP_Y + 76, 0xffffff, RP_RF_L1); rp_line(c, RP_Y + 104, 0x9fd8e2, RP_RF_L2); rp_line(c, RP_Y + 124, 0x9fd8e2, RP_RF_L3);
-        button(c, RP_BX, RP_RF_OK_Y, RP_BW, RP_HO_NO_H, 0x1c2f36, 0x9fd8e2, "OK", 3);
+        rp_line(c, RP_Y + UI(76), 0xffffff, RP_RF_L1); rp_line(c, RP_Y + UI(104), 0x9fd8e2, RP_RF_L2); rp_line(c, RP_Y + UI(124), 0x9fd8e2, RP_RF_L3);
+        button(c, RP_BX, RP_RF_OK_Y, RP_BW, RP_HO_NO_H, 0x1c2f36, 0x9fd8e2, "OK", UI_TEXT(3));
     } else if (s_rp.page == RESET_PG_ERASING) {      /* the hold is done: what is happening, said BEFORE the board goes quiet to do it. No
                                                         button, no bar: nothing here is asked */
         rect_fill(c, RP_X, RP_Y, RP_W, RP_H, 0x04141a);
         rect_edge(c, RP_X, RP_Y, RP_W, RP_H, 0x9fd8e2); rect_edge(c, RP_X + 1, RP_Y + 1, RP_W - 2, RP_H - 2, 0x1c2f36);
-        draw_text(c, RP_X + (RP_W - text_w(RP_EG_TITLE, 5)) / 2, RP_Y + 64, 5, 0xffffff, RP_EG_TITLE);
-        draw_text(c, RP_X + (RP_W - text_w(RP_EG_L1, 3)) / 2, RP_Y + 150, 3, 0xffffff, RP_EG_L1);
-        rp_line(c, RP_Y + 206, 0x9fd8e2, RP_EG_L2);
+        draw_text(c, RP_X + (RP_W - text_w(RP_EG_TITLE, UI_TEXT(5))) / 2, RP_Y + UI(64), UI_TEXT(5), 0xffffff, RP_EG_TITLE);
+        draw_text(c, RP_X + (RP_W - text_w(RP_EG_L1, UI_TEXT(3))) / 2, RP_Y + UI(150), UI_TEXT(3), 0xffffff, RP_EG_L1);
+        rp_line(c, RP_Y + UI(206), 0x9fd8e2, RP_EG_L2);
     } else {
         rp_panel(c, RP_HO_TITLE);
-        rp_line(c, RP_Y + 50, 0xffffff, RP_HO_L1); rp_line(c, RP_Y + 70, 0x9fd8e2, RP_HO_L2);
+        rp_line(c, RP_Y + UI(50), 0xffffff, RP_HO_L1); rp_line(c, RP_Y + UI(70), 0x9fd8e2, RP_HO_L2);
+#ifndef CONFIG_POCKET_TANK_320X240                   /* (this fork) no word of the Wi-Fi on a 320 x 240 board: it never saves a network */
         rp_line(c, RP_Y + 90, 0x9fd8e2, s_rp.wifi ? RP_WIFI_GONE : RP_WIFI_KEPT);
+#endif
         /* HOLD TO ERASE: its words, and a track along its foot that fills white, left to right, as the hold runs */
         const char *lab = render_reset_hold_frac() > 0 ? RP_HO_BTN2 : RP_HO_BTN;
         rect_fill(c, RP_BX, RP_HO_BTN_Y, RP_BW, RP_HO_BTN_H, 0x7a2028);
         rect_edge(c, RP_BX, RP_HO_BTN_Y, RP_BW, RP_HO_BTN_H, 0xf25b65); rect_edge(c, RP_BX + 1, RP_HO_BTN_Y + 1, RP_BW - 2, RP_HO_BTN_H - 2, 0xf25b65);
-        draw_text(c, RP_BX + (RP_BW - text_w(lab, 3)) / 2, RP_HO_BTN_Y + 12, 3, 0xffffff, lab);
+        draw_text(c, RP_BX + (RP_BW - text_w(lab, UI_TEXT(3))) / 2, RP_HO_BTN_Y + UI(12), UI_TEXT(3), 0xffffff, lab);
         rect_fill(c, RP_HO_TX, RP_HO_TY, RP_HO_TW, RP_HO_TH, 0x1a0508);
         rect_edge(c, RP_HO_TX, RP_HO_TY, RP_HO_TW, RP_HO_TH, 0xffffff);
-        button(c, RP_BX, RP_HO_NO_Y, RP_BW, RP_HO_NO_H, 0x1c2f36, 0x9fd8e2, "NO", 3);
+        button(c, RP_BX, RP_HO_NO_Y, RP_BW, RP_HO_NO_H, 0x1c2f36, 0x9fd8e2, "NO", UI_TEXT(3));
     }
 }
 static void rp_live(ctx_t *c, float frac) {
@@ -12658,19 +12686,21 @@ void render_reset_prompt(uint16_t *fb, int stride, float frac) {
     rp_live(&c, frac);
 }
 bool render_reset_text_fits(void) {
-    const int inner = RP_W - 16, choice = RP_BW - 16, pair = RENDER_CONFIRM_BTN_W - 12;
-    return text_w(RP_CH_TITLE, 3) <= inner && text_w(RP_TANK_TITLE, 3) <= RENDER_CONFIRM_W - 16 && text_w(RP_ER_TITLE, 3) <= inner && text_w(RP_HO_TITLE, 3) <= inner
-        && text_w(RP_CH_TANK, 3) <= choice && text_w(RP_CH_ERASE, 3) <= choice
-        && text_w(RP_CH_TANK1, 2) <= choice && text_w(RP_CH_TANK2, 2) <= choice && text_w(RP_CH_ERASE1, 2) <= choice && text_w(RP_CH_ERASE2, 2) <= choice
-        && text_w(RP_TANK_L1, 2) <= RENDER_CONFIRM_W - 16 && text_w(RP_TANK_L2, 2) <= RENDER_CONFIRM_W - 16 && text_w(RP_TANK_L3, 2) <= RENDER_CONFIRM_W - 16
-        && text_w(RP_ER_L1, 2) <= inner && text_w(RP_ER_L2, 2) <= inner && text_w(RP_ER_L3, 2) <= inner
+    const int inner = RP_W - UI(16), choice = RP_BW - UI(16), pair = RENDER_CONFIRM_BTN_W - UI(12);
+    return text_w(RP_CH_TITLE, UI_TEXT(3)) <= inner && text_w(RP_TANK_TITLE, UI_TEXT(3)) <= RENDER_CONFIRM_W - UI(16) && text_w(RP_ER_TITLE, UI_TEXT(3)) <= inner && text_w(RP_HO_TITLE, UI_TEXT(3)) <= inner
+        && text_w(RP_CH_TANK, UI_TEXT(3)) <= choice && text_w(RP_CH_ERASE, UI_TEXT(3)) <= choice
+        && text_w(RP_CH_TANK1, UI_TEXT(2)) <= choice && text_w(RP_CH_TANK2, UI_TEXT(2)) <= choice && text_w(RP_CH_ERASE1, UI_TEXT(2)) <= choice && text_w(RP_CH_ERASE2, UI_TEXT(2)) <= choice
+        && text_w(RP_TANK_L1, UI_TEXT(2)) <= RENDER_CONFIRM_W - UI(16) && text_w(RP_TANK_L2, UI_TEXT(2)) <= RENDER_CONFIRM_W - UI(16) && text_w(RP_TANK_L3, UI_TEXT(2)) <= RENDER_CONFIRM_W - UI(16)
+        && text_w(RP_ER_L1, UI_TEXT(2)) <= inner && text_w(RP_ER_L2, UI_TEXT(2)) <= inner && text_w(RP_ER_L3, UI_TEXT(2)) <= inner
+#ifndef CONFIG_POCKET_TANK_320X240                  /* (this fork) a 320 x 240 board draws no Wi-Fi box and no word of the Wi-Fi (rp_paint) */
         && 12 + 28 + 14 + text_w(RP_ER_BOX, 2) <= RP_BW - 8
         && text_w(RP_WIFI_KEPT, 2) <= inner && text_w(RP_WIFI_GONE, 2) <= inner
-        && text_w(RP_HO_L1, 2) <= inner && text_w(RP_HO_L2, 2) <= inner
-        && text_w(RP_HO_BTN, 3) <= choice && text_w(RP_HO_BTN2, 3) <= choice
-        && text_w(RP_EG_TITLE, 5) <= inner && text_w(RP_EG_L1, 3) <= inner && text_w(RP_EG_L2, 2) <= inner
-        && text_w(RP_RF_TITLE, 3) <= inner && text_w(RP_RF_L1, 2) <= inner && text_w(RP_RF_L2, 2) <= inner && text_w(RP_RF_L3, 2) <= inner
-        && text_w("BACK", 3) <= pair && text_w("NEXT", 3) <= pair && text_w("YES", 3) <= pair && text_w("NO", 3) <= pair
+#endif
+        && text_w(RP_HO_L1, UI_TEXT(2)) <= inner && text_w(RP_HO_L2, UI_TEXT(2)) <= inner
+        && text_w(RP_HO_BTN, UI_TEXT(3)) <= choice && text_w(RP_HO_BTN2, UI_TEXT(3)) <= choice
+        && text_w(RP_EG_TITLE, UI_TEXT(5)) <= inner && text_w(RP_EG_L1, UI_TEXT(3)) <= inner && text_w(RP_EG_L2, UI_TEXT(2)) <= inner
+        && text_w(RP_RF_TITLE, UI_TEXT(3)) <= inner && text_w(RP_RF_L1, UI_TEXT(2)) <= inner && text_w(RP_RF_L2, UI_TEXT(2)) <= inner && text_w(RP_RF_L3, UI_TEXT(2)) <= inner
+        && text_w("BACK", UI_TEXT(3)) <= pair && text_w("NEXT", UI_TEXT(3)) <= pair && text_w("YES", UI_TEXT(3)) <= pair && text_w("NO", UI_TEXT(3)) <= pair
         /* the panel on every glass: inside the frame, and on the round one inside the circle (its corners 8 px clear) */
         && PAGE_X + RP_X >= 4 && PAGE_X + RP_X + RP_W <= TANK_W - 4 && PAGE_Y + RP_Y >= 4 && PAGE_Y + RP_Y + RP_H <= TANK_H - 4
 #ifdef TANK_ROUND

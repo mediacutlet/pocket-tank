@@ -3284,8 +3284,12 @@ static void reset_pages_port(void) {
     tap(x, y, 80, FRAME_MS);
     if (render_reset_page() != RESET_PG_ERASE || render_reset_wifi() || touch_port_confirm_take()) TFAIL("reset pages: the double of the tap that brought ERASE EVERYTHING? did something");
     /* the box, NEXT, the last page */
+#if HB_320X240
+    if (rp_at(RESET_BTN_WIFI, &x, &y)) TFAIL("reset pages: ERASE EVERYTHING? has a Wi-Fi box on a 320 x 240 board (it never saves a network)");   /* (this fork) */
+#else
     if (!rp_tap(RESET_BTN_WIFI, 300) || !render_reset_wifi()) TFAIL("reset pages: the Wi-Fi box did not tick");
     if (!rp_tap(RESET_BTN_WIFI, 300) || render_reset_wifi()) TFAIL("reset pages: the Wi-Fi box did not untick");
+#endif
     if (!rp_tap(RESET_BTN_NEXT, 300) || render_reset_page() != RESET_PG_HOLD) TFAIL("reset pages: NEXT did not bring the last page (page %d)", render_reset_page());
     if (!rp_at(RESET_BTN_HOLD, &hx, &hy) || !rp_at(RESET_BTN_BACK, &nx, &ny)) { TFAIL("reset pages: the last page has no HOLD TO ERASE or no NO the panel can read"); return; }
     n++;
@@ -3311,10 +3315,12 @@ static void reset_pages_port(void) {
     if ((a = touch_port_confirm_take()) != RESET_ANS_ERASE || touch_port_confirm_up()) TFAIL("reset pages: the full hold answered %d (want %d), prompt %s", a, RESET_ANS_ERASE, touch_port_confirm_up() ? "still up" : "down");
     lift(FRAME_MS); n++;
     /* ... and with the box ticked */
+#if !HB_320X240                                             /* (this fork: no box on a 320 x 240 board - above) */
     if (!rp_to_hold(true)) TFAIL("reset pages: could not walk to the last page with the box ticked");
     else { lift(300); press(hx, hy, 3200);
            if ((a = touch_port_confirm_take()) != RESET_ANS_ERASE_WIFI) TFAIL("reset pages: the full hold, the box ticked, answered %d (want %d)", a, RESET_ANS_ERASE_WIFI);
            lift(FRAME_MS); n++; }
+#endif
     /* a press from before the page (the finger already there as it came), and one in its first 0.2 s: held 5 s, nothing */
     bare(); press(hx, hy, 200); touch_port_confirm_open_page(RESET_PG_HOLD); hold_for(5000);
     if (touch_port_confirm_take() > 0) TFAIL("reset pages: a finger down before the last page came, held 5 s, erased");

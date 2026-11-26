@@ -1956,15 +1956,22 @@ _Static_assert(SET_TITLE_Y + 7 * UI_TEXT(3) < SET_SEG_Y(SET_ROW1_Y) && SET_SEG_Y
 
 /* the pages this board scales whose measurements upstream keeps in this file: upstream's
    numbers through UI(), as the pages' own code scales its numbers. The reset prompt's tall
-   pages (0.4.2; its TANK page keeps RENDER_CONFIRM_*): upstream's panel runs to y 328 */
+   pages (0.4.2; its TANK page keeps RENDER_CONFIRM_*): upstream's panel runs to y 328. Its
+   height is the design's; its width is not: at UI(336), 219 px, ERASE EVERYTHING in size 2
+   (190 px, the smallest size that keeps it the page's loudest words) stood 4 px inside its
+   button, on the button's heavy edge, and ERASE EVERYTHING? 8 px inside the panel. 240 px,
+   centred on the page (glass x 40 .. 280), gives both room; the TANK page, whose widest
+   words (RESET THIS TANK?, 190 px) have 14 px either side, keeps the old confirm's 219 */
 #undef  RESET_PANEL_X
-#define RESET_PANEL_X UI(56)
+#define RESET_PANEL_X ((PAGE_W - RESET_PANEL_W) / 2)
 #undef  RESET_PANEL_Y
 #define RESET_PANEL_Y UI(40)
 #undef  RESET_PANEL_W
-#define RESET_PANEL_W UI(336)
+#define RESET_PANEL_W 240
 #undef  RESET_PANEL_H
 #define RESET_PANEL_H UI(288)
+_Static_assert(RESET_PANEL_X >= 0 && RESET_PANEL_X + RESET_PANEL_W <= PAGE_W && RESET_PANEL_W >= RENDER_CONFIRM_W,
+               "the reset prompt's tall pages on the page, no narrower than its TANK page");
 /* the critter cards' NAME | SHELVE (0.4.2): upstream's two 132 px buttons and their 16 px
    gap are 280 px, on cards the fork draws UI(336) wide (SNAIL_CARD_W ...) */
 #undef  RENDER_CRIT_NAME_W

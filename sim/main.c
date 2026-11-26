@@ -5215,6 +5215,15 @@ static uint16_t *od_stage(int k, int growth) {            /* the hero tank, its 
     tank.sd_unlocks |= SD_ITEM_VOLCANO; tank_volcano_place(&tank);
     if (OD_CASE[k].item == 9) { tank.sd_unlocks &= ~(uint32_t)(SD_ITEM_CORAL | SD_ITEM_CLUSTER | SD_ITEM_CASTLE); tank_decor_set(&tank, 9, 230, OD_CASE[k].z); }
     else { tank.sd_unlocks &= ~(uint32_t)SD_ITEM_VOLCANO; tank_decor_set(&tank, 2, 330, OD_CASE[k].z); }
+#ifdef CONFIG_POCKET_TANK_320X240
+    /* (this fork) the 320 px floor: the castle stops at x 198, and the hero tank's coral (208) and reef cluster (102), both IN
+       FRONT, stand over its door there - the 1.8's stand 118 px and more to its left, out of the way. The octopus in that den
+       was covered by them (a baby 45 px seen at its door, 60 asked; moved to 122, under the cluster, not drawn at all), so in
+       the castle's cases they leave the water, as the coral, the cluster and the castle leave it in the volcano's. Checked:
+       PT_OCTO_NOGATHER fails the castle's cells here, and octo-den-move a fails all eight with the den's move taken out of
+       octopus.c (audit SOC-2) */
+    if (OD_CASE[k].item == 2) tank.sd_unlocks &= ~(uint32_t)(SD_ITEM_CORAL | SD_ITEM_CLUSTER);
+#endif
     { const float dx = tank_decor_x(&tank, OD_CASE[k].item); octo_put(growth, dx + 150.0f < OCTO_XHI ? dx + 150.0f : dx - 150.0f); }   /* (from sand clear of the piece) */
     octopus_set_fav(OD_CASE[k].item); octopus_think(0);
     for (int i = 0; i < 40; i++) { tank_tick(&tank, 0.04f, advisor_rules); render_tank(&tank, fb, TANK_W); }
@@ -9427,7 +9436,19 @@ static int selftest_roost(const char *prefix) {
                 if (ch == 6) { roost_tick(1.0f); if (!roost_in(want)) RFAIL("hidden in the dark, it left at once (mode %d in %d)", tank.cr_mode, tank.cr_cave); }
                 if (!roost_until(other, 300)) RFAIL("change %d: the order flipped, it stays (mode %d in %d at %.0f)", ch, tank.cr_mode, tank.cr_cave, tank.cr_x);
             } else if (ch == 1) {                                             /* its piece moved */
+#ifdef CONFIG_POCKET_TANK_320X240
+                /* (this fork) the 320 px floor: a castle or a volcano stands 30 + 92 px in from the glass at least, so its
+                   span is x 122..198, and the pieces here stand at 130 and 190. The castle moved 40 px OUT, as the 1.8
+                   moves it, stops at 122 or 198 - 8 px - and the crab rightly stays: tank.c goes over only for a move past
+                   CR_NEAR_PX (16), on every board. 40 px toward the floor's middle is a whole move, as the 1.8's is; the
+                   volcano's was that way already. Checked with the move taken out of tank.c's re-check in the roost: all
+                   twelve moves fail here, as on the 1.8 */
+                {   const float from = tank_decor_x(&tank, want), mid = (TANK_FX0 + TANK_FX1) / 2.0f;
+                    tank_decor_set(&tank, want, from + (from < mid ? 40.0f : -40.0f), tank_decor_z(&tank, want));
+                    if (fabsf(tank_decor_x(&tank, want) - from) < 39.0f) RFAIL("the staging: its piece moved only %.0f px", fabsf(tank_decor_x(&tank, want) - from)); }
+#else
                 tank_decor_set(&tank, want, tank_decor_x(&tank, want) + side * 40, tank_decor_z(&tank, want));
+#endif
                 if (!roost_until(want, 200)) RFAIL("its piece moved, it did not follow (mode %d in %d at %.0f, the piece at %.0f)", tank.cr_mode, tank.cr_cave, tank.cr_x, roost_x(want));
             } else if (ch == 2) {                                             /* locked: nothing changes */
                 tank.sd_locked |= wbit; roost_tick(30);
@@ -11307,7 +11328,15 @@ static int selftest_badge_depth(const char *prefix) {
  * piece stands before the bed, plenty where the bed stands before the piece. PT_SH_STACK_OFF=1 is the control (0.3.9.6's drawing:
  * the hidden cells fail). With a prefix: <prefix>_shstack_<cell>.ppm, the offending pixels magenta */
 static const struct { const char *name; int item, iz, bed, bz, plant_over; bool hidden; float ph; } SHS_C[] = {
+#ifdef CONFIG_POCKET_TANK_320X240
+    /* (this fork) the volcano keeps its 200 px on a 240 px glass: its peak is 24 px under the surface, and the leaf of 0.80 coils the
+       seahorse there with its body over the top of the glass - 148 px of it drawn, the staging check's 150 not met. 0.72 is the
+       tallest leaf whose seahorse is whole on the glass (its coil at y 47, 23 px under the peak, the body standing over the
+       peak); PT_SH_STACK_OFF fails the cell there (293 of its 348 px over the volcano) */
+    { "leaf_at_volcano_peak",       9, DECOR_Z_BACK,  3, DECOR_Z_BACK,  0, true,  0.72f },
+#else
     { "leaf_at_volcano_peak",       9, DECOR_Z_BACK,  3, DECOR_Z_BACK,  0, true,  0.80f },   /* the keeper's photo: the coil at the peak, the body above it */
+#endif
     { "leaf_under_volcano_behind",  9, DECOR_Z_BACK,  3, DECOR_Z_BACK,  0, true,  0.55f },   /* both BEHIND, the volcano ranked above */
     { "leaf_behind_volcano_front",  9, DECOR_Z_FRONT, 3, DECOR_Z_BACK,  0, true,  0.55f },   /* (0.3.9.6 had it right: the back lane - no staging check) */
     { "blade_behind_castle_front",  2, DECOR_Z_FRONT, 0, DECOR_Z_BACK,  0, true,  0.55f },   /* the keeper's castle: the tower */
@@ -14784,6 +14813,16 @@ static int dp_run(const char *prefix, float secs, int seed, int vz, bool verbose
     tank_castle_place(&tank); tank_coral_place(&tank); tank_cluster_place(&tank); tank_volcano_place(&tank);
     tank_shrimp_place(&tank, 8);
     if (vz >= 0) tank_decor_set(&tank, 9, tank_decor_x(&tank, 9), vz);
+#ifdef CONFIG_POCKET_TANK_320X240
+    /* (this fork) the 320 px floor: these four pieces at their spots cover it nearly twice over, and the volcano's spot is its
+       middle, x 160, where its box (96 px either side) leaves 64 px at each glass - less than an adult fish's own box (34 px a
+       unit of size and 6, either side of its middle). The depths hardly changed: 7 in the twenty minutes with the volcano
+       BEHIND, 0 IN FRONT, and the rule before 0.3.9.7 (PT_DEPTH_POP_OLD) popped nothing with it BEHIND - the staging tested
+       nothing. Without the reef cluster, the volcano at the right end of its span and the hunt half as long again
+       (selftest_depth_pop): 53 and 52 changes and no pop; the old rule pops 2 and 5 */
+    tank.sd_unlocks &= ~(uint32_t)SD_ITEM_CLUSTER;
+    tank_decor_set(&tank, 9, TANK_FX1 - DECOR_MARGIN - VOLCANO_HALF_W, tank_decor_z(&tank, 9));
+#endif
     render_set_scene_cache(scene_buf); render_set_vignette_cache(vig_buf); render_set_card_cache(card_buf); render_set_modal_cache(give_buf, gift_buf); render_set_dirty_mask(dirty_buf);
     static uint16_t fb[TANK_W * TANK_H];
     static tank_t snap, prev;
@@ -14998,7 +15037,12 @@ static int selftest_depth_pop(const char *prefix) {
     static const int VZ[2] = { DECOR_Z_BACK, DECOR_Z_FRONT };
     int fails = 0;
     for (int v = 0; v < 2; v++) {
+#ifdef CONFIG_POCKET_TANK_320X240
+        /* (this fork) 30 minutes, not 20, on the 320 px floor (dp_run's staging there): its 20 saw 31 and 24 changes, 30 see 53 and 52 */
+        int ch = 0; const int pops = dp_run(prefix, 1800, 1, VZ[v], false, &ch);
+#else
         int ch = 0; const int pops = dp_run(prefix, 1200, 1, VZ[v], false, &ch);
+#endif
         if (pops || ch < 20) { printf("FAIL: depth-pop the volcano %s: %d pops in %d depth changes\n", VZ[v] == DECOR_Z_FRONT ? "IN FRONT" : "BEHIND", pops, ch); fails++; }
     }
     tank_debug_depth_pop_old(false);
@@ -15268,7 +15312,17 @@ static int selftest_hold_emerge(const char *prefix) {
         tank.n_fish = 4;
         tank.sd_unlocks |= SD_ITEM_VOLCANO | (VZ[v] == DECOR_Z_FRONT ? SD_ITEM_SEAHORSE : 0);   /* (the seahorse's back lane: behind a piece IN FRONT) */
         tank_volcano_place(&tank);
+#ifdef CONFIG_POCKET_TANK_320X240
+        /* (this fork) the 320 px floor: the volcano's own spot is the floor's middle, x 160, and a fish behind it there has no
+           way out: its box (96 px either side) leaves 64 px at each glass, and the way out wants an adult fish's whole box
+           beside it (34 px a unit of size and 6, either side: 80-98 px for these four), so tank.c found none and all four
+           stayed hidden, 50-72 px from the finger. At the left end of its span (x 122) the way out is on its right, as the
+           1.8's is either side of 224: there the four come out and to the finger, and the control (PT_HOLD_EMERGE_OFF) fails
+           both cases, as on the 1.8 */
+        tank_decor_set(&tank, 9, TANK_FX0 + DECOR_MARGIN + VOLCANO_HALF_W, VZ[v]);
+#else
         tank_decor_set(&tank, 9, tank_decor_x(&tank, 9), VZ[v]);
+#endif
         for (int b = 0; b < tank_veg_beds(&tank); b++) tank_veg_set(&tank, b, 0.7f);
         render_set_scene_cache(scene_buf); render_set_vignette_cache(vig_buf); render_set_card_cache(card_buf); render_set_modal_cache(give_buf, gift_buf); render_set_dirty_mask(dirty_buf);
         const float vx = tank_decor_x(&tank, 9), vy = TANK_BOT - 16 - 90;
@@ -21014,6 +21068,15 @@ static void crit_run(int vol, int sc, bool old, crit_out_t *o) {
     render_set_gfx_level(RENDER_GFX_MEDIUM); render_set_vignette(sc & 1); cuts_stage(vol);
     render_debug_cuts_old(old);
     for (int k = 0; k < 6; k++) { tank_tick(&tank, 1.0f / 17, advisor_rules); render_tank(&tank, fb, TANK_W); }
+#ifdef CONFIG_POCKET_TANK_320X240
+    /* (this fork) the 320 px floor: the castle (x 90 on the 1.8's floor) and the volcano (300) stop at the ends of their span,
+       122 and 198, and the crab's own spot (x1 + 70, past the reef bed) is 232 - right of the volcano, where the 1.8's is left
+       of it. So it went for the volcano's right foot, under the coral IN FRONT (x 400: 260 here), which covers the whole of its
+       run-up: its lane never changed, and after four run-ups it gave the climb up (by design) - no climb, no tilt. Set down
+       between the castle and the volcano, where the 1.8's crab is, it climbs the left foot as the 1.8's does; make 320X240=1
+       check-crit-cuts-control fails all four breaks (6, the tilted sampler's, on this climb) */
+    if (sc == 0) tank.cr_x = (tank_decor_x(&tank, 2) + tank_decor_x(&tank, 9)) / 2;
+#endif
     if (sc == 0) { tank_crab_climb(&tank); for (int k = 0; tank.cr_mode != CR_CLIMB && k < 9000; k++) tank_tick(&tank, 0.05f, advisor_rules); }
     if (sc == 1 || sc == 6) { tank_crab_roost(&tank, 9); for (int k = 0; tank.cr_mode != CR_ROOST && k < 9000; k++) tank_tick(&tank, 0.05f, advisor_rules); }
     for (int f = 0; f < CRIT_F; f++) {

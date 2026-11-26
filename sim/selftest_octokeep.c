@@ -84,6 +84,23 @@ int octopus_apart_run(int seed, int on, int growth) {
     tank_debug_no_apart(0); tank_octopus_release(&T); remove(sav);
     return 0;
 }
+#ifdef CONFIG_POCKET_TANK_320X240
+/* (this fork) N on the 320 px floor: a castle and a volcano both span x 122..198 here, so the octopus's den's door (the volcano's,
+   at 122) is under the castle (at 198: x 106..290) wherever the two stand, and its walk home ends under the castle in its back
+   lane, behind the castle's wall - as O allows (a den that stands behind the castle, its doorstep). That stretch is not a walk
+   THROUGH the castle: from the castle's edge on its den's side to the door, and the doorstep, it is not counted (the baby's last
+   12 px home were the 121 ticks that failed). Checked with the octopus told of no shelter IN FRONT, so that it passes the castle
+   in its back lane: N fails here, as on the 1.8 */
+static int n_home_stretch(float cx, float half) {
+    const int den = octopus_den_item();
+    if (den < 0 || den == 2) return 0;
+    const float door = tank_decor_x(&T, den), edge = door < cx ? cx - half + 4 : cx + half - 4, x = octopus_x();
+    return (x - edge) * (x - door) <= 0.0f || fabsf(x - door) < 6.0f;
+}
+#define N_HOME_STRETCH(cx, half) n_home_stretch((cx), (half))
+#else
+#define N_HOME_STRETCH(cx, half) 0
+#endif
 int selftest_octo_keep(void) {
     char sav[600]; snprintf(sav, sizeof sav, "%s-octokeep-%dx%d.sav", sim_shelf_dir(), TANK_W, TANK_H);
     setenv("POCKET_TANK_SAVE", sav, 1); remove(sav);   /* (never the real save, never another job's) */
@@ -366,6 +383,13 @@ int selftest_octo_keep(void) {
             T.light_override = true; T.light_on = true;
             T.oc_growth = gi ? 65535 : 0; octopus_think(0); run(&T, 80);
             const float cx = tank_decor_x(&T, 2), half = tank_decor_half_w(2);
+#ifdef CONFIG_POCKET_TANK_320X240
+            /* (this fork) the 240 px glass: a pellet falls 210 px to the sand, not the 1.8's 340, and lands before the fish have
+               it - and food on the sand brings the crab out of its roost, on every board. The adult's run lost its crab to the
+               feeder's pellets within 18 s of a 710 s roost, during a; sent home again for b, it ate them and went its own ways
+               (a rest, a dig) through the whole wait. N's scene is the crab at home: no pellet in the water, AUTO FEED off */
+            T.autofeed_off = true; for (int i = 0; i < MAX_FOOD; i++) T.food[i].alive = false;
+#endif
             tank_crab_roost(&T, 2);
             for (int i = 0; i < 3000 && T.cr_mode != CR_ROOST; i++) { tank_tick(&T, 0.04f, advisor_rules); tank_handled(&T); }
             if (T.cr_mode != CR_ROOST || T.cr_cave != 2) OK_FAIL("N: the crab did not roost in the castle (mode %d cave %d)", (int)T.cr_mode, (int)T.cr_cave);
@@ -373,7 +397,7 @@ int selftest_octo_keep(void) {
             /* a: across the tank, past the castle: let pass, in its front lane */
             int under_back = 0, shows = 0, went_in = 0; float far = 0, at = -1;
             #define N_TICK() do { tank_tick(&T, 0.04f, advisor_rules); tank_handled(&T); \
-                if (fabsf(octopus_x() - cx) < half - 4 && !octopus_lane_front() && octopus_inn() < 0.02f) under_back++; \
+                if (fabsf(octopus_x() - cx) < half - 4 && !octopus_lane_front() && octopus_inn() < 0.02f && !N_HOME_STRETCH(cx, half)) under_back++; \
                 if (octopus_den_item() == 2 || (octopus_inn() > 0.02f && fabsf(octopus_x() - cx) < 40)) went_in++; \
                 if (T.cr_show > 0 && !was) { shows++; at = octopus_x(); } was = T.cr_show > 0; \
                 if (at >= 0 && fabsf(octopus_x() - at) > far) far = fabsf(octopus_x() - at); } while (0)

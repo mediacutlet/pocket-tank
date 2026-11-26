@@ -1,5 +1,7 @@
 # pocket-tank 🐟
 
+[中文上手指南](docs/zh-CN.md)
+
 **A tiny language model keeps a fish tank alive on an $8 chip.**
 The ESP32-S3 board, with screen and battery used in this project is actually around $35.
 
@@ -765,6 +767,8 @@ built or tested here, and they may lag behind this repo:
   [their fork](https://github.com/lmoiseichuk/pocket-tank-cyd/tree/feature/cyd_ES3C28P).
   [Pull request #10](https://github.com/mediacutlet/pocket-tank/pull/10) has
   the details.
+
+- [ClingYang](https://github.com/ClingYang) ported it to the **LCKFB SZPI ESP32-S3 N16R8** with a 320×240 ST7789 LCD, FT5x06 touch, ESP-IDF 6.0.2 and a Simplified Chinese UI in [their fork](https://github.com/ClingYang/pocket-tank-szpi-zh). Source, firmware releases, a Chinese operation manual and hardware verification notes are available there.
 
 ## Train your own
 

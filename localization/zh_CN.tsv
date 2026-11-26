@@ -1,0 +1,695 @@
+MORE	详情
+FROM	来自
+DONE	完成
+BACK	返回
+SELL	出售
++%d OK?	换取%d枚？
+SHELVE	收纳
+LOCKED	已锁定
+CANCEL	取消
+NOW	现在
+DEL	删除
+FROM THE SHOP,	来自商店
+BORN TO %s AND %s	双亲为%s和%s
+IN AT THE SURFACE.	从水面游入
+NEXT DOOR.	来自邻居
+DOWN IN THE GRASS.	诞生于水草间
+NEW!	新成员！
+THE SHOP	商店
+BARS	条纹
+A MASK	面罩
+AN EYE BAND	眼带
+NO MARKINGS	纯色
+SOMETHING NEW: A %s BODY	新体型：%s
+SOMETHING NEW: %s FINS	新鱼鳍：%s
+SOMETHING NEW: %s	新特征：%s
+SOMETHING NEW: ITS BODY COLOR	新的身体颜色
+SOMETHING NEW: ITS MARKINGS	新的花纹
+NEXT	下一步
+ROLL	随机
+SWAP	换色
+LOCK	锁定
+SEND BACK	移至后方
+BRING FORWARD	移至前方
+BEHIND	后方
+AMONG	中间
+IN FRONT	前方
+SHAPE	体型
+FINS	鱼鳍
+BODY	身体
+PATTERN	图案
+MARKINGS	花纹
+WELCOME	欢迎
+TWO FRY HAVE MOVED IN.	两条小鱼住进来了
+THEY EAT, PLAY, REST AND	它们会吃饭、玩耍、休息
+GROW UP WHILE YOU WATCH.	在你的陪伴下慢慢长大
+EACH ONE THINKS FOR ITSELF.	每条鱼都会独立思考
+FIRST, LET'S MEET THEM.	先来认识它们吧
+PLACE THE BUBBLES	放置气泡柱
+DRAG THEM LEFT OR RIGHT	左右拖动调整位置
+PLACE THE %s	放置%s
+COLOR	颜色
+LOOK	外观
+THE 	
+BEHIND %s%s	位于%s%s后方
+IN FRONT OF %s%s	位于%s%s前方
+IN FRONT OF THE SEAGRASS	位于水草前方
+THE PLANTS GROW IN FRONT OF IT	水草会长在它的前面
+IT STANDS IN FRONT OF THE PLANTS	它会挡在水草前面
+BEHIND THE GRASS AND THE FISH	位于水草和鱼的后方
+IN FRONT OF EVERYTHING	放在最前方
+DEPTH	前后层次
+THE SEAGRASS	水草
+THE %s	%s
+DRAG IT LEFT OR RIGHT	左右拖动调整位置
+RENAME YOUR FISH	给鱼儿改名
+NAME THE NEW FRY	给新鱼苗取名
+NAME THE FIRST FISH	给第一条鱼取名
+NAME THE SECOND FISH	给第二条鱼取名
+SWIPE A LETTER UP OR DOWN	上下滑动选择字母
+%s FOR THE %s FISH	选择%s（第%s条鱼）
+A FORM	体型
+COLORS	配色
+SECOND	二
+FIRST	一
+GROWN UP	长大后
+%s  SAME AS ITS BODY	%s 与身体同色
+A NEW FRY!	新鱼苗诞生！
+GO AND SAY HELLO.	快来认识它吧
+MEET IT	认识它
+* HIDDEN IN THAT PARENT	星号表示亲代携带的特征
+ITS NATURE	它的性格
+BOLD	胆量
+SOCIAL	合群
+PARENTS	双亲
+NONE HERE	尚无记录
+CARING FOR THEM	照顾鱼儿
+TAP THE SURFACE TO FEED	轻点水面即可投食
+HOLD A FINGER AND THEY VISIT	按住屏幕，鱼儿会靠近
+TAP A FISH TO CHECK ON IT	轻点鱼儿查看状态
+DRAG THE GLASS TO WIPE ALGAE	擦拭玻璃清理藻类
+SWIPE ACROSS GRASS TO TRIM	横向划过水草即可修剪
+TWO TAPS FLIP THE LIGHT	双击屏幕切换灯光
+THEY CHOOSE. YOU CARE.	它们自主生活，你来用心照料
+BEGIN	开始养鱼
+SNAIL	蜗牛
+ALGAE GRAZED SO FAR	累计清理藻类
+NOTHING YET	暂无记录
+%d SPOT%s	%d处%s
+STRAWBERRY CRAB	草莓蟹
+PELLETS	饲料
+NONE YET	暂无
+SAND DOLLARS	沙币
+FOUND A SAND DOLLAR!	找到了一枚沙币！
+RUNNING FOR COVER	正在寻找掩护
+HIDING IN THE CASTLE	躲在城堡里
+HIDING IN THE CAVE	躲在洞穴里
+ROOSTING IN THE CASTLE	在城堡中休息
+ROOSTING IN THE CAVE	在洞穴中休息
+ROOSTING	正在休息
+OFF TO THE CASTLE	前往城堡
+OFF TO THE CAVE	前往洞穴
+PICKING AT THE SAND	正在翻找沙子
+GOING FOR FOOD	正在觅食
+EATING	正在进食
+CLIMBING THE VOLCANO	正在攀爬火山
+OUT FOR A WALK	正在散步
+RESTING	正在休息
+COLLECT	收藏
+SEA URCHIN	海胆
+GRASS GRAZED SO FAR	累计啃食水草
+%d CM	%d厘米
+%d.%d KM	%d.%d千米
+CHEWING	正在啃食
+OFF TO THE TALL GRASS	前往高水草
+CIRCLE	圆形
+TRIANGLE	三角形
+SQUARE	方形
+DIAMOND	菱形
+POCKET TANK PASSPORT	口袋鱼缸访客护照
+HOME	家园
+HEADING HOME	正在回家
+JUST ARRIVED	刚刚到访
+HERE %d MIN	已到访%d分钟
+FRY	鱼苗
+JUVENILE	幼鱼
+ADULT	成鱼
+ELDER	老鱼
+NAME	名字
+FORM	外形
+STAGE	成长阶段
+VISITING	正在到访
+INTERESTED IN %s	对%s感兴趣
+VISITED	曾到访
+COLLECTED	已收藏
+DEPORT	请它回家
+FULL	已满
+A GIFT FOR YOUR TANK	送给鱼缸的礼物
+IT WOULD LIVE HERE	它将住在这里
+FOR GOOD	成为永久居民
+ACCEPT	接受
+NO THANKS	婉拒
+%d SHRIMP	%d只虾
+%d PELLET%s EATEN	已吃掉%d粒饲料%s
+NEXT SHRIMP	下一只虾
+THE SCHOOL IS FULL	虾群已满
+TOO MUCH ALGAE TO EAT	藻类足够多
+ARRIVES IN %d MIN	约%d分钟后加入
+%d MORE PELLET%s	还需%d粒饲料%s
+SEAHORSE	海马
+WITH YOU SINCE TODAY	今天开始陪伴你
+%d DAY%s WITH YOU	已陪伴你%d天%s
+%d HITCH%s	已停靠%d次%s
++%d.%d TRUST PASSED ON	传递信任+%d.%d
+%d PELLET%s SNAPPED	已吃掉%d粒饲料%s
+ON YOUR FINGER	停在你的手指上
+SWIMMING TO YOU	正在游向你
+ASLEEP	正在睡觉
+RESTING ON THE SAND	在沙地上休息
+HOLDING %s	抓住%s
+ADRIFT	随水漂游
+GIVEN	已送出
+RESET TANK?	重置鱼缸？
+START OVER WITH TWO FRY	从两条鱼苗重新开始
+EVERYTHING ELSE IS LOST	其余进度将被清除
+NO	否
+YES	是
+PLUGGED IN	已接通电源
+UNPLUGGED	已拔出电源
+JUST NOW	刚刚
+%s AGO	%s前
+SCREEN ON	亮屏时长
+BATTERY LIFE	电池续航
+CHARGING	正在充电
+FULLY CHARGED	电量已充满
+ON BATTERY	电池供电
+FULL IN ABOUT %s	预计%s后充满
+READY TO UNPLUG	可以拔出电源
+NOT CHARGING RIGHT NOW	当前未充电
+ALMOST EMPTY	电量即将耗尽
+ABOUT %s LEFT	预计还可用%s
+THE %s TANK	%s鱼缸
+THE TANK NEXT DOOR	邻居的鱼缸
+GIVEN TO %s	已送给%s
+ASKING %s	正在询问%s
+THEY SAID NO THANKS	对方婉拒了
+THEIR TANK IS FULL	对方鱼缸已满
+NO ANSWER CAME	尚未收到答复
+CANNOT BE GIVEN RIGHT NOW	暂时无法送出
+GIVE	赠送
+ASKING	正在询问
+VISITING NEXT DOOR	正在邻居家做客
+KEEP AT LEAST TWO FISH	至少保留两条鱼
+NAME THE NEW FRY FIRST	请先给新鱼苗取名
+GIVE %s TO	将%s送给
+GIVE %s?	送出%s？
+NOT LINKED NOW	当前未连接
+TO	赠予
+IT WOULD LIVE THERE	它将永久住在对方家中
+ASKING THEIR KEEPER	正在询问对方主人
+CALL OFF	取消请求
+OK	确定
+NEW FRY	新鱼苗
+TANK	鱼缸
+%s: HOW	%s：怎么做
+TAP AGAIN TO SELL	再次点击确认出售
+WORTH %d SAND DOLLARS	价值%d枚沙币
+HOW?	怎么做？
+RENAME	改名
+EVERY STEP IS DONE. A FRY	条件已满足，新鱼苗
+WILL BE BORN IN THE GRASS	即将在水草间诞生
+ON ITS WAY	正在准备中
+WHEN ALL NEEDS ARE MET, A	满足全部条件后
+NEW FRY IS READY TO BE BORN	新的鱼苗就能诞生
+%d OF %d DONE	已完成%d/%d项
+%d OF %d FISH SO FAR	当前%d/%d条鱼
+NOT YET	尚未完成
+%u MIN	%u分钟
+%u H %u MIN	%u小时%u分钟
+ON THIS GLASS	本鱼缸
+TODAY	今天
+YESTERDAY	昨天
+%u DAYS AGO	%u天前
+%u VISIT%s	到访%u次%s
+FIRST MET	首次相遇
+IN YOUR TANK	在你的鱼缸中
+VISITS	到访次数
+%u FRY HERE	这里诞生了%u条鱼苗
+FAMILY	家族
+PAGE %d	第%d页
+OF %d	共%d页
+PAGE %d OF %d	第%d页，共%d页
+VISITOR COLLECTION	访客图鉴
+%d OF %d COLLECTED	已收集%d/%d
+CLOSE	关闭
+THE TANK	鱼缸
+WRONG VERSION	固件版本不匹配
+THIS IS THE %s	当前固件适用于%s
+BOARD	开发板
+CHECK FOR UPDATES FIXES IT	请使用适配本板的固件
+AI MODEL DAMAGED	模型校验异常
+REINSTALL AT POCKETANK.COM	请重新烧录模型文件
+YOUR FISH ARE SAFE	鱼儿存档已保留
+LIGHTS OUT	关灯
+YOU DOUBLE-TAPPED THE GLASS	你刚刚双击了玻璃
+DOUBLE-TAP TO TURN IT ON	再次双击即可开灯
+UPDATED	更新完成
+YOUR TANK IS NOW V%s	当前版本为V%s
+LOW BATTERY	电量偏低
+PLEASE CHARGE THE TANK	请为鱼缸充电
+IS NOW %s %s	已长成%s%s
+AN	
+FRY NOW IN THE SHOP	商店有新鱼苗了
+DECORATIONS	装饰
+CRITTERS	小生物
+BACKGROUNDS	背景
+IN USE	使用中
+OWNED	已拥有
+USE	使用
+UNLOCK	解锁
+NEW FRY IN %d H	%d小时后有新鱼苗
+NEW FRY IN %d MIN	%d分钟后有新鱼苗
+SOLD OUT	已售罄
+CHOOSE	选择
+FRY FOR SALE	鱼苗出售中
+THE TANK IS FULL	鱼缸已满
+WELCOME THE NEW FRY	欢迎新鱼苗
+YOU HAVE %d	你有%d枚沙币
+BUY	购买
+NOT IN THE SHOP NOW	商店暂未供应
+LOCKED IN PLACE	位置已锁定
+GROWING  %d%%	成长中 %d%%
+GROWING	成长中
+ON THE SHELF	已收纳
+IN THE TANK	已放入鱼缸
+PUT BACK	放回
+IN TANK	缸内
+HOW TO EARN	如何获取
+TAP TO CLOSE	轻点关闭
+PLACE	放置
+MOVE	移动
+DOUBLE-TAP	双击
+5 SEC	5秒
+15 SEC	15秒
+30 SEC	30秒
+1 MIN	1分钟
+3 MIN	3分钟
+5 MIN	5分钟
+10 MIN	10分钟
+30 MIN	30分钟
+ON	开
+OFF	关
+NORMAL	正常
+TURNED	翻转
+SETTINGS	设置
+BRIGHTNESS	亮度
+VOLUME	音量
+AUTO FEED	自动投食
+SCREEN	屏幕方向
+WORN THE OTHER WAY AROUND?	需要翻转显示方向吗？
+ROTATION	自动旋转
+UNLOCKED	未锁定
+UPDATES	更新
+LINK	联机
+DISCONNECT	断开连接
+TWO TANKS ARE ASKING	有两个鱼缸发来请求
+ONLY ONE AT A TIME	每次连接一个鱼缸
+A TANK IS ASKING	有鱼缸请求连接
+HOLD THE GLOWING ARROW	长按发光箭头
+ASKING...	正在请求……
+HOLD THE OTHER TANK'S ARROW	请长按另一鱼缸的箭头
+LINKED! THE DOOR IS OPEN	已连接，通道开启
+TAP DONE TO WATCH THEM SWIM	点击完成，观看鱼儿来往
+OPEN LINK ON THE OTHER TANK	在另一鱼缸打开联机
+AND PUT THEM SIDE BY SIDE	然后将两者并排放置
+PUT THE TANKS SIDE BY SIDE	请将两个鱼缸并排放置
+HOLD THE ARROWS THAT TOUCH	长按相邻的两个箭头
+NEARBY	附近
+THE TANKS DRIFTED	鱼缸位置发生变化
+PUT THEM BACK SIDE BY SIDE	请重新并排放好
+AND KEEP THEM STILL	并保持静止
+OR THE FISH WILL SWIM HOME	否则鱼儿将游回家
+THE FISH ARE SWIMMING HOME	鱼儿正在回家
+THEN THE DOOR CLOSES	随后通道关闭
+SWAPPING	正在切换
+ADVANCED	高级设置
+FOR GROWN-UPS	请谨慎调整
+TOUCH	触摸
+CALIBRATE	校准
+TAPS MISSING THEIR MARK?	点击位置不准确？
+BATTERY	电池
+%d MAH	%d毫安时
+STANDARD - CHARGES AT %d MA	标准配置，充电电流%d毫安
+CHARGES AT %d MA	充电电流%d毫安
+SET %d MAH	设为%d毫安时
+NOW %d MAH	当前%d毫安时
+MATCH THE SIZE ON YOUR BATTERY	请按电池标注容量设置
+WARNING	注意
+ONLY FOR A BIGGER BATTERY.	仅适用于更大容量电池
+THE TANK WILL CHARGE AT %d MA.	充电电流将达到%d毫安
+A SMALLER BATTERY CHARGED THIS	小容量电池以此电流充电
+FAST CAN GET HOT, SWELL UP	可能发热、鼓包
+OR CATCH FIRE.	甚至起火
+READ THE SIZE PRINTED ON IT.	请核对电池标注容量
+MY BATTERY IS %d MAH	我的电池为%d毫安时
+OR BIGGER	或更大容量
+CONTINUE	继续
+HOLD THE TANK THE WAY	请以平时的姿势
+YOU USUALLY DO.	握住鱼缸
+NINE CROSSES COME UP.	屏幕将依次显示九个十字
+TAP THE MIDDLE OF EACH ONE.	请点击每个十字中心
+START	开始
+RESET TOUCH	恢复触摸配置
+TAP THE CROSS  %d OF %d	点击十字 %d/%d
+TAP THIS CROSS TO KEEP	点击这个十字
+THE NEW TOUCH	保存新的校准
+THE OLD ONE COMES BACK IN %d	%d秒后恢复原校准
+%d OF %d	%d/%d
+MY TANKS	我的鱼缸
+TOUCH IS LOCKED	触摸已锁定
+PRESS BOOT TWICE TO UNLOCK	连按两次BOOT即可解锁
+MOVE %s	移动%s
+LIBRARY	鱼缸库
+RENAME THIS TANK	给鱼缸改名
+CLEAR	清空
+SPACE	空格
+LINE	换行
+EXPERIMENTAL	实验功能
+ON THE GLASS	当前鱼缸
+SHELVED %d DAY%s	已收纳%d天%s
+%d DAYS OLD	已生活%d天
+SWAP IN ANOTHER TANK	先切换到另一个鱼缸
+TO PUT THIS ONE AWAY	即可收纳当前鱼缸
+TIME	时间
+PAUSED	暂停
+DORMANT	休眠
+WAITS AS YOU LEFT IT	保持离开时的状态
+LIVES ON, AS IF ASLEEP	如同睡眠般继续生活
+SWAP IN	切换
+REMOVE	移除
+FROM THE SHELF?	从收藏架中移除？
+PIECE	装饰
+PIECES	装饰
+CRITTER	小生物
+BACKGROUND	背景
++%d FOR ITS PIECES	装饰返还%d枚
++%d FOR ITS %s	返还%d枚，来自%s
+AND %s	和%s
++%d FOR ITS %s,	返还%d枚，来自%s
+%s AND %s	%s和%s
+THIS TANK AND ITS FISH	这个鱼缸和其中的鱼儿
+ARE GONE FOR GOOD.	将被永久移除
+HOLD TO SELL	长按确认出售
+FILLING THE TANK	正在准备鱼缸
+THE LIBRARY	鱼缸库
+INSTALLED	已安装
+NEW TANK	新鱼缸
+GET	获取
+FREE	免费
+VERSION %s %s	版本%s %s
+BUILD %s	构建%s
+HATCHERY CREW	孵化小队
+BOARD CODE	设备编号
+NETWORK	网络
+NO NETWORK SAVED YET	尚未保存网络
+WHILE UPDATING, THE BOARD	更新期间鱼缸会暂停
+PAUSES AND REBOOTS ITSELF	完成后将自动重启
+CHECK FOR UPDATES	检查更新
+SURE?	确定？
+FORGET NETWORK	忘记网络
+CAPS	大写
+JOIN	连接
+LOOKING FOR NETWORKS	正在搜索网络
+CONNECTING TO	正在连接
+CHECKING FOR UPDATES	正在检查更新
+DOWNLOADING	正在下载
+NO SIGNAL	没有信号
+IS NOT IN RANGE	不在信号范围内
+TRY AGAIN	重试
+OTHER NETWORK	其他网络
+NOT ACCEPTED	连接被拒绝
+REFUSED THE PASSWORD. SOME ROUTERS	密码被拒绝，部分路由器
+TYPE IT AGAIN	请重新输入
+REFUSE THE FIRST TRIES. TRY AGAIN?	初次连接可能失败，请重试
+NO ANSWER	没有响应
+THE UPDATE SERVER DID NOT	更新服务器暂未响应
+ANSWER. IS THE INTERNET UP?	请检查互联网连接
+ODD ANSWER	响应异常
+THE UPDATE SERVER SENT	服务器返回的信息
+SOMETHING THIS TANK CANNOT READ	暂时无法识别
+DOWNLOAD STOPPED	下载已停止
+NOTHING HAS CHANGED	当前版本已保留
+NOT VERIFIED	校验未通过
+THE UPDATE WAS NOT SIGNED	更新签名不匹配
+BY POCKET TANK. NOTHING CHANGED	当前固件已保留
+TOO BIG	更新文件过大
+THE UPDATE DOES NOT FIT	更新文件超出本板容量
+THIS TANK. NOTHING CHANGED	当前固件已保留
+CANCELED	已取消
+NO RADIO	无线功能未启动
+THE WI-FI RADIO DID NOT	无线网络启动失败
+START. TRY AGAIN LATER	请稍后重试
+WRONG BOARD	板型不匹配
+THIS UPDATE IS FOR	这个更新适用于其他板型
+ANOTHER BOARD. NOTHING CHANGED	当前固件已保留
+SOMETHING WENT WRONG	发生错误
+NO NETWORKS	未发现网络
+NOTHING IN RANGE.	附近没有可用信号
+IS THE ROUTER ON?	请确认路由器已开启
+LOOK AGAIN	重新搜索
+UP TO DATE	已是最新版本
+YOUR TANK HAS THE LATEST	当前鱼缸已安装最新
+VERSION	版本
+NEEDS THE CABLE	需要通过数据线安装
+THIS UPDATE IS INSTALLED	请使用数据线烧录
+FROM POCKETANK.COM/INSTALL	安装适配本板的固件
+BACK TO TANK	返回鱼缸
+SCAN AGAIN	重新扫描
+UPDATE	更新
+NOT NOW	暂不更新
+WAKING UP	正在唤醒
+CHECKING THE TIME	正在校准时间
+PLUG IN TO UPDATE	请接通电源后更新
+THE BATTERY IS AT %d%%	当前电量%d%%
+AN UPDATE NEEDS THE CABLE IN	更新时请保持电源连接
+VERSION %s	版本%s
+RESTARTING	正在重启
+KEEP THE TANK ON	请保持鱼缸通电
+CHOOSE YOUR NETWORK	选择你的网络
+OPEN	开放网络
+PASSWORD FOR	输入网络密码
+%s VERSION	%s版本
+UPDATE READY	更新已就绪
+VERSION %s %s, %.1f MB	版本%s %s，%.1f MB
+MADE FOR THIS BOARD	适配当前开发板
+YOUR FISH STAY	鱼儿存档将保留
+IT TAKES ABOUT A MINUTE	大约需要一分钟
+IT TAKES ABOUT %d MINUTES	大约需要%d分钟
+THE TANK RESTARTS BY ITSELF	完成后将自动重启
+HOLD TO UPDATE	长按开始更新
+HOLD TO	长按
+TAP THE CROSS  %d OF 9	点击十字 %d/9
+STOPPED - NOTHING CHANGED	已停止，原配置保留
+KEPT THE OLD TOUCH	已保留原校准
+TOUCH BACK TO NORMAL	已恢复原触摸配置
+DID NOT WORK - TRY AGAIN	校准未成功，请重试
+NEW TOUCH SAVED	新校准已保存
+OPEN WATER	开阔水域
+ATLANTIS	失落古城
+KELP FOREST	海带森林
+TWILIGHT DEEP	暮色深海
+ROCK RIDGES	岩石山脊
+REEF WALLS	珊瑚石壁
+THE TANK AS IT STARTED,	鱼缸最初的模样
+CLEAR OPEN WATER	清澈开阔的水域
+OLD STONE COLUMNS,	古老的石柱
+A TEMPLE LONG UNDER WATER	沉睡水下的神殿
+A FOREST OF TALL KELP	高高的海带森林
+IN GREEN WATER	生长于碧绿水中
+DEEP BLUE WATER, A GLOW	幽深蓝水与微光
+AND DRIFTING SPECKS	点点浮尘缓缓漂游
+BRIGHT SHALLOW WATER	明亮的浅水
+AND A SANDY SLOPE	与柔和的沙坡
+RIDGE AFTER RIDGE OF ROCK	层层起伏的岩石
+FADING INTO THE DEEP	渐渐没入深处
+CORAL ON ROCKY WALLS,	珊瑚依附岩壁
+OPEN WATER BETWEEN	中间是开阔水道
+LOOK OUT OF A CAVE	从洞穴中望出去
+INTO THE OPEN SEA	是一片辽阔海洋
+SWORD PLANT	皇冠草
+BROAD, VERTICAL LEAVES	宽阔挺拔的叶片
+MORE COVER FOR YOUR CRITTERS	为小生物提供更多掩护
+GRAZES THE GLASS CLEAN,	啃食玻璃上的藻类
+EVEN WHILE THE TANK SLEEPS	鱼缸休眠时也会工作
+CASTLE	城堡
+STONE TOWERS AND AN ARCH	石塔与拱门
+THE FISH SWIM THROUGH IT	鱼儿会从中穿过
+A BRANCHING REEF CORAL,	枝条舒展的珊瑚
+GROWS FOR WEEKS, YOUR COLOR	会持续生长，颜色由你选择
+REEF CLUSTER	珊瑚礁群
+A MATURE REEF ON A ROCK,	岩石上的成熟珊瑚礁
+FILLS OUT, THEN IT BLOOMS	逐渐丰满，随后绽放
+SHRIMP	樱花虾
+A SCHOOL OF CHERRY SHRIMP	一群可爱的樱花虾
+THEY EAT SCRAPS AND MULTIPLY	清理残饵，并慢慢繁殖
+NIBBLES THE TALL GRASS,	啃食高高的水草
+HOLDS ON TO YOUR FINGER,	会抓住你的手指
+FISH TRUST YOU TWICE AS FAST	帮助鱼儿更快建立信任
+PUMPKIN	南瓜灯
+GLOWS WHEN THE LIGHTS GO OUT	关灯后会发光
+FOR OCTOBER, YOURS TO KEEP	十月限定，可永久保留
+VOLCANO	火山
+A CONE OF ROCK AND LAVA,	岩石与熔岩构成的火山
+GLOWING BUBBLES RISE FROM IT	发光气泡缓缓升起
+DIGS UP SAND DOLLARS,	会挖出沙币
+NAPS IN THE CASTLE OR CAVE	在城堡或洞穴中小睡
++%d  EACH FISH YOU FEED	亲手投食 +%d
++%d/%d/%d  A FISH GROWS UP	鱼儿长大 +%d/%d/%d
++%d  A NEW FRY IS BORN	鱼苗诞生 +%d
++%d  A FISH FULLY TRUSTS	完全信任你 +%d
++%d  %d ALGAE COLONIES	清理藻类 +%d / %d处
++%d  %d CM OF GRASS CUT	修剪水草 +%d / %d厘米
++%d  THE SEAHORSE SNACKS	海马进食 +%d
++%d/%d  THE CRAB DIGS ONE UP	草莓蟹找到沙币 +%d/%d
+REST A FINGER ON THE GLASS	将手指轻放在玻璃上
+AND KEEP IT STILL. EVERY	保持静止，每条鱼儿
+FISH EARNS TRUST WHILE IT	都会在陪伴中积累信任
+RESTS THERE. 3 QUICK TAPS	连续快速敲击三次
+SCARE THEM AND COST TRUST.	会惊吓它们并降低信任
+TAP THE WATER AT THE TOP	点击鱼缸顶部的水面
+OF THE TANK TO DROP FOOD.	即可投放饲料
+A FEEDING COUNTS AS A MEAL	鱼儿吃到饲料后
+ONCE A FISH EATS FROM IT.	才会计入一次喂食
+FOR A FEW SECONDS. A FISH	保持几秒钟
+THAT TRUSTS YOU SWIMS OVER	信任你的鱼儿会游来
+AND STAYS. FEED FIRST: A	并停在附近，记得先喂食
+HUNGRY FISH WON'T COME.	饥饿的鱼儿不会靠近
+FISH GROW WITH TIME,	鱼儿会随着时间成长
+SLOWER WHEN THE TANK IS	鱼缸休眠时
+IN SLEEP MODE.	成长速度会放缓
+FISH PERSONALITIES WILL	鱼儿与环境互动时
+NATURALLY DRIFT AS THEY	性格也会随着经历
+INTERACT WITH THE WORLD.	慢慢发生变化
+GRASS REGROWS ON ITS OWN,	水草会自行长回
+FASTEST WHILE THE TANK	在鱼缸休眠时
+SLEEPS.	生长得最快
+DRAG A FINGER ACROSS THE	用手指拖过玻璃
+GLASS TO WIPE IT CLEAN.	即可擦除藻类
+UNLOCKABLE CRITTERS CAN	解锁的小生物
+HELP KEEP IT CLEAN.	也会帮助清洁鱼缸
+A FRY	一条鱼苗
+A JUVENILE	一条幼鱼
+AN ADULT	一条成鱼
+AN ELDER	一条老鱼
+TRUST	信任
+ALL FISH MUST HAVE TRUST	每条鱼的信任值
+OF AT LEAST %d OUT OF 10	都需达到%d/10
+EVERY FISH DOES	所有鱼儿都已满足
+LOWEST NOW %d.%d	当前最低为%d.%d
+MEALS	喂食
+FEED THE FISH AT LEAST	累计喂食至少
+%d TIMES IN ALL	%d次
+%d OF %d SO FAR	当前已完成%d/%d
+HOLD	陪伴
+UNTIL A FISH SWIMS TO IT	直到有鱼儿游过来
+GROW	成长
+THE YOUNGEST FISH MUST	最小的鱼儿需要
+GROW INTO AN ADULT	成长为成鱼
+GROW INTO A JUVENILE	成长为幼鱼
+%s IS %s	%s处于%s阶段
+CHANGE	变化
+%s'S PERSONALITY	%s的性格
+MUST START TO SHIFT	需要开始发生变化
+%d%% THERE	已完成%d%%
+GLASS	玻璃
+NO MORE THAN %d%%	藻类覆盖不超过%d%%
+ALGAE COVERAGE	即可满足条件
+CURRENTLY CLEAN ENOUGH	当前已足够干净
+%d%% COVERED NOW	当前覆盖%d%%
+GRASS	水草
+ONE GRASS BED MUST GROW	至少一片水草需要
+TALL ENOUGH TO HIDE IN	长到足以藏身
+A NURSERY BED IS READY	育苗水草已准备好
+TALLEST BED %d%% THERE	最高水草已完成%d%%
+%u S	%u秒
+%d.%d M	%d.%d米
+LAGOON	潟湖
+GROTTO	海底洞穴
+CORAL	珊瑚
+FISH TANK	生态鱼缸
+FISH TANK - NEW	新建生态鱼缸
+FISH THAT THINK FOR THEMSELVES. FEED THEM, TEND THE TANK, WATCH THEM GROW.	鱼儿会自主探索。喂食、照料鱼缸，陪伴它们成长。
+MORE KINDS OF TANK ARE COMING	更多鱼缸类型陆续加入
+A LEAF	叶片
+A BLADE	草叶
+THE CASTLE	城堡
+THE CORAL	珊瑚
+THE VOLCANO	火山
+THE REEF	礁石
+THE SAND	沙地
+alpha	测试版
+V%s %s  BUILD %s	版本%s %s 构建%s
+%dM	%d分
+%dH %dM	%d时%d分
+%dH	%d时
+%dD %dH	%d天%d时
+%dD	%d天
+none	无
+no signal	没有无线信号
+wrong password	无线密码错误
+no answer from the server	服务器未响应
+bad manifest	更新清单无效
+download stopped	下载已中断
+not verified	固件校验失败
+too big	固件过大
+canceled	已取消
+no radio	无线功能不可用
+ABC	字母
+fry	鱼苗
+juv	幼鱼
+adult	成鱼
+elder	老鱼
+CLASSIC	经典
+SLENDER	纤长
+BULBOUS	圆润
+VEIL	飘逸长鳍
+SAIL	高帆鳍
+MASK	面罩
+EYE BAND	眼带
+SOLID	纯色
+seek_food	寻找食物
+flee_shadow	躲避阴影
+visit_bubbles	靠近气泡
+follow_friend	跟随伙伴
+explore	探索
+rest	休息
+dart_play	嬉戏
+inspect_reef	探索礁石
+REEF	珊瑚礁
+DUSK	暮色
+arrived	初来乍到
+first meal from you	第一次亲手喂食
+first hold-approach	第一次靠近手指
+first dart	第一次嬉戏
+first bubbles	第一次探索气泡
+first follow	第一次跟随伙伴
+reached juv	长成幼鱼
+reached adult	长成成鱼
+reached elder	步入老年
+first rest in the seagrass	第一次在水草间休息
+a pair	两鱼相伴
+a trio	三鱼同游
+a quartet	四鱼同行
+a quintet	五鱼成群
+first full night's sleep	第一次整夜安眠
+first play session	第一次陪伴嬉戏
+the tank changed someone	性格因鱼缸而改变
+first feeding	第一次投食
+first trimming	第一次修剪水草
+first glass cleaning	第一次擦净玻璃
+a school of ten shrimp	十只虾的大家庭
+first visit to the reef	第一次探索礁石
+first mutation	第一次出现新特征
+first fish sold	第一次出售鱼儿
+first seahorse feeding	第一次喂海马
+first sand dollar dug up	第一次挖到沙币

@@ -16702,6 +16702,15 @@ static void link_glyph(ctx_t *c, int x, int y, uint32_t rgb) {
 /* the DRIFTED notice's panel (page y) and its DISCONNECT button; link mode's
    DISCONNECT chip mirrors DONE's at the top right while a door is open */
 #define LINK_DRIFT_Y  UI(70)
+#ifdef CONFIG_POCKET_TANK_320X240
+/* (this fork) the notice can come up over link mode (link_dev.c draws it after render_link_mode): on the 240 px glass it
+   starts on the row under our badge's 44 px box and stands between the door tabs, which keep their size there */
+#undef  LINK_DRIFT_Y
+#define LINK_DRIFT_Y  (TOOL_CHIP_Y + TOOL_CHIP_H / 2 + 22 - PAGE_Y)
+#define LINK_DRIFT_W  (TANK_W - 2 * (LINK_TAB_GAP + LINK_TAB_W) - 2 * UI(4))
+#else
+#define LINK_DRIFT_W  UI(336)
+#endif
 #define LINK_DISC_W   UI(156)
 #define LINK_DISC_X   ((PAGE_W - LINK_DISC_W) / 2)
 #define LINK_DISC_Y   (LINK_DRIFT_Y + UI(122))
@@ -16829,15 +16838,21 @@ static void link_line(ctx_t *c, int py, const char *s, uint32_t rgb) {   /* a ce
 /* (this fork) link mode on the 240 px glass: the hint's three boxes (the two lines, NEARBY) under the tabs' foot and on
    the glass, the widest of the words (27 letters: TAP DONE TO WATCH THEM SWIM and the like) clear of the coin buttons
    under the tabs; our badge's 44 px box between DONE and DISCONNECT (link_chip_w and link_dchip_w, their words at 2x),
-   12 px from each; the DRIFTED notice on the page, its widest line inside it, DISCONNECT inside it */
+   12 px from each; the arrow under DONE clear of the left tab; the DRIFTED notice on the page, its widest line inside
+   it, DISCONNECT inside it, and over link mode clear of the tabs and of our badge's box */
 _Static_assert(PAGE_Y + LINK_HINT_Y - UI(4) >= TANK_BOT / 2 - LINK_TAB_H / 2 + LINK_TAB_H && LINK_HINT_Y + UI(46) - UI(4) + UI(22) <= PAGE_H &&
                TANK_W / 2 - (27 * 6 * UI_TEXT(2) + UI(16)) / 2 > LINK_TAB_GAP + LINK_COIN_W,
                "link mode's hint: under the tabs, on the glass, clear of the coins");
 _Static_assert((TANK_W - TOOL_CHIP_X - (10 + 10 * 6 * 2 - 2 + 10)) - (TOOL_CHIP_X + 8 + 20 + 8 + 4 * 6 * 2 - 2 + 10) >= 44 + 2 * 12,
                "link mode: our badge between DONE and DISCONNECT");
-_Static_assert(LINK_DRIFT_Y + UI(164) <= PAGE_H && UI(336) <= PAGE_W && 26 * 6 * UI_TEXT(2) <= UI(336) - 2 * UI(12) &&
-               LINK_DISC_Y + MSP_CLOSE_H + UI(4) <= LINK_DRIFT_Y + UI(164),
-               "the DRIFTED notice: on the page, its words and DISCONNECT inside it");
+_Static_assert(TOOL_CHIP_X + 8 + 20 + 8 + (4 * 6 * 2 - 2) / 2 - 13 > LINK_TAB_GAP + LINK_TAB_W - 1,
+               "link mode: the arrow under DONE clear of the left door tab");
+_Static_assert(LINK_DRIFT_Y + UI(164) <= PAGE_H && LINK_DRIFT_W <= PAGE_W && 26 * 6 * UI_TEXT(2) <= LINK_DRIFT_W - 2 * UI(12) &&
+               LINK_DISC_W <= LINK_DRIFT_W - 2 * UI(12) && LINK_DISC_Y + MSP_CLOSE_H + UI(4) <= LINK_DRIFT_Y + UI(164) &&
+               PAGE_X + (PAGE_W - LINK_DRIFT_W) / 2 > LINK_TAB_GAP + LINK_TAB_W - 1 &&
+               PAGE_X + (PAGE_W - LINK_DRIFT_W) / 2 + LINK_DRIFT_W - 1 < TANK_W - LINK_TAB_GAP - LINK_TAB_W &&
+               PAGE_Y + LINK_DRIFT_Y > TOOL_CHIP_Y + TOOL_CHIP_H / 2 + 22 - 1,
+               "the DRIFTED notice: on the page, its words and DISCONNECT inside it, clear of the door tabs and our badge's box");
 #endif
 void render_link_mode(const link_view_t *v, uint16_t *fb, int stride, double tclock) {
     const float clock = tank_anim(tclock);
@@ -16865,6 +16880,11 @@ void render_link_mode(const link_view_t *v, uint16_t *fb, int stride, double tcl
         link_glyph(&c, CX + 8, CY + (CH - 12) / 2, 0x04141a);
         draw_text(&c, CX + 8 + 20 + 8, CY + (CH - 14) / 2, 2, 0x04141a, "DONE");
         int ax = CX + CW / 2, ay = CY + CH + 10 + (int)(5 * (0.5f + 0.5f * sinf(clock * 4.0f)));
+#ifdef CONFIG_POCKET_TANK_320X240
+        ax = CX + 8 + 20 + 8 + text_w("DONE", 2) / 2;   /* (this fork) under DONE's word: the door tabs keep their 104 px on the
+                                                           240 px glass, and the left one's top corner (x 6..51 from y 68) stood
+                                                           where the arrow's left wing bobs under the chip's middle */
+#endif
         const src_t white = src_color(0xffffff, c.dim);
         for (int i = 0; i < 13; i++) for (int k = 0; k < 5; k++) {
             px_blend_s(&c, ax - 13 + i, ay + 13 - i + k, &white, 235);
@@ -16995,7 +17015,7 @@ void render_link_drift(const link_view_t *v, uint16_t *fb, int stride, double cl
     (void)clock;
     if (!v->drifting) return;
     ctx_t c = ctx_full(fb, stride, 1.0f);
-    const int W = UI(336), H = UI(164), X = PAGE_X + (PAGE_W - W) / 2, Y = PAGE_Y + LINK_DRIFT_Y;
+    const int W = LINK_DRIFT_W, H = UI(164), X = PAGE_X + (PAGE_W - W) / 2, Y = PAGE_Y + LINK_DRIFT_Y;
     shade_box(&c, X, Y, W, H);
     rect_edge(&c, X, Y, W, H, 0xffffff); rect_edge(&c, X + 1, Y + 1, W - 2, H - 2, 0x9fd8e2);
     static const char *const GRACE[4] = { "THE TANKS DRIFTED", "PUT THEM BACK SIDE BY SIDE", "AND KEEP THEM STILL", "OR THE FISH WILL SWIM HOME" };

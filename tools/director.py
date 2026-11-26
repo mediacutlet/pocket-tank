@@ -21,6 +21,9 @@ ap.add_argument("-t", "--time", type=float, default=2.0)
 ap.add_argument("--watch", action="store_true")
 ap.add_argument("cmd", nargs="*")
 a = ap.parse_args()
+if a.cmd == ["help"]:   # the list is kept here since 0.4.2 (the app's room), not on the tank
+    sys.stdout.write(open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "director_help.txt")).read())
+    sys.exit(0)
 ports = sorted(glob.glob("/dev/cu.usbmodem*"))
 port = a.port or os.environ.get("TANK_PORT") or (ports[0] if len(ports) == 1 else None)
 if not port:
@@ -40,7 +43,7 @@ try:
         if not line:
             continue
         text = line.decode("utf-8", "replace").rstrip()
-        if a.watch or "director" in text or not a.cmd:
+        if a.watch or "director" in text or ") link: " in text or ") blackbox: " in text or ") i2c: " in text or not a.cmd:   # the tank link, the black box and the I2C guard answer under their own tags
             print(text)
 except KeyboardInterrupt:
     pass

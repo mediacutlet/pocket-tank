@@ -4,3 +4,8 @@ dependencies:
   espressif/esp_lcd_ili9341: "^2.0"
   espressif/esp_lcd_touch_ft5x06: "^1.1"
   espressif/esp_lcd_touch_cst816s: "^1.0"
+  # the P4 home tank's panel (docs/board-p4-10.1.md); built only for that target
+  espressif/esp_lcd_jd9365:
+    version: "^2.0.2"
+    rules:
+      - if: "target == esp32p4"

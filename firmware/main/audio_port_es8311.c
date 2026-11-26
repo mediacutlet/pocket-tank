@@ -22,13 +22,30 @@
 
 static const char *TAG = "audio";
 
-#if !CONFIG_POCKET_TANK_CYD_320X240 /* the CYD names its own in board_pins.h */
+#ifdef TANK_TAB5_HW               /* the Tab5 (2026-10-19): an ES8388 (codec_port.c) on its own pins; the NS4150B's enable is
+                                  on the I/O expander (display_port_tab5_speaker), so PIN_AMP_EN is a pin it never drives */
+#define PIN_I2S_MCLK  30
+#define PIN_I2S_BCLK  27
+#define PIN_I2S_WS    29
+#define PIN_I2S_DOUT  26
+#define PIN_AMP_EN    GPIO_NUM_NC
+#elif defined(TANK_P4)         /* the P4 home tank (2026-10-12): its own codec pins and amp enable (board_pins.h) */
+#define PIN_I2S_MCLK  P4_PIN_I2S_MCLK
+#define PIN_I2S_BCLK  P4_PIN_I2S_BCLK
+#define PIN_I2S_WS    P4_PIN_I2S_WS
+#define PIN_I2S_DOUT  P4_PIN_I2S_DOUT
+#define PIN_AMP_EN    P4_PIN_AMP_EN
+#elif CONFIG_POCKET_TANK_CYD_320X240   /* (this fork) the CYD names its own in board_pins.h */
+#else
 #define PIN_I2S_MCLK  (board_is_square() ? S_PIN_I2S_MCLK : board_is_175() ? B_PIN_I2S_MCLK : 16)   /* the square: 16 is its PWR key sense; the 1.75: 42 */
 #define PIN_I2S_BCLK  (board_is_watch() ? W_PIN_I2S_BCLK : 9)
 #define PIN_I2S_WS    45
 #define PIN_I2S_DOUT  (board_is_watch() ? W_PIN_I2S_DOUT : 8)        /* ESP -> codec DSDIN */
 #define PIN_AMP_EN    46       /* NS4150B CTRL, 10k pulldown on the board */
-#define AMP_EN_ON     1        /* the NS4150B: enabled high */
+#endif
+#ifndef AMP_EN_ON              /* (this fork) the level that turns the amplifier on: the NS4150B's, high, unless the board's own
+                                  pins say otherwise (board_pins.h: the CYD's amplifier is enabled low) */
+#define AMP_EN_ON     1
 #endif
 #define BLOCK         160      /* 10 ms at 16 kHz */
 #define IDLE_US       (2 * 1000000LL)
@@ -43,7 +60,8 @@ static TaskHandle_t       s_task;
 static bool s_ok, s_up;
 static volatile bool s_sleep_req, s_warm_req;
 static int64_t s_quiet_since;
-static int s_volume = 2;
+static int s_volume = 100;                   /* percent (0.4: the settings slider), 0 = off */
+static int s_saved_volume = 100;             /* ... as last read from or written to NVS (audio_port_restore_volume) */
 static int16_t s_buf[BLOCK];
 /* cold-start settle, tunable live (director `snd settle <codec ms> <amp ms>`,
    `snd idle <s>`) until the bench says what the DAC and the NS4150B need */
@@ -58,8 +76,13 @@ static int64_t s_idle_us = 5 * 1000000LL;
 
 static uint32_t now_ms(void) { return (uint32_t)(esp_timer_get_time() / 1000); }
 
-/* the amplifier's enable, at the board's own "on" level */
+#ifdef TANK_TAB5_HW
+extern void display_port_tab5_speaker(bool on);
+static void amp(bool on) { display_port_tab5_speaker(on); }
+#else
+/* (this fork) the amplifier's enable, at the board's own "on" level (AMP_EN_ON: on upstream's boards 1, as it always was) */
 static void amp(bool on) { gpio_set_level(PIN_AMP_EN, on ? AMP_EN_ON : !AMP_EN_ON); }
+#endif
 
 /* Deep sleep (2026-09-16, the night the tank died): the I2S lines and the
  * amp's CTRL are the ESP's outputs into ICs that stay powered on VCC3V3 all
@@ -80,6 +103,7 @@ void audio_port_deep_sleep_pins(void) {
     gpio_num_t QUIET_PINS[QUIET_N]; quiet_pins(QUIET_PINS);
     for (size_t i = 0; i < QUIET_N; i++) {
         gpio_num_t p = QUIET_PINS[i];
+        if (p < 0) continue;                      /* (the Tab5's amp enable is on its expander) */
         gpio_reset_pin(p);                        /* off the I2S matrix routing, a GPIO again */
         gpio_set_direction(p, GPIO_MODE_OUTPUT);
         gpio_set_level(p, p == PIN_AMP_EN ? !AMP_EN_ON : 0);   /* the amp's enable held at OFF, which is high on the CYD */
@@ -88,7 +112,7 @@ void audio_port_deep_sleep_pins(void) {
 }
 static void release_pins(void) {
     gpio_num_t QUIET_PINS[QUIET_N]; quiet_pins(QUIET_PINS);
-    for (size_t i = 0; i < QUIET_N; i++) gpio_hold_dis(QUIET_PINS[i]);
+    for (size_t i = 0; i < QUIET_N; i++) if (QUIET_PINS[i] >= 0) gpio_hold_dis(QUIET_PINS[i]);
 }
 
 static void write_silence(int ms) {
@@ -133,7 +157,7 @@ static void player(void *arg) {
             ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
             if (s_sleep_req) { s_sleep_req = false; continue; }
             xSemaphoreTake(s_mx, portMAX_DELAY);
-            bool any = audio_active() || s_warm_req;
+            bool any = audio_active() || (s_warm_req && s_volume);   /* muted: a stale warm request does not bring it up */
             xSemaphoreGive(s_mx);
             s_warm_req = false;
             if (!any) continue;
@@ -157,11 +181,15 @@ static void player(void *arg) {
     }
 }
 
+/* "sndp" the percent (0.4); a board saved by 0.3.x has only "snd", its
+ * level (0 off, 1 quiet, 2 normal), read as the percent that sounds the same */
 static void load_volume(void) {
     nvs_handle_t h; uint8_t v;
     if (nvs_open("tank", NVS_READONLY, &h) != ESP_OK) return;
-    if (nvs_get_u8(h, "snd", &v) == ESP_OK && v <= 2) s_volume = v;
+    if (nvs_get_u8(h, "sndp", &v) == ESP_OK && v <= 100) s_volume = v;
+    else if (nvs_get_u8(h, "snd", &v) == ESP_OK && v <= 2) s_volume = audio_volume_from_level(v);
     nvs_close(h);
+    s_saved_volume = s_volume;
 }
 
 bool audio_port_init(i2c_master_bus_handle_t bus) {
@@ -170,13 +198,17 @@ bool audio_port_init(i2c_master_bus_handle_t bus) {
     size_t bank_bytes = (size_t)(_binary_sounds_bin_end - _binary_sounds_bin_start);
     if (bank_bytes != SND_BANK_BYTES) { ESP_LOGW(TAG, "bank is %u bytes, sounds.h says %u: rebuild (tools/make_sounds.py build) - silent", (unsigned)bank_bytes, (unsigned)SND_BANK_BYTES); return false; }
     if (!codec_port_present()) { ESP_LOGW(TAG, "no ES8311: silent"); return false; }
-    /* off before the pin becomes an output, so it never drives ON for a moment
-       (on the CYD the reset level, low, is ON); pulled toward off as well */
+#ifndef TANK_TAB5_HW
+#if AMP_EN_ON
+    gpio_config_t io = { .pin_bit_mask = 1ULL << PIN_AMP_EN, .mode = GPIO_MODE_OUTPUT, .pull_down_en = GPIO_PULLDOWN_ENABLE };
+#else   /* (this fork) an amplifier enabled low, the CYD's: off before the pin becomes an output, so it never drives ON for a
+           moment (the reset level, low, is ON), and pulled toward off as well */
     amp(false);
-    gpio_config_t io = { .pin_bit_mask = 1ULL << PIN_AMP_EN, .mode = GPIO_MODE_OUTPUT,
-                         .pull_down_en = AMP_EN_ON ? GPIO_PULLDOWN_ENABLE : GPIO_PULLDOWN_DISABLE,
-                         .pull_up_en = AMP_EN_ON ? GPIO_PULLUP_DISABLE : GPIO_PULLUP_ENABLE };
-    gpio_config(&io); amp(false);
+    gpio_config_t io = { .pin_bit_mask = 1ULL << PIN_AMP_EN, .mode = GPIO_MODE_OUTPUT, .pull_up_en = GPIO_PULLUP_ENABLE };
+#endif
+    gpio_config(&io);
+#endif
+    amp(false);
     i2s_chan_config_t cc = I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_AUTO, I2S_ROLE_MASTER);
     cc.dma_desc_num = 4; cc.dma_frame_num = BLOCK;
     if (i2s_new_channel(&cc, &s_tx, NULL) != ESP_OK) { ESP_LOGE(TAG, "no I2S channel"); return false; }
@@ -187,10 +219,12 @@ bool audio_port_init(i2c_master_bus_handle_t bus) {
                       .invert_flags = { 0 } },
     };
     if (i2s_channel_init_std_mode(s_tx, &std) != ESP_OK) { ESP_LOGE(TAG, "I2S std init failed"); return false; }
-    audio_init((const int16_t *)_binary_sounds_bin_start, SND_BANK_SAMPLES);   /* flash-mapped: no RAM */
+    audio_init(_binary_sounds_bin_start, SND_BANK_BYTES);   /* flash-mapped: no RAM */
     load_volume(); audio_set_volume(s_volume);
     s_mx = xSemaphoreCreateMutex();
-    xTaskCreatePinnedToCore(player, "audio", 4096, NULL, 6, &s_task, 1);
+    if (!s_mx || xTaskCreatePinnedToCore(player, "audio", 4096, NULL, 6, &s_task, 1) != pdPASS) {   /* (no player, no sound: s_ok stays false -
+                                                                   a notify to a task that never started asserted on every boot) */
+        ESP_LOGE(TAG, "no internal RAM for the audio task: silent"); s_task = NULL; return false; }
     s_ok = true;
     int present = 0; for (int i = 0; i < SND_COUNT; i++) present += SND_CUES[i].n_var > 0;
     ESP_LOGI(TAG, "%d of %d cues, bank %u KB in flash, volume %d; warm while handled (touch / IMU), down %lld s after", present, SND_COUNT, (unsigned)(SND_BANK_BYTES / 1024), s_volume, s_idle_us / 1000000);
@@ -205,7 +239,8 @@ void audio_port_play(int cue, int pitch_q8) {
     if (started) xTaskNotifyGive(s_task);
 }
 void audio_port_prewarm(void) {
-    if (!s_ok) return;
+    if (!s_ok || s_volume == 0) return;         /* MUTED = OFF (0.4): a muted tank plays nothing, so no touch or motion brings the
+                                                   amp up - held to an ear it hissed, the NS4150B enabled on silence (a keeper, 11-02) */
     s_quiet_since = 0;                          /* activity: the idle clock restarts */
     if (s_up) return;
     s_warm_req = true; xTaskNotifyGive(s_task);
@@ -214,14 +249,34 @@ void audio_port_stop(int cue) {
     if (!s_ok) return;
     xSemaphoreTake(s_mx, portMAX_DELAY); audio_stop(cue); xSemaphoreGive(s_mx);
 }
-void audio_port_set_volume(int level) {
-    s_volume = level < 0 ? 0 : level > 2 ? 2 : level;
+/* The mute edges. Into mute: if the port is up, send it down now (the player stops the voices, amp low, codec down, rail off - the
+ * sleep path). Out of mute: the touch that began the slider's drag was skipped by prewarm (it was muted then), so warm it here; the
+ * first tick plays ~255 ms late, once, instead of the port staying cold. */
+static void mute_edge(int was) {
+    if (!s_ok) return;
+    if (s_volume == 0 && s_up) { s_sleep_req = true; xTaskNotifyGive(s_task); }
+    else if (s_volume > 0 && was == 0) audio_port_prewarm();
+}
+void audio_port_preview_volume(int pct) {    /* not saved, but what audio_port_volume says: the page's knob follows the finger */
+    int was = s_volume;
+    s_volume = pct < 0 ? 0 : pct > 100 ? 100 : pct;
     if (s_ok) { xSemaphoreTake(s_mx, portMAX_DELAY); audio_set_volume(s_volume); xSemaphoreGive(s_mx); }
-    nvs_handle_t h;
-    if (nvs_open("tank", NVS_READWRITE, &h) == ESP_OK) { nvs_set_u8(h, "snd", (uint8_t)s_volume); nvs_commit(h); nvs_close(h); }
-    ESP_LOGI(TAG, "volume %s", s_volume == 0 ? "off" : s_volume == 1 ? "quiet" : "normal");
+    mute_edge(was);
+}
+void audio_port_set_volume(int pct) {
+    int was = s_volume;
+    s_volume = pct < 0 ? 0 : pct > 100 ? 100 : pct; s_saved_volume = s_volume;
+    if (s_ok) { xSemaphoreTake(s_mx, portMAX_DELAY); audio_set_volume(s_volume); xSemaphoreGive(s_mx); }
+    mute_edge(was);
+    nvs_handle_t h;                            /* "snd" too, the nearest old level: a board taken back to 0.3.x keeps a near volume */
+    if (nvs_open("tank", NVS_READWRITE, &h) == ESP_OK) {
+        nvs_set_u8(h, "sndp", (uint8_t)s_volume); nvs_set_u8(h, "snd", s_volume == 0 ? 0 : s_volume < 75 ? 1 : 2);
+        nvs_commit(h); nvs_close(h);
+    }
+    if (s_volume) ESP_LOGI(TAG, "volume %d%%", s_volume); else ESP_LOGI(TAG, "volume off");
 }
 int  audio_port_volume(void) { return s_volume; }
+void audio_port_restore_volume(void) { audio_port_preview_volume(s_saved_volume); }   /* a preview undone: the saved level back (mute's edges too), nothing written, no sound */
 void audio_port_sleep(void) {
     if (!s_ok || !s_up) return;
     s_sleep_req = true; xTaskNotifyGive(s_task);

@@ -12,6 +12,11 @@
 #include "freertos/task.h"
 #include "esp_log.h"
 #include "esp_timer.h"
+#include "esp_random.h"
+#include "link_dev.h"
+#include "tank_link.h"
+#include "gift.h"
+#include "swap.h"
 #include "esp_heap_caps.h"
 #include "esp_partition.h"
 #include "esp_system.h"
@@ -19,6 +24,7 @@
 #include "tank.h"
 #include "advisor.h"
 #include "render.h"
+#include "gl_upagain.h"
 #include "psram_plan.h"
 #include "display_port.h"
 #include "advisor_llm_esp.h"
@@ -28,21 +34,31 @@
 #include "battery.h"
 #include "imu_port.h"
 #include "director.h"
+#ifdef CONFIG_POCKET_TANK_RADIO_HOSTED
+#include "radio_hosted.h"
+#endif
 #include "update.h"
 #include "advanced.h"
 #include "shelf.h"
+#include "collection.h"
 #include "boot_show.h"
 #include "update_mode.h"
 #include "net_time.h"
+#include "clock_gate.h"
 #include <sys/time.h>
 #include "model_trailer.h"
 #include "esp_ota_ops.h"
+#include "esp_task_wdt.h"
+#include "blackbox.h"
+#include "i2c_guard.h"
 #include "brightness.h"
 #include "orientation.h"
 #include "sleep_setting.h"                 /* (this fork) the 320x240 boards' SLEEP row: SLEEP_SETTING_ROW */
 #include "batlog.h"
 #include "codec_port.h"
+#include "backgrounds.h"
 #include "progression.h"
+#include "octopus.h"
 #include "audio_port.h"
 #include "audio.h"
 #include "notice.h"
@@ -59,6 +75,7 @@
 #include "driver/gpio.h"
 #include "esp_sleep.h"
 #include "driver/rtc_io.h"
+#include "soc/soc_caps.h"
 #if CONFIG_POCKET_TANK_SLEEP_LIGHT || SLEEP_SETTING_ROW
 #include "driver/usb_serial_jtag.h"         /* usb_serial_jtag_is_connected: the dark stays awake for a USB host */
 #include "board_pins.h"                     /* the outputs the dark holds through light sleep (dark_hold_pins) */
@@ -70,7 +87,11 @@
  * AXP2101's PWRON, polled over I2C): the night mode is a PMIC power-off,
  * from which ONLY that key (or USB) can bring the board back, so it has to
  * be the one key the keeper ever presses - press to sleep, press to wake. */
+#ifdef CONFIG_IDF_TARGET_ESP32P4
+#define BTN_SLEEP ((gpio_num_t)P4_PIN_BOOT)   /* the P4's BOOT key is its strapping pin 35 (board_pins.h) */
+#else
 #define BTN_SLEEP GPIO_NUM_0
+#endif
 static bool s_pmic;                        /* an AXP2101 answered: the PWR key exists, power-off is real */
 static bool s_rtc;                         /* an RTC chip answered: the wall clock survives a PMIC power-off. Without one
                                               (the round 1.75C) the night is a DEEP sleep - the ESP32's own clock keeps
@@ -78,6 +99,17 @@ static bool s_rtc;                         /* an RTC chip answered: the wall clo
                                               STOPPED (no cell, the cable out) is still "yes": its time comes back the
                                               clockless way (THE STOPPED CLOCK below) */
 #include "board_pins.h"
+#include "touch_gate.h"
+#include "jelly.h"
+#include "school.h"
+#include "piranha_spike.h"
+#include "lib_thumbs.h"
+#include "lib_pics.h"
+#include "xt_notice.h"
+#ifdef TANK_P4
+static float s_dt_max;                 /* the longest frame since the display line last printed */
+static int s_dt_n60, s_dt_n100;        /* ... and how many took over 60 / 100 ms */
+#endif
 #define PWR_SENSE ((gpio_num_t)board_pwr_sense_pin())   /* the round board and the watch: a line that is high while the PWR key is down */
 static bool pwr_sensed(void) { return board_pwr_sense_pin() >= 0; }
 static bool pwr_sense_down(void) { return pwr_sensed() && gpio_get_level(PWR_SENSE); }
@@ -117,7 +149,7 @@ static const char *sleep_mode_name(void) {
 #undef  SLEEP_MODE_NAME
 #define SLEEP_MODE_NAME sleep_mode_name()
 #endif
-#if defined(CONFIG_POCKET_TANK_DISPLAY_SH8601) || defined(CONFIG_POCKET_TANK_DISPLAY_ILI9341) || defined(CONFIG_POCKET_TANK_DISPLAY_ST7789)
+#if CONFIG_POCKET_TANK_DISPLAY_SH8601 || CONFIG_POCKET_TANK_DISPLAY_JD9365 || CONFIG_POCKET_TANK_DISPLAY_ILI9341 || CONFIG_POCKET_TANK_DISPLAY_ST7789   /* (this fork) the 320x240 boards' SPI port owns the bus too */
 extern i2c_master_bus_handle_t board_i2c_bus(void);
 #else
 static i2c_master_bus_handle_t board_i2c_bus(void) { return NULL; }
@@ -127,7 +159,27 @@ static i2c_master_bus_handle_t board_i2c_bus(void) { return NULL; }
 extern const uint8_t tokenizer_bin_start[] asm("_binary_tokenizer_bin_start");
 extern const uint8_t tokenizer_bin_end[]   asm("_binary_tokenizer_bin_end");
 
+static int s_ev_n[SETUP_EVO_PHASES]; static int64_t s_ev_us[SETUP_EVO_PHASES], s_ev_rend[SETUP_EVO_PHASES];   /* (the reveal's bench: main's loop) */
 static const char *TAG = "pocket-tank";
+/* THE CAP's guard (progression.h, 2026-11-03): some path took the tank past POP_CAP fish. Said once, never an abort -
+   the keeper's fish are all still there; the line names the path to fix */
+static void cap_breach(const tank_t *t, int held, const char *file, int line, const char *path) {
+    static bool said;
+    if (said) return;
+    said = true;
+    ESP_LOGE(TAG, "THE FISH CAP: %d fish held (%d here) > POP_CAP %d at %s:%d (%s)", held, t->n_fish, POP_CAP, file, line, path);
+}
+static void swim_breach(const tank_t *t, int swim, int visitors, const char *path) {
+    static bool said;
+    if (said) return;
+    said = true;
+    ESP_LOGE(TAG, "THE SWIM LIMIT: %d swimming (%d visitors, %d of ours) > %d + %d at %s", swim, visitors, t->n_fish, POP_CAP, TANK_LINK_VISIT_PLACES, path);
+}
+#ifdef CONFIG_IDF_TARGET_ESP32P4
+#define FB_ALIGN 128                           /* the P4's PPA reads the frame from PSRAM: a whole L2 cache line */
+#else
+#define FB_ALIGN 64
+#endif
 static tank_t tank;
 static uint16_t *fb[PLAN_FB_COUNT];
 static bool llm_ok = false;
@@ -137,7 +189,9 @@ static bool llm_ok = false;
  * memcpy inside render_tank. */
 static async_memcpy_handle_t s_amc;
 static SemaphoreHandle_t s_amc_done;
-static bool s_prefetch_pending; static uint16_t *s_prefetch_fb; static unsigned s_prefetch_ep;   /* (the whole-frame prefetch: retired 2026-10-23, below) */
+static bool s_prefetch_pending; static uint16_t *s_prefetch_fb; static unsigned s_prefetch_ep;
+static const uint16_t *s_pir_primed; /* the buffer the prefetch filled with the piranha tank's room (NULL: none) */
+static bool s_prefetch_jelly;        /* the prefetch copied the jelly tank's water, not the fish scene */   /* (the whole-frame prefetch: retired 2026-10-23, below) */
 /* THE RESTORE (2026-10-23, in place of the whole-frame prefetch - the PSRAM
  * bus is the wall on these boards, and the prefetch moved 920 KB over it a
  * frame on the square): every frame marks the pixels it wrote (its buffer's
@@ -158,14 +212,41 @@ static bool s_prefetch_pending; static uint16_t *s_prefetch_fb; static unsigned 
 #define GRASS_LOOP_MOMENTS 88                           /* the 1.8 and the pendant at the 25 fps ceiling */
 #endif
 static int s_gl_refused;
+static unsigned s_gl_calls; static size_t s_gl_plan_free;   /* the loop's allocations so far, and PSRAM free after the last (THE LOOP PLANNED UP AGAIN: gl_upagain.h) */
 static void *gl_alloc(size_t n) {                       /* the loop's memory (64-byte aligned for the prefetch's DMA), only while PSRAM keeps its headroom */
     size_t free = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
+    s_gl_calls++; s_gl_plan_free = free;
     if (free < n + PLAN_PSRAM_MIN_FREE_AFTER + 200 * 1024) { if (s_gl_refused++ < 6) ESP_LOGW("display", "grass loop: %u KB refused, psram %u KB free (headroom %u KB)", (unsigned)(n / 1024), (unsigned)(free / 1024), (unsigned)((PLAN_PSRAM_MIN_FREE_AFTER + 200 * 1024) / 1024)); return NULL; }
     void *p = heap_caps_aligned_alloc(64, n, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     if (!p && s_gl_refused++ < 6) ESP_LOGW("display", "grass loop: %u KB not found in psram (%u KB free, largest %u KB)", (unsigned)(n / 1024), (unsigned)(free / 1024), (unsigned)(heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM) / 1024));
+    if (p) s_gl_plan_free = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
     return p;
 }
 static void gl_free(void *p) { heap_caps_free(p); }
+#define BAKE_SHOW_FLOOR (256u * 1024)                 /* the floor a bake may borrow down to while the boot show plays (below) */
+static bool s_show_building;                          /* boot_show_begin is baking its layers (the show is not on yet, its memory already held) */
+static void *bake_alloc(size_t n) {                     /* THE BACKGROUND's bake scratch (0.4.1): lent for one bake, given back - so only the plan's own
+                                                          headroom, not the grass loop's 200 KB more (11-04: the loop leaves ~1.25 MB free; the reef's 126 KB
+                                                          was refused under the loop's rule and every rebake drew plain water) */
+    /* (0.4.1, the square 11-05: the boot show holds ~700 KB for its few seconds and the reef's 132 KB was refused under the 1 MB
+       floor - the tank came up with no background. While the show plays its memory comes back within seconds, so a bake may
+       borrow down to BAKE_SHOW_FLOOR; render.c asks again about once a second whenever a bake was refused) */
+    static int refused;
+    size_t free = heap_caps_get_free_size(MALLOC_CAP_SPIRAM), floor = boot_show_on() || s_show_building ? BAKE_SHOW_FLOOR : PLAN_PSRAM_MIN_FREE_AFTER;
+    void *p = free >= n + floor ? heap_caps_aligned_alloc(64, n, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) : NULL;
+    if (!p && (refused++ < 6 || refused % 120 == 0))
+        ESP_LOGW("display", "background: the bake's %u KB not lent (psram %u KB free, largest %u KB) - the water alone until it can (refused %d times)",
+                 (unsigned)(n / 1024), (unsigned)(free / 1024), (unsigned)(heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM) / 1024), refused);
+    if (p && refused) { ESP_LOGI("display", "background: the bake's %u KB lent again (psram %u KB free) - the background is back", (unsigned)(n / 1024), (unsigned)(free / 1024)); refused = 0; }
+    return p;
+}
+static void *card_bake_alloc(size_t n) {              /* THE CARDS LENT (0.4.2): a card's bake, PSRAM only - never internal */
+    static int refused;
+    void *p = heap_caps_malloc(n, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!p && refused++ < 6) ESP_LOGW("display", "a card's bake: %u KB not found in psram (%u KB free) - the card drawn whole",
+                                      (unsigned)(n / 1024), (unsigned)(heap_caps_get_free_size(MALLOC_CAP_SPIRAM) / 1024));
+    return p;
+}
 #define USE_RESTORE 0                                   /* 0: the DMA prefetch (measured better on a grown tank); 1: the dirty restore */
 #define USE_FLUSH_TASK 0                                /* 0: the plain flush (2026-10-23: the task's CPU fill preempts the render - a wash; its GDMA
                                                          * copies and a PSRAM-direct send were both slower than the fill); 1: the flush task */
@@ -208,6 +289,56 @@ static void deep_sleep_now(int wake_after_s);
 #if CONFIG_POCKET_TANK_SLEEP_SCREEN || CONFIG_POCKET_TANK_SLEEP_LIGHT || SLEEP_SETTING_ROW
 static void enter_dark(int wake_after_s, bool by_face);
 #endif
+/* THE IMAGE MARKED GOOD (0.4): a fresh image boots "pending" and the bootloader
+ * rolls back on the next start that finds it still pending - a crash, but also a
+ * sleep, a power-off, a SWAP IN or CHECK FOR UPDATES. So it is marked once the
+ * tank has been on the glass OTA_VALID_FRAMES frames past its loading, and before
+ * every start the tank asks for itself (a keeper's own restart is never a rollback) */
+#define OTA_VALID_FRAMES 50                    /* ~2 s of the tank drawn */
+static bool s_ota_pending;
+static void ota_valid_now(const char *why) {
+    if (!s_ota_pending) return;
+    s_ota_pending = false;
+    esp_ota_mark_app_valid_cancel_rollback();
+    ESP_LOGI(TAG, "this image marked valid (%s): rollback cancelled", why);
+}
+void tank_ota_valid_now(const char *why) { ota_valid_now(why); }   /* (link_dev.c: the radio's own restarts - review 9's L3) */
+/* THE WATCHDOG (0.4, the 11-02 evening sweep: nothing reset a hung tank - a deadlock froze the glass until a 10 s PWR
+ * hold, and an image that hung on the glass never rolled back). The tank task is watched: fed once a frame and through
+ * the sleep's grace; TANK_WDT_MS without a feed panics and restarts the chip (an image still pending rolls back). Set
+ * here, not only in sdkconfig: a build directory keeps the sdkconfig it was made with. The idle tasks are not watched
+ * (a long boot step or update mode's flash work may starve IDLE0 harmlessly - with panic on that would be a restart);
+ * a frame that stops is what a keeper sees. The longest stall the tank task makes on purpose: director `wdt` */
+#define TANK_WDT_MS 20000
+static bool s_wdt_on; static int64_t s_wdt_fed, s_wdt_gap_max;
+static void wdt_feed(void) {
+    const int64_t now = esp_timer_get_time();
+    if (s_wdt_fed && now - s_wdt_fed > s_wdt_gap_max) {
+        s_wdt_gap_max = now - s_wdt_fed;
+        if (s_wdt_gap_max > 1000000) ESP_LOGW(TAG, "watchdog: the tank task went %lld ms unfed (the longest yet)", s_wdt_gap_max / 1000);
+    }
+    s_wdt_fed = now;
+    if (s_wdt_on) esp_task_wdt_reset();
+    blackbox_feed(now);                         /* the RTC watchdog with it (blackbox.h: it also sees a light sleep that never wakes) */
+}
+static void wdt_watch_tank_task(void) {         /* on the tank task */
+    const esp_task_wdt_config_t c = { .timeout_ms = TANK_WDT_MS, .idle_core_mask = 0, .trigger_panic = true };
+    esp_err_t e = esp_task_wdt_reconfigure(&c);
+    if (e == ESP_OK) e = esp_task_wdt_add(NULL);
+    s_wdt_on = e == ESP_OK; s_wdt_fed = esp_timer_get_time();
+    if (s_wdt_on) ESP_LOGI(TAG, "watchdog: the tank task watched, %d s unfed restarts the chip", TANK_WDT_MS / 1000);
+    else ESP_LOGE(TAG, "watchdog: could not watch the tank task (%s)", esp_err_to_name(e));
+    blackbox_rwdt_arm();
+}
+void device_wdt_feed(void) { wdt_feed(); }
+void device_wdt(int hang) {                     /* director `wdt` [hang]: the longest stall so far; `wdt hang` stops feeding (a dev test) */
+    ESP_LOGI(TAG, "watchdog: %s, %d s | longest unfed %lld ms | %lld ms since the last feed", s_wdt_on ? "ON" : "OFF", TANK_WDT_MS / 1000,
+             s_wdt_gap_max / 1000, (esp_timer_get_time() - s_wdt_fed) / 1000);
+    if (!hang) return;
+    progression_save(&tank);                    /* (the test costs no keeper anything) */
+    ESP_LOGW(TAG, "watchdog: hanging the tank task on purpose - the chip restarts in %d s", TANK_WDT_MS / 1000);
+    for (;;) vTaskDelay(pdMS_TO_TICKS(1000));   /* (a deadlock's look: blocked, never fed) */
+}
 static bat_t s_bh;                          /* the battery page's history: NVS "bat"/"hist" (its own namespace - a tank reset leaves it) */
 static void bat_hist_save(void);            /* at sleep too: the screen-on time so far */
 static bool s_btn_armed; static int64_t s_btn_low_since;   /* sleep_button_poll state */
@@ -251,6 +382,32 @@ static bool s_btn_used;   /* this press opened the reset prompt: no drowse, no p
 #define DIRECTOR_GRACE_US (5LL * 1000000)     /* `deepsleep N`: straight to stage 2 */
 #define KEY_POLL_US       (1000000LL)         /* the grace wakes once a second to ask the PMIC about the PWR key */
 static int battery_pct(void) { float f; bool c; return battery_port_read(&f, &c) ? (int)(f * 100 + 0.5f) : -1; }
+/* the watch with no panel restarts (0.4.3) - but never while this image is a fresh update still on trial (a restart then
+   rolls it back: it is marked good after OTA_VALID_FRAMES), nor at a wake from deep sleep (a restart makes it a cold boot) */
+static bool image_pending_verify(void) {
+    const esp_partition_t *run = esp_ota_get_running_partition(); esp_ota_img_states_t st;
+    return run && esp_ota_get_state_partition(run, &st) == ESP_OK && st == ESP_OTA_IMG_PENDING_VERIFY;
+}
+static bool woke_from_deep_sleep(void) {
+    const esp_sleep_wakeup_cause_t c = esp_sleep_get_wakeup_cause();
+    return c == ESP_SLEEP_WAKEUP_EXT0 || c == ESP_SLEEP_WAKEUP_EXT1 || c == ESP_SLEEP_WAKEUP_TIMER;
+}
+/* what the black box's heartbeat says the tank was doing (0.4.3) */
+static void bb_fill(bb_state_t *s, bool grace, float fps) {
+    memset(s, 0, sizeof *s);
+#ifdef TANK_P4
+    (void)grace; (void)fps; return;             /* (the big screens keep no black box in 0.4.3: nothing to read) */
+#endif
+    s->pct = battery_pct();                     /* (first: battery_port_state reads what it read) */
+    const int st = battery_port_state();
+    s->charging = st == BAT_CHARGING; s->cable = s->pct >= 0 && BAT_ON_POWER(st);
+    s->night = tank.night; s->link = link_dev_on(); s->grace = grace; s->no_panel = !display_port_panel_up(); s->locked = touch_port_touch_lock();
+    s->mv = battery_port_vbat_mv(); s->fps = fps; s->heals = display_port_panel_heals();
+}
+void device_blackbox_test(const char *what) {   /* director `blackbox test ...`: the tank saved first (the test costs no keeper anything) */
+    progression_save(&tank);
+    blackbox_test(what);
+}
 typedef struct { float x, y, heading; uint8_t goal, valid; } fish_snap_t;
 RTC_DATA_ATTR static fish_snap_t s_snap[N_FISH_MAX]; RTC_DATA_ATTR static int s_snap_n;
 static void snap_log(const char *what) {          /* "FeZ 156,238/explore mira ..." */
@@ -300,6 +457,10 @@ static int restore_fish(void) {
  *   "netwhy" = why the last FAILED sync failed (net_time_why), kept past the
  *     boots after it: the keeper's way round is Settings > Update, whose
  *     restart would take this boot's story with it (0.3.9).
+ *   "netlag" = 1: the clock was resumed at a save since the last good sync -
+ *     the stretch is owed; 0: a good sync set it since; absent: not known
+ *     (0.4.1, common/clock_gate.h). Like netclk / netok / netgave / netwhy it
+ *     is the board's: the backup page never carries it (TANK_KEYS_BOARD).
  * A failed sync after a power-off resumes the clock at the save (rtc_port_seed):
  * the stretch is owed, not lost - the clock now lags real time by exactly
  * that much, and the next good sync lives it through.
@@ -318,8 +479,29 @@ static int restore_fish(void) {
  * while its chip runs ("netclk", the first boot of 0.3.9: the jump is the
  * old build-time seed, nothing lived) - and gives up after NET_FIRST_TRIES
  * failed mornings ("netgave"), never a page every morning for a network
- * that is gone; a stopped chip asks regardless, it has to. */
-#define NET_FIRST_TRIES 3
+ * that is gone; a stopped chip asks regardless, it has to.
+ * THE 0.4 GATE IS 0.3.9.6's (0.4 rc round three). The rc skipped the ask on a
+ * running chip when the last try failed (round one), then counted an owed
+ * stretch in NVS "netowe" to ask again (round two). A third audit still found
+ * an owed night lost for good four ways: a router back only after the try cap,
+ * a new network saved, a seed while no network was saved, and a 0.3.9.6 tank
+ * already owed time taking the OTA (no netowe reads 0: nothing owed). Both are
+ * reverted: a chip-board asks at every boot until a try works, exactly as
+ * 0.3.9.6 did, so an owed stretch is paid by the first good sync whatever came
+ * between. The cost, accepted for 0.4 and deferred to 0.4.1: while the saved
+ * network is gone, every boot shows the TIME CHECK page for up to 30 s. A slow
+ * boot is a nuisance; a night never lived is a fish that never grew. An RTC
+ * read that fails stays UNKNOWN, never STOPPED (round two, kept): the clock is
+ * unset at that boot, so `set` is false and the board asks, as for a stopped
+ * chip, and the seed never writes the save's stamp into it.
+ * 0.4.1 KEEPS THAT RULE AND MAKES IT CHEAPER (common/clock_gate.h, the gate itself, driven by the sim's
+ * --selftest-clock-gate through a model of this boot). NVS "netlag" marks an owed clock: 1 at the seed (written
+ * before the chip is), 0 after a good sync has set the chip; absent (0.4.0 and older) = 0.3.9.6's gate. An owed
+ * clock asks whatever netok says (a seed while no network was saved left netok 1: that night was skipped); a chip
+ * that ran since a good sync owes nothing and does not ask. And a chip-board whose last boot check never saw the
+ * router asks with a quick look (two sweeps) instead of the 30 s: every boot still asks while time is owed - a
+ * router back is seen and paid - but a network gone costs a few seconds, not thirty. The seed also clears netok:
+ * the clock is no longer the internet's. */
 static int nvs_u8(const char *key, int dflt) {
     nvs_handle_t h; uint8_t v = (uint8_t)dflt;
     if (nvs_open("tank", NVS_READONLY, &h) == ESP_OK) { nvs_get_u8(h, key, &v); nvs_close(h); }
@@ -345,24 +527,31 @@ static char s_boot_sync[96] = "no sync at this boot";   /* what this boot's sync
  * on the bus for good, and the pendant froze on CHECKING THE TIME (three
  * times, found halted 2026-10-06: syncscr and tank both in spi_device_acquire_bus). */
 static volatile bool s_sync_finished;
-static bool s_sync_ok;
+static bool s_sync_ok, s_sync_quick;
 static int64_t s_sync_u, s_sync_at;
 static TaskHandle_t s_sync_waiter;
 static void sync_worker(void *arg) {
     (void)arg;
-    s_sync_ok = net_time_sync(&s_sync_u, &s_sync_at);
+    s_sync_ok = net_time_sync(&s_sync_u, &s_sync_at, s_sync_quick);
     s_sync_finished = true;
     xTaskNotifyGive(s_sync_waiter);
     vTaskDelete(NULL);
 }
+static void clock_lag_put(int lag, int ok) {    /* NVS "netlag" and "netok" together, one commit */
+    nvs_handle_t h;
+    if (nvs_open("tank", NVS_READWRITE, &h) == ESP_OK) { nvs_set_u8(h, "netlag", (uint8_t)lag); nvs_set_u8(h, "netok", (uint8_t)ok); nvs_commit(h); nvs_close(h); }
+}
 static void net_clock_boot(uint16_t *fb) {  /* before the tank exists: the radio has the internal heap to itself */
     if (!s_pmic || !net_saved()) return;
-    bool real = nvs_u8("netclk", 0), set = clock_port_now_unix() != 0, ok_before = nvs_u8("netok", 0);
-    if (real && set && ok_before) return;    /* a deep-sleep wake on a good clock, or a chip that ran all night */
-    if (s_rtc && set && !real) {             /* THE STOPPED CLOCK: a chip-board's one-time move onto real time, a few tries */
-        int gave = nvs_u8("netgave", 0);
-        if (gave >= NET_FIRST_TRIES) { snprintf(s_boot_sync, sizeof s_boot_sync, "not asked: %d failed tries, the chip keeps its own time", gave); return; }
-    }
+    const clock_gate_in_t g = { .rtc = s_rtc, .real = nvs_u8("netclk", 0), .set = clock_port_now_unix() != 0, .ok_before = nvs_u8("netok", 0),
+                                .lag = clock_lag_of(nvs_u8("netlag", 255)), .gave = nvs_u8("netgave", 0), .missed = net_time_missed() };
+    const bool real = g.real, set = g.set;
+    const clock_gate_t d = clock_gate(&g);   /* common/clock_gate.h: an owed clock always asks; nothing owed, no page */
+    if (d == CLOCK_SKIP_GOOD) return;        /* a deep-sleep wake on a good clock, or a chip that ran all night */
+    if (d == CLOCK_SKIP_RAN) { snprintf(s_boot_sync, sizeof s_boot_sync, "not asked: the last try failed, but the chip ran on since a good sync (nothing owed)"); return; }
+    if (d == CLOCK_SKIP_GAVE_UP) { snprintf(s_boot_sync, sizeof s_boot_sync, "not asked: %d failed tries, the chip keeps its own time", g.gave); return; }
+    const bool quick = d == CLOCK_ASK_QUICK;   /* the router not seen at the last boot: two sweeps, the whole 30 s once it is seen */
+    s_sync_quick = quick;
     int64_t u = 0, at = 0;
     bool ok;
     s_sync_finished = false; s_sync_waiter = xTaskGetCurrentTaskHandle();
@@ -378,8 +567,8 @@ static void net_clock_boot(uint16_t *fb) {  /* before the tank exists: the radio
             ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(40));
         } while (!s_sync_finished);
         u = s_sync_u; at = s_sync_at; ok = s_sync_ok;
-    } else ok = net_time_sync(&u, &at);      /* no glass (or no task): ask in place */
-    nvs_u8_put("netok", ok);
+    } else ok = net_time_sync(&u, &at, quick);   /* no glass (or no task): ask in place */
+    if (!ok) nvs_u8_put("netok", 0);         /* (a good try's netok waits for the chip to have the time: below, and net_clock_rebase) */
     if (s_rtc && set && !real) nvs_u8_put("netgave", ok ? 0 : nvs_u8("netgave", 0) + 1);
     snprintf(s_boot_sync, sizeof s_boot_sync, "%s%s", ok ? "got the time" : "FAILED: ", ok ? "" : net_time_why());
     if (!ok) {
@@ -393,12 +582,21 @@ static void net_clock_boot(uint16_t *fb) {  /* before the tank exists: the radio
     if (real) {
         int64_t was = clock_port_now_unix();
         struct timeval tv = { .tv_sec = (time_t)now }; settimeofday(&tv, NULL);
-        rtc_port_store();                    /* a chip that stopped (or lagged) runs on real time again */
+        /* the battery page's stamp, if it was taken on the late clock, moves with it (0.4.3, battery.h); with that clock
+           lost since (it had stopped: nothing to measure the jump from) such a stamp cannot be placed, and is dropped */
+        if (was) battery_clock_moved(&s_bh, now - was, BAT_CLOCK_PAID);
+        else battery_clock_unknown(&s_bh);
+        if (battery_take_save(&s_bh)) bat_hist_save();
+        battery_clock_owed(&s_bh, false);    /* (on real time from here: what the chip's write makes of netlag is the next boot's) */
+        if (rtc_port_store()) clock_lag_put(0, 1);   /* a chip that stopped (or lagged) runs on real time again: paid, nothing owed (written
+                                                        after the chip has it - a cut before leaves the debt marked) */
+        else nvs_u8_put("netok", 1);         /* the chip's write failed: this boot is paid, the chip's own state stands (a lagging one stays owed) */
         ESP_LOGI(TAG, "clock: set from the internet (%s) - the time away is lived through at this boot",
                  was ? "it had run on" : "it had stopped with the power");
         if (was) ESP_LOGI(TAG, "clock: it was %lld s %s", (long long)(now > was ? now - was : was - now), now >= was ? "behind (owed time, lived now)" : "ahead");
         snprintf(s_boot_sync, sizeof s_boot_sync, "got the time: %s", was ? "the clock had run on (corrected)" : "the clock had stopped (the time away lived from the save)");
     } else {
+        nvs_u8_put("netok", 1);              /* (netclk is still 0: the gate asks until the rebase has written it) */
         s_rebase_unix = u; s_rebase_us = at;
         ESP_LOGI(TAG, "clock: first time from the internet - the clock moves to it once the tank is loaded, with nothing lived for the jump");
         snprintf(s_boot_sync, sizeof s_boot_sync, "got the time: the FIRST sync (clock moved, nothing lived)");
@@ -406,10 +604,27 @@ static void net_clock_boot(uint16_t *fb) {  /* before the tank exists: the radio
 }
 static void net_clock_rebase(void) {        /* after progression_boot / _wake: a first sync takes over the clock */
     if (!s_rebase_us) return;
+    int64_t reb_jump = 0;                    /* (how far the old clock stood from the new: the save's word where the clock was unset) */
+    {   /* what else is stamped on the old clock moves with it, BEFORE the clock (a cut repeats it): the shelved tanks, a gift
+           in flight's day (0.4.2 audit r2, PW2-4 / PW2-5: a DORMANT tank's next SWAP IN lived the jump, the gift came back at once) */
+        void (*const busy)(void) = shelf_busy;
+        shelf_busy = wdt_feed;                   /* (a slot rewritten a shelved tank: fed between them) */
+        reb_jump = progression_clock_rebase(&tank, s_rebase_unix + (esp_timer_get_time() - s_rebase_us) / 1000000);
+        shelf_busy = busy;
+    }
     struct timeval tv = { .tv_sec = (time_t)(s_rebase_unix + (esp_timer_get_time() - s_rebase_us) / 1000000) };
+    const int64_t reb_was = clock_port_now_unix();
     settimeofday(&tv, NULL);
-    rtc_port_store();                        /* a chip-board: the chip moves onto real time with the clock */
+    if (!reb_jump && reb_was) reb_jump = (int64_t)tv.tv_sec - reb_was;
+    const bool stored = rtc_port_store();    /* a chip-board: the chip moves onto real time with the clock */
     nvs_u8_put("netclk", 1);
+    if (reb_jump) {                          /* the battery page's stamp is on the old clock too (0.4.3, battery.h) - after netclk:
+                                                a cut before it leaves the stamp unmoved, never moved twice by a rebase run again */
+        battery_clock_moved(&s_bh, reb_jump, BAT_CLOCK_REBASE);
+        if (battery_take_save(&s_bh)) bat_hist_save();
+    }
+    battery_clock_owed(&s_bh, false);
+    if (stored) clock_lag_put(0, 1);         /* on real time: nothing owed (0.4.1; a chip not written keeps what it had) */
     s_rebase_us = 0;
     progression_settings_changed();          /* the save stamps the new clock within SAVE_MIN_GAP_S: the one before it carries the
                                                 old clock (the no-cell 1.8's chip was 9 h behind, 2026-10-24) and a power cut
@@ -420,16 +635,40 @@ void device_clock_log(void) {               /* director `clock` */
     char why[80] = "none"; size_t n = sizeof why;
     nvs_handle_t h;
     if (nvs_open("tank", NVS_READONLY, &h) == ESP_OK) { if (nvs_get_str(h, "netwhy", why, &n) != ESP_OK) snprintf(why, sizeof why, "none"); nvs_close(h); }
-    ESP_LOGI(TAG, "clock: this boot %s | lived at boot %.2f h | now %lld | RTC chip %s | network %s | real time %s | last sync %s | last failure: %s | tonight: %s",
-             s_boot_sync, s_boot_lived_h, (long long)clock_port_now_unix(), !s_rtc ? "no" : rtc_port_stopped() ? "yes, STOPPED at this boot (lost power)" : "yes", net_saved() ? "saved" : "none",
+    const int lag = clock_lag_of(nvs_u8("netlag", 255)), miss = net_time_missed();
+    ESP_LOGI(TAG, "clock: this boot %s | lived at boot %.2f h | now %lld | RTC chip %s | network %s | real time %s | last sync %s | last failure: %s | owed: %s | router not seen: %d %s | tonight: %s",
+             s_boot_sync, s_boot_lived_h, (long long)clock_port_now_unix(), !s_rtc ? "no" : rtc_port_stopped() ? "yes, STOPPED at this boot (lost power)" : rtc_port_unread() ? "yes, NO ANSWER at this boot" : "yes", net_saved() ? "saved" : "none",
              nvs_u8("netclk", 0) ? "yes" : "not yet", nvs_u8("netok", 0) ? "ok" : "failed or never", why,
-             night_powers_off() ? "power-off" : "deep sleep, the clock running");
+             lag == CLOCK_LAG_OWED ? "YES (resumed at a save, the next good sync pays it)" : lag == CLOCK_LAG_NONE ? "no" : "not known (no 0.4.1 sync or seed yet)",
+             miss, miss == 1 ? "check" : "checks", night_powers_off() ? "power-off" : "deep sleep, the clock running");
+}
+/* the sleep's key-release waits (wake triggers are levels: never arm them held). Bounded (0.4 rc round two): a key line
+   stuck down - BOOT low, the PWR sense high - waited for good on a dark glass, the tank task silent and PWR dead (the
+   watch found dark). Past KEY_UP_WAIT_US it says which key and goes on; false = one is still down */
+#define KEY_UP_WAIT_US (3000000LL)
+static bool keys_up_wait(const char *when) {
+    for (int64_t t0 = esp_timer_get_time(); !gpio_get_level(BTN_SLEEP) || pwr_sense_down(); vTaskDelay(pdMS_TO_TICKS(10))) {
+        wdt_feed();
+        if (esp_timer_get_time() - t0 < KEY_UP_WAIT_US) continue;
+        ESP_LOGW(TAG, "sleep: %s - a key still down after %d s (BOOT %s, PWR %s): not waiting for it", when, (int)(KEY_UP_WAIT_US / 1000000),
+                 gpio_get_level(BTN_SLEEP) ? "up" : "DOWN", pwr_sense_down() ? "DOWN" : "up");
+        return false;
+    }
+    return true;
 }
 static void enter_sleep_for(int wake_after_s) {
     /* the face-down gesture's sleep: the IMU stays awake through the grace so
        turning the screen up can wake the tank (the CYD, no PMIC: no rails
        cycle around it, so the latch-up guard below has nothing to guard) */
-    bool by_face = s_sleep_by_face; s_sleep_by_face = false;
+    bool by_face = s_sleep_by_face; s_sleep_by_face = false;   /* (this fork) taken before the refusals below, so a refused
+                                                                    face-down sleep leaves no stale flag for the next one */
+    if (render_reset_erase_armed()) {           /* ERASE EVERYTHING is on the glass (ERASING) and begins within a frame or two: a sleep
+                                                   would take its page down and drop it - the key does nothing just now */
+        ESP_LOGW(TAG, "a sleep refused: ERASE EVERYTHING is about to begin");
+        return;
+    }
+    if (link_dev_busy()) { ESP_LOGW(TAG, "a sleep refused: the radio chip is being updated (UPDATING YOUR DEVICE)"); return; }   /* (0.4.3, the one install) */
+    ota_valid_now("a sleep");                  /* (before the save and any power cut below) */
 #if CONFIG_POCKET_TANK_IMU_FACE_DOWN_SLEEP
     /* any sleep that starts face down - the gesture's, or BOOT pressed while
        it lies there - wakes when it is turned face up. A BOOT sleep face up
@@ -468,7 +707,10 @@ static void enter_sleep_for(int wake_after_s) {
              wake_after_s > 0 ? "deep sleep with the timer" : night_powers_off() ? (s_rtc ? "PMIC power-off (the PWR key boots it)" : "PMIC power-off (the PWR key boots it; the internet gives the time back)")
              : pwr_sensed() ? "deep sleep (the PWR key wakes; the clock runs on)" : "deep sleep (BOOT wakes)", pct0, mv0);
     touch_port_confirm_answer(-1);              /* an open reset prompt is a NO */
+    link_dev_sleep();                           /* the tank link closes first: visitors home, ours recalled, the radio OFF -
+                                                   a radio left up through the light-sleep grace came back deaf (2026-10-05, the watch) */
     adv_close();                                /* ... the ADVANCED page goes (a sitting cut short keeps the saved map) */
+    tank_link_swap_park(&tank);                 /* the swap notes' waits (a no-clock tank's awake minutes - 0.4.3 audit r2, R2-2) */
     if (!progression_save(&tank))               /* never cancels: a tank that can't save (NVS down, a save that
                                                    wouldn't load) must still sleep, or the key goes dead */
         ESP_LOGE(TAG, "sleep: the tank save failed - sleeping anyway, the last good save stands");
@@ -478,7 +720,9 @@ static void enter_sleep_for(int wake_after_s) {
     batlog_add(pct0, mv0, display_port_brightness(), true, "sleep");
     if (!by_face) imu_port_sleep();   /* quiesce BEFORE the rails cycle (latch-up guard) */
     display_port_sleep();
-    while (!gpio_get_level(BTN_SLEEP) || pwr_sense_down()) vTaskDelay(pdMS_TO_TICKS(10));   /* wake triggers are levels: never arm them held */
+    keys_up_wait("before the grace");
+    const bool boot_stuck = !gpio_get_level(BTN_SLEEP), pwr_stuck = pwr_sense_down();   /* (a stuck line's GPIO wake is not armed - it would
+                                                   end the grace at once; the PMIC poll and the other key still wake it) */
     vTaskDelay(pdMS_TO_TICKS(30));
     while (battery_port_key_poll()) { }         /* the press that asked for this sleep is not the one that ends it */
     /* stage 1: the grace, RAM alive - light sleep in 1 s slices, each wake a
@@ -487,17 +731,36 @@ static void enter_sleep_for(int wake_after_s) {
        director's bench and a board with no PMIC */
     int64_t t0 = esp_timer_get_time();
     bool pressed = false;
+    bb_state_t bs;
+    bb_fill(&bs, true, 0); blackbox_event(BB_EV_GRACE_IN, &bs);
+    int64_t bb_last = t0;
+#ifdef TANK_P4
+    /* the home tank (2026-10-12): mains-powered, no PMIC, and its BOOT key is no sleep pad - the
+       night is the glass dark with the tank running on (time never freezes), until a finger
+       lands on the glass or BOOT is pressed. Polled, 30 ms: no light sleep, no grace to end. */
+    ESP_LOGI(TAG, "sleep: the glass is dark; a touch or BOOT wakes it");
     for (;;) {
+        vTaskDelay(pdMS_TO_TICKS(30));
+        wdt_feed();                              /* (the tank task is watched: a dark glass is not a hung one - the 0.4.3 review) */
+        float tx, ty;
+        if (touch_port_read_raw(&tx, &ty) || !gpio_get_level(BTN_SLEEP)) { pressed = true; break; }
+    }
+#endif
+    for (;!pressed;) {
         int64_t left = grace_us - (esp_timer_get_time() - t0);
         if (left <= 0) break;
-        gpio_wakeup_enable(BTN_SLEEP, GPIO_INTR_LOW_LEVEL);
-        if (pwr_sensed()) gpio_wakeup_enable(PWR_SENSE, GPIO_INTR_HIGH_LEVEL);   /* the PWR key itself: no second of polling to wait out */
+        wdt_feed();                             /* (each 1 s slice: the grace is no hang) */
+        if (esp_timer_get_time() - bb_last >= 10000000) { bb_last = esp_timer_get_time(); bb_fill(&bs, true, 0); blackbox_tick(bb_last, &bs); }
+        blackbox_crumb_phase(BB_PH_LIGHT_SLEEP);   /* (RTC memory: an RTC watchdog reset from inside the sleep says so) */
+        if (!boot_stuck) gpio_wakeup_enable(BTN_SLEEP, GPIO_INTR_LOW_LEVEL);
+        if (pwr_sensed() && !pwr_stuck) gpio_wakeup_enable(PWR_SENSE, GPIO_INTR_HIGH_LEVEL);   /* the PWR key itself: no second of polling to wait out */
         esp_sleep_enable_gpio_wakeup();
         esp_sleep_enable_timer_wakeup(left < KEY_POLL_US ? left : KEY_POLL_US);
         esp_light_sleep_start();
+        blackbox_crumb_phase(BB_PH_GRACE);
         esp_sleep_wakeup_cause_t why = esp_sleep_get_wakeup_cause();
-        gpio_wakeup_disable(BTN_SLEEP);
-        if (pwr_sensed()) gpio_wakeup_disable(PWR_SENSE);
+        if (!boot_stuck) gpio_wakeup_disable(BTN_SLEEP);
+        if (pwr_sensed() && !pwr_stuck) gpio_wakeup_disable(PWR_SENSE);
         /* wake sources are STICKY in ESP-IDF (s_config.wakeup_triggers): the
          * grace's timer would otherwise follow us into stage 2 and boot the
          * tank 90 s later - which it did (2026-09-14: every sleep since the
@@ -514,15 +777,17 @@ static void enter_sleep_for(int wake_after_s) {
         }
     }
     if (pressed) {                              /* a quick wake: resume in place */
-        while (!gpio_get_level(BTN_SLEEP) || pwr_sense_down()) vTaskDelay(pdMS_TO_TICKS(10));   /* the wake press, still down */
+        keys_up_wait("the wake");                /* the wake press, still down (stuck: the tank comes back anyway) */
         if (pwr_sensed()) { vTaskDelay(pdMS_TO_TICKS(80)); while (battery_port_key_poll()) { } }   /* ... and the PMIC's own note of it: not a new sleep press */
         float napped = (esp_timer_get_time() - t0) / 1e6f;
-        tank_tick_sleep(&tank, napped);         /* the nap counts, tiny as it is */
+        progression_slept(&tank, napped);       /* the nap counts, tiny as it is (growth, the fry offer, the meal pay's wait) */
         progression_woke(&tank);                /* a fry that was on its way: born now (2026-09-24) */
         battery_woke(&s_bh);                    /* what the gauge lost asleep is no screen-on drain */
         display_port_wake();
         imu_port_wake();
+        wdt_feed();
         batlog_add(battery_pct(), battery_port_vbat_mv(), 0, true, "nap");
+        bb_fill(&bs, false, 0); blackbox_event(BB_EV_GRACE_OUT, &bs);
         s_snap_n = 0; s_btn_armed = false; s_btn_low_since = 0;   /* require a fresh press */
         ESP_LOGI(TAG, "wake within the grace: resumed in place after %.0f s", napped);
         return;
@@ -534,6 +799,10 @@ static void enter_sleep_for(int wake_after_s) {
     if (wake_after_s <= 0 && night_powers_off()) {
         batlog_add(battery_pct(), battery_port_vbat_mv(), 0, true, "off");   /* mirrored to NVS: the morning reads it back */
         ESP_LOGI(TAG, "grace over: PMIC power-off (the PWR key or USB boots the tank; the night is lived through at that boot)");
+        nvs_u8_put("nkeep", 1);                                /* (0.4.2: ... and the tank on the glass, hard_boot_home - its morning is no hard boot) */
+        if (touch_port_touch_lock()) nvs_u8_put("tlkeep", 1);   /* the night's power-off keeps the touch lock (its morning boot is a power-on; the PWR-hold
+                                                                     power-off, enter_poweroff, writes none: the keeper's way out still unlocks) */
+        bb_fill(&bs, true, 0); blackbox_event(BB_EV_POWEROFF, &bs); blackbox_crumb_phase(BB_PH_POWEROFF);
         vTaskDelay(pdMS_TO_TICKS(20));
         if (battery_port_poweroff()) vTaskDelay(pdMS_TO_TICKS(1000));      /* the rails drop here */
         ESP_LOGW(TAG, "still powered after the soft cut: deep sleep instead");
@@ -565,6 +834,8 @@ int device_sleep_cfg(int mask) {
     return sleep_cfg();
 }
 static void deep_sleep_now(int wake_after_s) {
+    ota_valid_now("a sleep");
+    { bb_state_t bs; bb_fill(&bs, false, 0); blackbox_event(BB_EV_DEEP_SLEEP, &bs); }   /* (its PMIC reads and flash write before any pin goes quiet) */
     if (pwr_sensed()) {                         /* the PWR key's sense line (driven both ways by the board: no pull) wakes it,
                                                    as ext1 - the RTC peripherals can power down, which ext0 would keep up */
         int cfg = sleep_cfg();
@@ -583,13 +854,21 @@ static void deep_sleep_now(int wake_after_s) {
         display_port_deep_sleep_pins(tp_slept);
     } else {
         ESP_LOGI(TAG, "deep sleep (BOOT wakes%s)", wake_after_s > 0 ? ", or the timer" : "");
+#if SOC_PM_SUPPORT_EXT0_WAKEUP
         rtc_gpio_pullup_en(BTN_SLEEP); rtc_gpio_pulldown_dis(BTN_SLEEP);
         esp_sleep_enable_ext0_wakeup(BTN_SLEEP, 0);
+#else                                        /* the P4: no EXT0 (and never reached - its night keeps the tank running, above) */
+        esp_sleep_enable_ext1_wakeup(1ULL << BTN_SLEEP, ESP_EXT1_WAKEUP_ANY_LOW);
+#endif
     }
     if (wake_after_s > 0) esp_sleep_enable_timer_wakeup((int64_t)wake_after_s * 1000000);
     audio_port_deep_sleep_pins();
+#if !SOC_GPIO_SUPPORT_HOLD_SINGLE_IO_IN_DSLP     /* (the P4 holds pads one by one through deep sleep: gpio_hold_en is enough there) */
     gpio_deep_sleep_hold_en();
+#endif
     ESP_LOGI(TAG, "digital pads held + isolated");
+    blackbox_crumb_phase(BB_PH_DEEP_SLEEP);
+    blackbox_rwdt_disarm();                     /* (it counts in sleep: a night's deep sleep is no hang) */
     esp_deep_sleep_start();
 }
 
@@ -674,7 +953,9 @@ static void dark_wait(int64_t us, int touch_int, bool light) {
         if (touch_armed) gpio_wakeup_enable((gpio_num_t)touch_int, GPIO_INTR_LOW_LEVEL);
         esp_sleep_enable_gpio_wakeup();
         esp_sleep_enable_timer_wakeup(us);
+        blackbox_crumb_phase(BB_PH_LIGHT_SLEEP);   /* (RTC memory, as in upstream's grace: an RTC watchdog reset from inside the sleep says so) */
         esp_err_t slept = esp_light_sleep_start();
+        blackbox_crumb_phase(BB_PH_GRACE);
         gpio_wakeup_disable(BTN_SLEEP);
         if (touch_armed) gpio_wakeup_disable((gpio_num_t)touch_int);
         esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_ALL);  /* sticky in ESP-IDF: see enter_sleep_for */
@@ -691,14 +972,18 @@ static void dark_wait(int64_t us, int touch_int, bool light) {
 static void enter_dark(int wake_after_s, bool by_face) {
     int pct0 = battery_pct(), mv0 = battery_port_vbat_mv();
     touch_port_confirm_answer(-1);              /* an open reset prompt is a NO */
+    link_dev_sleep();                           /* the tank link closes, as in upstream's sleep: visitors home, ours recalled, the
+                                                   radio down - the link is never left on across a sleep (link_dev.c) */
     adv_close();                                /* ... the ADVANCED page goes, as in upstream's sleep (a sitting cut short keeps the saved map) */
+    tank_link_swap_park(&tank);                 /* ... and the swap notes' waits are kept, as there */
     if (!progression_save(&tank))               /* if the cell dies in the dark, this save is the tank */
         ESP_LOGE(TAG, "dark: the tank save failed - going dark anyway, the last good save stands");
     bat_hist_save();                            /* the screen-on time so far */
     audio_port_sleep();                         /* amp off, codec down */
     batlog_add(pct0, mv0, display_port_brightness(), true, "sleep");
     display_port_sleep();                       /* backlight off, panel off */
-    while (!gpio_get_level(BTN_SLEEP)) vTaskDelay(pdMS_TO_TICKS(10));   /* BOOT is a level wake: never arm it held */
+    keys_up_wait("before the dark");            /* BOOT is a level wake: never arm it held. Upstream's wait, bounded and fed: a key
+                                                   still down after it lights the tank again at the first look */
     vTaskDelay(pdMS_TO_TICKS(30));
     imu_port_rest_begin();
     int touch_int = by_face ? -1 : touch_port_wake_gpio();
@@ -721,6 +1006,10 @@ static void enter_dark(int wake_after_s, bool by_face) {
 #endif
     int64_t t0 = esp_timer_get_time();
     int64_t until = wake_after_s > 0 ? t0 + (int64_t)wake_after_s * 1000000 : 0;
+    bb_state_t bs;                              /* THE BLACK BOX, as in upstream's grace: in, a heartbeat every 10 s, out */
+    bb_fill(&bs, true, 0); blackbox_event(BB_EV_GRACE_IN, &bs);
+    blackbox_crumb_phase(BB_PH_GRACE);
+    int64_t bb_last = t0;
     bool glass_clear = false;                   /* a finger counts only after the glass was seen without one */
     int face_up = 0;                            /* IMU reads in a row not face down (a dark begun face down) */
     const char *why = NULL;
@@ -728,6 +1017,8 @@ static void enter_dark(int wake_after_s, bool by_face) {
     for (int look = 1; ; look++) {
         int64_t now = esp_timer_get_time();
         if (until && now >= until) { why = "the timer"; break; }
+        wdt_feed();                             /* each look: the tank task is watched (upstream's 0.4), and the dark is no hang */
+        if (now - bb_last >= 10000000) { bb_last = now; bb_fill(&bs, true, 0); blackbox_tick(now, &bs); }
         dark_wait(until && until - now < DARK_SLICE_US ? until - now : DARK_SLICE_US, touch_int, light);
         if (!gpio_get_level(BTN_SLEEP)) { why = "BOOT"; break; }
         if (!by_face) {
@@ -754,14 +1045,16 @@ static void enter_dark(int wake_after_s, bool by_face) {
 #if CONFIG_POCKET_TANK_SLEEP_LIGHT || SLEEP_SETTING_ROW
     if (light) dark_hold_pins(false);
 #endif
-    while (!gpio_get_level(BTN_SLEEP)) vTaskDelay(pdMS_TO_TICKS(10));   /* a BOOT wake press, still down */
+    keys_up_wait("the wake");                   /* a BOOT wake press, still down (stuck: the tank comes back anyway) */
     float dark_s = (esp_timer_get_time() - t0) / 1e6f;
     progression_slept(&tank, dark_s < PROGRESSION_SLEEP_CAP_S ? dark_s : (float)PROGRESSION_SLEEP_CAP_S);
     progression_woke(&tank);                    /* a fry that was on its way: born now */
     battery_woke(&s_bh);                        /* what the gauge lost in the dark is no screen-on drain */
     display_port_wake();
     touch_port_swallow();                       /* the waking finger does nothing in the tank */
+    wdt_feed();                                 /* (the dark lived through: a long one is seconds of sleep slices) */
     batlog_add(battery_pct(), battery_port_vbat_mv(), display_port_brightness(), false, "woke");
+    bb_fill(&bs, false, 0); blackbox_event(BB_EV_GRACE_OUT, &bs);
     s_btn_armed = false; s_btn_low_since = 0;   /* BOOT's release is not a new press */
     if (moved) ESP_LOGI(TAG, "lit by motion (%d off the rest pose) after %.0f s dark", moved, dark_s);
     else ESP_LOGI(TAG, "lit by %s after %.0f s dark", why, dark_s);
@@ -777,9 +1070,18 @@ static void enter_poweroff(void) {
     enter_sleep_for(0);   /* none (a 320x240 board: NEVER): ignored there, with its line; screen, lightsleep: the dark, as any sleep */
     return;
 #endif
+    if (render_reset_erase_armed()) {           /* ERASE EVERYTHING is on the glass (ERASING) and begins within a frame or two: a power-off
+                                                   would take its page down and drop it - the key does nothing just now */
+        ESP_LOGW(TAG, "a power-off refused: ERASE EVERYTHING is about to begin");
+        return;
+    }
+    if (link_dev_busy()) { ESP_LOGW(TAG, "a power-off refused: the radio chip is being updated (UPDATING YOUR DEVICE)"); return; }
+    ota_valid_now("a power-off");
     ESP_LOGI(TAG, "power-off now: saving tank, PMIC soft cut (the PWR key boots)");
     touch_port_confirm_answer(-1);
+    link_dev_sleep();                           /* the tank link says goodbye (a sudden death is `link die`) */
     adv_close();
+    tank_link_swap_park(&tank);                 /* (see enter_sleep_for) */
     if (!progression_save(&tank))               /* never cancels (see enter_sleep_for) */
         ESP_LOGE(TAG, "power-off: the tank save failed - cutting anyway, the last good save stands");
     bat_hist_save();
@@ -787,6 +1089,8 @@ static void enter_poweroff(void) {
     batlog_add(battery_pct(), battery_port_vbat_mv(), display_port_brightness(), true, "off");   /* to NVS too: the shelf time is measurable at the next boot */
     imu_port_sleep();
     display_port_sleep();
+    { bb_state_t bs; bb_fill(&bs, false, 0); blackbox_event(BB_EV_POWEROFF, &bs); }
+    blackbox_crumb_phase(BB_PH_POWEROFF);
     vTaskDelay(pdMS_TO_TICKS(50));
     if (battery_port_poweroff()) vTaskDelay(pdMS_TO_TICKS(1000));  /* rails drop here */
     deep_sleep_now(0);   /* no PMIC (QEMU / bring-up) or write failed */
@@ -798,12 +1102,15 @@ void device_poweroff(void) { s_sleep_why = "the director's poweroff"; enter_powe
  * seconds are deaf to it - the press that powered the board on can still be
  * landing in the status register. */
 #define KEY_BOOT_DEAF_US 3000000
+/* a PMIC long press nobody made (2026-10-06, the square watch on USB):
+   battery_port_key_poll answers 3 for one with no key-down edge before it */
 static void pwr_key_poll(int64_t now) {
     static int64_t last;
     if (now - last < 100000) return;
     last = now;
     int k = battery_port_key_poll();
     if (!k) return;
+    if (k == 3) { ESP_LOGW(TAG, "PWR key: a long press with no key-down before it - noise, ignored"); return; }
     if (now < KEY_BOOT_DEAF_US) { ESP_LOGI(TAG, "PWR key %s press in the boot's first seconds: the power-on press, ignored", k == 2 ? "long" : "short"); return; }
     ESP_LOGI(TAG, "PWR key: %s press", k == 2 ? "long" : "short");
     s_sleep_why = k == 2 ? "the PWR key, held" : "the PWR key";
@@ -814,22 +1121,25 @@ static void pwr_key_poll(int64_t now) {
  * like the battery history's, so a tank reset (which erases "tank") leaves
  * them: the battery and the glass belong to the board, not to the fish.
  * "cell" (u16 mAh; none or not in the list = the board's own cell) and
- * "tfit" (the touch map, a touch_fit_t blob; none = the board's own map). */
+ * "tfit" (the touch map: a touch_cal_t blob since 0.4.2, its sittings - 0.4.1 kept one touch_fit_t, still read; none =
+ * the board's own map). */
 static void adv_load(void) {
-    nvs_handle_t h; uint16_t mah = 0; touch_fit_t f = TOUCH_FIT_NONE; size_t len = sizeof f;
+    nvs_handle_t h; uint16_t mah = 0; touch_cal_t c = TOUCH_CAL_NONE;
     if (nvs_open("adv", NVS_READONLY, &h) == ESP_OK) {
         nvs_get_u16(h, "cell", &mah);
-        if (nvs_get_blob(h, "tfit", &f, &len) != ESP_OK || len != sizeof f) f = TOUCH_FIT_NONE;
+        uint8_t blob[sizeof(touch_cal_t)]; size_t len = sizeof blob;   /* 0.4.1 kept a touch_fit_t, 0.4.2 a touch_cal_t: touch_cal_load reads either */
+        if (nvs_get_blob(h, "tfit", blob, &len) != ESP_OK || !touch_cal_load(blob, len, &c)) c = TOUCH_CAL_NONE;
         nvs_close(h);
     }
-    adv_init(mah, &f);
+    adv_init_cal(mah, &c);
     const touch_fit_t *k = adv_touch_fit();
+    const touch_cal_t *kc = adv_touch_cal();
 #if ADV_BATTERY_ROW
-    ESP_LOGI(TAG, "advanced: battery %d mAh%s, touch %s (x %.3f %+.1f, y %.3f %+.1f)", adv_cell(), adv_cell() == ADV_CELL_STOCK ? " (the board's own)" : "",
-             touch_fit_is_none(k) ? "the board's own map" : "THE KEEPER'S MAP", k->ax, k->bx, k->ay, k->by);
+    ESP_LOGI(TAG, "advanced: battery %d mAh%s, touch %s (x %.3f %+.1f, y %.3f %+.1f; %d sitting%s, quarters %d %d)", adv_cell(), adv_cell() == ADV_CELL_STOCK ? " (the board's own)" : "",
+             touch_fit_is_none(k) ? "the board's own map" : "THE KEEPER'S MAP", k->ax, k->bx, k->ay, k->by, kc->n, kc->n == 1 ? "" : "s", kc->q[0], kc->q[1]);
 #else   /* (this fork) a 320 x 240 board: no charger the firmware sets, so no size to name - the 1.8's would be read as this cell's */
-    ESP_LOGI(TAG, "advanced: touch %s (x %.3f %+.1f, y %.3f %+.1f); no battery row (no charger to set)",
-             touch_fit_is_none(k) ? "the board's own map" : "THE KEEPER'S MAP", k->ax, k->bx, k->ay, k->by);
+    ESP_LOGI(TAG, "advanced: touch %s (x %.3f %+.1f, y %.3f %+.1f; %d sitting%s, quarters %d %d); no battery row (no charger to set)",
+             touch_fit_is_none(k) ? "the board's own map" : "THE KEEPER'S MAP", k->ax, k->bx, k->ay, k->by, kc->n, kc->n == 1 ? "" : "s", kc->q[0], kc->q[1]);
 #endif
     if (adv_cell() != ADV_CELL_STOCK) battery_port_set_cell(adv_cell());   /* the board's own: battery_port_init set it */
 }
@@ -838,8 +1148,8 @@ static void adv_save(int act) {
     esp_err_t e;
     if (act == ADV_ACT_CELL) e = nvs_set_u16(h, "cell", (uint16_t)adv_cell());
     else {
-        const touch_fit_t *f = adv_touch_fit();
-        e = touch_fit_is_none(f) ? nvs_erase_key(h, "tfit") : nvs_set_blob(h, "tfit", f, sizeof *f);
+        const touch_cal_t *c = adv_touch_cal();
+        e = c->n == 0 ? nvs_erase_key(h, "tfit") : nvs_set_blob(h, "tfit", c, sizeof *c);
         if (e == ESP_ERR_NVS_NOT_FOUND) e = ESP_OK;
     }
     if (e == ESP_OK) e = nvs_commit(h);
@@ -867,6 +1177,7 @@ static int64_t s_btn_up_at; static bool s_btn_once;          /* the first of two
 #if CONFIG_POCKET_TANK_320X240
 static bool s_btn_sleep_due;                                  /* (this fork) a single press, its sleep waiting out the window for a second */
 #endif
+static bool s_set_back_ms;                                    /* the settings page came from a MY TANKS that came from the keeper page: kept across the round trip */
 static bool s_shelf_want;                                     /* open MY TANKS on the next tank frame (its snapshot first) */
 static uint16_t *s_shelf_thumb;                               /* the tank on the glass, as the NOW slot shows it (PSRAM) */
 static int s_sh_page, s_sh_card = -1;                         /* the page shown, the tank whose card is up (-1 none, SH_CARD_GLASS the tank on the glass) */
@@ -874,10 +1185,19 @@ static int s_sh_page, s_sh_card = -1;                         /* the page shown,
 static const shelf_tank_t *sh_card_tank(void) { return s_sh_card == SH_CARD_GLASS ? shelf_now() : shelf_get(s_sh_card); }
 static int sh_card_index(void) { return s_sh_card == SH_CARD_GLASS ? -1 : s_sh_card; }   /* (shelf_rename's: -1 = the tank on the glass) */
 static bool s_sh_lib;                                         /* THE LIBRARY instead of the shelves */
+static bool s_sh_pick; static int s_pick = -1;                /* PICK A THEME up, and the pick (-1 none) */
+static int s_lib_pg;                                           /* THE LIBRARY's page (0: the fish and jelly tanks, 1: the piranhas and the minnows - 0.4.2) */
+static const char *s_note_name;                               /* whose CREW ONLY note is up (NULL: the jelly tank's) */
+static bool s_sh_tlnote; static open_wait_t s_tl_wait;        /* the touch lock's note (the padlock just turned on, 0.4.2) and when it opened */
+static bool s_sh_note;                                        /* the jelly row's note (a board off the crew: J6) */
 static bool s_sh_ren; static shelf_rename_t s_shr; static const uint16_t *s_shr_thumb;   /* a tank's RENAME (over its card), its keyboard, its picture */
-static bool s_sh_rm; static int s_rm_refund; static float s_rm_hold;                  /* MORE: REMOVE (over its card), what its pieces bring, the hold 0..1 */
+static bool s_sh_rm; static int s_rm_refund, s_rm_n[3]; static float s_rm_hold;                  /* MORE: REMOVE (over its card), what its pieces bring, the hold 0..1 */
 static int64_t s_rm_t0; static bool s_rm_down; static int s_rm_press;                  /* ... the hold's start, the finger, where it landed */
+static open_wait_t s_lib_wait, s_card_wait, s_rm_wait;                                  /* when THE LIBRARY, a card, REMOVE opened: the opening tap's double
+                                                                                           is spent, and REMOVE's hold counts from a later press (touch_gate.h) */
 static bool s_loaded; static int64_t s_load_t0;                                         /* LOADING: done this boot, and since when */
+static bool s_loading_last = true;   /* last frame's LOADING (true until the first frame decides): the notices wait it out (0.4, a keeper:
+                                        the UPDATED card came up under the boot show, chimed, and was gone before the tank showed) */
 static bool s_load_swap;                                                                /* ... this boot is a SWAP IN: FILLING THE TANK (any other: WAKING THE TANK) */
 static bool s_show_tried; static int64_t s_show_t0; static int s_show_frames; static int64_t s_show_whole_us;                                     /* THE BOOT SHOW (boot_show.c): tried this boot, and since when */
 static void *show_alloc(size_t n) {                                                     /* its memory, from what the grass loop left - never the last of it */
@@ -889,18 +1209,268 @@ static bool s_sh_moving; static int s_mv_pos;                                   
 static int64_t s_hold_t0; static float s_hold_x, s_hold_y; static bool s_hold_down;     /* ... a finger held still on the shelves */
 static uint16_t *s_shelf_page; static bool s_shelf_baked;
 static uint16_t *s_sh_thumbs;                                 /* the page's eight snapshots (PSRAM) */
-static void shelf_close(void) { touch_port_show_shelf(false); s_sh_card = -1; s_sh_lib = false; s_sh_ren = false; s_sh_rm = false; s_sh_moving = false; }
+static bool s_shelf_from_ms;                                  /* MY TANKS came from the keeper page's foot (0.4): closing it goes back there,
+                                                                 as every page opened from it does (Strato 11-01); BOOT twice opens it bare */
+/* MY TANKS' memory (0.4, the 11-02 evening sweep: the page, its eight snapshots, the NOW picture and the planks' wood -
+   ~510-700 KB of PSRAM - stayed for good after the first open, and the next grass plan was squeezed: the square's steppy
+   grass). Freed as it closes, whichever way (a page or the birth flow can close it too: the frame loop checks); drawn
+   again on the next open, ~16-26 ms */
+static void jelly_lib_free(void);
+static void shelf_free(void) {
+    if (!s_shelf_page && !s_sh_thumbs && !s_shelf_thumb) return;
+    heap_caps_free(s_shelf_page); s_shelf_page = NULL; heap_caps_free(s_sh_thumbs); s_sh_thumbs = NULL;
+    heap_caps_free(s_shelf_thumb); s_shelf_thumb = NULL;
+    jelly_lib_free();
+    render_shelf_free(); s_shelf_baked = false;
+    ESP_LOGI(TAG, "MY TANKS: its memory back, psram %u KB free", (unsigned)(heap_caps_get_free_size(MALLOC_CAP_SPIRAM) / 1024));
+}
+static void shelf_close(void) {
+    shelf_free();
+    touch_port_show_shelf(false); s_sh_card = -1; s_sh_lib = false; s_sh_ren = false; s_sh_rm = false; s_sh_moving = false; s_sh_pick = false; s_sh_note = false; s_sh_tlnote = false;
+    if (s_shelf_from_ms && touch_port_touch_lock()) { s_shelf_from_ms = false; ESP_LOGI(TAG, "MY TANKS: locked - back to the tank, not the keeper page"); }   /* (0.4,
+                                                       the 11-02 sweep: a locked keeper page took no touch and never closed - the tank stuck behind it) */
+    else if (s_shelf_from_ms) { s_shelf_from_ms = false; touch_port_show_milestones(true); ESP_LOGI(TAG, "MY TANKS: back to the keeper page"); }
+}
 static void shelf_toggle(void) {
     if (touch_port_shelf()) { shelf_close(); ESP_LOGI(TAG, "BOOT twice: MY TANKS closed"); return; }
     if (setup_active() || touch_port_confirm_up()) { ESP_LOGI(TAG, "BOOT twice: not over a naming / placement page or the reset prompt"); return; }
+    if (link_dev_updating()) { ESP_LOGI(TAG, "BOOT twice: not over UPDATING YOUR DEVICE (the tank restarts when it ends)"); return; }   /* (0.4.3, the audit's M5) */
     touch_port_dismiss();                                     /* any page closes first */
-    s_shelf_want = true; s_sh_page = shelf_now()->pos / 8; s_sh_card = -1; s_sh_lib = false;
+    s_shelf_want = true; s_sh_page = shelf_now()->pos / 8; s_sh_card = -1; s_sh_lib = false; s_shelf_from_ms = false;
+    s_sh_ren = false; s_sh_rm = false; s_sh_moving = false; s_sh_pick = false; s_sh_note = false; s_sh_tlnote = false;   /* (MY TANKS shut by a page or the prompt, not shelf_close: nothing left open, TCH-3) */
+#ifdef TANK_P4
+    s_sh_card = SH_CARD_GLASS;                                /* the big screens' wide page: its pane opens on the tank on the glass */
+#endif
     ESP_LOGI(TAG, "BOOT twice: MY TANKS");
 }
 void device_shelf_toggle(void) { shelf_toggle(); }   /* the director's `shelf`: BOOT twice, by wire */
 static const uint16_t *s_frame_last;   /* the frame rendered last (director `shot`: its pixels as they went to the glass) */
 const uint16_t *device_last_frame(void) { return s_frame_last; }
 void device_touch_lock(int on) { if (on >= 0) { touch_port_set_touch_lock(on); nvs_u8_put("tlock", on); s_shelf_baked = false; } ESP_LOGI(TAG, "touch lock: %s", touch_port_touch_lock() ? "LOCKED" : "off"); }   /* ... `touchlock on|off` */
+/* ---- THE JELLY TANK (docs/jelly-tank-0.6.md "The crew release", 2026-11-07): shelf type 1. Its save is an empty tank (the
+   wallet and the board's settings, as any tank's); its jellies are made from its theme (the shelf header's variant, fixed for
+   good: J2) at every boot, and its jet / light ride in NVS beside it (one jelly tank a board: J3). On the glass the fish tank
+   does not run at all: no tick, no brain asked, no grass loop, no notices - the jellies and the frame's pages. ---- */
+static bool s_jm;                                             /* a jelly tank on the glass (this boot) */
+static jelly_tank_t *s_jt; static uint16_t *s_jbg; static void *s_jsc;
+static lib_pics_t *s_jpics;                                   /* THE LIBRARY's theme pictures and the tank they are made in (PSRAM, lib_pics.h) */
+static int64_t jelly_now_us(void) { return esp_timer_get_time(); }
+static bool jelly_scratch_ok(void) {                          /* the engine's scratch in PSRAM (made once, kept: never its calloc fallback,
+                                                                 which would take the internal heap) */
+    if (!s_jsc) { s_jsc = heap_caps_calloc(1, jelly_scratch_bytes(), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT); if (s_jsc) jelly_set_scratch(s_jsc); }
+    jelly_clock_us = jelly_now_us;
+    return s_jsc != NULL;
+}
+static const char *jelly_theme_name(int v) { return JELLY_THEMES[v >= 0 && v < JELLY_THEME_N ? v : 0].name; }
+static void jelly_touch_cb(float x, float y, bool down, double now) { if (s_jt) jelly_touch(s_jt, x, y, down, now); }
+/* THE JET AND THE LIGHT, A THEME EACH (0.4.3: up to three jelly tanks, one a theme - shelf_new_jelly): NVS u8 keys "jjet<k>",
+   "jaim<k>", "jlight<k>", "jlon<k>" for theme k. Before 0.4.3 the board's one jelly tank kept them under the bare keys ("jjet"
+   ...): jelly_prefs_migrate gives them to that tank's theme at the first boot that finds it alone and its theme's keys never
+   written. The bare keys are still written with every change (an older build after a rollback reads them: the tank last
+   changed), and only an ERASE EVERYTHING forgets them. Cosmetic only: no tank, fish or sand dollar rides on these */
+static int jelly_theme_ix(int v) { return v >= 0 && v < JELLY_THEME_N ? v : 0; }   /* (as jelly_theme_start reads the variant) */
+static const char *jkey(char b[12], const char *k, int th) { snprintf(b, 12, "%s%d", k, th); return b; }
+static void jelly_prefs_load(void) {                          /* the jet's pace and aim, the light and its color, as the keeper left them in this theme's tank */
+    const int th = jelly_theme_ix(shelf_now()->variant); char b[12];
+    int pace = nvs_u8(jkey(b, "jjet", th), 255), aim = nvs_u8(jkey(b, "jaim", th), 0), lt = nvs_u8(jkey(b, "jlight", th), 255), on = nvs_u8(jkey(b, "jlon", th), 1);
+    if (pace <= JET_STEADY) jelly_jet_set(s_jt, pace, aim < JET_AIMS ? aim : 0);
+    if (lt < JLIGHT_N) s_jt->light = lt;
+    s_jt->light_on = on != 0;
+}
+static void jelly_prefs_put(int th, int jet, int aim, int lt, int on) {
+    char b[12];
+    nvs_u8_put(jkey(b, "jjet", th), jet); nvs_u8_put(jkey(b, "jaim", th), aim); nvs_u8_put(jkey(b, "jlight", th), lt); nvs_u8_put(jkey(b, "jlon", th), on);   /* (jlon last: the mark) */
+}
+static void jelly_prefs_tick(int64_t now) {                   /* kept a few seconds after the last change (a fan slid through every arrow writes once) */
+    static int64_t changed; static int last[4] = { -1, -1, -1, -1 };
+    int cur[4] = { s_jt->jet, s_jt->jet_aim, s_jt->light, s_jt->light_on };
+    if (last[0] < 0) { memcpy(last, cur, sizeof last); return; }
+    if (memcmp(cur, last, sizeof cur)) { memcpy(last, cur, sizeof last); changed = now; return; }
+    if (changed && now - changed > 4000000) {
+        changed = 0;
+        jelly_prefs_put(jelly_theme_ix(shelf_now()->variant), cur[0], cur[1], cur[2], cur[3]);
+        nvs_u8_put("jjet", cur[0]); nvs_u8_put("jaim", cur[1]); nvs_u8_put("jlight", cur[2]); nvs_u8_put("jlon", cur[3]);   /* (the bare keys: an older build's) */
+        ESP_LOGI(TAG, "jelly: kept - %s, jet %d aim %d, light %s %s", jelly_theme_name(shelf_now()->variant), cur[0], cur[1], JELLY_LIGHT_NAMES[cur[2]], cur[3] ? "on" : "off");
+    }
+}
+/* a theme's jet and light back to its own (a new jelly tank of it, or its tank removed); th < 0: every theme's and the bare keys (ERASE EVERYTHING) */
+static void jelly_prefs_forget(int th) {
+    for (int k = 0; k < JELLY_THEME_N; k++) if (th < 0 || k == th) jelly_prefs_put(k, 255, 0, 255, 1);
+    if (th < 0) { nvs_u8_put("jjet", 255); nvs_u8_put("jlight", 255); nvs_u8_put("jlon", 1); nvs_u8_put("jaim", 0); }
+}
+static void jelly_prefs_migrate(void) {                       /* the boot (above): a board's one jelly tank from before 0.4.3 */
+    const unsigned have = shelf_jelly_themes();
+    if (shelf_count_type(SHELF_TYPE_JELLY) != 1) return;
+    int th = 0; while (th < JELLY_THEME_N && !(have >> th & 1)) th++;
+    char b[12];
+    if (th >= JELLY_THEME_N || nvs_u8(jkey(b, "jlon", th), 254) != 254) return;   /* (its keys written already: nothing to give) */
+    jelly_prefs_put(th, nvs_u8("jjet", 255), nvs_u8("jaim", 0), nvs_u8("jlight", 255), nvs_u8("jlon", 1));
+    ESP_LOGI(TAG, "jelly: the jelly tank's jet and light kept for %s (from before 0.4.3)", jelly_theme_name(th));
+}
+static void jelly_start(void) {                               /* the boot, a jelly tank on the glass */
+    s_jbg = heap_caps_aligned_alloc(64, PLAN_FB_ALLOC, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);   /* the scene's shape: the DMA prefetch copies it */
+    if (!s_jt) s_jt = heap_caps_calloc(1, sizeof *s_jt, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!jelly_scratch_ok() || !s_jt || !s_jbg) {
+        ESP_LOGE(TAG, "jelly: no PSRAM for the jelly tank - dark glass, MY TANKS still opens");
+        heap_caps_free(s_jt); s_jt = NULL; heap_caps_free(s_jbg); s_jbg = NULL;
+        touch_port_set_jelly(jelly_touch_cb);                 /* (the bare glass goes nowhere - never the fish tank's code on an empty tank) */
+        return; }
+    jelly_set_bg_cache(s_jbg);
+    jelly_theme_start(s_jt, shelf_now()->variant);
+    jelly_prefs_load();
+    touch_port_set_jelly(jelly_touch_cb);
+    ESP_LOGI(TAG, "jelly: THE JELLY TANK on the glass - %s, %d jellies, light %s %s, jet %d aim %d", jelly_theme_name(shelf_now()->variant), s_jt->n,
+             JELLY_LIGHT_NAMES[s_jt->light], s_jt->light_on ? "on" : "off", s_jt->jet, s_jt->jet_aim);
+}
+/* ---- THE MINNOWS and THE PIRANHA TANK (0.4.2, Strato 11-11: "add two more experimental tanks to the library"): shelf types 3
+   and 2, the jelly tank's way - s_jm is true for every experimental tank (no fish tank under it, its save an empty tank),
+   s_xt says which. Each has the bare glass (touch_port_set_jelly) and its own baked room for the DMA prefetch.
+   THE MINNOWS (common/school.c, docs/school-tank.md): the school's tick runs on core 1 while core 0 flushes (the spike's
+   pass B; no model runs under an experimental tank, so the core is free) - the next frame waits for it before it draws;
+   touch takes s_sch_mx so a finger never lands mid-tick. THE PIRANHA TANK (common/piranha_spike.c, docs/piranha-tank.md):
+   its room baked at the boot (~3 s on the 1.8, the loading page's place), a tap drops meat. ---- */
+static int s_xt;                                              /* the type on the glass (SHELF_TYPE_*) */
+static school_t *s_sch; static uint16_t *s_sch_bg;
+static SemaphoreHandle_t s_sch_go, s_sch_done, s_sch_mx;
+static float s_sch_dt; static bool s_sch_owed, s_sch_core1; static TaskHandle_t s_sch_h;
+static int64_t s_sch_wait_us, s_sch_tick_us;
+static piranha_spike_t *s_pir; static uint16_t *s_pir_scene;
+static int64_t s_pir_us; static int s_pir_frames;
+/* the school on each glass: the most that holds 25 fps with room, measured on the board with the driftwood (11-11; Strato:
+   "the max minnows that allow 25 fps"). Pendant: 368 = 25.3-25.4, 384 = 25.3, 400 = 24.7, 448 = 23.0. Watch: 448 = 25.4,
+   464 = 25.3-25.4, 480 = 24.9-25.2, 512 = 23.9-24.4. Square: 352 = 25.4, 384 = 24.8-25.2, 448 = 22.5 */
+#if defined(TANK_ROUND)
+#define MINNOWS_N 368
+#elif defined(TANK_WATCH)
+#define MINNOWS_N 448
+#elif defined(TANK_SQUARE)
+#define MINNOWS_N 352
+#else
+#define MINNOWS_N 512                                         /* (the 1.8, measured 11-11 with the driftwood and the tick truly on core 1: 512 = 25.4 fps with
+                                                                 room, 528 = 25.3-25.4 with the tick starting to be waited for, 544 = 24.3-25.0, 576 = 23.4.
+                                                                 Strato: "the max minnows that allow 25 fps") */
+#endif
+#define PIRANHA_N 8
+static int64_t xt_now_us(void) { return esp_timer_get_time(); }
+static void xt_yield(void) { wdt_feed(); vTaskDelay(1); }
+static void sch_task(void *arg) {
+    (void)arg;
+    for (;;) {
+        xSemaphoreTake(s_sch_go, portMAX_DELAY);
+        xSemaphoreTake(s_sch_mx, portMAX_DELAY);
+        int64_t t0 = esp_timer_get_time();
+        school_tick(s_sch, s_sch_dt);
+        s_sch_tick_us += esp_timer_get_time() - t0;
+        xSemaphoreGive(s_sch_mx);
+        xSemaphoreGive(s_sch_done);
+    }
+}
+static void sch_touch_cb(float x, float y, bool down, double now) {
+    static bool was;                                          /* (the port calls this every poll, finger or not: with no finger down and none just lifted
+                                                                 there is nothing to tell the school - and taking the mutex then waits out the tick on
+                                                                 core 1, which put the tick back in the frame: review, 11-11) */
+    if (!s_sch || (!down && !was)) { was = down; return; }
+    was = down;
+    if (s_sch_mx) xSemaphoreTake(s_sch_mx, portMAX_DELAY);
+    school_touch(s_sch, x, y, down, now);
+    if (s_sch_mx) xSemaphoreGive(s_sch_mx);
+}
+static void pir_touch_cb(float x, float y, bool down, double now) { (void)now; if (s_pir) piranha_spike_touch(s_pir, x, y, down); }
+static void none_touch_cb(float x, float y, bool down, double now) { (void)x; (void)y; (void)down; (void)now; }
+static void minnows_start(void) {
+    s_sch = heap_caps_calloc(1, sizeof *s_sch, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    s_sch_bg = heap_caps_aligned_alloc(64, PLAN_FB_ALLOC, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);   /* the scene's shape: the DMA prefetch copies it */
+    void *sc = heap_caps_calloc(1, school_scratch_bytes(), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    touch_port_set_jelly(sch_touch_cb);
+    if (!s_sch || !s_sch_bg || !sc) {
+        ESP_LOGE(TAG, "minnows: no PSRAM for the school - dark glass, MY TANKS still opens");
+        heap_caps_free(s_sch); heap_caps_free(s_sch_bg); heap_caps_free(sc); s_sch = NULL; s_sch_bg = NULL; return; }
+    school_set_scratch(sc); school_set_bg_cache(s_sch_bg); school_clock_us = xt_now_us;
+    s_sch_go = xSemaphoreCreateBinary(); s_sch_done = xSemaphoreCreateBinary(); s_sch_mx = xSemaphoreCreateMutex();
+    s_sch_core1 = s_sch_go && s_sch_done && s_sch_mx && xTaskCreatePinnedToCore(sch_task, "school", 6144, NULL, 5, &s_sch_h, 1) == pdPASS;   /* (the grid's counts are ~1 KB of its stack) */
+    if (!s_sch_core1) ESP_LOGW(TAG, "minnows: no task on core 1 (internal RAM?) - the tick stays on core 0");
+    school_init(s_sch, (uint32_t)esp_timer_get_time() | 1, MINNOWS_N);
+    ESP_LOGI(TAG, "minnows: THE MINNOWS on the glass - %d fish, the tick on core %d, psram %u KB free", s_sch->n, s_sch_core1 ? 1 : 0, (unsigned)(heap_caps_get_free_size(MALLOC_CAP_SPIRAM) / 1024));
+}
+static void piranha_start(void) {
+    s_pir = heap_caps_malloc(piranha_spike_size(), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    s_pir_scene = heap_caps_aligned_alloc(64, PLAN_FB_ALLOC, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    touch_port_set_jelly(pir_touch_cb);
+    if (!s_pir || !s_pir_scene) {
+        ESP_LOGE(TAG, "piranha: no PSRAM for the piranha tank - dark glass, MY TANKS still opens");
+        heap_caps_free(s_pir); heap_caps_free(s_pir_scene); s_pir = NULL; s_pir_scene = NULL; return; }
+    memset(s_pir_scene, 0, PLAN_FB_ALLOC);
+    piranha_spike_set_timer(xt_now_us); piranha_spike_set_yield(xt_yield);
+    int64_t b0 = esp_timer_get_time();
+    piranha_spike_build(s_pir, s_pir_scene, TANK_W, TANK_H, PIRANHA_N);
+    piranha_spike_set_yield(NULL);
+    piranha_spike_auto(s_pir, 75);                            /* meat on its own every 75 s when none is in the water (a tap drops it at once) */
+    ESP_LOGI(TAG, "piranha: THE PIRANHA TANK on the glass - %d piranhas, its room baked in %lld ms, psram %u KB free", PIRANHA_N,
+             (esp_timer_get_time() - b0) / 1000, (unsigned)(heap_caps_get_free_size(MALLOC_CAP_SPIRAM) / 1024));
+}
+static void xt_start(void) {                                  /* the boot, an experimental tank on the glass */
+    if (s_xt == SHELF_TYPE_JELLY) jelly_start();
+    else if (s_xt == SHELF_TYPE_MINNOWS) minnows_start();
+    else if (s_xt == SHELF_TYPE_PIRANHA) piranha_start();
+    else { touch_port_set_jelly(none_touch_cb); ESP_LOGW(TAG, "shelf: tank type %d on the glass is not one this build knows - dark glass, MY TANKS still opens", s_xt); }
+}
+static void xt_frame(uint16_t *f, float dt, double clock) {   /* a frame of the experimental tank on the glass (no page over it) */
+    if (s_xt == SHELF_TYPE_JELLY && s_jt && s_jbg) { jelly_tick(s_jt, dt); jelly_render(s_jt, f, TANK_W); }
+    else if (s_xt == SHELF_TYPE_MINNOWS && s_sch) {
+        if (s_sch_owed) { int64_t w0 = esp_timer_get_time(); xSemaphoreTake(s_sch_done, portMAX_DELAY); s_sch_owed = false; s_sch_wait_us += esp_timer_get_time() - w0; }
+        if (!s_sch_core1) { int64_t t0 = esp_timer_get_time(); school_tick(s_sch, dt); s_sch_tick_us += esp_timer_get_time() - t0; }
+        school_render(s_sch, f, TANK_W);
+        if (s_sch_core1) { s_sch_dt = dt; s_sch_owed = true; xSemaphoreGive(s_sch_go); }   /* core 1 ticks while this core flushes */
+    }
+    else if (s_xt == SHELF_TYPE_PIRANHA && s_pir) {
+        int64_t r0 = esp_timer_get_time();
+        piranha_spike_frame(s_pir, f, TANK_W, clock, s_pir_primed == f);
+        s_pir_us += esp_timer_get_time() - r0; s_pir_frames++;
+        s_pir_primed = NULL;
+    }
+    else memset(f, 0, (size_t)TANK_W * TANK_H * sizeof(uint16_t));   /* (no PSRAM for it: dark, MY TANKS still opens) */
+}
+static const uint16_t *xt_scene(void) {                       /* its baked room, for the DMA prefetch (NULL: none) */
+    return s_xt == SHELF_TYPE_JELLY ? (s_jt ? jelly_bg_buf(s_jt) : NULL) : s_xt == SHELF_TYPE_MINNOWS ? (s_sch ? school_bg_buf(s_sch) : NULL)
+         : s_xt == SHELF_TYPE_PIRANHA ? s_pir_scene : NULL;
+}
+static void xt_primed(const uint16_t *f) {                    /* the prefetch filled f with that room */
+    if (s_xt == SHELF_TYPE_JELLY) jelly_fb_primed(f);
+    else if (s_xt == SHELF_TYPE_MINNOWS) school_fb_primed(f);
+    else if (s_xt == SHELF_TYPE_PIRANHA) s_pir_primed = f;
+}
+void device_xt_cmd(int argc, char **argv) {                   /* the director's `minnows count <n> | feed [x] | tap`, `piranha feed [x] | auto <s>` */
+    if (!strcmp(argv[0], "minnows") && s_sch && argc > 1) {
+        xSemaphoreTake(s_sch_mx, portMAX_DELAY);
+        if (!strcmp(argv[1], "count") && argc > 2) school_set_count(s_sch, atoi(argv[2]));
+        else if (!strcmp(argv[1], "feed")) school_feed(s_sch, argc > 2 ? (float)atof(argv[2]) : TANK_W * 0.5f);
+        else if (!strcmp(argv[1], "tap")) { float x = 0, y = 0; for (int i = 0; i < s_sch->n; i++) { x += s_sch->f[i].x; y += s_sch->f[i].y; } if (s_sch->n) school_tap(s_sch, x / s_sch->n, y / s_sch->n); }
+        xSemaphoreGive(s_sch_mx);
+        ESP_LOGI(TAG, "minnows: %s (%d fish)", argv[1], s_sch->n);
+    } else if (!strcmp(argv[0], "piranha") && s_pir && argc > 1) {
+        if (!strcmp(argv[1], "feed")) piranha_spike_feed(s_pir, argc > 2 ? (float)atof(argv[2]) : TANK_W * 0.5f);
+        else if (!strcmp(argv[1], "auto") && argc > 2) piranha_spike_auto(s_pir, (float)atof(argv[2]));
+        ESP_LOGI(TAG, "piranha: %s", argv[1]);
+    } else ESP_LOGW(TAG, "minnows count <n> | feed [x] | tap, piranha feed [x] | auto <s> - with that tank on the glass (`shelf minnows`, `shelf piranha`, then `shelf swap <place>`)");
+}
+/* THE LIBRARY's pictures: each theme's tank after a few seconds. Until 0.4.2 all three were made before the page drew
+   (said to be ~0.2 s; 2-3 s on the glass: the water of each drawn pixel by pixel with no cache, most of it); now the page
+   draws at once and lib_pics.h makes the ones it shows behind it, a little each frame - this is only their memory. On a fish
+   tank the jellies are drawn with no water cache; on a jelly tank its own cache serves (keyed by the light) */
+static void jelly_lib_open(void) {
+    if (s_jpics || !s_shelf_page) return;
+    s_jpics = jelly_scratch_ok() ? heap_caps_malloc(lib_pics_bytes(), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) : NULL;
+    if (!s_jpics) { ESP_LOGW(TAG, "jelly: no PSRAM for the library's pictures"); return; }
+    lib_pics_init(s_jpics);
+    if (s_xt != SHELF_TYPE_JELLY) jelly_set_bg_cache(NULL);
+}
+/* ... and given back as MY TANKS closes (0.4.2 roadmap item 4), made or half made: the pictures and their tank, and on a
+   fish tank the engine's scratch too, so the next grass plan has the PSRAM. Made again on the next visit to the library; a
+   jelly tank keeps its scratch (it draws with it). */
+static void jelly_lib_free(void) {
+    heap_caps_free(s_jpics); s_jpics = NULL;
+    if (s_xt != SHELF_TYPE_JELLY && s_jsc) { jelly_set_scratch(NULL); heap_caps_free(s_jsc); s_jsc = NULL; }   /* (the minnows and the piranhas do not draw with it either) */
+}
 /* pages: up to the highest place in use, and always one empty place after it */
 static int shelf_pages(void) {
     int top = shelf_now()->pos;
@@ -909,31 +1479,103 @@ static int shelf_pages(void) {
     return p > SHELF_POS_MAX / 8 ? SHELF_POS_MAX / 8 : p;
 }
 static int shelf_price(void) { return shelf_count_type(0) > 0 ? SHELF_NEW_PRICE : 0; }   /* D4: the first of a kind free, another 300 */
+/* THE JELLY TANK's row (0.4.3, up to three, one a theme): CREW ONLY while there is a theme left to install and the board is off
+   the crew (a board with all three, crew or not, shows INSTALLED); its words once all three are here */
+#ifdef TANK_P4
+static bool jelly_row_locked(void) { return true; }   /* the big screens: NOT YET, whatever the shelf holds (0.4.4: render_big.c's note) */
+#else
+static bool jelly_row_locked(void) { return shelf_jelly_themes() != (1u << JELLY_THEME_N) - 1 && !net_port_crew(); }
+#endif
+#define JELLY_ROW_ALL "ALL THREE THEMES ARE INSTALLED."   /* (four lines at most on the bowl: the line alone) */
 /* the page is still: drawn ONCE as it opens or changes (the wood's grain is per pixel - ~90 ms on the 1.8,
    9 fps if drawn every frame) into a PSRAM copy, then copied each frame. Never drop the frame rate. */
+#ifdef TANK_P4
+/* THE SHELF KEPT (0.4.3): the page is still, and on a big screen copying its megapixel into the frame and turning it
+   whole took 51 ms a frame (16.8 fps on the 10.1). A frame buffer that already holds this very bake is left alone and
+   says "nothing moved" (s_shk_n 0: the port turns no tile - p4_tiles.c A KEPT PAGE); the bake counts up whenever the kept
+   copy changes; a frame something else drew over (the reset prompt, a gift, the loading bubbles, RENAME's keys) is
+   whole, and forgets what the buffers held */
+static const uint16_t *s_shk_fb[2]; static unsigned s_shk_gen[2], s_shk_now = 1; static int s_shk_n = -1;
+static void shelf_kept_forget(void) { s_shk_gen[0] = s_shk_gen[1] = 0; }
+#endif
 static void shelf_render(uint16_t *fb) {
     int tw, th; render_shelf_thumb_size(&tw, &th);
+#ifdef TANK_P4
+    s_shk_n = -1;
+#endif
     float swap_t = s_swap_i >= 0 ? (esp_timer_get_time() - s_swap_t0) / 1e6f : -1;
     if (swap_t >= 0) { s_shelf_baked = false; render_shelf_card_swapping(swap_t); }   /* (the card again each frame: its button pulses) */
     if (!s_shelf_page) s_shelf_page = heap_caps_malloc((size_t)TANK_W * TANK_H * 2, MALLOC_CAP_SPIRAM);
     if (!s_sh_thumbs) s_sh_thumbs = heap_caps_malloc((size_t)tw * th * 2 * 8, MALLOC_CAP_SPIRAM);
     if (!s_shelf_page || !s_sh_thumbs) return;
+    /* THE LIBRARY's pictures, behind the page (0.4.2, lib_pics.h): the list shows theme 0, PICK A THEME all three. Every
+       frame with one wanted gives it a little work (taps, which draw the page again, do not hold it up) - but not the frame
+       the pictures' memory is first asked for, the page's first. The drawing uses THIS frame as its scratch (the page is
+       copied over it below), and the made picture is put straight into the kept page: its one little tank, not the page
+       again. Under the row's note the page is drawn again instead */
+    #define JWANT (s_sh_pick ? (1u << JELLY_THEME_N) - 1 : 1u)
+    if (s_sh_lib && s_lib_pg == 0 && s_jpics && lib_pics_waiting(s_jpics, JWANT)) {
+        int ms = 0, n = 0, wall = 0, k = lib_pics_step(s_jpics, JWANT, fb, jelly_now_us, LIB_PIC_BUDGET_US, &ms, &n, &wall);
+        if (k >= 0) {
+#ifdef TANK_P4
+            s_shk_now++;                                      /* (the kept copy gets a picture) */
+#endif
+            if (s_sh_note) s_shelf_baked = false;
+            else if (s_shelf_baked && s_sh_pick) render_jelly_pick_set_have(shelf_jelly_themes()), render_jelly_pick_pic(s_shelf_page, TANK_W, k, lib_pics_get(s_jpics, k), s_pick);
+            else if (s_shelf_baked && k == 0) render_library_pic(s_shelf_page, TANK_W, 1, lib_pics_get(s_jpics, 0), jelly_row_locked());
+            ESP_LOGI(TAG, "jelly: the library's picture %d (%s) in %d ms of work over %d frames, %d ms after it was asked for", k, jelly_theme_name(k), ms, n, wall);
+        }
+    } else if (!s_sh_lib) lib_pics_rest(s_jpics);             /* (the library left with one half made: begun again when it is next wanted) */
+#ifdef TANK_P4
+    if (!s_shelf_baked) s_shk_now++;
+#endif
     if (!s_shelf_baked) {
         int64_t tb0 = esp_timer_get_time();
-        if (s_sh_lib) {                                       /* the fish tank only, until the library downloads (step 5) */
-            library_row_t r = { "FISH TANK", "FISH THAT THINK FOR THEMSELVES. FEED THEM, TEND THE TANK, WATCH THEM GROW.",
-                                s_shelf_thumb, false, true, shelf_price() };
-            render_library(s_shelf_page, TANK_W, &r, 1, (int)tank.sd_balance, "MORE KINDS OF TANK ARE COMING");
+        if (s_sh_lib) {                                       /* the fish tank, and THE JELLY TANK (every board sees it; the crew's to make: J6) */
+            jelly_lib_open();
+            const uint16_t *jth[JELLY_THEME_N];               /* (a picture not made yet: NULL, its glass empty - the page never waits for one) */
+            for (int k = 0; k < JELLY_THEME_N; k++) jth[k] = lib_pics_get(s_jpics, k);
+            render_library_set_page(s_lib_pg + 1, 2);
+            if (s_sh_pick) {
+                const char *names[JELLY_THEME_N]; for (int k = 0; k < JELLY_THEME_N; k++) names[k] = JELLY_THEMES[k].name;
+                render_jelly_pick_set_have(shelf_jelly_themes());   /* (0.4.3: the themes here already, INSTALLED) */
+                render_jelly_pick(s_shelf_page, TANK_W, names, jth, s_pick);
+            } else if (s_lib_pg == 1) {                       /* page 2 (0.4.2): THE PIRANHA TANK and THE MINNOWS - crew only, 500 SD once a kind,
+                                                                 one of each; their pictures baked (lib_thumbs.h: there on the first frame) */
+                uint16_t *pt = s_sh_thumbs + (size_t)tw * th, *mt = s_sh_thumbs + (size_t)tw * th * 2;
+                const bool pic_p = lib_thumb(LIB_THUMB_PIRANHA, pt, tw, th), pic_m = lib_thumb(LIB_THUMB_MINNOWS, mt, tw, th);
+                const int pp = shelf_xt_price(SHELF_TYPE_PIRANHA), pm = shelf_xt_price(SHELF_TYPE_MINNOWS); const bool crew = net_port_crew();
+                library_row_t r[2] = {
+                    { "PIRANHAS", "A HUNGRY SHOAL IN DARK WATER. TAP TO DROP MEAT.", pic_p ? pt : NULL, true, pp < 0, pp < 0 ? 0 : pp, pp < 0, pp >= 0 && !crew },
+                    { "MINNOWS", "HUNDREDS OF TINY FISH MOVING AS ONE. TAP, DRAG OR FEED.", pic_m ? mt : NULL, true, pm < 0, pm < 0 ? 0 : pm, pm < 0, pm >= 0 && !crew } };
+#ifdef TANK_P4
+                r[0].locked = r[1].locked = true;             /* (the big screens: NOT YET, whatever the shelf holds - 0.4.4) */
+#endif
+                render_library(s_shelf_page, TANK_W, r, 2, (int)tank.sd_balance, "MORE KINDS OF TANK ARE COMING");
+                if (s_sh_note) { render_library_note_name(s_note_name); render_library_note(s_shelf_page, TANK_W); render_library_note_name(NULL); }
+            } else {
+                const uint16_t *fish_th = s_jm ? NULL : s_shelf_thumb;   /* (a jelly tank on the glass: a fish tank's own snapshot from the shelf) */
+                for (int k = 0; s_jm && k < shelf_count() && !fish_th; k++)
+                    if (shelf_get(k)->type == SHELF_TYPE_FISH && shelf_thumb(k, s_sh_thumbs, (size_t)tw * th)) fish_th = s_sh_thumbs;
+                const unsigned have = shelf_jelly_themes(); const bool all = have == (1u << JELLY_THEME_N) - 1;   /* (0.4.3: up to three, one a theme) */
+                library_row_t r[2] = {
+                    { "FISH TANK", "FISH THAT THINK FOR THEMSELVES. FEED THEM, TEND THE TANK, WATCH THEM GROW.",
+                      fish_th, false, true, shelf_price(), false, false },
+                    { "JELLY TANK", all ? JELLY_ROW_ALL : "GLOWING JELLIES DRIFTING IN THE DARK. NOTHING TO DO BUT WATCH.",
+                      jth[0], true, have != 0, 0, all, jelly_row_locked() } };
+                render_library(s_shelf_page, TANK_W, r, 2, (int)tank.sd_balance, "MORE KINDS OF TANK ARE COMING");
+                if (s_sh_note) render_library_note(s_shelf_page, TANK_W);
+            }
         } else {
             shelf_slot_t sl[8]; const uint16_t *card_thumb = NULL;
             for (int j = 0; j < 8; j++) {
                 int pos = s_sh_page * 8 + j, at = shelf_at_pos(pos);
-                if (at == -1) sl[j] = (shelf_slot_t){ SHELF_NOW, shelf_now()->name, false, s_shelf_thumb };
+                if (at == -1) sl[j] = (shelf_slot_t){ SHELF_NOW, shelf_now()->name, SHELF_TYPE_EXPERIMENTAL(shelf_now()->type), s_shelf_thumb };
                 else if (at < 0) sl[j] = (shelf_slot_t){ SHELF_EMPTY, "", false, NULL };
                 else {
                     const shelf_tank_t *t = shelf_get(at);
                     uint16_t *buf = s_sh_thumbs + (size_t)j * tw * th;
-                    sl[j] = (shelf_slot_t){ t->time_mode == SHELF_TIME_PAUSED ? SHELF_PAUSED : SHELF_DORMANT, t->name, false,
+                    sl[j] = (shelf_slot_t){ t->time_mode == SHELF_TIME_PAUSED ? SHELF_PAUSED : SHELF_DORMANT, t->name, SHELF_TYPE_EXPERIMENTAL(t->type),
                                             shelf_thumb(at, buf, (size_t)tw * th) ? buf : NULL };
                     if (at == s_sh_card) card_thumb = sl[j].thumb;
                 }
@@ -943,30 +1585,57 @@ static void shelf_render(uint16_t *fb) {
                 int at = shelf_at_pos(s_mv_pos); const shelf_tank_t *mt = at == -1 ? shelf_now() : shelf_get(at);
                 render_shelf_set_move(true, s_mv_pos / 8 == s_sh_page ? s_mv_pos % 8 : -1, mt ? mt->name : "");
             } else render_shelf_set_move(false, -1, NULL);
+#ifdef TANK_P4
+            {   int sel = -1;                                 /* the wide page: the place whose card is open wears a frame */
+                for (int j = 0; j < 8; j++) { int at = shelf_at_pos(s_sh_page * 8 + j); if ((at == -1 && s_sh_card == SH_CARD_GLASS) || (at >= 0 && at == s_sh_card)) sel = j; }
+                render_big_shelf_state(sel, shelf_now()->type == SHELF_TYPE_FISH);
+            }
+#endif
             render_shelf(s_shelf_page, TANK_W, sl, s_sh_page + 1, shelf_pages());
+            if (s_sh_tlnote) render_shelf_lock_note(s_shelf_page, TANK_W);   /* (kept with the page: drawn once) */
             const shelf_tank_t *t = sh_card_tank();
+            const bool jelly_card = t && t->type == SHELF_TYPE_JELLY;
+            const bool xt_card = t && SHELF_TYPE_EXPERIMENTAL(t->type);   /* (the flask on its card) */
+            const char *card_kind = !t ? "" : t->type == SHELF_TYPE_JELLY ? "JELLY TANK" : t->type == SHELF_TYPE_PIRANHA ? "PIRANHA TANK" : t->type == SHELF_TYPE_MINNOWS ? "MINNOW TANK" : "FISH TANK";
+            render_shelf_set_jelly(jelly_card ? jelly_theme_name(t->variant) : NULL);
+            render_shelf_set_xt(!t ? NULL : t->type == SHELF_TYPE_PIRANHA ? "PIRANHAS" : t->type == SHELF_TYPE_MINNOWS ? "MINNOWS" : NULL);   /* (its card and REMOVE speak of jellies, name its theme) */
             if (s_sh_card == SH_CARD_GLASS) card_thumb = s_shelf_thumb;
+#ifdef TANK_P4
+            if (s_sh_tlnote && !s_sh_ren && !s_sh_rm) t = NULL;   /* (the wide page: the lock's note has the card's pane) */
+#endif
             if (t && s_sh_ren) { s_shr_thumb = card_thumb; render_shelf_rename(s_shelf_page, TANK_W, NULL, &s_shr, 1, 0); }   /* (the backdrop; the keyboard each frame) */
-            else if (t && s_sh_rm) { s_shr_thumb = card_thumb; render_shelf_remove(s_shelf_page, TANK_W, NULL, 0, 0, 1); }   /* (REMOVE: the backdrop; the panel each frame) */
+            else if (t && s_sh_rm) { s_shr_thumb = card_thumb; render_shelf_remove(s_shelf_page, TANK_W, NULL, 0, NULL, 0, 1); }   /* (REMOVE: the backdrop; the panel each frame) */
             else if (t && s_sh_card == SH_CARD_GLASS) {          /* the tank on the glass: its name, RENAME */
-                shelf_slot_t cs = { SHELF_NOW, t->name, false, card_thumb };
-                render_shelf_card(s_shelf_page, TANK_W, &cs, "FISH TANK", 0, -1);
+                shelf_slot_t cs = { SHELF_NOW, t->name, xt_card, card_thumb };
+                render_shelf_card(s_shelf_page, TANK_W, &cs, card_kind, 0, -1);
             } else if (t) {
-                shelf_slot_t cs = { t->time_mode == SHELF_TIME_PAUSED ? SHELF_PAUSED : SHELF_DORMANT, t->name, false, card_thumb };
+                shelf_slot_t cs = { t->time_mode == SHELF_TIME_PAUSED ? SHELF_PAUSED : SHELF_DORMANT, t->name, xt_card, card_thumb };
                 int64_t now = clock_port_now_unix(), d = now > t->shelved_unix ? (now - t->shelved_unix) / 86400 : 0;
-                render_shelf_card(s_shelf_page, TANK_W, &cs, t->save_len ? "FISH TANK" : "FISH TANK - NEW", (int)d, -1);
+                render_shelf_card(s_shelf_page, TANK_W, &cs, xt_card ? card_kind : t->save_len ? "FISH TANK" : "FISH TANK - NEW", (int)d, -1);
             }
         }
         s_shelf_baked = true;
         if (swap_t < 0) ESP_LOGI(TAG, "MY TANKS: page drawn in %lld ms", (esp_timer_get_time() - tb0) / 1000);   /* (16 ms the 1.8, 26 the square; 0.3.9.3 measured 340-960 before the wood was kept) */
     }
     render_shelf_card_swapping(-1);
+#ifdef TANK_P4
+    {   const bool still = swap_t < 0 && !s_sh_ren && !s_sh_rm && !(s_sh_lib && s_lib_pg == 0 && lib_pics_waiting(s_jpics, JWANT));
+        const int k = fb == s_shk_fb[0] ? 0 : fb == s_shk_fb[1] ? 1 : s_shk_fb[0] ? 1 : 0;
+        if (still && s_shk_fb[k] == fb && s_shk_gen[k] == s_shk_now) s_shk_n = 0;   /* this buffer holds this bake: nothing to copy, nothing to turn */
+        else { memcpy(fb, s_shelf_page, (size_t)TANK_W * TANK_H * 2); s_shk_fb[k] = fb; s_shk_gen[k] = still ? s_shk_now : 0; }
+    }
+#else
     memcpy(fb, s_shelf_page, (size_t)TANK_W * TANK_H * 2);
+#endif
+    const unsigned jwait = s_sh_lib && s_lib_pg == 0 ? lib_pics_waiting(s_jpics, JWANT) : 0;   /* a glass still empty: the bubbles (never over the note) */
+    #undef JWANT
+    if (jwait && s_sh_pick) render_jelly_pick_set_have(shelf_jelly_themes()), render_jelly_pick_loading(fb, TANK_W, jwait, s_pick, (float)(esp_timer_get_time() % 24000000) / 1e6f);   /* (ten turns of the bubbles: no jump at the wrap) */
+    else if (jwait && !s_sh_note) render_library_loading(fb, TANK_W, 2, jelly_row_locked() ? 2 : 0, (float)(esp_timer_get_time() % 24000000) / 1e6f);
     if (swap_t > SWAP_PULSE_S + SWAP_FADE_S) { memset(fb, 0, (size_t)TANK_W * TANK_H * 2); s_swap_go = true; }   /* dark: the swap after this frame is out */
     else if (swap_t > SWAP_PULSE_S) render_fade(fb, TANK_W, (int)(256 * (1 - (swap_t - SWAP_PULSE_S) / SWAP_FADE_S)));
     if (s_sh_rm && !s_sh_lib && sh_card_tank()) {            /* REMOVE: the panel, every frame (the hold fills) */
         shelf_slot_t cs = { SHELF_DORMANT, sh_card_tank()->name, false, s_shr_thumb };
-        render_shelf_remove(fb, TANK_W, &cs, s_rm_refund, s_rm_hold, 2);
+        render_shelf_remove(fb, TANK_W, &cs, s_rm_refund, s_rm_n, s_rm_hold, 2);
     }
     if (s_sh_ren && !s_sh_lib) {                              /* a tank's RENAME: the keyboard over the backdrop, every frame (the bar blinks) */
         shelf_slot_t cs = { SHELF_DORMANT, "", false, s_shr_thumb };
@@ -979,7 +1648,11 @@ static void shelf_remove_poll(void) {
     if (!s_sh_rm || !touch_port_shelf()) return;
     float x, y; bool down = touch_port_finger(&x, &y);
     int h = render_shelf_remove_hit(x, y);
-    if (down && !s_rm_down) { s_rm_press = h; s_rm_t0 = h == SHM_TAP_HOLD ? esp_timer_get_time() : 0; }
+    if (down && !s_rm_down) {                                 /* a press: the hold counts from it - unless REMOVE has only just opened (tap, tap, hold) */
+        int64_t now = esp_timer_get_time(), since = now - s_rm_wait.at;
+        s_rm_press = h; s_rm_t0 = h == SHM_TAP_HOLD && !open_wait_spent(&s_rm_wait, now) ? now : 0;   /* (THE TOUCH RULE: the double of the tap that opened it - never restarted; a mash, then a hold, waits a pause) */
+        if (h == SHM_TAP_HOLD && !s_rm_t0) ESP_LOGI(TAG, "MY TANKS: REMOVE - a press %lld ms after it opened (or the last spent one) is no hold (lift, pause, then hold)", since / 1000);
+    }
     if (down && s_rm_t0) {
         if (h != SHM_TAP_HOLD) { s_rm_t0 = 0; s_rm_hold = 0; }   /* (slid off it: start again) */
         else s_rm_hold = (float)(esp_timer_get_time() - s_rm_t0) / (SHM_HOLD_S * 1e6f);
@@ -987,15 +1660,22 @@ static void shelf_remove_poll(void) {
     if (s_rm_hold >= 1.0f) {
         int i = s_sh_card, refund = s_rm_refund; char nm[24]; snprintf(nm, sizeof nm, "%s", sh_card_tank() ? sh_card_tank()->name : "?");
         for (char *p = nm; *p; p++) if (*p == '\n') *p = ' ';
-        bool ok = i >= 0 && shelf_remove(i);
-        if (ok) { tank.sd_balance += refund; progression_save(&tank); tank_emit(TEV_CONFIRM, -1); }
+        const bool was_jelly = i >= 0 && shelf_get(i) && shelf_get(i)->type == SHELF_TYPE_JELLY;
+        const int was_theme = was_jelly ? jelly_theme_ix(shelf_get(i)->variant) : 0;   /* (0.4.3: its theme free again, its jet and light with it) */
+        int got = i >= 0 ? progression_remove_tank(&tank, i) : -1;   /* (0.4.1: journaled - paid, then erased; a cut at any write
+                                                                       leaves the tank and no refund, or the refund and no tank) */
+        bool ok = got >= 0;
+        if (ok) { refund = got; tank_emit(TEV_CONFIRM, -1); if (was_jelly) jelly_prefs_forget(was_theme); }
         ESP_LOGI(TAG, "MY TANKS: %s %s%s (+%d SD, wallet %d)", ok ? "removed" : "could not remove", nm, ok ? "" : " - the flash refused", ok ? refund : 0, (int)tank.sd_balance);
         s_sh_rm = false; s_sh_card = -1; s_rm_t0 = 0; s_rm_hold = 0; s_shelf_baked = false;
+        touch_port_spend_press();                             /* (the finger still on HOLD TO SELL: its lift is no tap on the shelves now under it) */
         if (s_sh_page > shelf_pages() - 1) s_sh_page = shelf_pages() - 1;
     } else if (!down && s_rm_down) {
         if (s_rm_t0) { s_rm_t0 = 0; s_rm_hold = 0; }        /* lifted early: nothing */
         else if ((h == SHM_TAP_BACK && s_rm_press == SHM_TAP_BACK) || (h == SHM_TAP_OUTSIDE && s_rm_press == SHM_TAP_OUTSIDE)) {
             s_sh_rm = false; s_shelf_baked = false; ESP_LOGI(TAG, "MY TANKS: REMOVE - back to the card");
+            open_wait_start(&s_card_wait, esp_timer_get_time());   /* (the card again, its SWAP IN under BACK: a double tap's second
+                                                                       half is spent, never a swap - 0.4 rc round two) */
         }
     }
     s_rm_down = down;
@@ -1006,14 +1686,51 @@ static void shelf_rename_poll(void) {
     float x, y; bool down = touch_port_finger(&x, &y);
     int r = render_shelf_rename_touch(&s_shr, x, y, down);
     if (r == SHR_TICK) tank_emit(TEV_WHEEL_TICK, -1);
-    else if (r == SHR_CANCEL) { s_sh_ren = false; s_shelf_baked = false; ESP_LOGI(TAG, "MY TANKS: RENAME cancelled"); }
+    else if (r == SHR_CANCEL) { s_sh_ren = false; s_shelf_baked = false; open_wait_start(&s_card_wait, esp_timer_get_time()); ESP_LOGI(TAG, "MY TANKS: RENAME cancelled"); }
     else if (r == SHR_DONE) {
         char nm[24]; render_shelf_rename_name(&s_shr, nm, sizeof nm);
         bool ok = shelf_rename(sh_card_index(), nm);
         s_sh_ren = false; s_shelf_baked = false; tank_emit(TEV_CONFIRM, -1);
+        open_wait_start(&s_card_wait, esp_timer_get_time());   /* (back to the card, as REMOVE's BACK: a second tap is spent) */
         ESP_LOGI(TAG, "MY TANKS: renamed %s%s", ok && sh_card_tank() ? sh_card_tank()->name : "?", ok ? "" : " (the flash refused: the old name stays)");
     }
 }
+/* A HARD BOOT LOADS THE MAIN TANK (0.4.2, Strato 11-11: "a hard reboot of the device should always load the default main
+   aquarium tank, as an additional safe guard to get out of experimental tanks if they freeze or boot button fails to launch
+   the tank switcher"). A hard boot is the touch lock's (app_main): any start that is not the tank's own restart (a SWAP IN,
+   an update), a wake from deep sleep, or the morning after the night's own power-off - so PWR held 10 s, a flat battery,
+   the cable's reset, a crash and a watchdog all count. With an experimental tank on the glass (any type but the fish tank)
+   such a boot swaps the MAIN TANK in before the experimental tank's code has run a line: the fish tank last on the glass
+   (shelf_home_pick: the frame's `home`, else the first fish tank on the shelves, else a new one, free). The experimental tank goes onto the shelf as any swapped tank does
+   (its save, the wallet carried over; no snapshot: it never drew this boot) and is one SWAP IN away. A swap the shelf
+   refuses leaves the experimental tank up - logged, never a boot loop (the restart that follows a swap is a soft one). */
+static bool s_hard_boot; static int s_hard_why;
+#ifdef TANK_P4
+/* NO EXPERIMENTAL TANK ON A BIG SCREEN'S GLASS (0.4.3, Strato 11-23 "move the tanks to 0.4.4"): THE LIBRARY gives none
+   (render_big_library_row_note), the director's `shelf jelly | minnows | piranha` makes none, and ANY start with one on
+   the glass - however it got there (a SWAP IN of one a backup or an old save left on the shelf) - is a hard boot's: the
+   main tank comes back before its code has run a line. The 0.4.4 work turns it on here (1) */
+#define XT_BIG_OK 0
+#endif
+static void hard_boot_home(void) {
+#if defined(TANK_P4) && !XT_BIG_OK
+    if (shelf_now()->type == SHELF_TYPE_FISH) return;
+    if (!s_hard_boot) ESP_LOGW(TAG, "a big screen: no experimental tank on its glass yet (0.4.4)");
+#else
+    if (shelf_now()->type == SHELF_TYPE_FISH || !s_hard_boot) return;
+#endif
+    char was[20]; snprintf(was, sizeof was, "%s", shelf_now()->name); for (char *q = was; *q; q++) if (*q == '\n') *q = ' ';
+    ESP_LOGW(TAG, "hard boot (reset reason %d) with %s on the glass: the main tank comes back", s_hard_why, was);
+    int pick = shelf_home_pick(clock_port_now_unix());
+    if (pick < 0) { ESP_LOGE(TAG, "hard boot: no fish tank and no room for one - %s stays up", was); return; }
+    if (!progression_save(&tank)) { ESP_LOGE(TAG, "hard boot: the tank on the glass would not save - no swap, it stays up"); return; }
+    progression_carry_t c; progression_carry_take(&tank, &c);
+    if (!shelf_swap(pick, NULL, 0, 0, &c, sizeof c, clock_port_now_unix())) { ESP_LOGE(TAG, "hard boot: the swap could not start - %s stays up", was); return; }
+    ESP_LOGI(TAG, "hard boot: the main tank is back on the glass, %s on the shelf; restarting", was);
+    vTaskDelay(pdMS_TO_TICKS(150));
+    esp_restart();
+}
+static volatile bool s_wire_tap; static float s_wire_x, s_wire_y;   /* the director's `shelf tap <x> <y>`: a tap on MY TANKS by wire (the bench; 0.4.2) */
 static void shelf_swap_in(int i);
 /* the director's `shelf <cmd>` (docs/tank-switcher.md step 3: stage the shelf on the glass for b-roll). A tank is named
    by its PLACE on the shelves (0 = the first, as `shelf list` shows); `name` takes "LINE 1/LINE 2"; `new` is free
@@ -1022,6 +1739,10 @@ void device_shelf_cmd(int argc, char **argv) {
     const char *c = argv[0];
     int pos = argc > 1 ? atoi(argv[1]) : -1, i = pos >= 0 ? shelf_at_pos(pos) : -3;
     s_shelf_baked = false;                                    /* (an open page shows the change) */
+#if defined(TANK_P4) && !XT_BIG_OK
+    if (!strcmp(c, "jelly") || !strcmp(c, "minnows") || !strcmp(c, "piranha")) {
+        ESP_LOGW(TAG, "shelf %s: not on the big screens yet (0.4.4: XT_BIG_OK in main.c)", c); return; }
+#endif
     if (!strcmp(c, "list")) {
         int64_t now = clock_port_now_unix();
         for (int p = 0; p < SHELF_POS_MAX; p++) {
@@ -1031,15 +1752,33 @@ void device_shelf_cmd(int argc, char **argv) {
             char nm[24]; snprintf(nm, sizeof nm, "%s", t->name); for (char *q = nm; *q; q++) if (*q == '\n') *q = '/';
             if (k == -1) ESP_LOGI(TAG, "shelf: place %d  %-15s  ON THE GLASS (tank %u)", p, nm, (unsigned)t->id);
             else ESP_LOGI(TAG, "shelf: place %d  %-15s  %s, shelved %lld d, %s, pieces worth %d (tank %u)", p, nm, t->time_mode == SHELF_TIME_PAUSED ? "PAUSED" : "DORMANT",
-                          (long long)(now > t->shelved_unix ? (now - t->shelved_unix) / 86400 : 0), t->save_len ? "lived in" : "fresh", shelf_pieces_value(k), (unsigned)t->id);
+                          (long long)(now > t->shelved_unix ? (now - t->shelved_unix) / 86400 : 0), t->save_len ? "lived in" : "fresh", shelf_refund_value(k, NULL), (unsigned)t->id);
         }
         ESP_LOGI(TAG, "shelf: %d shelved + the one on the glass, %d places free", shelf_count(), shelf_free_places());
+    } else if (!strcmp(c, "jelly")) {                        /* shelf jelly <0-2>: THE JELLY TANK by wire, in a theme (crew or not: staging) */
+        int th = argc > 1 ? atoi(argv[1]) : 0;
+        if (th < 0 || th >= JELLY_THEME_N) th = 0;
+        int k = shelf_new_jelly(th, JELLY_TANK_NAMES[th], clock_port_now_unix());   /* (0.4.3: one a theme) */
+        if (k < 0) ESP_LOGW(TAG, "shelf: no %s jelly tank (one is here already, the shelves are full, or the flash refused)", jelly_theme_name(th));
+        else { jelly_prefs_forget(th); ESP_LOGI(TAG, "shelf: THE JELLY TANK (%s) at place %d", jelly_theme_name(th), shelf_get(k)->pos); }
+    } else if (!strcmp(c, "minnows") || !strcmp(c, "piranha")) {   /* shelf minnows | piranha: that experimental tank by wire (free, crew or not: staging; one a board) */
+        const int ty = !strcmp(c, "minnows") ? SHELF_TYPE_MINNOWS : SHELF_TYPE_PIRANHA;
+        int k = shelf_count_type(ty) ? -1 : shelf_new_kind(ty, 0, clock_port_now_unix());
+        if (k < 0) ESP_LOGW(TAG, "shelf: no %s tank (one is here already, the shelves are full, or the flash refused)", c);
+        else ESP_LOGI(TAG, "shelf: %s at place %d - `shelf swap %d` puts it on the glass", shelf_get(k)->name, shelf_get(k)->pos, shelf_get(k)->pos);
+    } else if (!strcmp(c, "tap") && argc > 2) {              /* shelf tap <x> <y>: a tap on MY TANKS (frame coordinates), as a finger's - taken by the next frame */
+        s_wire_x = (float)atof(argv[1]); s_wire_y = (float)atof(argv[2]); s_wire_tap = true;
+        return;
+    } else if (!strcmp(c, "unpaid")) {                       /* shelf unpaid: the board has paid for no experimental tank (staging the 500 SD GET; a kind
+                                                                 with a tank on the board reads paid again at the next boot) */
+        shelf_port_frame_del("xbuy");
+        ESP_LOGI(TAG, "shelf: no experimental tank reads paid for - piranha %d, minnows %d SD", shelf_xt_price(SHELF_TYPE_PIRANHA), shelf_xt_price(SHELF_TYPE_MINNOWS));
     } else if (!strcmp(c, "new")) {
         int k = shelf_new(0, clock_port_now_unix());
         if (k < 0) ESP_LOGW(TAG, "shelf: no new tank (the shelves are full, or the flash refused)");
         else ESP_LOGI(TAG, "shelf: new tank %s at place %d", shelf_get(k)->name, shelf_get(k)->pos);
     } else if (strcmp(c, "name") && strcmp(c, "swap") && strcmp(c, "pause") && strcmp(c, "dormant") && strcmp(c, "remove"))
-        ESP_LOGW(TAG, "shelf list | new | swap <place> | pause <place> | dormant <place> | name <place> <line 1>[/<line 2>] | remove <place>");
+        ESP_LOGW(TAG, "shelf list | new | jelly <theme 0-2> | minnows | piranha | unpaid | tap <x> <y> | swap <place> | pause <place> | dormant <place> | name <place> <line 1>[/<line 2>] | remove <place>");
     else if (i == -3 || i == -2) ESP_LOGW(TAG, "shelf %s <place>: no tank at place %d (`shelf list`)", c, pos);
     else if (!strcmp(c, "name")) {
         char nm[24] = ""; for (int a = 2; a < argc; a++) { if (a > 2) strncat(nm, " ", sizeof nm - strlen(nm) - 1); strncat(nm, argv[a], sizeof nm - strlen(nm) - 1); }
@@ -1051,8 +1790,8 @@ void device_shelf_cmd(int argc, char **argv) {
         bool ok = shelf_set_time(i, !strcmp(c, "pause") ? SHELF_TIME_PAUSED : SHELF_TIME_DORMANT, clock_port_now_unix());
         ESP_LOGI(TAG, "shelf: place %d %s%s", pos, !strcmp(c, "pause") ? "PAUSED" : "DORMANT", ok ? "" : " - refused");
     } else if (!strcmp(c, "remove")) {
-        int v = shelf_pieces_value(i);
-        if (shelf_remove(i)) { tank.sd_balance += v; progression_save(&tank); ESP_LOGI(TAG, "shelf: place %d removed, +%d SD (wallet %d)", pos, v, (int)tank.sd_balance); }
+        int v = progression_remove_tank(&tank, i);
+        if (v >= 0) ESP_LOGI(TAG, "shelf: place %d removed, +%d SD (wallet %d)", pos, v, (int)tank.sd_balance);
         else ESP_LOGW(TAG, "shelf: the remove was refused");
         s_sh_card = -1; s_sh_ren = false; s_sh_rm = false;
     }
@@ -1064,7 +1803,8 @@ static void shelf_swap_in(int i) {
     int tw, th; render_shelf_thumb_size(&tw, &th);
     ESP_LOGI(TAG, "MY TANKS: SWAP IN %s (tank %u) - saving, moving the tanks, restarting", t->name, (unsigned)t->id);
     touch_port_confirm_answer(-1);
-    progression_save(&tank);
+    if (!progression_save(&tank)) {                          /* (its slot would get an older save, or none) */
+        ESP_LOGE(TAG, "MY TANKS: the tank on the glass would not save - no swap, nothing moved"); return; }
     bat_hist_save();
     batlog_add(battery_pct(), battery_port_vbat_mv(), display_port_brightness(), false, "swap");
     progression_carry_t c; progression_carry_take(&tank, &c);
@@ -1072,6 +1812,7 @@ static void shelf_swap_in(int i) {
     if (!shelf_swap(i, s_shelf_thumb, s_shelf_thumb ? tw : 0, s_shelf_thumb ? th : 0, &c, sizeof c, clock_port_now_unix())) {
         ESP_LOGE(TAG, "MY TANKS: the swap could not start (no free slot, or the flash refused) - nothing moved"); return; }
     ESP_LOGI(TAG, "MY TANKS: tanks moved in %lld ms; restarting", (esp_timer_get_time() - t0) / 1000);
+    ota_valid_now("a SWAP IN");
     audio_port_sleep();
     vTaskDelay(pdMS_TO_TICKS(150));                           /* the log line out the door */
     esp_restart();
@@ -1079,7 +1820,11 @@ static void shelf_swap_in(int i) {
 /* MOVE's way in: a finger held still 0.7 s on a tank on the shelves (no card, page or panel up) lifts it */
 static void shelf_hold_poll(void) {
     float x, y; bool down = touch_port_finger(&x, &y);
+#ifdef TANK_P4                                                /* (the wide page: a card is open beside the shelves, and is no page over them) */
+    if (!touch_port_shelf() || s_sh_lib || s_sh_ren || s_sh_rm || s_sh_moving) { s_hold_t0 = 0; s_hold_down = down; return; }
+#else
     if (!touch_port_shelf() || s_sh_lib || s_sh_card != -1 || s_sh_ren || s_sh_rm || s_sh_moving) { s_hold_t0 = 0; s_hold_down = down; return; }
+#endif
     int64_t now = esp_timer_get_time();
     if (down && !s_hold_down) { s_hold_t0 = now; s_hold_x = x; s_hold_y = y; }
     if (down && s_hold_t0 && (fabsf(x - s_hold_x) > 24 || fabsf(y - s_hold_y) > 24)) s_hold_t0 = 0;   /* (a finger that wanders is no hold) */
@@ -1090,48 +1835,133 @@ static void shelf_hold_poll(void) {
             int pos = s_sh_page * 8 + r - SHELF_TAP_SLOT0, at = shelf_at_pos(pos);
             if (at != -2) {
                 s_sh_moving = true; s_mv_pos = pos; s_shelf_baked = false; tank_emit(TEV_WHEEL_TICK, -1);
+                touch_port_spend_press();                     /* (the lift that lets it go is no tap: a firm press is one since 0.4.1, and on its
+                                                                 own place it would put the tank straight back) */
                 ESP_LOGI(TAG, "MY TANKS: MOVE - place %d in hand", pos);
             }
         }
     }
     s_hold_down = down;
 }
-static void shelf_tap(float x, float y) {
+static void shelf_tap(float x, float y, int64_t press_us) {   /* (press_us: when the tap's press began - the waits read it, TCH-1) */
     if (s_swap_i >= 0) return;                                /* (SWAP IN under way) */
     s_shelf_baked = false;                                    /* whatever happens, the page is drawn afresh */
+    if (s_sh_tlnote) {                                        /* the touch lock's note: any tap closes it (not the padlock tap's own double) */
+        if (open_wait_spent_at(&s_tl_wait, press_us, esp_timer_get_time())) return;
+        s_sh_tlnote = false; touch_port_shelf_back(); return;
+    }
     if (s_sh_moving) {                                        /* MOVE: a place takes it (a tank there trades), CANCEL puts it back */
         int r = render_shelf_tap(x, y);
-        if (r == SHELF_TAP_LIBRARY) { s_sh_moving = false; ESP_LOGI(TAG, "MY TANKS: MOVE cancelled"); }
+        if (r == SHELF_TAP_LIBRARY) { s_sh_moving = false; touch_port_shelf_back(); ESP_LOGI(TAG, "MY TANKS: MOVE cancelled"); }
         else if (r == SHELF_TAP_PREV && s_sh_page > 0) s_sh_page--;
         else if (r == SHELF_TAP_NEXT && s_sh_page < shelf_pages() - 1) s_sh_page++;
         else if (r >= SHELF_TAP_SLOT0) {
             int to = s_sh_page * 8 + r - SHELF_TAP_SLOT0, i = shelf_at_pos(s_mv_pos);
             bool ok = to == s_mv_pos || shelf_move(i, to);
-            s_sh_moving = false;
+            s_sh_moving = false; touch_port_shelf_back();      /* (the main page back: its wait, R2T-5) */
             if (ok && to != s_mv_pos) tank_emit(TEV_CONFIRM, -1);
             ESP_LOGI(TAG, "MY TANKS: MOVE place %d -> %d%s", s_mv_pos, to, ok ? "" : " - refused (the flash)");
         }
         return;
     }
     if (s_sh_lib) {
-        int r = render_library_tap(x, y, 1);
-        if (r == LIB_TAP_BACK) { s_sh_lib = false; return; }
+        if (open_wait_spent_at(&s_lib_wait, press_us, esp_timer_get_time())) { ESP_LOGI(TAG, "MY TANKS: a tap as THE LIBRARY opened - spent (the opening tap's double)"); return; }
+        if (s_sh_note) {                                      /* the jelly row's note (J6): OK, or a tap outside it, closes it */
+            int r = render_library_note_tap(x, y);
+            if (r == LNOTE_TAP_OK || r == LNOTE_TAP_OUTSIDE) { s_sh_note = false; s_note_name = NULL; open_wait_start(&s_lib_wait, esp_timer_get_time()); }
+            return;
+        }
+        if (s_sh_pick) {                                      /* PICK A THEME (J2): a picture picks, NEW TANK makes it - for good */
+            int r = render_jelly_pick_tap(x, y);
+            if (r == JP_TAP_BACK) { s_sh_pick = false; open_wait_start(&s_lib_wait, esp_timer_get_time()); return; }
+            if (r >= JP_TAP_THEME0 && r < JP_TAP_THEME0 + JELLY_THEME_N) {
+                if (shelf_jelly_themes() >> (r - JP_TAP_THEME0) & 1) { ESP_LOGI(TAG, "MY TANKS: %s - installed already (one a theme)", jelly_theme_name(r - JP_TAP_THEME0)); return; }
+                s_pick = r - JP_TAP_THEME0; tank_emit(TEV_WHEEL_TICK, -1); return; }
+            if (r != JP_TAP_NEW || s_pick < 0) return;
+            if (shelf_jelly_themes() >> s_pick & 1) { ESP_LOGI(TAG, "MY TANKS: a %s jelly tank is already here (one a theme)", jelly_theme_name(s_pick)); s_sh_pick = false; return; }
+            if (shelf_free_places() < 1) { ESP_LOGI(TAG, "MY TANKS: the shelves are full"); return; }
+            int i = shelf_new_jelly(s_pick, JELLY_TANK_NAMES[s_pick], clock_port_now_unix());   /* (free: no wallet write, so no journal) */
+            if (i < 0) { ESP_LOGE(TAG, "MY TANKS: the jelly tank could not be made (the flash refused)"); return; }
+            jelly_prefs_forget(s_pick);                       /* (a new jelly tank starts with its theme's own light, the jet off) */
+            tank_emit(TEV_CONFIRM, -1);
+            s_sh_pick = false; s_sh_lib = false; s_sh_page = shelf_get(i)->pos / 8; touch_port_shelf_back();
+            ESP_LOGI(TAG, "MY TANKS: THE JELLY TANK made - %s, at place %d", jelly_theme_name(s_pick), shelf_get(i)->pos);
+            return;
+        }
+        int r = render_library_tap(x, y, 2);
+        ESP_LOGI(TAG, "MY TANKS: THE LIBRARY page %d, a tap at %.0f,%.0f -> %d", s_lib_pg + 1, x, y, r);
+        if (r == LIB_TAP_PREV || r == LIB_TAP_NEXT) { s_lib_pg = r == LIB_TAP_NEXT; tank_emit(TEV_WHEEL_TICK, -1); return; }   /* two pages (0.4.2) */
+#ifdef TANK_P4
+        if ((r == LIB_TAP_ROW0 || r == LIB_TAP_ROW0 + 1) && render_big_library_row_note(s_lib_pg, r - LIB_TAP_ROW0)) {
+            /* THE JELLY TANK, THE PIRANHAS, THE MINNOWS on a big screen (0.4.3, Strato 11-23 "yes build the note, move the
+               tanks to 0.4.4"): the note NOT AVAILABLE ON / HOME TANK YET. - never PICK A THEME, never a GET, crew or not */
+            s_sh_note = true; s_note_name = s_lib_pg == 1 ? (r == LIB_TAP_ROW0 ? "PIRANHAS" : "MINNOWS") : NULL;
+            open_wait_start(&s_lib_wait, esp_timer_get_time());
+            ESP_LOGI(TAG, "MY TANKS: the %s row - not on the big screens yet (0.4.4): its note", s_note_name ? s_note_name : "JELLY TANK");
+            return;
+        }
+#endif
+        if (s_lib_pg == 1 && (r == LIB_TAP_ROW0 || r == LIB_TAP_ROW0 + 1)) {   /* THE PIRANHA TANK / THE MINNOWS */
+            const int ty = r == LIB_TAP_ROW0 ? SHELF_TYPE_PIRANHA : SHELF_TYPE_MINNOWS, price = shelf_xt_price(ty);
+            const char *nm = ty == SHELF_TYPE_PIRANHA ? "PIRANHAS" : "MINNOWS";
+            if (price < 0) return;                            /* INSTALLED: nothing to tap (one a kind) */
+            if (!net_port_crew()) { s_sh_note = true; s_note_name = nm; open_wait_start(&s_lib_wait, esp_timer_get_time()); ESP_LOGI(TAG, "MY TANKS: the %s row on a board off the crew - its note", nm); return; }
+            if (tank.sd_balance < price) { ESP_LOGI(TAG, "MY TANKS: %s costs %d, the wallet has %d", nm, price, (int)tank.sd_balance); return; }
+            if (shelf_free_places() < 1) { ESP_LOGI(TAG, "MY TANKS: the shelves are full"); return; }
+            int i = progression_get_xt(&tank, ty, clock_port_now_unix());   /* (journaled the first time: the tank and its 500, both or neither) */
+            if (i < 0) { ESP_LOGE(TAG, "MY TANKS: %s could not be made (the flash refused) - nothing made, nothing paid", nm); return; }
+            tank_emit(TEV_CONFIRM, -1);
+            s_sh_lib = false; s_sh_page = shelf_get(i)->pos / 8; touch_port_shelf_back();
+            ESP_LOGI(TAG, "MY TANKS: %s at place %d for %d SD (wallet %d)", nm, shelf_get(i)->pos, price, (int)tank.sd_balance);
+            return;
+        }
+        if (s_lib_pg != 0 && r != LIB_TAP_BACK) return;
+        if (r == LIB_TAP_BACK) { s_sh_lib = false; touch_port_shelf_back(); return; }   /* (BACK stands where CLOSE does: its double, R2T-5) */
+        if (r == LIB_TAP_ROW0 + 1) {                          /* THE JELLY TANK's row */
+            if (shelf_jelly_themes() == (1u << JELLY_THEME_N) - 1) return;       /* ALL THREE INSTALLED: nothing to tap (0.4.3: one a theme) */
+            if (!net_port_crew()) { s_sh_note = true; ESP_LOGI(TAG, "MY TANKS: the jelly row on a board off the crew - its note"); }
+            else { s_sh_pick = true; s_pick = -1; ESP_LOGI(TAG, "MY TANKS: PICK A THEME"); }
+            open_wait_start(&s_lib_wait, esp_timer_get_time());
+            return;
+        }
         if (r != LIB_TAP_ROW0) return;
         int price = shelf_price();
         if (tank.sd_balance < price) { ESP_LOGI(TAG, "MY TANKS: NEW TANK costs %d, the wallet has %d", price, (int)tank.sd_balance); return; }
         if (shelf_free_places() < 1) { ESP_LOGI(TAG, "MY TANKS: the shelves are full"); return; }
-        int i = shelf_new(0, clock_port_now_unix());
-        if (i < 0) { ESP_LOGE(TAG, "MY TANKS: NEW TANK failed (the flash refused)"); return; }
-        tank.sd_balance -= price; progression_settings_changed();
-        s_sh_lib = false; s_sh_page = shelf_get(i)->pos / 8;
+        int i = price > 0 ? progression_buy_tank(&tank, price, clock_port_now_unix())   /* (0.4.1: journaled - a cut at any write is a
+                                                                                  tank bought and paid, or neither) */
+                          : shelf_new(SHELF_TYPE_FISH, clock_port_now_unix());   /* the first fish tank is free (D4): a jelly tank on the glass
+                                                                                  and every fish tank removed - no wallet write, no journal */
+        if (i < 0) { ESP_LOGE(TAG, "MY TANKS: NEW TANK failed (the flash refused) - nothing bought, nothing paid"); return; }
+        s_sh_lib = false; s_sh_page = shelf_get(i)->pos / 8; touch_port_shelf_back();
         ESP_LOGI(TAG, "MY TANKS: NEW TANK %s at place %d for %d SD (wallet %d)", shelf_get(i)->name, shelf_get(i)->pos, price, (int)tank.sd_balance);
         return;
     }
+#ifdef TANK_P4
+    {   /* THE WIDE PAGE's rail: the other pages (a locked board, or a tank with no such page, answers NONE: render_big.c) */
+        int rr = render_shelf_tap(x, y);
+        if (rr == SHELF_TAP_TO_KEEPER || rr == SHELF_TAP_TO_SHOP || rr == SHELF_TAP_TO_VISITORS) {
+            s_shelf_from_ms = false; shelf_close();
+            if (rr == SHELF_TAP_TO_KEEPER) touch_port_show_milestones(true);
+            else if (rr == SHELF_TAP_TO_SHOP) touch_port_show_shop(true);
+            else touch_port_show_collection(true);
+            ESP_LOGI(TAG, "MY TANKS: the rail - %s", rr == SHELF_TAP_TO_KEEPER ? "KEEPER" : rr == SHELF_TAP_TO_SHOP ? "UPGRADES" : "VISITORS");
+            return;
+        }
+    }
+    if ((s_sh_card >= 0 || s_sh_card == SH_CARD_GLASS) && render_shelf_card_tap(x, y) != SHC_TAP_OUTSIDE) {   /* (a tap off the card: the shelves', below - the card stays) */
+#else
     if (s_sh_card >= 0 || s_sh_card == SH_CARD_GLASS) {
+#endif
+        if (open_wait_spent_at(&s_card_wait, press_us, esp_timer_get_time())) { ESP_LOGI(TAG, "MY TANKS: a tap as the card opened - spent (the opening tap's double)"); return; }
         int r = render_shelf_card_tap(x, y), i = s_sh_card;
-        if (r == SHC_TAP_OUTSIDE) s_sh_card = -1;
+        if (r == SHC_TAP_OUTSIDE) { s_sh_card = -1; touch_port_shelf_back(); }   /* (the padlock lies outside every card: R2T-5) */
         else if (r == SHC_TAP_RENAME) { s_sh_ren = true; render_shelf_rename_begin(&s_shr, sh_card_tank()->name); ESP_LOGI(TAG, "MY TANKS: RENAME %s", sh_card_tank()->name); }
-        else if (i == SH_CARD_GLASS) { }                      /* (its card has RENAME alone) */
+        else if (r == SHC_TAP_SETTINGS && i == SH_CARD_GLASS && shelf_now()->type == SHELF_TYPE_JELLY) {   /* the jelly tank's way to settings (J7) */
+            if (touch_port_touch_lock()) ESP_LOGI(TAG, "MY TANKS: SETTINGS - the board is locked (the padlock first)");   /* (a locked page takes no touch:
+                                                                       it could only be left by BOOT twice - the keeper page's 11-02 lesson) */
+            else { s_set_back_ms = s_shelf_from_ms; shelf_close(); touch_port_show_settings(true); touch_port_settings_from_shelf(); ESP_LOGI(TAG, "MY TANKS: SETTINGS (the jelly tank)"); } }
+        else if (i == SH_CARD_GLASS) { }                      /* (its card has RENAME alone; a jelly tank's SETTINGS too) */
         else if (r == SHC_TAP_DORMANT || r == SHC_TAP_PAUSED) {
             int mode = r == SHC_TAP_PAUSED ? SHELF_TIME_PAUSED : SHELF_TIME_DORMANT;
             if (shelf_set_time(i, mode, clock_port_now_unix())) ESP_LOGI(TAG, "MY TANKS: %s %s", shelf_get(i)->name, mode ? "PAUSED" : "DORMANT");
@@ -1140,27 +1970,41 @@ static void shelf_tap(float x, float y) {
             ESP_LOGI(TAG, "MY TANKS: SWAP IN %s tapped - the pulse, the fade, then the swap", shelf_get(i)->name);
         }
         else if (r == SHC_TAP_MORE) {                         /* MORE: REMOVE (D5) */
-            s_sh_rm = true; s_rm_refund = shelf_pieces_value(i); s_rm_hold = 0; s_rm_t0 = 0; s_rm_down = true; s_rm_press = SHM_TAP_NONE;   /* (the lift of this tap is not a press) */
-            ESP_LOGI(TAG, "MY TANKS: MORE on %s - its pieces bring %d", shelf_get(i)->name, s_rm_refund);
+            s_sh_rm = true; s_rm_refund = shelf_refund_value(i, s_rm_n); s_rm_hold = 0; s_rm_t0 = 0; s_rm_down = true; s_rm_press = SHM_TAP_NONE;   /* (the lift of this tap is not a press) */
+            open_wait_start(&s_rm_wait, esp_timer_get_time());
+            ESP_LOGI(TAG, "MY TANKS: MORE on %s - it brings %d (%d pieces, %d critters, %d backgrounds)", shelf_get(i)->name, s_rm_refund, s_rm_n[0], s_rm_n[1], s_rm_n[2]);
         }
         return;
     }
     int r = render_shelf_tap(x, y);
+#ifdef TANK_P4
+    if (r == SHELF_TAP_CLOSE) s_shelf_from_ms = false;        /* (the rail's CLOSE is the way to the tank, as on every wide page) */
+#endif
     if (r == SHELF_TAP_CLOSE) { shelf_close(); ESP_LOGI(TAG, "MY TANKS: CLOSE"); }
     else if (r == SHELF_TAP_TOUCH_LOCK) {                     /* THE TOUCH LOCK: the board's, kept across restarts */
         bool on = !touch_port_touch_lock();
         touch_port_set_touch_lock(on); nvs_u8_put("tlock", on);
         tank_emit(TEV_CONFIRM, -1);
+        if (on) { s_sh_tlnote = true; open_wait_start(&s_tl_wait, esp_timer_get_time()); }   /* what it does and the way back (0.4.2); never as it is turned off */
         ESP_LOGI(TAG, "MY TANKS: touch %s", on ? "LOCKED" : "unlocked");
     }
-    else if (r == SHELF_TAP_LIBRARY) s_sh_lib = true;
+    else if (r == SHELF_TAP_SETTINGS) {                       /* the icon foot's cog (0.4.2): the settings page from any tank, an experimental one too */
+        if (touch_port_touch_lock()) ESP_LOGI(TAG, "MY TANKS: SETTINGS - the board is locked (the padlock first)");   /* (a locked page takes no touch: J7's rule) */
+#ifdef TANK_P4
+        else { s_shelf_from_ms = false; shelf_close(); touch_port_show_settings(true); ESP_LOGI(TAG, "MY TANKS: the rail - SETTINGS"); }   /* (the wide page: its rail comes back here) */
+#else
+        else { s_set_back_ms = s_shelf_from_ms; shelf_close(); touch_port_show_settings(true); touch_port_settings_from_shelf(); ESP_LOGI(TAG, "MY TANKS: SETTINGS"); }   /* (its CLOSE comes back here: Strato 11-12) */
+#endif
+    }
+    else if (r == SHELF_TAP_LIBRARY) { s_sh_lib = true; s_lib_pg = 0; open_wait_start(&s_lib_wait, esp_timer_get_time()); }
     else if (r == SHELF_TAP_PREV && s_sh_page > 0) s_sh_page--;
     else if (r == SHELF_TAP_NEXT && s_sh_page < shelf_pages() - 1) s_sh_page++;
     else if (r >= SHELF_TAP_SLOT0) {
         int at = shelf_at_pos(s_sh_page * 8 + r - SHELF_TAP_SLOT0);
-        if (at == -2) s_sh_lib = true;                        /* an empty place: the library */
+        if (at == -2) { s_sh_lib = true; s_lib_pg = 0; open_wait_start(&s_lib_wait, esp_timer_get_time()); }   /* an empty place: the library (its NEW TANK row over the place) */
         else if (at == -1) s_sh_card = SH_CARD_GLASS;          /* the tank on the glass: its own card (0.3.9.3, Strato: rename it too) */
         else if (at >= 0) s_sh_card = at;
+        if (at != -2) open_wait_start(&s_card_wait, esp_timer_get_time());   /* (its SWAP IN / MORE over places 4-5) */
     }
 }
 static void sleep_button_poll(int64_t now) {
@@ -1205,8 +2049,14 @@ static void sleep_button_poll(int64_t now) {
         else if (!s_btn_used && !touch_port_touch_lock() && now - s_btn_low_since >= BTN_CHORD_US && touch_port_pressed_since(s_btn_low_since + BTN_CHORD_US)
                  && !touch_port_confirm_up() && !adv_up()) {
             s_btn_used = true;
-            if (touch_port_settings()) { ESP_LOGI(TAG, "BOOT held %.0f s + tap on the settings page: the ADVANCED page", ADV_BOOT_HOLD_S); touch_port_open_advanced(); }
-            else { ESP_LOGI(TAG, "BOOT held %.0f s + tap: reset prompt", ADV_BOOT_HOLD_S); touch_port_confirm_open(); }
+            if (touch_port_settings()) { ESP_LOGI(TAG, "BOOT held %.0f s + tap on the settings page: the ADVANCED page", ADV_BOOT_HOLD_S);
+                int w = touch_port_open_advanced();          /* (its tap on a slider jumped the knob: the saved level back, nothing written) */
+                if (w == SET_TAP_BRIGHT) brightness_restore(); else if (w == SET_TAP_VOLUME) audio_port_restore_volume(); }
+            else {                                       /* the reset prompt: MY TANKS closes first, and stays shut (TCH-3) */
+                if (touch_port_shelf()) shelf_close();
+                s_shelf_want = false;
+                ESP_LOGI(TAG, "BOOT held %.0f s + tap: reset prompt", ADV_BOOT_HOLD_S); touch_port_confirm_open();
+            }
         }
     }
 }
@@ -1227,6 +2077,7 @@ static void on_tank_event(int ev, int fish, void *ud) {
     switch (ev) {
     case TEV_TAP:         audio_port_play(SND_TAP, AUDIO_PITCH_ONE); break;
     case TEV_FEED:        audio_port_play(SND_FEED, AUDIO_PITCH_ONE); break;
+    case TEV_PLOP:        audio_port_play(SND_PLOP, AUDIO_PITCH_ONE); break;     /* THE DROP IN (0.4.3) */
     case TEV_LIGHT_ON:    audio_port_play(SND_LIGHT_ON, AUDIO_PITCH_ONE); break;
     case TEV_LIGHT_OFF:   audio_port_play(SND_LIGHT_OFF, AUDIO_PITCH_ONE); break;
     case TEV_WIPE:        audio_port_play(SND_WIPE, AUDIO_PITCH_ONE); break;
@@ -1254,6 +2105,11 @@ static float s_bat_frac; static bool s_bat_chg, s_bat_ok, s_bat_low;
 static int s_bat_state = BAT_ON_BATTERY, s_bat_mv;   /* BAT_*; VBAT, read with the gauge (the page shows it) */
 static int64_t s_bat_popup_us;              /* the cable went in: the pill shows until then */
 static int s_bat_fake = -1, s_bat_fake_state;   /* director `battery N [charging|full|plugged]`: a staged gauge, for the camera (-1 = the real one) */
+#ifdef TANK_P4
+extern int display_port_p4_debug_mask(void);
+static bool s_no_prefetch;                 /* director `p4 8`: the scene prefetch DMA off (the white-flash bisect) */
+void device_p4_prefetch(bool on) { s_no_prefetch = !on; ESP_LOGI(TAG, "scene prefetch DMA %s", on ? "on" : "OFF"); }
+#endif
 void device_fake_battery(int pct, int state) {
     s_bat_fake = pct < 0 ? -1 : pct > 100 ? 100 : pct; s_bat_fake_state = state;
     if (pct < 0) s_bat_low = false;
@@ -1318,17 +2174,51 @@ static void battery_frame(int64_t now) {
 
 static void reset_tank(void) {
     ESP_LOGW(TAG, "RESET: wiping the tank (%d fish) for a fresh one", tank.n_fish);
+    link_dev_sleep();                           /* the link's goodbye first (0.4, 2026-11-02): visitors here swim home, never to hang on
+                                                   unseen in the engine with the old tank's slots; a fresh tank links as itself */
     progression_reset(&tank, (uint32_t)esp_timer_get_time() ^ 0xC0FFEEu);
     notice_sync(&tank);                         /* a fresh tank has nothing to announce */
     brightness_save();                          /* the erase took the setting with it */
     orientation_save();                         /* ... and this one */
     sleep_setting_save();                       /* ... and the SLEEP row's, if the keeper chose one (this fork) */
     ESP_LOGI(TAG, "fresh tank: %s + %s, both fry", tank.fish[0].name, tank.fish[1].name);
+    if (touch_port_shelf()) shelf_close();      /* (the welcome takes the glass alone: nothing under it reads the finger, TCH-3) */
+    s_shelf_want = false;
     setup_begin(&tank);                         /* welcome, names, colours - as on a fresh install */
 }
 
-static void request_update(void);        /* below: CHECK FOR UPDATES */
+/* ERASE EVERYTHING (0.4.2, the reset prompt's second choice, answered by a 3 s hold): the board as a new install has it -
+ * progression_erase_all (every tank, the sand dollars, everything bought, the collection; the Wi-Fi only if its box was
+ * ticked), then a restart, so the board comes up exactly as a fresh one does: the boot show, one tank, two fry, the welcome.
+ * Kept: the touch map and the battery's size (NVS `adv`), the battery's history (`bat`) and log, brightness, volume,
+ * GRAPHICS and the VIGNETTE (`gfx`, `vigoff`), the board code and HATCHERY CREW (`wifi`: code, crew). A power cut: progression.h (the boot finishes it). */
+static void erase_everything(bool forget_wifi) {
+    ESP_LOGW(TAG, "ERASE EVERYTHING: %d shelved tanks, %ld sand dollars, the tank on the glass (%d fish)%s", shelf_count(), (long)tank.sd_balance, tank.n_fish,
+             forget_wifi ? ", and the Wi-Fi" : " - the Wi-Fi kept");
+    shelf_busy = wdt_feed;                      /* (a full shelf is seconds of sector erases on this task: fed between slots) */
+    wdt_feed();
+    /* the link's goodbye (visitors here swim home, as a reset) only once the erase is certain - progression calls it when
+       the journal has landed. Refused before that: the link, the tank and the shelf are untouched, and the glass says so */
+    if (!progression_erase_all(&tank, (uint32_t)esp_timer_get_time() ^ 0xE4A5Eu, forget_wifi, link_dev_sleep)) {
+        ESP_LOGE(TAG, "ERASE EVERYTHING: the board refused its first write - NOTHING was erased");
+        touch_port_confirm_open_page(RESET_PG_REFUSED);   /* COULD NOT ERASE / NOTHING WAS CHANGED, OK */
+        return;
+    }
+    wdt_feed();
+    jelly_prefs_forget(-1);                     /* (the jelly tanks' jet and light: their tanks are gone) */
+    bat_hist_save();
+    batlog_add(battery_pct(), battery_port_vbat_mv(), display_port_brightness(), false, "erase");
+    audio_port_sleep();
+    ota_valid_now("ERASE EVERYTHING");          /* (as request_update: this restart is no failed boot to roll back) */
+    ESP_LOGW(TAG, "ERASE EVERYTHING: done - restarting as a new board");
+    esp_restart();
+}
+
+static void request_update(bool add);    /* below: CHECK FOR UPDATES (add: ADD A NETWORK) */
 static void tank_task(void *arg);
+static void ob_start(void);                                      /* (below: the octopus's picture on core 1) */
+static TaskHandle_t s_ob_h;                                      /* (audit FW-3: the octobuild task, its stack in `stacks`) */
+#define OB_STACK 4096
 /* THE SECOND CORE (0.3.9.4, Strato on the square: a decoration's DONE "really churns for 15 seconds" - the grass loop's rebake on
  * the render core, however sliced): the loop's slices run on a task of their own on core 1, between the frames, under ONE lock
  * the tank task holds from its tick through its render (the drawing state is shared) and gives before the flush. The bake keeps
@@ -1336,20 +2226,65 @@ static void tank_task(void *arg);
  * yields to it for the seconds a rebake takes. */
 static SemaphoreHandle_t s_render_lock; static volatile bool s_render_wants; static bool s_render_held;
 static void render_unlock(void) { if (s_render_held) { s_render_held = false; xSemaphoreGive(s_render_lock); } }
+/* THE DIRTY MASK WHILE LINKED (0.4, 2026-11-01): the 1.8 keeps its 20 KB mask in internal RAM (in PSRAM a frame
+   costs ~1.5 ms more), and with the radio up that left it 13 KB - the tank link's internal margin. Just before
+   the radio starts the mask steps out to PSRAM, and once the radio is down it comes back in if there is room.
+   Swapped under the render lock (the second core's bake may be mid-slice otherwise); called from the tank task. */
+static uint32_t *s_dirty_mask; static bool s_dirty_home_internal;
+#define DIRTY_BACK_MARGIN (16 * 1024)   /* (each board runs at 20-29 KB with its mask in, from boot: 24 KB kept the watch's 26 KB mask out for good) */
+void device_dirty_mask_for_radio(bool radio) {
+    if (!s_dirty_mask || !s_dirty_home_internal || !s_render_lock) return;
+    const size_t n = RENDER_DIRTY_WORDS * 4;
+    const bool ext = esp_ptr_external_ram(s_dirty_mask);
+    uint32_t *to = NULL;
+    if (radio && !ext) to = heap_caps_malloc(n, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    else if (!radio && ext && heap_caps_get_free_size(MALLOC_CAP_INTERNAL) >= n + DIRTY_BACK_MARGIN) to = heap_caps_malloc(n, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    if (!to) return;
+    const bool held = s_render_held;
+    if (!held) xSemaphoreTake(s_render_lock, portMAX_DELAY);
+    memcpy(to, s_dirty_mask, n); render_set_dirty_mask(to); heap_caps_free(s_dirty_mask); s_dirty_mask = to;
+    if (!held) xSemaphoreGive(s_render_lock);
+    ESP_LOGI(TAG, "dirty mask %s | internal heap %u KB", radio ? "to PSRAM: the radio comes up" : "back in internal RAM: the radio is down", (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL) / 1024);
+}
+void device_grass_loop_on(bool on) {         /* director `grassloop`: under the render lock (0.4.2 review: the loop's banks swap and its memory goes - never under a
+                                                core-1 slice; the director runs before the frame takes the lock) */
+    const bool held = s_render_held;
+    if (s_render_lock && !held) xSemaphoreTake(s_render_lock, portMAX_DELAY);
+    render_grass_loop_on(on);
+    if (s_render_lock && !held) xSemaphoreGive(s_render_lock);
+}
 static int64_t s_bake_us, s_bake_wait_us; static int s_bake_slices, s_bake_takes, s_bake_timeouts;
 static volatile int64_t s_bake_deadline; static int64_t s_flush_avg_us = 18000;   /* the bake's window: the flush (its running average), never into the next frame's start */
+#define TANK_STACK 12288                         /* (director `stacks`: the high-water marks these were sized by - 11-02 on Strato's square,
+                                                    a boot, a rebake, MY TANKS, ~25 decisions: the tank used 4.5 KB, the bake 1.8, the advisor 2.9) */
+#define BAKE_STACK 6144                          /* (16 KB until 0.4: 10 KB back to the internal heap) */
+#define BAKE_SPARE (8 * 1024)                    /* internal RAM the bake leaves beside it (NVS writes, the audio path) */
+static TaskHandle_t s_tank_h, s_bake_h;
+/* THE BAKE'S SHARE OF A DECISION (0.4, the 11-02 evening sweep, measured on Strato's square: a rebake on core 1 at priority 6
+   took its time out of the advisor's decisions - 4.3, 4.4, 4.7 s against 3.8 - about the bake's own core-1 time, ~5 s a
+   whole rebake). Between decisions the bake runs free; within one it takes at most s_bake_cap_us of core 1, then waits
+   for the decision to end. A cap stretches the rebake (the grass drawn live meanwhile) by what it keeps from the decisions:
+   director `bakecap MS` (0 = no cap) */
+#define BAKE_CAP_US 350000
+static int64_t s_bake_cap_us = BAKE_CAP_US, s_bake_dec_us; static uint32_t s_bake_seq; static int s_bake_capped;
 static void bake_task(void *arg) {
     (void)arg;
     for (;;) {
         int r = 0;
         const int64_t tw = esp_timer_get_time();
-        if (!s_render_wants && esp_timer_get_time() + 5000 < s_bake_deadline && xSemaphoreTake(s_render_lock, pdMS_TO_TICKS(40))) {
+        uint32_t seq = 0; const bool deciding = llm_ok && advisor_llm_esp_busy(&seq);
+        if (seq != s_bake_seq) { s_bake_seq = seq; s_bake_dec_us = 0; }   /* (a decision ended: the next one's share starts at none) */
+        const bool capped = deciding && s_bake_cap_us > 0 && s_bake_dec_us >= s_bake_cap_us;
+        if (capped) { if (render_grass_loop_ready() < render_grass_loop_n()) s_bake_capped++; }   /* (a wait that held a bake back: counted) */
+        else if (!s_render_wants && esp_timer_get_time() + 5000 < s_bake_deadline && xSemaphoreTake(s_render_lock, pdMS_TO_TICKS(40))) {
             const int64_t t0 = esp_timer_get_time(); s_bake_wait_us += t0 - tw; s_bake_takes++;
             do {                                            /* slices while the flush's window lasts (a slice is under ~5 ms): never a frame kept waiting */
                 r = render_grass_loop_bake_slice(&tank);
                 if (r) s_bake_slices++;
-            } while (r && !s_render_wants && esp_timer_get_time() + 5000 < s_bake_deadline);
-            s_bake_us += esp_timer_get_time() - t0;
+            } while (r && !s_render_wants && esp_timer_get_time() + 5000 < s_bake_deadline
+                     && !(deciding && s_bake_cap_us > 0 && s_bake_dec_us + (esp_timer_get_time() - t0) >= s_bake_cap_us));
+            const int64_t used = esp_timer_get_time() - t0;
+            s_bake_us += used; if (deciding) s_bake_dec_us += used;
             xSemaphoreGive(s_render_lock);
         } else if (!s_render_wants) s_bake_timeouts++;
         if (r) taskYIELD(); else vTaskDelay(pdMS_TO_TICKS(4));
@@ -1360,24 +2295,94 @@ static void start_tank_task(void *arg) {
     ESP_LOGI(TAG, "starting the tank task: internal heap %u KB free (largest block %u KB)",
              (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL) / 1024, (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL) / 1024);
     s_render_lock = xSemaphoreCreateMutex();
-    render_set_grass_loop_task(s_render_lock && xTaskCreatePinnedToCore(bake_task, "bake", 16384, NULL, 6, NULL, 1) == pdPASS);
-    if (xTaskCreatePinnedToCore(tank_task, "tank", 12288, NULL, 4, NULL, 0) != pdPASS)
+    /* the tank task FIRST (0.4, the 11-02 evening sweep: the bake's stack went first, and on the square / pendant - ~50 KB
+       free, the largest block 18-19 KB - the tank's could find no block: no frames, no PWR key). The bake only from what
+       is left, BAKE_SPARE kept beside it; without it the grass loop slices on the render core (render_grass_loop_bake_more) */
+    render_set_grass_loop_task(false);
+    if (xTaskCreatePinnedToCore(tank_task, "tank", TANK_STACK, NULL, 4, &s_tank_h, 0) != pdPASS)
         ESP_LOGE(TAG, "THE TANK TASK COULD NOT START: no internal RAM for its stack");
+    const size_t big = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL);
+    const bool bake = s_render_lock && big >= BAKE_STACK + BAKE_SPARE && xTaskCreatePinnedToCore(bake_task, "bake", BAKE_STACK, NULL, 6, &s_bake_h, 1) == pdPASS;
+    render_set_grass_loop_task(bake);
+#ifdef TANK_P4
+    { extern void split_task_start(void); split_task_start(); }
+#endif
+    ob_start();
+    ESP_LOGI(TAG, "tank task up%s | internal heap %u KB free (largest block %u KB)", bake ? ", the bake beside it" : " - NO BAKE TASK: the grass loop bakes on the render core",
+             (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL) / 1024, (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL) / 1024);
+}
+#ifdef TANK_P4
+/* THE GRASS ON TWO CORES (p4-perf 0.4.3, render.c THE SPLIT): core 1's share of the back grass pass. The render core
+   hands it a job and draws its own share meanwhile, then waits for it: a frame later by nothing, the grass in half the
+   time. Priority 6, as the bake's (above the advisor's 5: the frame does not wait for a decision; the audio's 6 takes
+   turns with it). Its stack is internal RAM. */
+static SemaphoreHandle_t s_vs_go, s_vs_done; static void (*volatile s_vs_fn)(void *); static void *volatile s_vs_arg; static TaskHandle_t s_vs_h;
+static int64_t s_vs_wait_us;                    /* (the log: the render core's wait for core 1's share, a 10 s window) */
+#define SPLIT_STACK 4096
+static void split_task(void *a) {
+    (void)a;
+    for (;;) { xSemaphoreTake(s_vs_go, portMAX_DELAY); s_vs_fn(s_vs_arg); xSemaphoreGive(s_vs_done); }
+}
+static bool split_go(void (*fn)(void *), void *arg) {
+    if (!s_vs_h) return false;
+    s_vs_fn = fn; s_vs_arg = arg; xSemaphoreGive(s_vs_go); return true;
+}
+static void split_wait(void) { const int64_t t0 = esp_timer_get_time(); xSemaphoreTake(s_vs_done, portMAX_DELAY); s_vs_wait_us += esp_timer_get_time() - t0; }
+void split_task_start(void) {
+    s_vs_go = xSemaphoreCreateBinary(); s_vs_done = xSemaphoreCreateBinary();
+    if (s_vs_go && s_vs_done && xTaskCreatePinnedToCore(split_task, "split", SPLIT_STACK, NULL, 6, &s_vs_h, 1) == pdPASS) render_set_second_core(split_go, split_wait);
+    else { s_vs_h = NULL; ESP_LOGW(TAG, "the grass split: no task on core 1 (internal RAM?) - one core draws it all"); }
+}
+#endif
+void device_bake_cap(int ms) {                  /* director `bakecap [MS]` */
+    if (ms >= 0) s_bake_cap_us = (int64_t)ms * 1000;
+    ESP_LOGI(TAG, "bake cap: %lld ms of core 1 a decision%s | %d waits so far", s_bake_cap_us / 1000, s_bake_cap_us ? "" : " (none: the bake runs free)", s_bake_capped);
+}
+void device_stacks(void) {                      /* director `stacks`: what each task's stack never used, and the heaps */
+    ESP_LOGI(TAG, "stacks unused: tank %u of %u B | bake %u of %u B | octobuild %u of %u B | advisor %u of %u B | internal %u KB free (largest %u KB, low %u KB) | psram %u KB free",
+             s_tank_h ? (unsigned)uxTaskGetStackHighWaterMark(s_tank_h) : 0, (unsigned)TANK_STACK,
+             s_bake_h ? (unsigned)uxTaskGetStackHighWaterMark(s_bake_h) : 0, (unsigned)BAKE_STACK,
+             s_ob_h ? (unsigned)uxTaskGetStackHighWaterMark(s_ob_h) : 0, (unsigned)OB_STACK,
+             (unsigned)advisor_llm_esp_stack_unused(), (unsigned)ADVISOR_STACK,
+             (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL) / 1024, (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL) / 1024,
+             (unsigned)heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL) / 1024, (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM) / 1024);
 }
 #define FRAME_MIN_MS 40                      /* the frame rate's ceiling: 25 fps (see the loop's foot) */
+/* THE OCTOPUS'S PICTURE ON THE SECOND CORE (0.4.3, common/octopus.c octopus_async_*): after the tank's draw this core lays the next
+   picture's pose out and core 1 rasterizes it while the frame is sent; the next tick waits for it (as the minnows' tick). Its stack in
+   PSRAM: internal RAM has none to spare */
+static SemaphoreHandle_t s_ob_go, s_ob_done; static bool s_ob_core1, s_ob_owed; static int64_t s_ob_wait_us;
+static void ob_wait(void);
+static void ob_task(void *arg) { (void)arg; for (;;) { xSemaphoreTake(s_ob_go, portMAX_DELAY); const int64_t t0 = esp_timer_get_time(); octopus_async_build(); octo_perf_us[4] += (long)(esp_timer_get_time() - t0); xSemaphoreGive(s_ob_done); } }
+static void ob_start(void) {
+    s_ob_go = xSemaphoreCreateBinary(); s_ob_done = xSemaphoreCreateBinary();
+    s_ob_core1 = s_ob_go && s_ob_done && xTaskCreatePinnedToCoreWithCaps(ob_task, "octobuild", OB_STACK, NULL, 6, &s_ob_h, 1, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) == pdPASS;
+    octopus_set_async(s_ob_core1);
+    octopus_set_async_wait(s_ob_core1 ? ob_wait : NULL);          /* (audit FW-1: a portrait built on this core first waits for core 1's raster - the same wait as the tick's) */
+    ESP_LOGI(TAG, "the octopus's picture: %s", s_ob_core1 ? "rasterized on core 1" : "on the render core (no task)");
+}
+static void ob_wait(void) { if (s_ob_owed) { const int64_t w0 = esp_timer_get_time(); xSemaphoreTake(s_ob_done, portMAX_DELAY); s_ob_owed = false; s_ob_wait_us += esp_timer_get_time() - w0; octo_perf_us[5] += (long)(esp_timer_get_time() - w0); } }
 static void tank_task(void *arg) {
     (void)arg;
     int64_t last = esp_timer_get_time(); int cur = 0;
     int64_t last_log = last;
-    int64_t render_us = 0, flush_us = 0, card_us = 0; uint32_t frames = 0, card_frames = 0;
+    int64_t render_us = 0, flush_us = 0, card_us = 0; uint32_t frames = 0, card_frames = 0, cover_frames = 0;
     /* the rest of the frame (2026-10-03: render + flush were ~36 ms of a ~50 ms frame, the other ~14 untimed):
        the polls (keys, IMU, touch, the console), the tank's tick, the wait for the scene prefetch, what
        follows the flush (the next prefetch, this log), and the frame's sleep */
     int64_t polls_us = 0, tick_us = 0, wait_us = 0, tail_us = 0, sleep_us = 0, slept_from = 0;
     ESP_LOGI(TAG, "tank task up | heap int %u KB", (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL) / 1024);
+    wdt_watch_tank_task();
     for (;;) {
+        wdt_feed();                              /* once a frame (THE WATCHDOG) */
+        blackbox_frame();
         int64_t now = esp_timer_get_time();
         float dt = (now - last) / 1e6f; last = now; if (dt > 0.25f) dt = 0.25f;
+#ifdef TANK_P4
+        if (dt > s_dt_max) s_dt_max = dt;            /* (the log's longest frame) */
+        if (dt > 0.06f) s_dt_n60++;
+        if (dt > 0.1f) s_dt_n100++;
+#endif
         if (slept_from) sleep_us += now - slept_from;
         sleep_button_poll(now);
         pwr_key_poll(now);
@@ -1432,8 +2437,16 @@ static void tank_task(void *arg) {
         q = tank_screen_turned(&tank) ? 2 : 0;  /* worn on a wrist the live flip never runs (the arm swings through every angle):
                                                    the way up is the keeper's setting, or what AUTO learned from the taps (tank.h) */
 #endif
-        display_port_set_quarter(q);      /* per-frame, so a turn lands between flushes */
-        touch_port_set_quarter(q);
+        {   /* the ADVANCED page's TURN IT OVER (0.4.2): during the turned sitting the flow has the way up - the IMU's own
+               reading (a ROTATION lock set aside), the watch's turned over from its SCREEN - and the IMU's turn starts it */
+#if TANK_WORN
+            int sq = adv_quarter(q, -1);
+#else
+            int sq = adv_quarter(q, imu_port_quarter());
+#endif
+            display_port_set_quarter(sq);     /* per-frame, so a turn lands between flushes */
+            touch_port_set_quarter(sq);
+        }
         { static int kept_uq = -1;        /* ... and for update mode's pages after the restart: the way up, fixed if the IMU did not choose it */
 #ifdef TANK_WATCH
           int uq = q | UPD_WAY_FIXED;
@@ -1444,8 +2457,15 @@ static void tank_task(void *arg) {
           if (uq != kept_uq) { nvs_u8_put("uq", uq); kept_uq = uq; } }
         touch_port_poll(&tank);
         director_poll(&tank);
+        link_dev_poll(&tank);              /* the tank link with ghost fish, while `link on` (docs/tank-link-0.4.md) */
         int ans = touch_port_confirm_take();
-        if (ans > 0) reset_tank();
+        if (ans == RESET_ANS_ERASE || ans == RESET_ANS_ERASE_WIFI) {   /* (0.4.2) the hold is done: ERASING goes on the glass FIRST - the erase
+                                              blocks this task for a while (the glass froze on the last frame of the hold, Strato's
+                                              watch); it begins below, once that page has been drawn and the panel has it */
+            touch_port_confirm_open_page(RESET_PG_ERASING); render_reset_erasing(ans);
+            ESP_LOGW(TAG, "ERASE EVERYTHING: held - ERASING on the glass, the erase after it");
+        }
+        else if (ans > 0) reset_tank();
         else if (ans < 0) ESP_LOGI(TAG, "reset prompt: tank kept");
 #if CONFIG_POCKET_TANK_320X240
         if (touch_port_take_lock_open() && !touch_port_shelf())   /* (this fork) a finger held still on the locked glass: MY TANKS,
@@ -1456,36 +2476,61 @@ static void tank_task(void *arg) {
             shelf_toggle();
 #endif
         { int v = 0, w = touch_port_take_setting(&v);                 /* the settings page */
-          if (w == SET_TAP_TANKS) shelf_toggle();                    /* MY TANKS from the settings page (0.3.9.3): as BOOT twice */
+          if (touch_port_take_shelf_return() && !touch_port_shelf()) { shelf_toggle(); s_shelf_from_ms = s_shelf_want && s_set_back_ms && !s_jm; ESP_LOGI(TAG, "settings: CLOSE - back to MY TANKS"); }   /* the cog's page closed (0.4.2) */
+          if (w == SET_TAP_TANKS) { shelf_toggle(); s_shelf_from_ms = s_shelf_want && !s_jm; }   /* MY TANKS from the keeper page's foot (0.4; the settings page in 0.3.9.3): as BOOT
+                                                                        twice, and its CLOSE comes back to the keeper page */
           else if (w == SET_TAP_BRIGHT) brightness_set_level(v);
           else if (w == SET_TAP_BRIGHT_LIVE) brightness_preview(v);   /* the slider's knob under the finger: the glass follows it */
           else if (w == SET_TAP_VOLUME) { audio_port_set_volume(v); if (v) audio_port_play(SND_CONFIRM, AUDIO_PITCH_ONE); }
+          else if (w == SET_TAP_VOLUME_LIVE) { audio_port_preview_volume(v); if (v) audio_port_play(SND_WHEEL_TICK, AUDIO_PITCH_ONE); }   /* a tick at each step, at its loudness */
           else if (w == SET_TAP_LIGHT) ESP_LOGI(TAG, "settings: lights out %s", v ? "AUTO (the idle rule)" : "MANUAL (double-tap the glass)");
           else if (w == SET_TAP_IDLE) ESP_LOGI(TAG, "settings: lights out after %d s still", v);
           else if (w == SET_TAP_FEED) ESP_LOGI(TAG, "settings: auto feed %s", v ? "ON" : "OFF (the keeper feeds; a starving fish loses trust)");
+          /* (GRAPHICS' two: the page hands over a tap on the one already chosen too, and the director's `gfx` / `vignette` come this way -
+             what the page shows is what is kept; written only when it differs from what is stored) */
+          else if (w == SET_TAP_GFX) { if (nvs_u8("gfx", 0) != v) nvs_u8_put("gfx", v); ESP_LOGI(TAG, "settings: graphics %s (saved; the render takes it up at its next frame)", render_gfx_name()); }
+          else if (w == SET_TAP_VIG) { if (nvs_u8("vigoff", 255) != !v) nvs_u8_put("vigoff", !v); ESP_LOGI(TAG, "settings: vignette %s (saved; the render takes it up at its next frame)", v ? "ON" : "OFF"); }
           else if (w == SET_TAP_ROTATE) ESP_LOGI(TAG, "settings: rotation %s", v ? (tank.orient_q == 2 ? "LOCKED (turned over)" : tank.orient_q ? "LOCKED (on a side)" : "LOCKED (upright)") : "unlocked (the picture follows the tank)");
           else if (w == SET_TAP_FLIP) orientation_set(v != 0);              /* the CYD's SCREEN row (no IMU) */
           else if (w == SET_TAP_SLEEP) sleep_setting_set(v); }              /* the 320x240 boards' SLEEP row: NEVER / SCREEN / LIGHT */
         { int a = touch_port_take_adv();                                /* the ADVANCED page: a size SET, a touch map kept or dropped */
           if (a == ADV_ACT_CELL) { adv_save(a); battery_port_set_cell(adv_cell()); audio_port_play(SND_CONFIRM, AUDIO_PITCH_ONE); }
           else if (a == ADV_ACT_FIT) { adv_save(a); audio_port_play(SND_CONFIRM, AUDIO_PITCH_ONE);
-              const touch_fit_t *f = adv_touch_fit();
-              ESP_LOGI(TAG, "advanced: touch %s (x %.3f %+.1f, y %.3f %+.1f)", touch_fit_is_none(f) ? "back to the board's own map" : "map kept", f->ax, f->bx, f->ay, f->by); } }
+              const touch_fit_t *f = adv_touch_fit(), *g = adv_touch_fit_at(tank.orient_q); const touch_cal_t *k = adv_touch_cal();
+              ESP_LOGI(TAG, "advanced: touch %s (upright x %.3f %+.1f, y %.3f %+.1f; this way up (%d) x %.3f %+.1f, y %.3f %+.1f; %d sitting%s)",
+                       k->n == 0 ? "back to the board's own map" : "map kept", f->ax, f->bx, f->ay, f->by, tank.orient_q, g->ax, g->bx, g->ay, g->by, k->n, k->n == 1 ? "" : "s"); } }
         adv_tick(dt);
-        if (touch_port_take_update() == UPD_TAP_CHECK) request_update();   /* the updates page's CHECK: save, restart into update mode */
+        { const int u = touch_port_take_update();
+          if (u == UPD_TAP_CHECK) request_update(false);   /* the updates page's CHECK: save, restart into update mode */
+          else if (u == UPD_TAP_ADD) request_update(true); }   /* the WI-FI page's ADD A NETWORK (0.4.2): the same, begun at the list */
         if (s_swap_i >= 0 && !touch_port_shelf()) { s_swap_i = -1; s_swap_go = false; }   /* (MY TANKS closed under it: no swap) */
         if (s_swap_go) {                                 /* the dark frame went out last frame: save, move, restart */
             int i = s_swap_i; s_swap_go = false; s_swap_i = -1;
             shelf_swap_in(i);                            /* (back here only if it could not start: the card again) */
             s_shelf_baked = false;
         }
-        { float sx, sy; if (touch_port_take_shelf_tap(&sx, &sy) && !s_sh_ren && !s_sh_rm) shelf_tap(sx, sy); }   /* MY TANKS (RENAME and REMOVE take their own touches) */
+        { float sx, sy; int64_t sp; if (touch_port_take_shelf_tap(&sx, &sy, &sp) && !s_sh_ren && !s_sh_rm) shelf_tap(sx, sy, sp); }
+        if (s_wire_tap) { s_wire_tap = false; if (touch_port_shelf()) { ESP_LOGI(TAG, "MY TANKS: a tap by wire at %.0f,%.0f (lib %d page %d note %d pick %d card %d)", s_wire_x, s_wire_y, s_sh_lib, s_lib_pg, s_sh_note, s_sh_pick, s_sh_card); shelf_tap(s_wire_x, s_wire_y, esp_timer_get_time()); } }   /* MY TANKS (RENAME and REMOVE take their own touches) */
         shelf_rename_poll(); shelf_remove_poll(); shelf_hold_poll();
         { int r = touch_port_take_shop();                               /* the shop's UNLOCK / MOVE / SELL / SHELVE / PUT BACK */
-          if (r >= SHOP_TAP_PLACE) {                                    /* back from the shelf (0.3.9): the placement page, its old spot in place */
+          if (r == SHOP_TAP_LAB) {                                      /* THE FISH LAB's OPEN (0.4.3): the creator's pages, for a fry made to order */
+              touch_port_show_shop(false); setup_begin_lab(&tank);
+              ESP_LOGI(TAG, "shop: THE FISH LAB opened (a fry is %d, balance %d)", SD_PRICE_LAB_FRY, (int)tank.sd_balance);
+          } else if (r >= SHOP_TAP_BG_USE) {                            /* a background switched to (0.4.1): the shop stays up, the row says IN USE;
+                                                                           the tank bakes it when the shop closes (render_tank sees bg_now) */
+              int bg = r - SHOP_TAP_BG_USE;
+              if (progression_bg_use(&tank, bg)) { audio_port_play(SND_CONFIRM, AUDIO_PITCH_ONE); ESP_LOGI(TAG, "shop: background %s in use", bg_name(bg)); }
+          } else if (r >= SHOP_TAP_BG_BUY) {                            /* a background bought (0.4.1): 25 from the wallet, in use at once */
+              int bg = r - SHOP_TAP_BG_BUY;
+              if (progression_bg_buy(&tank, bg)) { audio_port_play(SND_CONFIRM, AUDIO_PITCH_ONE);
+                  ESP_LOGI(TAG, "shop: background %s unlocked and in use, %d sand dollars left", bg_name(bg), (int)tank.sd_balance); }
+              else ESP_LOGI(TAG, "shop: background %s refused (balance %d, price %d)", bg_name(bg), (int)tank.sd_balance, SD_PRICE_BG);
+          } else if (r >= SHOP_TAP_PLACE) {                                    /* back from the shelf (0.3.9): the placement page, its old spot in place */
               int item = r - SHOP_TAP_PLACE;
-              if (progression_unshelve(&tank, item)) { audio_port_play(SND_CONFIRM, AUDIO_PITCH_ONE); touch_port_show_shop(false); setup_begin_place(&tank, item);
-                  ESP_LOGI(TAG, "shop: %s back from the shelf - placement page up", SD_ITEMS[item].name); }
+              if (progression_unshelve(&tank, item)) { audio_port_play(SND_CONFIRM, AUDIO_PITCH_ONE);
+                  if (tank_decor_placeable(item)) { touch_port_show_shop(false); setup_begin_place(&tank, item);
+                                                    ESP_LOGI(TAG, "shop: %s back from the shelf - placement page up", SD_ITEMS[item].name); }
+                  else ESP_LOGI(TAG, "shop: %s back from the shelf, where it was", SD_ITEMS[item].name); }   /* a critter (0.4.2): no page, the shop stays up */
           } else if (r >= SHOP_TAP_SHELVE) {                            /* put away (0.3.9): the shop stays up, the row says ON THE SHELF */
               int item = r - SHOP_TAP_SHELVE;
               if (progression_shelve(&tank, item)) { audio_port_play(SND_CONFIRM, AUDIO_PITCH_ONE);
@@ -1497,33 +2542,59 @@ static void tank_task(void *arg) {
               else ESP_LOGI(TAG, "shop: fry %d refused (balance %d, %d fish)", k, (int)tank.sd_balance, tank.n_fish);
           } else if (r >= SHOP_TAP_SELL) {                              /* sold back: the refund, the piece gone, the row for sale again */
               int item = r - SHOP_TAP_SELL;
+              const int back = progression_sell_value_of(&tank, item);   /* (before the sale: a staged piece pays for the stages it has) */
               if (progression_sell(&tank, item)) { audio_port_play(SND_CONFIRM, AUDIO_PITCH_ONE);
-                  ESP_LOGI(TAG, "shop: %s sold back for %d, balance %d", SD_ITEMS[item].name, progression_sell_value(item), (int)tank.sd_balance); }
+                  ESP_LOGI(TAG, "shop: %s sold back for %d, balance %d", SD_ITEMS[item].name, back, (int)tank.sd_balance); }
           } else if (r >= SHOP_TAP_MOVE) {                              /* a piece already in the tank: place it again */
               int item = r - SHOP_TAP_MOVE;
               touch_port_show_shop(false); setup_begin_place(&tank, item);
               ESP_LOGI(TAG, "shop: MOVE %s - placement page up (drag, DEPTH, DONE)", SD_ITEMS[item].name);
+          } else if (r == SHOP_TAP_BUY + SHOP_ITEM_LAB) {               /* THE FISH LAB (0.4.3): the board's from now on */
+              if (progression_lab_buy(&tank)) { audio_port_play(SND_CONFIRM, AUDIO_PITCH_ONE);
+                  ESP_LOGI(TAG, "shop: THE FISH LAB unlocked, %d sand dollars left", (int)tank.sd_balance); }
+              else ESP_LOGI(TAG, "shop: THE FISH LAB refused (balance %d, price %d)", (int)tank.sd_balance, SD_PRICE_LAB);
+          } else if (r == SHOP_TAP_BUY + SHOP_ITEM_BREED) {             /* SELECTIVE BREEDING (0.4.2): the BREEDING tool joins the wheel */
+              if (progression_breed_buy(&tank)) { audio_port_play(SND_CONFIRM, AUDIO_PITCH_ONE);
+                  ESP_LOGI(TAG, "shop: SELECTIVE BREEDING unlocked, %d sand dollars left", (int)tank.sd_balance); }
+              else ESP_LOGI(TAG, "shop: SELECTIVE BREEDING refused (balance %d, price %d)", (int)tank.sd_balance, SD_PRICE_BREED);
           } else if (r >= SHOP_TAP_BUY) {
               int item = r - SHOP_TAP_BUY;
+              const int had = progression_stage(&tank, item);           /* (0.4.3: owned already - an UPGRADE, the piece stays where it stands: no placement page) */
               if (progression_buy(&tank, item)) { audio_port_play(SND_CONFIRM, AUDIO_PITCH_ONE);
-                  ESP_LOGI(TAG, "shop: %s unlocked, %d sand dollars left", SD_ITEMS[item].name, (int)tank.sd_balance);
-                  if (tank_decor_placeable(item)) {                     /* a placeable piece: the page opens over the live tank */
+                  if (had) ESP_LOGI(TAG, "shop: %s upgraded to stage %d, %d sand dollars left", SD_ITEMS[item].name, progression_stage(&tank, item), (int)tank.sd_balance);
+                  else ESP_LOGI(TAG, "shop: %s unlocked, %d sand dollars left", SD_ITEMS[item].name, (int)tank.sd_balance);
+                  if (tank_decor_placeable(item) && !had) {                     /* a placeable piece: the page opens over the live tank */
                       touch_port_show_shop(false); setup_begin_place(&tank, item);
                       ESP_LOGI(TAG, "shop: placement page up for the %s", SD_ITEMS[item].name); } }
-              else ESP_LOGI(TAG, "shop: %s refused (balance %d, price %d)", SD_ITEMS[item].name, (int)tank.sd_balance, SD_ITEMS[item].price); } }
+              else ESP_LOGI(TAG, "shop: %s refused (balance %d, price %d)", SD_ITEMS[item].name, (int)tank.sd_balance, progression_next_price(&tank, item)); } }
         brightness_apply(tank.night);
         { static int64_t last_bat; if (now - last_bat > 5LL * 60 * 1000000) {   /* battery log: awake sample every 5 min */
             batlog_add(battery_pct(), battery_port_vbat_mv(), display_port_brightness(), false, last_bat ? "" : "boot"); last_bat = now; } }
         int64_t pf_tick = esp_timer_get_time(); polls_us += pf_tick - now;
-        tank.hold_light = setup_active() || touch_port_confirm_up();   /* no lights-out mid-name */
-        tank.ui_cover = tank.hold_light || touch_port_milestones() || touch_port_settings() || touch_port_updates() || touch_port_shop() || touch_port_battery() || touch_port_shelf() || adv_up();   /* a fry's spawning waits */
+        tank.hold_light = (setup_active() && !setup_is_about()) || touch_port_confirm_up();   /* no lights-out mid-name (MORE's pages: the keeper page's rule, no hold) */
+        tank.ui_cover = tank.hold_light || touch_port_milestones() || touch_port_settings() || touch_port_updates() || touch_port_shop() || touch_port_collection() || touch_port_battery() || touch_port_shelf() || adv_up();   /* a fry's spawning waits */
         render_unlock();                           /* (a safety net: the lock is given before the flush) */
         s_render_wants = true; xSemaphoreTake(s_render_lock, portMAX_DELAY); s_render_wants = false; s_render_held = true;   /* THE SECOND CORE: the bake task out while the frame runs */
+        if (s_jm) { tank.clock += dt; if (s_jt) jelly_prefs_tick(now);   /* THE JELLY TANK: no fish tank under it (its clock alone, for the pages' blinks) */
+            static int64_t dirty_at; if (!progression_dirty()) dirty_at = 0; else if (!dirty_at) dirty_at = now;
+            else if (now - dirty_at > 10000000LL) { dirty_at = 0; progression_save(&tank); }   /* (a setting kept in the save: progression_tick's saver
+                                                                       does not run here) */ }   /* THE JELLY TANK: no fish tank under it (its clock alone, for the pages' blinks) */
+        else {
+        ob_wait();                                        /* (the octopus's picture from core 1, done before anything of it moves) */
         tank_tick(&tank, dt, llm_ok ? advisor_llm_esp : advisor_rules);
         progression_tick(&tank, dt);
+        }
         battery_frame(now);
+        if (!s_jm) {
         if (llm_ok && advisor_core_damaged()) notice_model_damaged();   /* a decision's odds were not numbers (once per start) */
-        notice_tick(&tank, dt, tank.ui_cover || setup_birth_due());   /* a fry's welcome first (2026-09-29) */
+        extern bool director_notice_hold;
+        notice_tick(&tank, dt, director_notice_hold || tank.ui_cover || setup_holds_notices(&tank) || s_loading_last   /* every setup page and a fry's welcome first (setup.c, the
+                                                                   sim's rule too, 0.4.3 audit r1 TP-8 / TP-9b: MORE's pages hold them now - one came
+                                                                   and went undrawn under them; the lab and the reveal held them already, ui_cover); */   /* a fry's welcome first (2026-09-29); the boot show first (0.4); */
+                               || render_give_modal_step(&tank) != RENDER_GM_OFF || render_gift_up(&tank)   /* the GIVE modal and the gift card first:
+                                                                   a notice under them stepped aside, never chiming unseen or taking their taps (11-02 sweep) */
+                               || link_dev_page_up());             /* (0.4.2, audit TP-1b) link mode's page too: a notice was drawn over it and one
+                                                                   tap on DONE closed both, the notice unread */
         { int cue = notice_take_cue(); if (cue >= 0) audio_port_play(cue, AUDIO_PITCH_ONE); }
         { static bool loop_on;                     /* the bubble loop rides the setup's placement page */
           bool loop = setup_active() && !setup_is_birth() && setup_page() == SETUP_PG_BUBBLES;
@@ -1532,14 +2603,18 @@ static void tank_task(void *arg) {
           if (s >= 0 && prev_sel < 0) audio_port_play(SND_CARD_OPEN, AUDIO_PITCH_ONE);
           if (s < 0 && prev_sel >= 0) audio_port_play(SND_CARD_CLOSE, AUDIO_PITCH_ONE);
           prev_sel = s; }
-        if (!touch_port_confirm_up()) {           /* an arrival owed its welcome: the birth flow (setup.c) */
+        if (!touch_port_confirm_up() && !link_dev_updating()) {   /* an arrival owed its welcome: the birth flow (setup.c) - not over UPDATING THE
+                                                                     LINK, which restarts the tank when it ends (0.4.3, M5): it waits for the next boot */
             int nb = setup_poll_birth(&tank);
             if (nb >= 0) { touch_port_dismiss(); audio_port_play(SND_ARRIVAL, AUDIO_PITCH_ONE);
                            ESP_LOGI(TAG, "a new fry, %s: birth flow up (announce, name, family; director `setup off` drops it)", tank.fish[nb].name); }
         }
+        }   /* (!s_jm) */
         int64_t pf_wait = esp_timer_get_time(); tick_us += pf_wait - pf_tick;
         int64_t pf_tail = pf_wait;
         if (fb[cur]) {
+            render_frame_begin();                            /* (THE PAGE KEPT: a buffer keeps the keeper page while nothing else draws) */
+            render_gift_allow(!setup_active() && !touch_port_confirm_up() && !adv_up());   /* the gift card waits under these (11-02 sweep) */
             if (USE_RESTORE) {
                 if (s_restore_pending[cur]) {               /* this buffer's last frame: the scene is back under it once it left the wire (flush_done) */
                     xSemaphoreTake(s_restored[cur], portMAX_DELAY);
@@ -1550,8 +2625,13 @@ static void tank_task(void *arg) {
             } else if (s_prefetch_pending) {                /* prior frame's scene prefetch */
                 xSemaphoreTake(s_amc_done, portMAX_DELAY);
                 s_prefetch_pending = false;
-                render_fb_primed(s_prefetch_fb, s_prefetch_ep);
+                if (s_prefetch_jelly) { render_fb_primed(NULL, 0); xt_primed(s_prefetch_fb); }   /* (the jelly tank's water) */
+                else render_fb_primed(s_prefetch_fb, s_prefetch_ep);
             }
+#ifdef TANK_P4
+            { static uint32_t on; render_set_touched_mask(&on); }   /* (the big screens: marking on - the marks are tiles, render.c THE BIG SCREENS' TOUCHED TILES) */
+            { extern void display_port_p4_restore_wait(void); display_port_p4_restore_wait(); }   /* THE RESTORE BESIDE THE TICK: the scene back in this buffer before it is drawn (the wait counted as the prefetch's) */
+#endif
             int64_t t0 = esp_timer_get_time();
             wait_us += t0 - pf_wait;
             /* a page that covers the glass (KEEPER, SETTINGS, UPDATES, UPGRADES: each fills the whole frame before
@@ -1559,7 +2639,13 @@ static void tank_task(void *arg) {
                19 fps with SETTINGS up, 25 without the hidden tank). The tank itself ticks on. No buffer holds
                the scene while a page is up, so none is "primed": the first tank frame after the page copies the
                scene itself. */
-            bool page = touch_port_milestones() || touch_port_settings() || touch_port_updates() || touch_port_shop() || touch_port_shelf() || adv_up();
+            bool page = touch_port_milestones() || touch_port_settings() || touch_port_updates() || touch_port_shop() || touch_port_shelf() || adv_up()
+                        || setup_is_about()          /* (MORE's pages, 0.4.2: over the keeper page, not the tank) */
+                        || setup_lab_black()         /* (THE FISH LAB's pages, 0.4.3: a black page of their own - no tank drawn under them) */
+                        || setup_evo_black();        /* (THE PARAGON'S REVEAL, 0.4.3: its own dark page, held - the tank was drawn under it, hidden) */
+#ifdef TANK_P4
+            page = page || touch_port_collection();   /* (the big screens' VISITORS covers the glass and keeps its own frame: no tank drawn under it - it ran at 7 fps over one) */
+#endif
             /* LOADING (0.3.9.3, Strato: "i rather add a loading spinner if its some kind of first load churn"): a tank's
                grass loop is first baked behind render_loading, two moments a frame at full speed, instead of under a
                stuttering tank - after a SWAP IN or a power-on. Once per boot; 15 s at most */
@@ -1577,22 +2663,58 @@ static void tank_task(void *arg) {
                     if (!loading) { s_loaded = true; ESP_LOGW(TAG, "loading: 15 s and the loop is not whole - the tank as it is"); }
                 } else if (s_load_t0) { s_loaded = true; ESP_LOGI(TAG, "loading: the tank is ready after %lld ms", (now - s_load_t0) / 1000); }
             }
+            s_loading_last = loading;
+            touch_port_set_quiet(loading);             /* the boot show takes no tap (0.4, the 11-02 sweep) */
+            { static int s_valid_frames; if (s_ota_pending && !loading && ++s_valid_frames >= OTA_VALID_FRAMES) ota_valid_now("the tank is on the glass"); }
+            {   /* THE LOOP PLANNED UP AGAIN (0.4, Strato 11-02 on the square: "the grass looks too steppy" - the band grew while a page held
+                   PSRAM, the plan was squeezed to 18 moments of 48, and nothing but a restart planned it again). A plan that came out short
+                   of GRASS_LOOP_MOMENTS is tried again once PSRAM free is clearly more than when it was planned (GL_UP_GAIN: a page's memory
+                   back, a hold let go) and the tank has been bare and the loop whole for a minute - the same bake as a boot's, the grass
+                   drawn live meanwhile. A short plan with nothing given back (a tall bed's budget, GL_MIN_BANDS) is the loop as it is:
+                   never retried. A retry that gains no moments is the last until the loop plans anew on its own (the 11-02 evening
+                   sweep: "memory was refused" was the old trigger, but every plan logs refusals - the bands are allocated until one is,
+                   the arena probed down by quarters - so a tall bed re-planned at 1, 4, 16 min, then every 30, for good) */
+                static gl_up_t s_up;                        /* (the decision: common/gl_upagain.h - the day's moments, plans counted by the render; never by night's
+                                                               picture nor at LOW; MEDIUM's shape whole is its loop whole - 0.4.2 review) */
+                gl_up_in_t in = { .plans = render_grass_loop_plans(), .night = gl_up_night(render_grass_loop_night(), tank.night, render_gfx_level() == RENDER_GFX_MEDIUM), .on = render_grass_loop_is_on(),
+                                  .low = render_gfx_low(), .busy = loading || page || setup_active() || touch_port_confirm_up(),
+                                  .plan_free = s_gl_plan_free, .ps_free = heap_caps_get_free_size(MALLOC_CAP_SPIRAM), .now = now, .goal = GRASS_LOOP_MOMENTS };
+                render_grass_loop_day_moments(&in.planned, &in.shape, &in.ready);
+                const int up = gl_up_step(&s_up, &in);
+                if (up & GL_UP_PLANNED) ESP_LOGI("display", "grass loop: planned again, %d -> %d moments%s", s_up.said_from, in.planned, s_up.spent ? " - no gain: not tried again" : "");
+                if (up & GL_UP_NOW) {
+                    ESP_LOGI("display", "grass loop: %d of %d moments, planned with psram %u KB free, %u KB now - planning it again",
+                             in.planned, GRASS_LOOP_MOMENTS, (unsigned)(s_up.free_at / 1024), (unsigned)(in.ps_free / 1024));
+                    render_grass_loop_on(false); render_grass_loop_on(true);
+                }
+            }
             if (!loading && boot_show_on()) boot_show_end();   /* (a page over it, or out of time: its memory back) */
-            if (page && !USE_RESTORE) render_fb_primed(NULL, 0);
+            if (page && s_jm) xt_notice_tick(dt, true);   /* (0.4.3) a page over the experimental tank (MY TANKS): its thank-you, up, was seen; one owed waits */
+            if (page && !USE_RESTORE) { render_fb_primed(NULL, 0); if (s_jm) xt_primed(NULL); else jelly_fb_primed(NULL); }   /* (the page draws into it: no water there now) */
             else if (loading) {
                 int baked = render_grass_loop_bake_more(&tank, 2);
                 if (baked == 0 && (!boot_show_on() || render_grass_loop_warming())) render_tank(&tank, fb[cur], TANK_W);   /* (a tank frame until the loop can bake: its look settles) */
                 if (!s_show_tried && boot_show_ready()) {     /* the loop has its memory (the show's comes from what is left), or there is none to wait for */
                     s_show_tried = true;
                     size_t before = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
-                    if (boot_show_begin(&tank, s_load_swap, show_alloc, gl_free)) {
+                    s_show_building = true;            /* (its layers' bakes and its rebake of the scene: the background lent under the show's floor - 0.4.1,
+                                                          the square 11-05: refused, they drew the water and the loop rebuilt mid-show) */
+                    const bool show_ok = boot_show_begin(&tank, s_load_swap, show_alloc, gl_free);
+                    s_show_building = false;
+                    if (show_ok) {
                         s_show_t0 = esp_timer_get_time();
                         ESP_LOGI(TAG, "loading: the boot show (%s), built in %lld ms, psram %u -> %u KB free", s_load_swap ? "the water rises" : "the light comes up",
                                  (s_show_t0 - now) / 1000, (unsigned)(before / 1024), (unsigned)(heap_caps_get_free_size(MALLOC_CAP_SPIRAM) / 1024));
                     } else ESP_LOGW(TAG, "loading: no memory for the boot show (psram %u KB free) - the bubbles instead", (unsigned)(before / 1024));
                 }
             }
-            else if (!page) render_tank(&tank, fb[cur], TANK_W);
+            else if (!page && s_jm) {                       /* THE JELLY TANK */
+                xt_frame(fb[cur], dt, tank.clock);         /* (the jellies, the minnows, the piranhas - or dark: MY TANKS still opens) */
+                xt_notice_tick(dt, s_shelf_want || touch_port_touch_lock());   /* (0.4.3) the thank-you: over the bare tank only - never on MY TANKS'
+                                                              snapshot (BOOT twice: s_shelf_want, this frame) nor the locked glass */
+                if (xt_notice_up()) render_xt_notice(fb[cur], TANK_W);
+            }
+            else if (!page) { render_tank(&tank, fb[cur], TANK_W); if (s_ob_core1 && !s_ob_owed && octopus_async_prep()) { s_ob_owed = true; xSemaphoreGive(s_ob_go); } }
             if (s_shelf_want && !page && !loading) {                       /* BOOT twice: this frame's tank is the NOW slot's picture, the page from the next */
                 int tw, th; render_shelf_thumb_size(&tw, &th);
                 if (!s_shelf_thumb) s_shelf_thumb = heap_caps_malloc((size_t)tw * th * 2, MALLOC_CAP_SPIRAM);
@@ -1605,14 +2727,40 @@ static void tank_task(void *arg) {
                                                 between 40 ms frame boundaries */
             int sel = touch_port_selected();
             int64_t tc = esp_timer_get_time();
+            if (!touch_port_shelf() && !s_shelf_want) shelf_free();   /* (closed by a page or the birth flow, not shelf_close) */
+#ifdef TANK_P4
+            /* THE DRY PASS (0.4.3, back from October's home line; render.c): a page that covers the glass is signed tile by
+               tile first and drawn only where this buffer does not already hold it, and only those tiles are turned - a
+               million pixels filled and a whole frame through the PPA otherwise, for the same picture (SHOP and SETTINGS
+               ran at 16 - 17 fps on the 10.1). The pages the tile test holds that way: SETTINGS (not while its GRAPHICS face
+               bakes a tank under itself), UPDATES and the SHOP. Every other page is drawn whole, and so is any frame a writer
+               went around the primitives in (THE TAINT). */
+            bool p4_dry = false;
+            static bool s_p4_page_whole;                 /* the last frame's page met a writer the signs do not cover: this one is drawn whole at once (a dry
+                                                            pass first would only be thrown away - the shop under its modal, a shelf's thumbs) */
+#define P4_PAGE(ok, draw) do { if (!(ok) || s_p4_page_whole || !render_page_dry_ok(false)) { render_overlay_begin(fb[cur]); draw; } \
+                               else { p4_dry = true; render_overlay_dry(fb[cur]); draw; if (render_overlay_redraw()) { draw; render_overlay_unmask(); } } } while (0)
+            if (page) render_overlay_begin(fb[cur]);   /* (a page frame: this buffer's marks begin here - render_tank did not run) */
+#else
+#define P4_PAGE(ok, draw) do { draw; } while (0)
+#endif
             if (touch_port_shelf()) {             /* MY TANKS (the tank switcher) */
                 shelf_render(fb[cur]);
                 sel = -1;
             } else if (adv_up()) {                /* the ADVANCED page (0.3.9.2) */
                 adv_render(fb[cur], TANK_W);
                 sel = -1;
+            } else if (setup_lab_black()) {       /* THE FISH LAB's pages (0.4.3): black, held - only the fish's boxes drawn again */
+                render_lab_page(&tank, fb[cur], TANK_W, tank.clock);
+                sel = -1;
+            } else if (setup_evo_black()) {       /* THE PARAGON'S REVEAL (0.4.3): its own page, held - only what moves drawn again */
+                render_evo_held(&tank, fb[cur], TANK_W, tank.clock);
+                sel = -1;
+            } else if (setup_is_about()) {        /* MORE's pages (0.4.2): the keeper page halved, held, the panel over it */
+                render_keeper_about(&tank, fb[cur], TANK_W, tank.clock);
+                sel = -1;
             } else if (touch_port_milestones()) {       /* milestones page: covers the tank until a tap */
-                render_milestones(&tank, fb[cur], TANK_W);
+                render_milestones(&tank, fb[cur], TANK_W);   /* (the big screens: the wide keeper page keeps its own frame - render_big.c THE WIDE PAGE KEPT - and says its moving boxes) */
                 sel = -1;
             } else if (touch_port_settings()) {  /* settings page: brightness + volume */
 #if CONFIG_POCKET_TANK_320X240
@@ -1625,20 +2773,43 @@ static void tank_task(void *arg) {
 #endif
                 render_settings_set_sleep(sleep_setting());   /* -1 on a deepsleep build: no row */
 #endif
-                render_settings(&tank, fb[cur], TANK_W, brightness_level(), audio_port_volume());
+                { static int64_t gfx_t0; static bool gfx_quit;   /* (the log's ONE MOMENT: how long the page said it, for the bench) */
+                  if (!render_gfx_busy()) gfx_t0 = 0, gfx_quit = false;
+                  else { if (!gfx_t0) gfx_t0 = esp_timer_get_time();
+                         render_gfx_settle(s_jm ? NULL : &tank, fb[cur], TANK_W);
+                         if (!render_gfx_busy()) { ESP_LOGI(TAG, "gfx page: ONE MOMENT %d ms", (int)((esp_timer_get_time() - gfx_t0) / 1000)); gfx_t0 = 0; }
+                         else if (!render_gfx_waiting() && !gfx_quit) { gfx_quit = true; ESP_LOGI(TAG, "gfx page: ONE MOMENT gave up at %d ms (the rest bakes under the tank)", (int)((esp_timer_get_time() - gfx_t0) / 1000)); } } }   /* THE GRAPHICS PAGE's ONE MOMENT (0.4.2): a change made on
+                                                        it baked in behind the page - tank frames and loop moments into this buffer, which the page then
+                                                        covers whole. Idle (every other frame of the page): nothing */
+#ifdef TANK_P4
+                render_settings(&tank, fb[cur], TANK_W, brightness_level(), audio_port_volume());   /* (the big screens: the wide SETTINGS page keeps its own frame - render_big.c) */
+#else
+                P4_PAGE(!render_gfx_busy(), render_settings(&tank, fb[cur], TANK_W, brightness_level(), audio_port_volume()));
+#endif
                 sel = -1;
             } else if (touch_port_updates()) {   /* the updates page (2026-09-30): version, network, CHECK FOR UPDATES */
-                render_updates_page(fb[cur], TANK_W);
+#ifdef TANK_P4
+                render_updates_page(fb[cur], TANK_W);        /* (the big screens: the wide UPDATES page is a still page, kept - render_big.c, update.c) */
+#else
+                P4_PAGE(true, render_updates_page(fb[cur], TANK_W));
+#endif
                 sel = -1;
             } else if (touch_port_shop()) {      /* the shop: sand dollars and what they buy */
-                render_shop(&tank, fb[cur], TANK_W);
+#ifdef TANK_P4
+                render_shop(&tank, fb[cur], TANK_W);         /* (the big screens: the wide UPGRADES page keeps its own frame, as the keeper page - render_big.c) */
+#else
+                P4_PAGE(true, render_shop(&tank, fb[cur], TANK_W));
+#endif
+                sel = -1;
+            } else if (touch_port_collection()) {   /* the visitor collection (2026-10-06) */
+                render_collection(&tank, fb[cur], TANK_W);
                 sel = -1;
             } else render_sd_toast(&tank, fb[cur], TANK_W);   /* the live tank: "+N" as dollars are earned */
             if (page && USE_RESTORE) render_touch_all();   /* a whole page: the whole scene comes back under it */
             if (sel >= 0) render_stats_card(&tank, sel, fb[cur], TANK_W);   /* tapped fish: stats card (+ the pill) */
             {   /* the battery pill: with a card, while low, and a few seconds after the cable goes in;
                    the battery page (a tap on the pill) over the live tank in its place */
-                bool pages = touch_port_milestones() || touch_port_settings() || touch_port_updates() || touch_port_shop() || touch_port_shelf() || setup_active() || touch_port_confirm_up() || adv_up();
+                bool pages = touch_port_milestones() || touch_port_settings() || touch_port_updates() || touch_port_shop() || touch_port_collection() || touch_port_shelf() || setup_active() || touch_port_confirm_up() || adv_up();
                 bool bpage = touch_port_battery() && s_bat_ok && !pages;
                 bool pill = s_bat_ok && !pages && !bpage && (sel >= 0 || s_bat_low || now < s_bat_popup_us);
                 if (bpage) {
@@ -1646,19 +2817,29 @@ static void tank_task(void *arg) {
                     battery_info(&s_bh, clock_port_now_unix(), (int)(s_bat_frac * 100 + 0.5f), s_bat_mv, s_bat_state, &bi);
                     render_battery_info(fb[cur], TANK_W, &bi, tank.clock);
                 } else if (pill) render_battery(fb[cur], TANK_W, s_bat_frac, s_bat_state, tank.clock);
-                if (!pages && !bpage) render_tool_chip(&tank, sel, fb[cur], TANK_W);   /* a tool in hand: the chip (2026-10-01) */
+                if (!pages && !bpage) { render_tool_chip(&tank, sel, fb[cur], TANK_W); render_breed_card(&tank, fb[cur], TANK_W); }   /* a tool in hand: the chip (2026-10-01); SELECTIVE BREEDING's card (0.4.2) */
+                if (!pages && !bpage) link_dev_draw(fb[cur], TANK_W, tank.clock);      /* link mode's page, the DRIFTED notice (0.4) */
                 touch_port_set_pill(pill);
             }
-            if (!touch_port_milestones() && !touch_port_settings() && !touch_port_updates() && !touch_port_shop() && !touch_port_shelf() && !adv_up()) {   /* an announcement over the live tank */
+            if (!touch_port_milestones() && !touch_port_settings() && !touch_port_updates() && !touch_port_shop() && !touch_port_collection() && !touch_port_shelf() && !adv_up()
+                && !setup_is_about() && !setup_evo_black()) {   /* an announcement over the live tank (not over MORE's pages: the keeper page's own rule;
+                                                   nor over the reveal - drawn last, it always covered one) */
                 const notice_t *nt = notice_current();
                 if (nt) render_notice(&tank, fb[cur], TANK_W, nt->kind, nt->fish, nt->bit, 1.0f - nt->age / NOTICE_UP_S);
             }
-            if (touch_port_lock_hint() && !touch_port_shelf())   /* a touch on the locked glass: the way back */
+            if (!touch_port_milestones() && !touch_port_settings() && !touch_port_updates() && !touch_port_shop() && !touch_port_collection()
+                && !touch_port_battery() && !touch_port_shelf() && !adv_up() && !setup_active())   /* over the live tank (0.4): the GIVE modal (the keeper
+                                                                                                 page draws its own) */
+                render_give_modal(&tank, fb[cur], TANK_W);
+            render_gift(&tank, fb[cur], TANK_W);     /* a gift offered to us: over ANY page (the keeper page drew it as part of itself), waiting
+                                                        under the tank's own setup (render_gift_allow, the frame's top; 11-02 sweep) */
+            { int gc = render_gift_take_cue(); if (gc >= 0) audio_port_play(gc, AUDIO_PITCH_ONE); }   /* its cue as it is first seen */
+            if (touch_port_lock_hint() && !touch_port_shelf() && !setup_evo_black())   /* a touch on the locked glass: the way back (the reveal: under it, as ever) */
                 render_touch_lock_hint(fb[cur], TANK_W);
-            if (setup_active())                  /* first-run setup: over the tank, under the prompt */
+            if (setup_active() && !setup_is_about() && !setup_lab_black() && !setup_evo_black())   /* first-run setup: over the tank, under the prompt (MORE's and the lab's: drawn above) */
                 render_setup(&tank, fb[cur], TANK_W, tank.clock);
-            if (touch_port_confirm_up())         /* reset prompt: over everything, fish still swim */
-                render_confirm_reset(fb[cur], TANK_W, touch_port_confirm_frac());
+            if (touch_port_confirm_up())         /* reset prompt: over everything, fish still swim (0.4.2: the page of it that is up) */
+                render_reset_prompt(fb[cur], TANK_W, touch_port_confirm_frac());
             if (loading) {                       /* (over everything: the whole frame) */
                 if (boot_show_on()) {
                     int ln = render_grass_loop_n();
@@ -1676,14 +2857,85 @@ static void tank_task(void *arg) {
                 else if (!s_show_tried) memset(fb[cur], 0, (size_t)TANK_W * TANK_H * sizeof(uint16_t));   /* (dark until the show starts; no show and no loop: the tank frame drawn above) */
                 if (USE_RESTORE) render_touch_all();
             }
+#ifdef TANK_P4
+            /* (the big screens) no tank in this frame: a page over it, the boot show, an experimental tank */
+            const bool p4_no_tank = page || loading || s_jm;
+            s_p4_page_whole = page && !loading && render_overlay_tainted();   /* (asked before the frame loop's own word, below) */
+            if (!page) render_overlay_forget(fb[cur]);     /* (an experimental tank, the boot show: the buffer holds no page - render_tank says so itself) */
+            if (page && (!p4_dry || loading)) render_overlay_taint();   /* (a page drawn whole, or under the boot show: this buffer holds nothing THE DRY PASS may count on) */
+            const bool p4_page_dry = p4_dry && page && !loading && !render_overlay_tainted();   /* this frame's page was signed whole: its tiles alone */
+            if (page) render_overlay_keep();               /* what this buffer holds of the page now */
+            /* ... and "everything": those, a page drawn over the tank (VISITORS), and the overlays whose drawing the tile
+               test does not hold yet (the placement page's live piece by rule; the battery page, the
+               reset prompt's pages, the GIVE modal and the gift card, SELECTIVE BREEDING's card, the lock hint).
+               LINK's page and its cards left this list 11-24: they are overlay tiles now (9.5 fps -> the tank's own on the
+               10.1; --selftest-linkpage holds them against a whole render) */
+            const bool p4_other = setup_is_place() || (setup_zoomed() && (!setup_evo_black() || !page)) || touch_port_battery()   /* (VISITORS left this list 11-16: the wide page keeps its own frame;
+                                                   the paragon's reveal 11-24: held at 2x, its boxes alone - render.c THE REVEAL KEPT AT 2X - but a reveal
+                                                   opened by a tap in this frame's poll was drawn over a tank frame: everything) */
+                                  || touch_port_confirm_up() || render_give_modal_step(&tank) != RENDER_GM_OFF || render_gift_up(&tank)
+                                  || tank.tool == TOOL_BREED || touch_port_lock_hint() || (display_port_p4_debug_mask() & 1024);
+            const bool p4_whole = (p4_no_tank && !p4_page_dry) || p4_other;
+#endif
             int64_t t1 = esp_timer_get_time();
             if (sel >= 0) { card_us += t1 - tc; card_frames++; }
+            if (notice_current() || xt_notice_up() || sel >= 0) cover_frames++;   /* (the frame-rate tests: a frame with a card or notice up is no tank reading) */
             s_bake_deadline = esp_timer_get_time() + s_flush_avg_us - 500;   /* THE SECOND CORE: the bake task has the flush's window */
+            const uint16_t *gsc = NULL, *gband = NULL; size_t gtop = 0, goff = 0, glen = 0; unsigned gep = 0;   /* THE GRASS LOOP's parts for the
+                                                               prefetch below, taken while the render lock is still held: the bake on core 1
+                                                               rebakes the bands once it is given (0.4 rc hardening); the DMA starts after it */
+            const bool gl_parts = !USE_RESTORE && !page && !s_jm && s_amc && render_grass_loop_parts(tank.clock + FRAME_MIN_MS / 1000.0f, &gsc, &gtop, &gband, &goff, &glen, &gep);
             render_unlock();
             /* the next frame's scene prefetch starts BEFORE this frame's flush (2026-10-03): the copy
                into the idle framebuffer takes ~14 ms, and started after the flush it had only the
                tick and a 1 ms sleep to hide behind - the next frame waited ~9 ms for it. The flush
                only reads this frame's buffer; the copy rides alongside it. */
+#ifdef TANK_P4
+            {   /* THE BIG SCREENS' port turns only what changed (display_port_jd9365.c, common/p4_tiles.c): this frame's changed
+                   tiles (the tank's own drawing: render_changed_rects) and the overlay tiles (what was drawn over the live tank
+                   after it, each signed: render.c THE OVERLAY TILES). "Everything" (p4_whole, set where the frame was drawn) is
+                   a page that covers the glass, the boot show, an experimental tank, and every overlay --selftest-tiles does not
+                   yet hold against a whole render. Then the scene put back into the next frame's buffer where that buffer's
+                   last frame drew (the PPA as a copier), BEFORE the flush (THE PIPELINE, 2026-10-20): the flush leaves this
+                   frame's turn running while the next is drawn */
+                extern void display_port_p4_changed(const short *xy, int n);
+                extern void display_port_p4_tiles(const render_overlay_t *o);
+                extern void display_port_p4_algae(const uint8_t *algae);
+                extern void display_port_p4_restore(uint16_t *fb, const uint16_t *scene, bool full);
+                static unsigned s_fb_ep[2] = { ~0u, ~0u };
+                const short *xy = NULL; const int n = p4_whole ? -1 : p4_page_dry ? 0 : render_changed_rects(&xy);   /* (a page taken dry: no tank under it, its tiles are the overlay's) */
+                /* A KEPT PAGE (0.4.3): the keeper page alone on the glass keeps its own frame, and says which boxes moved -
+                   those tiles alone are turned (render.c THE KEPT PAGE'S BOXES); anything drawn over it: the whole frame */
+                extern void display_port_p4_changed_page(const short *xy, int n, int src);
+                const bool p4_evo = setup_evo_black() && page && !loading && !touch_port_shelf() && !adv_up() && !setup_lab_black();   /* (the draw chain's order: the reveal held drew this frame) */
+                const bool p4_ms = !p4_page_dry && page && !loading && !touch_port_shelf() && !setup_is_about() && !p4_evo
+                                   && (adv_up() ? render_big_still_drawn()         /* (ADVANCED's own page is a still page; its warning and touch pages are whole) */
+                                       : (touch_port_milestones() || touch_port_settings() || touch_port_updates() || touch_port_shop() || touch_port_collection()));   /* (the keeper page, the SETTINGS page or the UPGRADES page: the draw chain's order) */
+                if (p4_evo) {                                  /* THE REVEAL KEPT AT 2X: its moving boxes, or the whole frame (anything over it) */
+                    const short *bx = NULL; const int bn = p4_other ? -1 : render_evo_changed(&bx);
+                    display_port_p4_changed_page(bx, bn, cur);
+                } else
+                if (touch_port_shelf() && page) {              /* THE SHELF KEPT: nothing moved, or the whole frame */
+                    const bool over = p4_other || setup_active() || loading;
+                    if (over) shelf_kept_forget();
+                    display_port_p4_changed_page(NULL, over ? -1 : s_shk_n, cur);
+                } else
+                if (p4_ms) { const short *bx = NULL; const int bn = (p4_other || setup_active()) ? -1 : render_milestones_changed(&bx);
+                             display_port_p4_changed_page(bx, bn, cur); }
+                else display_port_p4_changed(xy, n);
+                if (!p4_whole) display_port_p4_tiles(render_overlay());
+                if (!p4_page_dry) display_port_p4_algae(tank.algae);   /* (no film in a page's frame: its tiles would count as the tank's and never be spared a turn; a cell that changes meanwhile is seen when the tank is back) */
+                uint16_t *next = fb[cur ^ 1]; unsigned ep;
+                const uint16_t *scene = render_scene_buf(&ep);
+                if (p4_no_tank) s_fb_ep[0] = s_fb_ep[1] = ~0u;   /* no tank in this frame: both buffers owe a whole scene when it is back */
+                else if (scene && next && next != fb[cur] && !s_no_prefetch) {
+                    display_port_p4_restore(next, scene, s_fb_ep[cur ^ 1] != ep);
+                    s_fb_ep[cur ^ 1] = ep; render_fb_primed(next, ep);
+                }
+                (void)gl_parts;
+            }
+            display_port_flush(fb[cur]);
+#else
             /* the frame leaves on the flush task while the next one renders (2026-10-23); once it has left, flush_done
                puts the scene back under what it drew. Without the task: the plain flush, the restore here. */
             if (!USE_RESTORE) {                             /* the next frame's scene prefetch starts BEFORE this frame's flush (2026-10-03): the copy
@@ -1693,44 +2945,88 @@ static void tank_task(void *arg) {
                 display_port_flush_wait(fb[cur ^ 1]);       /* the other buffer's flush (last frame's) must be over before the prefetch writes it */
                 uint16_t *next = fb[cur ^ 1];
                 const uint16_t *scene = render_scene_buf(&s_prefetch_ep);
-                const uint16_t *gsc, *gband; size_t gtop, goff, glen; unsigned gep;
-                if (!page && s_amc && next && next != fb[cur] &&
-                    render_grass_loop_parts(tank.clock + FRAME_MIN_MS / 1000.0f, &gsc, &gtop, &gband, &goff, &glen, &gep) &&   /* THE GRASS LOOP: the scene above the
-                                                                                                                       grass, the next frame's band below it */
+                if (gl_parts && next && next != fb[cur] &&                  /* THE GRASS LOOP: the scene above the grass, the next frame's band below it */
                     (gtop == 0 || esp_async_memcpy(s_amc, next, (void *)gsc, gtop, amc_cb, (void *)1) == ESP_OK) &&
                     esp_async_memcpy(s_amc, (uint8_t *)next + goff, (void *)gband, glen, amc_cb, NULL) == ESP_OK) {
                     s_prefetch_ep = gep; s_prefetch_fb = next; s_prefetch_pending = true;
-                } else if (!page && s_amc && scene && next && next != fb[cur] &&
+                } else if (!page && s_amc && (s_jm ? (scene = xt_scene()) != NULL : scene != NULL) && next && next != fb[cur] &&
                     esp_async_memcpy(s_amc, next, (void *)scene, PLAN_FB_ALLOC, amc_cb, NULL) == ESP_OK) {
                     s_prefetch_fb = next; s_prefetch_pending = true;
                 }
+                s_prefetch_jelly = s_jm;
                 if (!USE_FLUSH_TASK || !display_port_flush_async(fb[cur], NULL, NULL)) display_port_flush(fb[cur]);
             } else if (USE_FLUSH_TASK && display_port_flush_async(fb[cur], flush_done, NULL)) s_restore_pending[cur] = true;
             else { display_port_flush(fb[cur]); flush_done(fb[cur], NULL); s_restore_pending[cur] = true; }
+#endif
+            {   /* ERASE EVERYTHING, announced (render.h): this frame has been handed to the panel. render_reset_erase_ready answers
+                   only when ERASING has been DRAWN in two frames: the first of them left whole before the second could be handed
+                   over (one frame on the wire at a time: display_port_flush_async waits for the one before), flush_wait(NULL)
+                   then sees the second off the flush task, and the pause lets the SPI's last stripe out - a flash erase holds
+                   interrupts off, and a stripe still queued would sit until it ended. Only then the erase, on this task */
+                int ea = render_reset_erase_ready();
+                if (ea) { display_port_flush_wait(NULL); vTaskDelay(pdMS_TO_TICKS(120)); erase_everything(ea == RESET_ANS_ERASE_WIFI); }
+            }
             touch_port_poll(&tank);
             pf_tail = esp_timer_get_time();
             s_flush_avg_us += ((pf_tail - t1) - s_flush_avg_us) / 8;
             s_bake_deadline = 0;
             render_us += t1 - t0; flush_us += pf_tail - t1; frames++; s_frame_last = fb[cur];
+            {   /* THE REVEAL'S BENCH (0.4.3): each page of the paragon's reveal, its own frame rate - the interval from the frame before
+                   on the same page, so a page's first frame (and the window's) is not counted against it */
+                static int64_t s_ev_prev; static int s_ev_last = -1;
+                const int ph = setup_evo_phase(&tank);
+                if (ph >= 0 && ph == s_ev_last && s_ev_prev) { s_ev_n[ph]++; s_ev_us[ph] += pf_tail - s_ev_prev; s_ev_rend[ph] += t1 - t0; }
+                s_ev_prev = pf_tail; s_ev_last = ph;
+            }
         }
         cur ^= 1;
         if (now - last_log > 10 * 1000000) {
+            const float bb_fps = frames * 1e6f / (float)(now - last_log);
             if (frames) {
+                if (s_ev_n[0] + s_ev_n[1] + s_ev_n[2] + s_ev_n[3]) {
+                    static const char *const EVN[SETUP_EVO_PHASES] = { "shells", "spin", "choose", "keep" };
+                    char ln[200]; int o = 0;
+                    for (int i = 0; i < SETUP_EVO_PHASES; i++) if (s_ev_n[i])
+                        o += snprintf(ln + o, sizeof ln - o, "%s%s %d fr %.1f fps render %.1f ms", o ? " | " : "", EVN[i], s_ev_n[i],
+                                      s_ev_n[i] * 1e6f / (float)s_ev_us[i], s_ev_rend[i] / 1e3f / s_ev_n[i]);
+                    ESP_LOGI("display", "evo pages: %s", ln);
+                    memset(s_ev_n, 0, sizeof s_ev_n); memset(s_ev_us, 0, sizeof s_ev_us); memset(s_ev_rend, 0, sizeof s_ev_rend);
+                }
                 unsigned ep; const uint16_t *sc = render_scene_buf(&ep);
                 ESP_LOGI("display", "fb mid 0x%04x corner 0x%04x | scene mid 0x%04x ep %u | night %d prefetch %d",
                          fb[cur] ? fb[cur][(TANK_H / 2) * TANK_W + TANK_W / 2] : 0,
                          fb[cur] ? fb[cur][5 * TANK_W + 5] : 0,
                          sc ? sc[(TANK_H / 2) * TANK_W + TANK_W / 2] : 0, ep,
                          (int)tank.night, (int)(s_restore_pending[0] + s_restore_pending[1]));
-                ESP_LOGI("display", "%.1f fps | render %.1f ms flush %.1f ms | scene %.1f shafts %.1f veg %.1f fd/bub %.1f fish %.1f vig %.1f algae %.1f | card %.1f ms x%lu | veg %.2f %.2f %.2f",
+                ESP_LOGI("display", "%.1f fps | render %.1f ms flush %.1f ms | scene %.1f shafts %.1f veg %.1f fd/bub %.1f fish %.1f vig %.1f algae %.1f | card %.1f ms x%lu covered %lu | veg %.2f %.2f %.2f | gfx %s",
                          frames * 1e6f / (float)(now - last_log),
                          render_us / 1e3f / frames, flush_us / 1e3f / frames,
                          render_prof_us[0] / 1e3f / frames, render_prof_us[1] / 1e3f / frames,
                          render_prof_us[2] / 1e3f / frames, render_prof_us[3] / 1e3f / frames,
                          render_prof_us[4] / 1e3f / frames, render_prof_us[5] / 1e3f / frames,
                          render_prof_us[6] / 1e3f / frames,
-                         card_frames ? card_us / 1e3f / card_frames : 0.0f, (unsigned long)card_frames,
-                         tank.veg_growth[0], tank.veg_growth[1], tank.veg_growth[2]);
+                         card_frames ? card_us / 1e3f / card_frames : 0.0f, (unsigned long)card_frames, (unsigned long)cover_frames,
+                         tank.veg_growth[0], tank.veg_growth[1], tank.veg_growth[2], render_gfx_name());
+                if (render_gfx_level() == RENDER_GFX_MEDIUM) {   /* GRAPHICS MEDIUM: THE NIGHT PICTURE (render.c THE TWO BANKS) - held or not, in use, the bakes of each bank */
+                    size_t nb; const int nm = render_grass_loop_night_held(&nb); int db, ndb; render_grass_loop_bank_bakes(&db, &ndb);
+                    ESP_LOGI("display", "gfx MEDIUM: night picture %s (%d moments, %u KB) | day %d of %d moments | moments baked: day %d, night %d | psram %u KB free",
+                             render_grass_loop_night() ? "IN USE" : nm ? "held" : "NONE (the night as HIGH's)", nm, (unsigned)(nb / 1024),
+                             render_grass_loop_night() ? 0 : render_grass_loop_ready(), render_grass_loop_night() ? 0 : render_grass_loop_n(), db, ndb,
+                             (unsigned)(heap_caps_get_free_size(MALLOC_CAP_SPIRAM) / 1024));
+                }
+                { static int pk, pw, pwhy[MS_WHY_N]; int k, w, why[MS_WHY_N]; render_milestones_counts(&k, &w, why);   /* THE PAGE KEPT */
+                  if (k + w > pk + pw) ESP_LOGI("display", "keeper page: %d frames kept, %d drawn whole (not its buffer %d, a box out %d, changed %d, drawn over %d, a frame without it %d, out now %d)",
+                                                 k - pk, w - pw, why[0] - pwhy[0], why[1] - pwhy[1], why[2] - pwhy[2], why[3] - pwhy[3], why[4] - pwhy[4], why[5] - pwhy[5]);
+                  pk = k; pw = w; memcpy(pwhy, why, sizeof why); }
+#ifdef TANK_P4
+                { extern void display_port_p4_tile_stats(unsigned *turned, unsigned *spared);
+                  extern void display_port_p4_restore_stats(unsigned *restored, unsigned *film_only, unsigned *rects);
+                  extern void display_port_p4_ops(unsigned *turn, unsigned *put);
+                  unsigned tu, sp, re, fo, rt, ot, op; display_port_p4_tile_stats(&tu, &sp); display_port_p4_restore_stats(&re, &fo, &rt); display_port_p4_ops(&ot, &op);
+                  { unsigned fc, fk; render_film_kept_stats(&fc, &fk); ESP_LOGI("display", "film cells a frame: %.0f, left alone %.0f (THE FILM KEPT)", fc / (float)frames, fk / (float)frames); }
+                  ESP_LOGI("display", "tiles a frame (of %d): rects %.0f | turned %.0f spared %.0f in %.0f ops | restored %.0f in %.0f ops (film tiles not restored %.0f)",
+                           RENDER_TILES_X * RENDER_TILES_Y, rt / (float)frames, tu / (float)frames, sp / (float)frames, ot / (float)frames, re / (float)frames, op / (float)frames, fo / (float)frames); }
+#endif
                 int64_t fw, fs; display_port_flush_prof(&fw, &fs);
                 { int64_t gu; int gn; render_grass_cache_prof(&gu, &gn); if (gn) ESP_LOGI("display", "grass cache: %d rebuilds, %.1f ms each", gn, gu / 1e3f / gn); }
                 { int ln, lb, lr; int64_t lus; render_grass_loop_prof(&ln, &lb, &lus, &lr);
@@ -1739,9 +3035,22 @@ static void tank_task(void *arg) {
                   { int why, nm = render_grass_loop_nomem(&why), tb, ts, tn; render_grass_loop_top(&tb, &ts, &tn);
                     if (render_grass_loop_is_on() && !ln && nm) ESP_LOGW("display", "grass loop: no loop - the plan gave up for %d rows at %s (the top: bed %d, %d segments, %d beds; veg %.2f %.2f %.2f / %.2f)", nm, why == 1 ? "the tables" : why == 2 ? "the bake's buffers" : "the bands or the arena", tb, ts, tn, tank.veg_growth[0], tank.veg_growth[1], tank.veg_growth[2], tank.veg_growth[3]); }
                   if (lb) ESP_LOGI("display", "grass loop: a bake %.1f ms%s", lus / 1e3f / lb, s_bake_slices ? " (on core 1)" : "");
-                  if (s_bake_slices) { ESP_LOGI("display", "grass loop: core 1 baked %d slices in %d takes (%.1f ms a take, waited %.1f ms a take, %d timeouts)", s_bake_slices, s_bake_takes,
-                                                 s_bake_takes ? s_bake_us / 1e3f / s_bake_takes : 0, s_bake_takes ? s_bake_wait_us / 1e3f / s_bake_takes : 0, s_bake_timeouts);
-                                       s_bake_slices = 0; s_bake_us = 0; s_bake_takes = 0; s_bake_wait_us = 0; s_bake_timeouts = 0; }
+                  if (s_bake_slices) { ESP_LOGI("display", "grass loop: core 1 baked %d slices in %d takes (%.1f ms a take, waited %.1f ms a take, %d timeouts, %d waits for a decision)", s_bake_slices, s_bake_takes,
+                                                 s_bake_takes ? s_bake_us / 1e3f / s_bake_takes : 0, s_bake_takes ? s_bake_wait_us / 1e3f / s_bake_takes : 0, s_bake_timeouts, s_bake_capped);
+                                       s_bake_slices = 0; s_bake_us = 0; s_bake_takes = 0; s_bake_wait_us = 0; s_bake_timeouts = 0; s_bake_capped = 0; }
+                  { int r0, r1, m0, m1; if (render_grass_loop_shrunk(&r0, &r1, &m0, &m1))   /* THE BAND SHRINKS (0.4.2): once a replan */
+                        ESP_LOGI("display", "grass loop: the grass is shorter - band %d -> %d rows, moments %d -> %d%s", r0, r1, m0, m1, r1 ? "" : " (no plan: the grass drawn live)"); }
+                  { int d[5], odd, nb; render_grass_loop_probe(d, &odd, &nb);   /* THE GRASS PROBE (0.4.2): only when the odd masks are missing or frames switched way */
+                    static bool s_odd_said;
+                    if (nb && odd) s_odd_said = false;           /* (a plan with them: the next one that loses them is said again) */
+                    if (render_grass_loop_is_on() && nb && !odd && !s_odd_said) {
+                        s_odd_said = true;
+                        ESP_LOGW("display", "grass loop: its odd-frond masks were refused (psram %u KB free) - an animal THROUGH the grass is drawn BEHIND it, loop and live frames alike",
+                                 (unsigned)(heap_caps_get_free_size(MALLOC_CAP_SPIRAM) / 1024));
+                    }
+                    if (render_grass_loop_is_on() && nb && (!odd || d[2]))
+                        ESP_LOGI("display", "grass probe: loop %d live %d switches %d | THROUGH with odd fronds %d, as BEHIND %d | odd masks %d of %d",
+                                 d[0], d[1], d[2], d[3], d[4], odd, nb + 1); }
                   { int bx[6][4], nb = render_grass_loop_boxes(bx); long area = 0;   /* THE PATCH (0.3.9.4): stale inside boxes only - which, and how much of the band */
                     for (int i = 0; i < nb; i++) area += (long)(bx[i][2] - bx[i][0] + 1) * (bx[i][3] - bx[i][1] + 1);
                     if (nb) ESP_LOGI("display", "grass loop: patching %d box%s (%ld px, %ld%% of the band): %d,%d-%d,%d%s", nb, nb > 1 ? "es" : "", area, lr ? area * 100 / ((long)TANK_W * lr) : 0,
@@ -1755,14 +3064,53 @@ static void tank_task(void *arg) {
                          (float)(now - last_log) / 1e3f / frames, polls_us / 1e3f / frames, tick_us / 1e3f / frames, wait_us / 1e3f / frames,
                          render_us / 1e3f / frames, flush_us / 1e3f / frames, tail_us / 1e3f / frames, sleep_us / 1e3f / frames,
                          (flush_us - fw - fs) / 1e3f / frames, fw / 1e3f / frames, fs / 1e3f / frames);
-                card_us = 0; card_frames = 0;
+                if (s_xt == SHELF_TYPE_MINNOWS && s_sch)
+                    ESP_LOGI("display", "minnows: its task's stack never used %u of 6144", s_sch_h ? (unsigned)uxTaskGetStackHighWaterMark(s_sch_h) : 0);
+                if (s_xt == SHELF_TYPE_MINNOWS && s_sch)
+                    ESP_LOGI("display", "minnows: %d fish, tick on core %d | tick %.1f (grid %.1f steer %.1f move %.1f) core-1 wait %.1f | draw: water %.1f fish %.1f crumbs+ripples %.1f ms",
+                             s_sch->n, s_sch_core1 ? 1 : 0, s_sch_tick_us / 1e3f / frames, school_prof_us[0] / 1e3f / frames, school_prof_us[1] / 1e3f / frames, school_prof_us[2] / 1e3f / frames,
+                             s_sch_wait_us / 1e3f / frames, school_prof_us[3] / 1e3f / frames, school_prof_us[4] / 1e3f / frames, school_prof_us[5] / 1e3f / frames);
+                memset(school_prof_us, 0, sizeof school_prof_us); s_sch_wait_us = 0; s_sch_tick_us = 0;
+                if (s_xt == SHELF_TYPE_PIRANHA && s_pir && s_pir_frames) {
+                    piranha_spike_stats_t pst; piranha_spike_get_stats(s_pir, &pst);
+                    ESP_LOGI("display", "piranha: %.2f ms a frame x%d, %d busy, %d puffs", s_pir_us / 1e3f / s_pir_frames, s_pir_frames, pst.fish_busy, pst.puffs);
+                    s_pir_us = 0; s_pir_frames = 0; }
+                if (s_xt == SHELF_TYPE_JELLY && s_jt)
+                    ESP_LOGI("display", "jelly: %s, %d jellies, light %s %s, jet %d aim %d | bg %.1f halos %.1f tent+arms %.1f bells %.1f motes %.1f tick %.1f ms",
+                             jelly_theme_name(shelf_now()->variant), s_jt->n, s_jt->light_on ? "on" : "off", JELLY_LIGHT_NAMES[s_jt->light], s_jt->jet, s_jt->jet_aim,
+                             jelly_prof_us[0] / 1e3f / frames, jelly_prof_us[1] / 1e3f / frames, jelly_prof_us[2] / 1e3f / frames,
+                             jelly_prof_us[3] / 1e3f / frames, jelly_prof_us[4] / 1e3f / frames, jelly_prof_us[5] / 1e3f / frames);
+                memset(jelly_prof_us, 0, sizeof jelly_prof_us);
+                card_us = 0; card_frames = 0; cover_frames = 0;
+#ifdef PT_PERF
+                { extern int64_t perf_ns[40]; extern long perf_ct[40];   /* (measurement builds: common/render.c's PF marks, ms a frame) */
+                  char pl[420]; int po = 0;
+                  for (int pi = 0; pi < 32 && po < 400; pi++) if (perf_ns[pi]) po += snprintf(pl + po, sizeof pl - po, " %d:%.2f", pi, perf_ns[pi] / 1e6f / frames);
+                  ESP_LOGI("display", "perf ms/frame |%s | rebuilds %.2f masks %.2f /frame", pl, (float)perf_ct[18] / frames, (float)perf_ct[3] / frames);
+                  memset(perf_ns, 0, sizeof perf_ns); memset(perf_ct, 0, sizeof perf_ct); }
+#endif
+#ifdef TANK_P4
+                { extern void render_dep_room_stats(int *go_max, int *over); int go, ov; render_dep_room_stats(&go, &ov);   /* A FRAME'S TRAVEL (render.c) */
+                  ESP_LOGI("display", "travel: longest frame %d ms, %d over 60, %d over 100 | a fish behind the grass or a piece %d px a frame at most, past 8 px %d",
+                           (int)(s_dt_max * 1000), s_dt_n60, s_dt_n100, go, ov);   /* (the frame after these lines is the long one: the printing itself, ~100 ms every 10 s) */
+                  s_dt_max = 0; s_dt_n60 = s_dt_n100 = 0; }
+#endif
                 ESP_LOGI("display", "the fish stage split: fish %.1f | snail+urchin %.1f | front pieces back %.1f | front grass %.1f | front overlays %.1f | front lanes %.1f | arch shade %.1f ms",
                          render_prof_us[7] / 1e3f / frames, render_prof_us[8] / 1e3f / frames, render_prof_us[9] / 1e3f / frames, render_prof_us[10] / 1e3f / frames,
                          render_prof_us[11] / 1e3f / frames, render_prof_us[12] / 1e3f / frames, render_prof_us[13] / 1e3f / frames);
+#ifdef TANK_P4
+                { uint32_t vf, vp; render_split_counts(&vf, &vp);   /* THE GRASS ON TWO CORES: how often, where, and the render core's wait for core 1's share */
+                  ESP_LOGI("display", "the grass split: %s, %lu of %lu phases on two cores, at x %d, waited %.1f ms a frame | its stack never used %u of %d",
+                           render_split_is_on() ? "on" : "OFF", (unsigned long)vp, (unsigned long)vf, render_split_x(), s_vs_wait_us / 1e3f / frames,
+                           s_vs_h ? (unsigned)uxTaskGetStackHighWaterMark(s_vs_h) : 0, SPLIT_STACK);
+                  s_vs_wait_us = 0; }
+#endif
                 memset(render_prof_us, 0, sizeof render_prof_us);
             }
             render_us = flush_us = 0; frames = 0;
             polls_us = tick_us = wait_us = tail_us = sleep_us = 0;
+            if (display_port_panel_power_check())           /* the watch's panel rail found off: healed (0.4.2 item 7) - the morning's record has it */
+                batlog_add(battery_pct(), battery_port_vbat_mv(), display_port_brightness(), false, "panel rail");
             uint32_t d, ms; float tps; advisor_llm_esp_stats(&d, &ms, &tps);
             char goals[N_FISH_MAX * 16] = ""; size_t gl = 0;
             for (int i = 0; i < tank.n_fish && gl + 16 < sizeof goals; i++)
@@ -1773,6 +3121,15 @@ static void tank_task(void *arg) {
                      (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL) / 1024,
                      (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM) / 1024,
                      battery_pct(), battery_port_vbat_mv(), display_port_brightness());
+            { bb_state_t bs; bb_fill(&bs, false, bb_fps); blackbox_tick(now, &bs); }   /* THE BLACK BOX: the 5-min heartbeat and the edges (0.4.3) */
+#ifdef TANK_WATCH
+            if (!image_pending_verify() && display_port_board_back() && blackbox_late_restart_take()) {   /* the watch's image ran with no panel, and the watch answers now */
+                ESP_LOGW(TAG, "the watch's chips answer now, and the panel never came up: saving and restarting to bring it up");
+                progression_save(&tank);
+                { bb_state_t bs; bb_fill(&bs, false, bb_fps); blackbox_event(BB_EV_RESTART, &bs); }
+                esp_restart();
+            }
+#endif
             last_log = now;
         }
         /* the frame's ceiling (2026-10-04): FRAME_MIN_MS a frame, 25 fps. Frames and decisions share one
@@ -1796,7 +3153,7 @@ const char *version_port_string(void) { return esp_app_get_description()->versio
  * free pages" (a partition that can't mount at all) is answered with an
  * erase, and a raw copy of the partition goes to the unused front of
  * "storage" first, so the tank can still be pulled out by hand
- * (esptool read_flash 0xA90000 0x6000 rescue.bin). Any other error - a
+ * (esptool read_flash 0xD20000 0x6000 rescue.bin - storage's start). Any other error - a
  * newer IDF's format after a rollback, say - leaves the flash alone: the tank
  * runs without saving until a build that can read it is back. */
 #define NVS_RESCUE_SIZE 0x6000
@@ -1827,22 +3184,28 @@ static void nvs_start(void) {
 /* CHECK FOR UPDATES (the updates page, or the director's `ota check`): the
  * tank is saved as it is before sleep, then the board restarts into update
  * mode (update_mode.c) - the radio never runs beside the tank */
-static void request_update(void) {
+static void request_update(bool add) {
 #if CONFIG_POCKET_TANK_320X240
     /* (this fork) the 320x240 boards have no update channel (no manifest of
        their own, flashed by cable: CYD.md): no restart into update mode,
        which app_main would not enter anyway */
-    ESP_LOGW(TAG, "update check: a 320x240 board is updated by cable (CYD.md), not over the air");
+    ESP_LOGW(TAG, "%s: a 320x240 board is updated by cable (CYD.md), not over the air", add ? "ADD A NETWORK" : "update check");
     return;
 #endif
+    if (render_reset_erase_armed()) {           /* ERASE EVERYTHING is on the glass (ERASING) and begins within a frame or two: CHECK FOR UPDATES
+                                                   would take its page down and drop it - the key does nothing just now */
+        ESP_LOGW(TAG, "CHECK FOR UPDATES refused: ERASE EVERYTHING is about to begin");
+        return;
+    }
     touch_port_confirm_answer(-1);
     progression_save(&tank);
     bat_hist_save();
     batlog_add(battery_pct(), battery_port_vbat_mv(), display_port_brightness(), false, "update");
     audio_port_sleep();
-    update_mode_request();                   /* restarts */
+    ota_valid_now(add ? "ADD A NETWORK" : "CHECK FOR UPDATES");
+    update_mode_request(add);                /* restarts */
 }
-void device_update_check(void) { request_update(); }
+void device_update_check(void) { request_update(false); }
 /* the installer page asked a RUNNING tank for the networks (its Connect to /
  * Change Wi-Fi): saved the same way, then the restart into provisioning mode */
 void device_provision_request(void) {
@@ -1850,21 +3213,30 @@ void device_provision_request(void) {
     ESP_LOGW(TAG, "provisioning: a 320x240 board has no update channel, so no Wi-Fi to set up");
     return;
 #endif
+    if (render_reset_erase_armed()) {           /* ERASE EVERYTHING is on the glass (ERASING) and begins within a frame or two: Wi-Fi setup
+                                                   would take its page down and drop it - the key does nothing just now */
+        ESP_LOGW(TAG, "Wi-Fi setup refused: ERASE EVERYTHING is about to begin");
+        return;
+    }
     touch_port_confirm_answer(-1);
     progression_save(&tank);
     bat_hist_save();
     batlog_add(battery_pct(), battery_port_vbat_mv(), display_port_brightness(), false, "wifi");
     audio_port_sleep();
+    ota_valid_now("Wi-Fi setup");            /* (as request_update: a new build's restart into provisioning is no failed boot to roll back) */
     provision_mode_request();                /* restarts */
 }
 
 void app_main(void) {
     ESP_LOGI(TAG, "pocket-tank v%s %s (build %s) for %s boot%s", PT_RELEASE, PT_RELEASE_STAGE, version_port_string(), PT_BOARD,
              esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_EXT0 || esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_EXT1 ? " (woken by button)" : "");
+    blackbox_boot_begin();                   /* THE BLACK BOX (0.4.3): the reset reason and the run before's breadcrumb, before anything else runs */
     gpio_config_t btn = { .pin_bit_mask = 1ULL << BTN_SLEEP, .mode = GPIO_MODE_INPUT,
                           .pull_up_en = GPIO_PULLUP_ENABLE };
     gpio_config(&btn);
+#if !SOC_GPIO_SUPPORT_HOLD_SINGLE_IO_IN_DSLP
     gpio_deep_sleep_hold_dis();              /* a deep-sleep wake is a boot: the night's pad holds end here */
+#endif
     nvs_start();
     director_early();                        /* the installer page's handshake, answered from here on (director.c) */
     { int carried = batlog_init();       /* the battery log survives every reset but a power-on */
@@ -1875,10 +3247,18 @@ void app_main(void) {
 #ifdef SLEEP_SETTING_ROW
     ESP_LOGI(TAG, "sleep mode: %s (%s)", SLEEP_MODE_NAME, sleep_setting_saved() ? "chosen in settings" : "the build's default, nothing chosen in settings");
 #endif
+    render_set_gfx_level(nvs_u8("gfx", RENDER_GFX_HIGH));   /* GRAPHICS (0.4.2): a device setting; a device that never saved one: HIGH */
+    render_set_vignette(nvs_u8("vigoff", 0) != 1);          /* the VIGNETTE (0.4.2): a device setting; no key, or anything but 1: ON */
     bat_hist_load();
+    {   /* an edge on a clock that runs behind is stamped so (battery.h). A stamp still marked when nothing is owed any more
+           was put right without a sync to say by how much (a chip that would not answer, answering again): dropped */
+        const bool owed = clock_lag_of(nvs_u8("netlag", 255)) == CLOCK_LAG_OWED;
+        battery_clock_owed(&s_bh, owed);
+        if (!owed) { battery_clock_unknown(&s_bh); if (battery_take_save(&s_bh)) bat_hist_save(); }
+    }
     assert_plan();
     for (int i = 0; i < PLAN_FB_COUNT; i++) {
-        fb[i] = heap_caps_aligned_alloc(64, PLAN_FB_ALLOC, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        fb[i] = heap_caps_aligned_alloc(FB_ALIGN, PLAN_FB_ALLOC, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
         if (i < 2) { s_fbs[i] = fb[i]; s_restored[i] = xSemaphoreCreateBinary();
                      s_touched[i] = heap_caps_malloc(RENDER_DIRTY_WORDS * 4, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);   /* the frame's touched mask (PSRAM: internal RAM is spoken for) */
                      if (!s_touched[i]) ESP_LOGW(TAG, "no touched mask for fb %d: the whole scene is copied every frame", i); }
@@ -1897,24 +3277,51 @@ void app_main(void) {
         gpio_config(&sense);
     }
     touch_port_init();
-    {   /* THE TOUCH LOCK: as the keeper left it across the tank's own restarts (SWAP IN, an update, a wake from deep sleep) - and
+    {   /* THE TOUCH LOCK: as the keeper left it across the tank's own restarts (SWAP IN, an update, a wake from deep sleep, the
+           morning after the night's power-off - 0.4 rc: that boot is a power-on too, and the lock was lost every night) - and
            OFF after any other start: a hard boot (PWR held 10 s, the battery run flat, the cable's reset, a crash). 0.3.9.6, Strato
            11-01 after Migima's stuck welcome: "make sure a hard boot restores touch, i don't want this to lock up future devices" */
         const esp_reset_reason_t why = esp_reset_reason();
-        int lk = nvs_u8("tlock", 0);
-        if (lk && why != ESP_RST_SW && why != ESP_RST_DEEPSLEEP) { nvs_u8_put("tlock", 0); lk = 0; ESP_LOGI(TAG, "touch lock: OFF - a hard boot (reset reason %d) unlocks the glass", (int)why); }
+        int lk = nvs_u8("tlock", 0), keep = nvs_u8("tlkeep", 0);   /* (tlkeep: the last stop was the night's power-off, enter_sleep_for - its morning keeps the lock) */
+        if (keep) nvs_u8_put("tlkeep", 0);                     /* (one boot only, whatever this one is) */
+        if (lk && why == ESP_RST_POWERON && keep) ESP_LOGI(TAG, "touch lock: kept - the morning after the night's power-off");
+        else if (lk && why != ESP_RST_SW && why != ESP_RST_DEEPSLEEP) { nvs_u8_put("tlock", 0); lk = 0; ESP_LOGI(TAG, "touch lock: OFF - a hard boot (reset reason %d) unlocks the glass", (int)why); }
         touch_port_set_touch_lock(lk);
+        const int nkeep = nvs_u8("nkeep", 0);                  /* (one boot only, as tlkeep) */
+        if (nkeep) nvs_u8_put("nkeep", 0);
+        s_hard_boot = why != ESP_RST_SW && why != ESP_RST_DEEPSLEEP && !(why == ESP_RST_POWERON && nkeep);
+        s_hard_why = (int)why;
     }
     s_pmic = battery_port_init(board_i2c_bus());
     adv_load();                       /* the keeper's battery size and touch map (the hidden ADVANCED page, 0.3.9.2) */
     if (!board_has_expander()) {      /* not positively the 1.8: on the round board A3V3 feeds the ES7210 whole,
                                          and off, it clamps the I2C bus (battery_port.h) - never cut it on a guess */
         battery_port_pin_rail("aldo1");
-        codec_port_mic_adc_down(board_i2c_bus());
+        codec_port_mic_adc_down(board_i2c_bus(), board_es7210_addr());   /* (0x40, or 0x42 on a 1.75C rev 1.1: the address the probe found) */
     }
+#ifdef TANK_WATCH
+    battery_port_pin_rail("aldo2");   /* the watch's panel power enable is pulled up to ALDO2 - on the watch's own image whatever the probe found
+                                         (0.4.3: an unnamed board lost ALDO2 to the trim below, watch-dark record E12) */
+#else
     if (board_is_watch()) battery_port_pin_rail("aldo2");   /* the watch's panel power enable is pulled up to ALDO2 */
+#endif
     battery_port_trim_rails();        /* the schematic's unused outputs off (docs/HANDOFF.md, the battery pass) */
     battery_port_key_init();          /* the PWR key: sleep / power-off IRQs on, the power-on press cleared */
+#ifdef TANK_WATCH
+    if (!display_port_panel_up() && !image_pending_verify() && !woke_from_deep_sleep() && blackbox_panel_restart_take()) {
+                                                                      /* (never a fresh update's first boot: a restart before it is marked
+                                                                         good rolls it back - the review of 0.4.3's watch-dark work; never a
+                                                                         wake from the night's deep sleep: a restart makes it a cold boot) */   /* the watch's image with no panel: a restart brings it up (11-13's USB
+                                                                         restart did) - BB_PANEL_RESTARTS in a row at most, then the tank runs and
+                                                                         the 10 s check asks again (display_port_board_back) */
+        blackbox_boot_commit(true);
+        ESP_LOGW(TAG, "the watch's panel did not come up (the board not found on the I2C bus): restarting to try again");
+        blackbox_crumb_phase(BB_PH_PANEL_RESTART);
+        vTaskDelay(pdMS_TO_TICKS(50));
+        esp_restart();
+    }
+#endif
+    blackbox_boot_commit(false);      /* the boot record: the PMIC as found, the reset, the run before */
     s_imu = imu_port_init(board_i2c_bus());   /* screen auto-flip; absent IMU = always upright (never seeded: nothing could turn it back) */
     if (s_imu) {
         imu_port_sides(display_port_quarters());   /* the square's and the pendant's own builds stand on a side too (0.3.9.3) */
@@ -1931,6 +3338,7 @@ void app_main(void) {
 #endif
     s_rtc = rtc_port_init(board_i2c_bus());   /* wall clock for the ravenous rule (before the clockless night's sync) */
     net_clock_boot(fb[0]);            /* no RTC chip, a stopped one, or a chip not yet on real time, with a saved network: the time from the internet, before the advisor takes the heap */
+    battery_port_key_clear();         /* a PWR press on the TIME CHECK page (up to 30 s, nothing polls the key) is not a sleep press once the tank is up (0.4 rc) */
     /* the advisor's hot buffers (~70 KB of internal SRAM, advisor_llm_esp.c)
        come before the discretionary caches below: the LLM is not optional */
     /* model: mmap the raw partition; weights are read through the flash cache */
@@ -1947,22 +3355,32 @@ void app_main(void) {
     }
     ESP_LOGI(TAG, "after the advisor: internal heap %u KB free", (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL) / 1024);
     /* static-scene cache: gradient/pebbles/reef drawn once per lighting state */
-    uint16_t *scene = heap_caps_aligned_alloc(64, PLAN_FB_ALLOC, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    uint16_t *scene = heap_caps_aligned_alloc(FB_ALIGN, PLAN_FB_ALLOC, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     if (scene) render_set_scene_cache(scene); else ESP_LOGW(TAG, "no scene cache RAM: full redraw per frame");
+    render_set_bake_scratch(bake_alloc, gl_free);            /* (the backgrounds' bake, 0.4.1) */
     if (scene) { render_set_grass_loop(gl_alloc, gl_free, GRASS_LOOP_BUDGET); render_grass_loop_lock(GRASS_LOOP_MOMENTS); render_grass_loop_on(GRASS_LOOP_ON); }   /* (its memory comes as the grass is first baked) */
     if (GRASS_CACHE_ON) { uint16_t *sg = scene ? heap_caps_aligned_alloc(64, PLAN_FB_ALLOC, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) : NULL;   /* the grass cache (2026-10-24): the scene + the back grass - only when it is the one on (the loop needs the PSRAM) */
       uint32_t *bgm = sg ? heap_caps_malloc(RENDER_DIRTY_WORDS * 4, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) : NULL;
       if (sg && bgm) { render_set_grass_cache(sg, bgm); render_set_grass_cache_on(GRASS_CACHE_ON, GRASS_CACHE_MS); }
       else ESP_LOGW(TAG, "grass cache: no PSRAM - the grass is drawn whole every frame"); }
-    uint8_t *vig = heap_caps_malloc(TANK_W * TANK_H, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    uint8_t *vig = heap_caps_malloc(render_vignette_cache_bytes(), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);   /* (a quarter, mirrored: 0.4.2) */
     if (vig) render_set_vignette_cache(vig);
     /* dirty mask (20 KB): internal SRAM if it fits - it is cleared and read
        every frame, and in PSRAM that was ~1.5 ms; PSRAM fallback */
     { void *ds = heap_caps_malloc(render_decor_scratch_size(), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);   /* the coral / cluster tables: PSRAM, never .bss */
       if (ds) render_set_decor_scratch(ds); else ESP_LOGW(TAG, "decor scratch: no PSRAM (%u B) - falling back to internal", (unsigned)render_decor_scratch_size()); }
-    uint32_t *dirty = heap_caps_malloc(RENDER_DIRTY_WORDS * 4, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+#ifdef TANK_P4                                   /* the big screens' mask is 128 KB (1280 x 800): in PSRAM - internal it starves the DMA's link lists */
+    uint32_t *dirty = heap_caps_malloc(RENDER_DIRTY_WORDS * 4, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+#else
+    uint32_t *dirty = NULL;                  /* (internal only with the tank task's stack and BAKE_SPARE still free beside it - 0.4, the 11-02 evening
+                                                sweep: it took what it found, 20-29 KB, and the tank task came after it. Every board runs at 20-29 KB
+                                                free with its mask, the tank's and the bake's stacks in: this margin keeps the mask in on all four) */
+    if (heap_caps_get_free_size(MALLOC_CAP_INTERNAL) >= RENDER_DIRTY_WORDS * 4 + TANK_STACK + BAKE_SPARE)
+        dirty = heap_caps_malloc(RENDER_DIRTY_WORDS * 4, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
     if (!dirty) dirty = heap_caps_malloc(RENDER_DIRTY_WORDS * 4, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+#endif
     if (dirty) render_set_dirty_mask(dirty); else ESP_LOGW(TAG, "no dirty mask RAM: full redraw per frame");
+    s_dirty_mask = dirty; s_dirty_home_internal = dirty && !esp_ptr_external_ram(dirty);
     ESP_LOGI(TAG, "dirty mask %s", !dirty ? "none" : esp_ptr_external_ram(dirty) ? "PSRAM" : "internal SRAM");
     /* stats card cache: redrawn 4x/s, blitted otherwise. Internal SRAM if it
        fits (a PSRAM->PSRAM copy of the 56 KB sprite cost 3.3 ms per frame,
@@ -1978,6 +3396,8 @@ void app_main(void) {
         card = heap_caps_malloc(RENDER_CARD_W * RENDER_CARD_H * 2, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
     if (!card) card = heap_caps_malloc(RENDER_CARD_W * RENDER_CARD_H * 2, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     if (card) render_set_card_cache(card);
+    render_set_modal_alloc(card_bake_alloc, heap_caps_free);   /* the GIVE modal's and the gift card's bakes (THE CARDS BAKED, 0.4): lent
+                                                                 while a card is up, 2 x 166 KB of PSRAM back the rest of the day (0.4.2) */
     ESP_LOGI(TAG, "card cache %s", !card ? "none" : esp_ptr_external_ram(card) ? "PSRAM" : "internal SRAM");
     { void *dep = heap_caps_malloc(render_depth_buf_bytes(), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);   /* SWIM DEPTH (0.3.9.4): a fish behind or through the grass */
       render_set_depth_buf(dep);
@@ -1986,21 +3406,61 @@ void app_main(void) {
     audio_port_init(board_i2c_bus());  /* the sound bank + player task (docs/AUDIO.md); silent without the codec */
     tank_events_set(on_tank_event, NULL);
     director_init();                  /* serial scenario console (filming / bench) */
+#ifdef CONFIG_POCKET_TANK_RADIO_HOSTED
+    radio_hosted_boot();              /* the home tank's radio chip: greet it if it was just updated (radio_hosted.h) */
+#endif
     /* scene-prefetch DMA: installed only AFTER the display grabbed its SPI DMA
        channel — installed earlier, async memcpy steals SPI2's GDMA trigger
        slot and the panel silently loses its pixel path (black screen). */
     if (scene && fb[0] && fb[1] != fb[0]) {
         async_memcpy_config_t amc_cfg = ASYNC_MEMCPY_DEFAULT_CONFIG();
-        amc_cfg.backlog = 4; amc_cfg.sram_trans_align = 4; amc_cfg.psram_trans_align = 64;
+        amc_cfg.backlog = 4; amc_cfg.sram_trans_align = 4; amc_cfg.psram_trans_align = 64;   /* the DMA's burst (16/32/64): the buffers' own alignment is FB_ALIGN, a multiple */
         s_amc_done = xSemaphoreCreateBinary();
         if (esp_async_memcpy_install(&amc_cfg, &s_amc) != ESP_OK) {
             s_amc = NULL; ESP_LOGW(TAG, "async memcpy unavailable: CPU scene restore");
         }
     }
     tank_init(&tank, (uint32_t)esp_timer_get_time() ^ 0xC0FFEEu);
+    tank_entropy = esp_random;                /* fish and tank IDs (the tank link, 0.4): the hardware RNG */
+    progression_cap_hook = cap_breach;        /* THE CAP's guard: a tank past POP_CAP says so once in the log */
+    tank_link_swim_hook = swim_breach;        /* ... and THE SWIM LIMIT's: more than 2 visitors or 7 swimming (0.4.1) */
+    {   /* GIVE's notes (tank link phase 6, gift.h): ~1.6 KB, PSRAM - never the internal margin; the boot's
+           progression_wake loads them and settles what they can */
+        gift_book_t *gb = heap_caps_calloc(1, sizeof(gift_book_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        if (gb) { gb->persist = true; gift_attach(&tank, gb); }
+        ESP_LOGI(TAG, "gift notes %s (%u B)", gb ? "PSRAM" : "none: this tank cannot give or take", (unsigned)sizeof(gift_book_t));
+    }
+    {   /* FISH SWAP's book (0.4.3, swap.h): ~1.3 KB, PSRAM; the boot's progression load finishes what its note says */
+        swap_book_t *sb = heap_caps_calloc(1, sizeof(swap_book_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        if (sb) { sb->persist = true; sb->peer_edge = -1; swap_attach(&tank, sb); }
+        ESP_LOGI(TAG, "swap book %s (%u B)", sb ? "PSRAM" : "none: this tank cannot swap", (unsigned)sizeof(swap_book_t));
+    }
+    {   /* the VISITOR COLLECTION's pages 2..10 (0.4): ~8.6 KB, PSRAM - never the internal margin; none = the first page only */
+        void *more = heap_caps_calloc(1, collection_more_size(), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        collection_set_more(more);
+        ESP_LOGI(TAG, "visitor pages 2..%d %s (%u B)", COLL_PAGES, more ? "PSRAM" : "none: the collection stops at its first page", (unsigned)collection_more_size());
+    }
     esp_sleep_wakeup_cause_t cause = esp_sleep_get_wakeup_cause();
     bool from_sleep = cause == ESP_SLEEP_WAKEUP_EXT0 || cause == ESP_SLEEP_WAKEUP_EXT1 || cause == ESP_SLEEP_WAKEUP_TIMER;
+    if (progression_erase_pending()) {       /* an ERASE EVERYTHING this boot has to finish (a power cut, a refused write): the same page first,
+                                                as the direct path shows it - the shelf's erase below can take a while on a full shelf */
+        ESP_LOGW(TAG, "ERASE EVERYTHING was not finished: ERASING on the glass, then the rest of it");
+        if (fb[0]) {
+            const int uq = nvs_u8("uq", 0);  /* (the way up, as update mode's and the time check's pages take it) */
+            memset(fb[0], 0, (size_t)TANK_W * TANK_H * 2);
+            brightness_apply(false);
+            display_port_set_quarter((uq & UPD_WAY_FIXED) ? (uq & 3) : imu_port_quarter());
+            render_reset_open(RESET_PG_ERASING); render_reset_prompt(fb[0], TANK_W, 0); render_reset_close();
+            display_port_flush(fb[0]);       /* (the plain flush: whole, here; then time for its last stripe to leave) */
+            vTaskDelay(pdMS_TO_TICKS(120));
+        }
+        shelf_busy = wdt_feed;
+    }
     shelf_boot(clock_port_now_unix());       /* MY TANKS: the slots read back, a swap cut short finished - before the save it may have moved is loaded */
+    s_xt = shelf_now()->type;
+    s_jm = SHELF_TYPE_EXPERIMENTAL(s_xt);    /* AN EXPERIMENTAL TANK on the glass (the jellies, the minnows, the piranhas): its save is an empty tank (no fry, no welcome) */
+    progression_set_jelly(s_jm);
+    if (s_jm) { render_grass_loop_on(false); s_loaded = true; s_show_tried = true; }   /* (no grass, no boot show: the jellies from the first frame) */
     ESP_LOGI(TAG, "shelf: %s on the glass (tank %u, place %d), %d on the shelf, %d places free",
              shelf_now()->name, (unsigned)shelf_now()->id, shelf_now()->pos, shelf_count(), shelf_free_places());
     if (from_sleep) {                        /* the night, lived through in one step */
@@ -2022,15 +3482,53 @@ void app_main(void) {
         net_clock_rebase();
         if (clock_port_now_unix() == 0) {    /* a clockless board, or a chip that stopped, after a power cut with no time from the internet: time resumes at the save */
             rtc_port_seed(progression_loaded_unix());
-            rtc_port_store();                /* the chip runs on from there; the stretch is owed until a sync pays it */
+            battery_clock_owed(&s_bh, true);     /* edges from here are stamped on a late clock (a chip that would not answer too:
+                                                    netlag is not set for it, and the next boot drops such a stamp - bat_hist_load) */
+            if (!rtc_port_unread()) {        /* the chip runs on from there; the stretch is owed until a sync pays it (the next
+                                                boot asks again, net_clock_boot; a chip that would not answer is never written:
+                                                it may hold good time, newer than the save, and owes nothing) */
+                clock_lag_put(1, 0);         /* OWED, and netok no longer stands (0.4.1: a seed while no network was saved left it 1,
+                                                and the boot after a network was saved skipped the ask) - written BEFORE the chip */
+                rtc_port_store();
+            }
+        } else {                             /* a clock BEHIND the loaded save's stamp: only a restore stamps a save ahead of the board's
+                                                clock (the backup page stamps it at the computer's now). On a board that owes time the
+                                                clock lags real time, so every later save would be stamped behind the restore's and the
+                                                next good sync would live the owed stretch from BEFORE the restore again (0.4.1 audit W3).
+                                                The clock moves up to the stamp - the seed's own rule, the clock never behind the save -
+                                                and only while a sync is still owed (netlag 1, or not known with the last try failed):
+                                                the TIME CHECK asks again at every boot, so a computer's clock that ran ahead is put
+                                                right by the next good sync, never kept. Still owed: netlag stays as it is. */
+            const int64_t st = progression_loaded_unix(), now = clock_port_now_unix();
+            const int lag = clock_lag_of(nvs_u8("netlag", 255));
+            if (st > now && (lag == CLOCK_LAG_OWED || (lag == CLOCK_LAG_UNKNOWN && !nvs_u8("netok", 0)))) {
+                struct timeval tv = { .tv_sec = (time_t)st }; settimeofday(&tv, NULL);
+                if (!rtc_port_unread()) rtc_port_store();
+                battery_clock_moved(&s_bh, st - now, BAT_CLOCK_STEP);   /* (an owed stamp goes up with it and stays owed: battery.h) */
+                if (battery_take_save(&s_bh)) bat_hist_save();
+                ESP_LOGI(TAG, "clock: %lld s behind the save's stamp (a restore) with a sync still owed - moved up to it", (long long)(st - now));
+            }
         }
     }
-    { progression_carry_t c;                 /* swapped in: the wallet and the board's settings came with the swap */
-      if (shelf_take_carry(&c, sizeof c)) { s_load_swap = true; progression_carry_give(&tank, &c); progression_save(&tank);
-          ESP_LOGI(TAG, "shelf: swapped in - the wallet (%d) and the board's settings carried over", (int)c.sd_balance); } }
+    progression_shelf_settle(&tank);         /* a NEW TANK or a REMOVE a power cut stopped half way: the tank and its price, both or neither (0.4.1) */
+    if (progression_erase_settled_take()) {  /* ERASE EVERYTHING finished by this boot (a power cut, a refused write): the direct path's clean-up */
+        jelly_prefs_forget(-1);
+        ESP_LOGW(TAG, "ERASE EVERYTHING was finished at this boot: a new board");
+    }
+    if (progression_swap_carry(&tank)) {     /* swapped in: the wallet and the board's settings came with the swap - given at the wake
+                                                (with its marker), saved here, and let go once a save has it (R-saves S1/S3; round 2) */
+        s_load_swap = true;
+        ESP_LOGI(TAG, "shelf: swapped in - the wallet (%d) and the board's settings carried over", (int)tank.sd_balance); }
+    shelf_paid_note();                       /* (0.4.2) an experimental kind with a tank on the board is paid for, whatever a power cut left */
+    jelly_prefs_migrate();                   /* (0.4.3) a jelly tank from before: its jet and light become its theme's */
+    shelf_home_note();                       /* (0.4.2) a fish tank on the glass is the board's main tank ... */
+    hard_boot_home();                        /* ... and a hard boot with an experimental tank up brings it back (restarts; never returns then) */
+    if (s_jm) { xt_start();                  /* its jellies from its theme, the jet and light as left, the bare glass theirs */
+                if (s_xt == SHELF_TYPE_JELLY) xt_notice_open_jelly(shelf_now()->id);   /* (0.4.3: the jelly tanks say it once in all) */
+                else xt_notice_open(shelf_now()->id, true); }   /* (0.4.3) the first time this tank is on the glass: its thank-you (xt_notice.h) */
     notice_sync(&tank);                      /* what is already earned stays unannounced */
     { uint32_t r = progression_loaded_release();   /* which release wrote the tank we just loaded */
-      if (r) ESP_LOGI(TAG, "the save was written by v%d.%d.%d", (int)(r >> 16), (int)(r >> 8 & 255), (int)(r & 255));
+      if (r) ESP_LOGI(TAG, "the save was written by v%d.%d.%d.%d", (int)(r >> 24), (int)(r >> 16 & 255), (int)(r >> 8 & 255), (int)(r & 255));   /* (four bytes since 0.3.8.1) */
       else ESP_LOGI(TAG, "the save predates release numbers (or there was none)");
       if (r && r < (uint32_t)PT_RELEASE_NUM) notice_updated();   /* the first boot of a new release: its card, once (the next save stamps this release) */ }
     if (model_trailer_unknown_body()) notice_model_damaged();   /* a model body we never shipped (2026-10-21) */
@@ -2039,14 +3537,15 @@ void app_main(void) {
           ESP_LOGW(TAG, "this is the %s version on a %s board: CHECK FOR UPDATES offers this board's own", PT_BOARD, hw);
           if (!from_sleep) notice_wrong_board();
       } }
-    /* the save loaded under this image: it is good - the bootloader's
-       rollback (a fresh image boots "pending" once) stands down. Before the
-       first save write, so an older build never meets a newer save it
-       cannot read (it reads its prefix anyway: persist_port_esp.c) */
+    /* a fresh image boots "pending" once: it is marked good only when the
+       tank is on the glass (ota_valid_now, the frame loop) - a crash before
+       that boots the previous slot, as docs/OTA.md says (0.4, the 11-02 sweep:
+       it was marked here, before the tank task had drawn a frame, so a crash
+       in the render / link / boot show code looped for good) */
     { esp_ota_img_states_t st; const esp_partition_t *run = esp_ota_get_running_partition();
       if (run && esp_ota_get_state_partition(run, &st) == ESP_OK && st == ESP_OTA_IMG_PENDING_VERIFY) {
-          esp_ota_mark_app_valid_cancel_rollback();
-          ESP_LOGI(TAG, "first boot of this image from %s: marked valid, rollback cancelled", run->label); } }
+          s_ota_pending = true;
+          ESP_LOGI(TAG, "first boot of this image from %s: pending - marked valid once the tank is on the glass", run->label); } }
     ESP_LOGI(TAG, "population %d (cap %d): %s + %s ...", tank.n_fish, POP_CAP,
              tank.fish[0].name, tank.n_fish > 1 ? tank.fish[1].name : "-");
     if (progression_setup_pending()) {           /* a new tank (fresh install, or a reset mid-flow): the welcome */
@@ -2056,7 +3555,7 @@ void app_main(void) {
     /* one-shot: what a frame costs with the stats card up (the card only
        renders on a tap, so the running profile rarely shows it) */
     if (fb[0] && tank.n_fish > 0) {
-        uint16_t *tmp = heap_caps_aligned_alloc(64, PLAN_FB_BYTES, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        uint16_t *tmp = heap_caps_aligned_alloc(FB_ALIGN, PLAN_FB_BYTES, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
         if (tmp) {
             render_tank(&tank, tmp, TANK_W);
             int64_t t0 = esp_timer_get_time();

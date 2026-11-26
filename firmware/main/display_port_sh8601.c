@@ -22,6 +22,9 @@
  * is up is the panel's MADCTL (S_MADCTL; director `madctl` to try another). */
 #include "display_port.h"
 #include "board_pins.h"
+#include "board_probe.h"
+#include "blackbox.h"
+#include "i2c_guard.h"
 #include "tank.h"
 #include "render.h"
 #include "driver/spi_master.h"
@@ -51,7 +54,12 @@ static const char *TAG = "sh8601";
 
 static esp_lcd_panel_handle_t s_panel;
 static esp_lcd_panel_io_handle_t s_io;          /* kept for DCS writes after init (brightness) */
-static uint8_t s_brightness = 0xFF;             /* what init_cmds' 0x51 sets */
+static uint8_t s_brightness = 0xFF;             /* the level wanted (the keeper's, brightness_apply) - sent once the panel is lit */
+/* DARK TILL A FRAME IS IN (0.4.1, mysiak + Bananna on Discord, "Boot animation glitch": a green triangle flashed at every boot and
+   tank switch). The init lists lit the panel at 0xFF the moment it came on, before a frame had been written: for a beat it showed
+   whatever its own memory held from before the reset. Now every init list lights it at 0 (as the watch's BSP does), and the level
+   waits here until the first whole frame - the loading's black - is in its memory (display_port_flush) */
+static bool s_dark = true;
 static uint16_t *s_stripe[2];                   /* PANEL_W x STRIPE_ROWS, DMA-capable; ping-pong */
 static SemaphoreHandle_t s_stripe_free;         /* counts stripe buffers not in DMA flight */
 /* where a flush's time goes (2026-10-03): waiting for a stripe buffer to come
@@ -135,6 +143,7 @@ static int  s_pw = PANEL_W, s_ph = PANEL_H;     /* the portrait panel this board
 static int  s_fx, s_fy;                         /* ... and where the frame's corner sits on it (even, as the CO5300 wants) */
 static bool s_border_clear;                     /* a frame smaller than its panel: the glass around it is owed its black */
 static bool s_expander;                         /* the 1.8's TCA9554 answered */
+static uint8_t s_es7210;                        /* the address the ES7210 answered at, 0 = none (0.4.2: 0x40..0x43, board_probe.h) */
 static bool s_inverted;                         /* 180-degree flip, done in the transpose */
 /* the round panel's view: where the tank's picture sits on the 466 px square */
 #define FIT_W 360                               /* 448 x 368 at 4/5: 90 x 74 groups of 5 px -> 4 */
@@ -214,8 +223,10 @@ bool board_is_square(void) { return s_square; }
 static volatile bool s_probed;                  /* the chips were asked (display_port_init) */
 bool board_port_probed(void) { return s_probed; }
 const char *board_port_hw(void) {
-    return s_square ? "square216" : s_watch ? "watch206" : s_round ? "round175c" : s_expander ? "amoled18" : NULL;
+    board_kind_t k = { .is175 = s_175, .round = s_round, .watch = s_watch, .square = s_square };   /* (by name: a swapped field could pass the host test) */
+    return board_kind_id(k, s_expander);
 }
+uint8_t board_es7210_addr(void) { return s_es7210; }
 int  board_pwr_sense_pin(void) { return s_175 ? -1 : s_round ? R_PIN_PWR_SENSE : s_watch ? W_PIN_PWR_SENSE : s_square ? S_PIN_PWR_SENSE : -1; }
 void display_port_frame_origin(int *px, int *py) { *px = s_fx; *py = s_fy; }
 /* the boards whose resets are GPIOs (the 1.75C, the watch): the pads held through a deep sleep */
@@ -299,7 +310,7 @@ static const sh8601_lcd_init_cmd_t init_cmds[] = {
     {0x3A, (uint8_t[]){0x55}, 1, 0},
     {0x35, (uint8_t[]){0x00}, 1, 0},
     {0x53, (uint8_t[]){0x20}, 1, 0},
-    {0x51, (uint8_t[]){0xFF}, 1, 0},
+    {0x51, (uint8_t[]){0x00}, 1, 0},
     {0x63, (uint8_t[]){0xFF}, 1, 0},
     {0x2A, (uint8_t[]){0x00, 0x00, 0x01, 0x6F}, 4, 0},
     {0x2B, (uint8_t[]){0x00, 0x00, 0x01, 0xBF}, 4, 0},
@@ -344,7 +355,7 @@ static const sh8601_lcd_init_cmd_t round_init_cmds[] = {
     {0x3A, (uint8_t[]){0x55}, 1, 0},
     {0x35, (uint8_t[]){0x00}, 1, 0},
     {0x53, (uint8_t[]){0x20}, 1, 0},
-    {0x51, (uint8_t[]){0xFF}, 1, 0},
+    {0x51, (uint8_t[]){0x00}, 1, 0},
     {0x63, (uint8_t[]){0xFF}, 1, 0},
     {0x2A, (uint8_t[]){0x00, 0x06, 0x01, 0xD7}, 4, 0},
     {0x2B, (uint8_t[]){0x00, 0x00, 0x01, 0xD1}, 4, 0},
@@ -366,7 +377,7 @@ static const sh8601_lcd_init_cmd_t watch_init_cmds[] = {
     {0x2A, (uint8_t[]){0x00, 0x16, 0x01, 0xAF}, 4, 0},
     {0x2B, (uint8_t[]){0x00, 0x00, 0x01, 0xF5}, 4, 0},
     {0x29, (uint8_t[]){0x00}, 0, 10},
-    {0x51, (uint8_t[]){0xFF}, 1, 0},
+    {0x51, (uint8_t[]){0x00}, 1, 0},
 };
 /* the square's init, from Waveshare's BSP (esp32_s3_touch_amoled_2_16): the
  * 1.75C's sequence (sleep out first, as the watch), the window the whole 480,
@@ -381,7 +392,7 @@ static const sh8601_lcd_init_cmd_t square_init_cmds[] = {
     {0x3A, (uint8_t[]){0x55}, 1, 0},
     {0x35, (uint8_t[]){0x00}, 1, 0},
     {0x53, (uint8_t[]){0x20}, 1, 0},
-    {0x51, (uint8_t[]){0xFF}, 1, 0},
+    {0x51, (uint8_t[]){0x00}, 1, 0},
     {0x63, (uint8_t[]){0xFF}, 1, 0},
     {0x2A, (uint8_t[]){0x00, 0x00, 0x01, 0xDF}, 4, 0},
     {0x2B, (uint8_t[]){0x00, 0x00, 0x01, 0xDF}, 4, 0},
@@ -403,19 +414,26 @@ uint8_t display_port_madctl(void) { return s_madctl; }
  * connected, so whatever ran before may have left them off: both on, here,
  * before the panel is touched (REG 90 bits 0 / 1; battery_port pins them
  * against the boot trim later). */
+static int s_boot_r90 = -1;                       /* REG 90 as found (the black box keeps it) */
 static void watch_rails_on(void) {
     i2c_device_config_t cfg = { .dev_addr_length = I2C_ADDR_BIT_LEN_7, .device_address = 0x34, .scl_speed_hz = 400000 };
     i2c_master_dev_handle_t dev;
     if (i2c_master_bus_add_device(s_i2c, &cfg, &dev) != ESP_OK) return;
     uint8_t reg = 0x90, v = 0;
-    if (i2c_master_transmit_receive(dev, &reg, 1, &v, 1, 100) == ESP_OK && (v & 0x03) != 0x03) {
-        uint8_t wr[2] = { 0x90, (uint8_t)(v | 0x03) };
-        i2c_master_transmit(dev, wr, 2, 100);
+    i2c_guard_lock();
+    const bool got = i2c_master_transmit_receive(dev, &reg, 1, &v, 1, 100) == ESP_OK;
+    if (got) s_boot_r90 = v;
+    const bool off = got && (v & 0x03) != 0x03;
+    if (off) { uint8_t wr[2] = { 0x90, (uint8_t)(v | 0x03) }; i2c_master_transmit(dev, wr, 2, 100); }
+    i2c_guard_unlock();
+    if (off) {
         ESP_LOGW(TAG, "the PMIC had ALDO1/ALDO2 off (REG 90 was %02x): switched on - the panel's power enable hangs on ALDO2", v);
         vTaskDelay(pdMS_TO_TICKS(50));
     }
     i2c_master_bus_rm_device(dev);
 }
+int  display_port_boot_reg90(void) { return s_boot_r90; }
+bool display_port_panel_up(void) { return s_panel != NULL; }
 
 /* a DCS command over the QSPI link, framed as the sh8601 driver frames its own:
  * <write opcode 0x02><cmd><00> in a 32-bit word */
@@ -428,7 +446,44 @@ static bool probe(uint8_t addr) {                /* three tries: a board is not 
     for (int i = 0; i < 3; i++) if (i2c_master_probe(s_i2c, addr, 50) == ESP_OK) return true;
     return false;
 }
+static uint8_t probe_es7210(void) {              /* the ES7210 at 0x40 + 0..3 (its AD0 / AD1 straps; a 1.75C rev 1.1 answers at 0x42):
+                                                    the first that answers, 0 for none. A missing address NACKs at once */
+    for (int i = 0; i < ES7210_ADDR_COUNT; i++) if (probe((uint8_t)(ES7210_ADDR_FIRST + i))) return (uint8_t)(ES7210_ADDR_FIRST + i);
+    return 0;
+}
+/* the chips that say which board this is (board_probe.h decides). cst: the square's touch chip asked for, with its
+   reset let go (GPIO 40 - the watch's I2S data line, an output anyway: harmless there) - never in the run (the late
+   check below), only at boot */
+static board_chips_t probe_chips(bool cst) {
+    board_chips_t chips = { false, 0, false, false };
+    chips.expander = probe(I2C_ADDR_EXPANDER);
+    chips.es7210 = probe_es7210();                   /* the 1.75 / 1.75-B: expander AND an ES7210 (the 1.8 has none); no expander: the 1.75C family */
+    if (board_decide(chips).mic) chips.rtc = probe(I2C_ADDR_RTC);   /* the watch has the 1.75C's ES7210 AND an RTC chip (on the always-on RTC rail) */
+    if (cst && board_decide(chips).watch) {          /* ... and so has the 2.16 square: told apart by the touch chip, a CST92xx
+                                                        asked for at 0x5A; the watch's FT3168 sits at 0x38 */
+        gpio_reset_pin(S_PIN_TP_RST); gpio_set_direction(S_PIN_TP_RST, GPIO_MODE_OUTPUT);
+        gpio_set_level(S_PIN_TP_RST, 0); vTaskDelay(pdMS_TO_TICKS(10));
+        gpio_set_level(S_PIN_TP_RST, 1); vTaskDelay(pdMS_TO_TICKS(60));
+        chips.cst9217 = probe(I2C_ADDR_CST9217);
+    }
+    return chips;
+}
+/* the board this image draws for was found (a board-specific image), or anything answers at all (the 1.8's image) */
+static bool board_found(board_chips_t c) {
+    const board_kind_t k = board_decide(c);
+#if defined(TANK_ROUND)
+    return k.round;
+#elif defined(TANK_WATCH)
+    return k.watch;
+#elif defined(TANK_SQUARE)
+    return k.square;
+#else
+    return c.expander || k.mic || probe(0x34);
+#endif
+}
+#define BOARD_TRIES 3
 bool display_port_init(void) {
+    i2c_guard_boot_clear(PIN_I2C_SDA, PIN_I2C_SCL);  /* a slave a flash's reset cut off mid-byte lets go first (i2c_guard.h) */
     i2c_master_bus_config_t bus = { .i2c_port = I2C_NUM_0, .sda_io_num = PIN_I2C_SDA, .scl_io_num = PIN_I2C_SCL,
         .clk_source = I2C_CLK_SRC_DEFAULT, .glitch_ignore_cnt = 7, .flags.enable_internal_pullup = true };
     ESP_ERROR_CHECK(i2c_new_master_bus(&bus, &s_i2c));
@@ -437,20 +492,25 @@ bool display_port_init(void) {
        path, as before. Nothing at all = a dead bus (the 1.75C with A3V3 off
        is exactly that - battery_port.h): no panel is driven on a guess, the
        pins differ between the boards. */
-    s_expander = probe(I2C_ADDR_EXPANDER);
-    s_175 = s_expander && probe(I2C_ADDR_ES7210);    /* the 1.75 / 1.75-B: an expander like the 1.8's AND the 1.75C's ES7210 (the 1.8 has none) */
-    bool mic = !s_expander && probe(I2C_ADDR_ES7210);
-    s_watch = mic && probe(I2C_ADDR_RTC);            /* the watch has the 1.75C's ES7210 AND an RTC chip (on the always-on RTC rail) */
-    s_round = s_175 || (mic && !s_watch);
-    if (s_watch) {                                   /* ... and so has the 2.16 square: told apart by the touch chip. Its reset let go
-                                                        (GPIO 40 - the watch's I2S data line, an output anyway: harmless there) and a
-                                                        CST92xx asked for at 0x5A; the watch's FT3168 sits at 0x38 */
-        gpio_reset_pin(S_PIN_TP_RST); gpio_set_direction(S_PIN_TP_RST, GPIO_MODE_OUTPUT);
-        gpio_set_level(S_PIN_TP_RST, 0); vTaskDelay(pdMS_TO_TICKS(10));
-        gpio_set_level(S_PIN_TP_RST, 1); vTaskDelay(pdMS_TO_TICKS(60));
-        s_square = probe(I2C_ADDR_CST9217);
-        if (s_square) s_watch = false;
+    /* the decision itself is board_decide (board_probe.h, table-tested on the host); here the chips are asked */
+    /* a board not found is asked again, after the bus reset (0.4.3): 2026-11-13 a flash left the watch's bus failing at
+       boot, the board went unnamed, and the watch's image refused it - no panel, ALDO2 trimmed off (watch-dark record E12) */
+    board_chips_t chips; int tries = 0; bool found;
+    for (;;) {
+        tries++;
+        chips = probe_chips(true);
+        found = board_found(chips);
+        if (found || tries >= BOARD_TRIES) break;
+        ESP_LOGW(TAG, "board probe %d of %d: this image's board not found (expander %d, ES7210 0x%02x, RTC %d, CST92xx %d) - the I2C bus reset, then again",
+                 tries, BOARD_TRIES, chips.expander, chips.es7210, chips.rtc, chips.cst9217);
+        i2c_guard_recover("the board not found at boot");
+        vTaskDelay(pdMS_TO_TICKS(100));
     }
+    blackbox_boot_board(found ? tries : 0);
+    if (found && tries > 1) ESP_LOGW(TAG, "board probe: found at try %d", tries);
+    s_expander = chips.expander; s_es7210 = chips.es7210;
+    bool mic = board_decide(chips).mic;
+    { board_kind_t k = board_decide(chips); s_175 = k.is175; s_round = k.round; s_watch = k.watch; s_square = k.square; }
     s_probed = true;                                 /* board_port_hw() means it from here (the installer's question waits for it) */
     if (!s_expander && !mic && !probe(0x34)) {
         ESP_LOGE(TAG, "nothing answers on the I2C bus (no expander, no ES7210, no PMIC): the board cannot be told, the panel stays dark - "
@@ -476,19 +536,19 @@ bool display_port_init(void) {
     }
 #endif
     if (s_square) {
-        ESP_LOGI(TAG, "board: the SQUARE, 2.16 (CO5300 480x480 / CST92xx at 0x%02x) - no expander, an ES7210 at 0x%02x, an RTC at 0x%02x", I2C_ADDR_CST9217, I2C_ADDR_ES7210, I2C_ADDR_RTC);
+        ESP_LOGI(TAG, "board: the SQUARE, 2.16 (CO5300 480x480 / CST92xx at 0x%02x) - no expander, an ES7210 at 0x%02x, an RTC at 0x%02x", I2C_ADDR_CST9217, s_es7210, I2C_ADDR_RTC);
         for (size_t i = 0; i < HELD_N; i++) gpio_hold_dis(SQUARE_HELD[i].pin);   /* a deep sleep's holds end here */
         for (size_t i = 0; i < sizeof ROUND_BUS / sizeof ROUND_BUS[0]; i++) gpio_hold_dis(ROUND_BUS[i]);   /* ... and the QSPI lines' */
         s_pw = S_PANEL; s_ph = S_PANEL;
     } else if (s_watch) {
-        ESP_LOGI(TAG, "board: the WATCH, 2.06 (CO5300 410x502 / FT3168) - no expander, an ES7210 at 0x%02x, an RTC at 0x%02x", I2C_ADDR_ES7210, I2C_ADDR_RTC);
+        ESP_LOGI(TAG, "board: the WATCH, 2.06 (CO5300 410x502 / FT3168) - no expander, an ES7210 at 0x%02x, an RTC at 0x%02x", s_es7210, I2C_ADDR_RTC);
         for (size_t i = 0; i < HELD_N; i++) gpio_hold_dis(WATCH_HELD[i].pin);   /* a deep sleep's holds end here */
         watch_rails_on();
         s_pw = W_PANEL_W; s_ph = W_PANEL_H;
     } else if (s_round) {
         if (s_175) ESP_LOGI(TAG, "board: the ROUND 1.75 / 1.75-B (CO5300 466x466 / CST9217) - an expander at 0x%02x AND an ES7210 at 0x%02x; resets on %d / %d (BETA)",
-                            I2C_ADDR_EXPANDER, I2C_ADDR_ES7210, B_PIN_LCD_RST, B_PIN_TP_RST);
-        else ESP_LOGI(TAG, "board: the ROUND 1.75C (CO5300 466x466 / CST9217) - no expander, an ES7210 at 0x%02x", I2C_ADDR_ES7210);
+                            I2C_ADDR_EXPANDER, s_es7210, B_PIN_LCD_RST, B_PIN_TP_RST);
+        else ESP_LOGI(TAG, "board: the ROUND 1.75C (CO5300 466x466 / CST9217) - no expander, an ES7210 at 0x%02x", s_es7210);
         for (size_t i = 0; i < HELD_N; i++) gpio_hold_dis(held_pins()[i].pin);   /* a deep sleep's holds end here */
         for (size_t i = 0; i < sizeof ROUND_BUS / sizeof ROUND_BUS[0]; i++) gpio_hold_dis(ROUND_BUS[i]);   /* ... and the QSPI lines' (sleepcfg 8) */
         for (int ky = 0; ky < 4; ky++) for (int kx = 0; kx < 4; kx++) {       /* FIT's area weights: 25ths, as 32nds that sum to 32 */
@@ -532,6 +592,7 @@ bool display_port_init(void) {
                                               .bits_per_pixel = 16, .vendor_config = (void *)&vendor };
     ESP_ERROR_CHECK(esp_lcd_new_panel_sh8601(io, &pcfg, &s_panel));
     if (held_pins()) gpio_sleep_sel_dis(pin_lcd_rst());   /* the reset line keeps its level through the sleep grace's light sleep */
+    s_dark = true;                                  /* (lit at 0 by the init list: the level waits for the first frame) */
     ESP_ERROR_CHECK(esp_lcd_panel_reset(s_panel));
     ESP_ERROR_CHECK(esp_lcd_panel_init(s_panel));
     ESP_ERROR_CHECK(esp_lcd_panel_set_gap(s_panel, panel_x_gap(), 0));
@@ -578,21 +639,83 @@ void display_port_wake(void) {
     if (!s_panel) return;
     if (!held_pins()) expander_power_up();
     else gpio_set_level(pin_tp_rst(), 1);           /* the touch chip is reporting again by the time the panel is up */
+    s_dark = true;                                  /* (dark again till the first frame after the wake) */
     esp_lcd_panel_reset(s_panel);
     esp_lcd_panel_init(s_panel);
     esp_lcd_panel_set_gap(s_panel, panel_x_gap(), 0);
     if (s_square && s_madctl != S_MADCTL) dcs(0x36, &s_madctl, 1);   /* a way up tried from the director outlives the re-init */
     s_side_sent = -1;                               /* ... and a side: the next frame sends it again */
-    display_port_set_brightness(s_brightness);      /* init_cmds put it back at 255 */
+    display_port_set_brightness(s_brightness);      /* init_cmds put it at 0: the level waits for the first frame */
     esp_lcd_panel_disp_on_off(s_panel, true);
     s_round_clear = true;                           /* a reset panel's memory is not black */
     s_border_clear = s_fx > 0 || s_fy > 0;
 }
 
+/* THE WATCH'S DARK GLASS (0.4.2 item 7, 2026-11-07): two watches went dark with the tank running - taps still fed, PWR did
+ * nothing - and the PMIC showed ALDO2 off (REG 90 = 01). DSI_PWR_EN hangs on ALDO2, so the panel had no power. Nothing in
+ * the firmware clears a pinned ALDO2 (every REG 90 write is battery_port_set_rail's or watch_rails_on's), so the PMIC or a
+ * bad read on the bus did. The tank task asks here every 10 s while awake: ALDO2 off -> the rail back on, the panel's full
+ * init again (display_port_wake, the drowse wake's own path) and a W line with the PMIC's registers for the cause. */
+static uint32_t s_rail_heals;
+static bool pmic_dev(i2c_master_dev_handle_t *dev) {
+    i2c_device_config_t cfg = { .dev_addr_length = I2C_ADDR_BIT_LEN_7, .device_address = 0x34, .scl_speed_hz = 400000 };
+    return s_i2c && i2c_master_bus_add_device(s_i2c, &cfg, dev) == ESP_OK;
+}
+static bool pmic_rd(i2c_master_dev_handle_t dev, uint8_t reg, uint8_t *v) { return i2c_master_transmit_receive(dev, &reg, 1, v, 1, 100) == ESP_OK; }
+bool display_port_panel_power_check(void) {
+    if (!s_watch || !s_panel) return false;          /* (the watch's image with no panel at all: display_port_board_back, main restarts) */
+    i2c_master_dev_handle_t dev;
+    if (!pmic_dev(&dev)) return false;
+    uint8_t v = 0, again = 0;
+    i2c_guard_lock();                                /* the reads and the write one step: no other task's REG 90 write between them */
+    bool off = pmic_rd(dev, 0x90, &v) && !(v & 0x02) && pmic_rd(dev, 0x90, &again) && !(again & 0x02);   /* read twice: one bad read is not a dark panel */
+    if (!off) { i2c_guard_unlock(); i2c_master_bus_rm_device(dev); return false; }
+    uint8_t on_src = 0, off_src = 0, i0 = 0, i1 = 0, i2 = 0, cfg = 0;
+    pmic_rd(dev, 0x20, &on_src); pmic_rd(dev, 0x21, &off_src); pmic_rd(dev, 0x48, &i0); pmic_rd(dev, 0x49, &i1); pmic_rd(dev, 0x4A, &i2); pmic_rd(dev, 0x10, &cfg);
+    uint8_t wr[2] = { 0x90, (uint8_t)(again | 0x03) };   /* (the second read: the newer) */
+    bool ok = i2c_master_transmit(dev, wr, 2, 100) == ESP_OK;
+    i2c_guard_unlock();
+    i2c_master_bus_rm_device(dev);
+    vTaskDelay(pdMS_TO_TICKS(50));                  /* (watch_rails_on's settle) */
+    display_port_wake();
+    s_rail_heals++;
+    ESP_LOGW(TAG, "THE PANEL'S RAIL WAS OFF (REG 90 %02x): ALDO2 switched on%s, the panel re-inited (heal %lu) | PMIC on-src %02x off-src %02x irq %02x %02x %02x cfg %02x",
+             v, ok ? "" : " - the write FAILED", (unsigned long)s_rail_heals, on_src, off_src, i0, i1, i2, cfg);
+    return true;
+}
+uint32_t display_port_panel_heals(void) { return s_rail_heals; }
+/* THE WATCH WITH NO PANEL (0.4.3): the watch's image found no watch at boot (the bus failing after a flash, 11-13) and
+   drew for nothing - the heal above cannot help, there is no panel to heal. Asked every 10 s: do the watch's chips
+   answer now? Then main saves the tank and restarts, once a power-on (blackbox_late_restart_take): the restart's boot
+   switches the rails on and brings the panel up - the full init, as the USB restart did on 11-13 */
+bool display_port_board_back(void) {
+#ifdef TANK_WATCH
+    if (s_panel || !s_i2c) return false;
+    board_chips_t c = { false, 0, false, false };
+    c.expander = i2c_master_probe(s_i2c, I2C_ADDR_EXPANDER, 50) == ESP_OK;
+    for (int i = 0; i < ES7210_ADDR_COUNT && !c.es7210; i++) if (i2c_master_probe(s_i2c, (uint16_t)(ES7210_ADDR_FIRST + i), 50) == ESP_OK) c.es7210 = (uint8_t)(ES7210_ADDR_FIRST + i);
+    if (board_decide(c).mic) c.rtc = i2c_master_probe(s_i2c, I2C_ADDR_RTC, 50) == ESP_OK;
+    if (board_decide(c).watch) c.cst9217 = i2c_master_probe(s_i2c, I2C_ADDR_CST9217, 50) == ESP_OK;   /* (asked as it is - no reset pulse: that pin
+                                                                                                    is the watch's I2S line - a square's chip
+                                                                                                    answers, a watch has none at 0x5A) */
+    return board_decide(c).watch;
+#else
+    return false;
+#endif
+}
+/* director `panelrail off` (a TEST of the above): ALDO2 cut behind the pin's back, as the dark watches were found */
+void display_port_panel_rail_test_off(void) {
+    i2c_master_dev_handle_t dev; uint8_t v = 0;
+    if (!s_watch || !pmic_dev(&dev)) { ESP_LOGW(TAG, "panelrail: the watch only"); return; }
+    if (pmic_rd(dev, 0x90, &v)) { uint8_t wr[2] = { 0x90, (uint8_t)(v & ~0x02) }; i2c_master_transmit(dev, wr, 2, 100); }
+    i2c_master_bus_rm_device(dev);
+    ESP_LOGW(TAG, "panelrail: ALDO2 cut (REG 90 was %02x) - the glass goes dark; the 10 s check should bring it back", v);
+}
+
 /* DCS 0x51 WRDISBV */
 void display_port_set_brightness(uint8_t level) {
     s_brightness = level;
-    dcs(0x51, &level, 1);
+    if (!s_dark) dcs(0x51, &level, 1);              /* (dark: it waits for the first frame - display_port_flush) */
 }
 uint8_t display_port_brightness(void) { return s_brightness; }
 
@@ -908,7 +1031,7 @@ bool display_port_flush_async(const uint16_t *fb, void (*done)(const uint16_t *f
         xSemaphoreGive(s_fl_done);
         ESP_LOGI(TAG, "flush: asynchronous, %s", s_fl_amc ? "the stripes copied by GDMA" : "CPU fills");
     }
-    if (s_border_clear || s_round_clear) return false;      /* a clear owed: the plain flush does it */
+    if (s_border_clear || s_round_clear || s_dark) return false;   /* a clear owed, or the panel not lit yet: the plain flush does it */
     display_port_flush_wait(NULL);                          /* one frame on its way at a time */
     xSemaphoreTake(s_fl_done, 0);                           /* (it was given: ours now, until the task gives it back) */
     s_fl_fb = fb; s_fl_cb = done; s_fl_arg = arg;
@@ -918,6 +1041,7 @@ bool display_port_flush_async(const uint16_t *fb, void (*done)(const uint16_t *f
 void display_port_flush(const uint16_t *fb) {               /* the plain flush, whole, here and now */
     display_port_flush_wait(NULL);
     flush_now(fb);
+    if (s_dark && s_panel && !s_probe) { s_dark = false; dcs(0x51, &s_brightness, 1); }   /* the first whole frame is in: lit (queued after its stripes) */
 }
 void display_port_flush_async_prof(int64_t *task_us, int *frames, int64_t *copy_us) {
     *task_us = s_fl_us; *frames = s_fl_frames; *copy_us = s_prof_copy; s_fl_us = s_prof_copy = 0; s_fl_frames = 0;

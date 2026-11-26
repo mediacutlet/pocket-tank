@@ -71,6 +71,73 @@ menu "pocket-tank"
             image shows nothing on the other boards. Build it with
             SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.square" into its
             own build directory and sdkconfig (docs/board-amoled-2.16.md).
+    config POCKET_TANK_P4
+        bool "The HOME TANK build: a 640x400 tank shown at 2x on the Waveshare ESP32-P4-WIFI6-Touch-LCD-10.1"
+        default n
+        depends on IDF_TARGET_ESP32P4
+        help
+            On = TANK_P4: the rectangle's world a half again as wide, drawn 2x
+            by the P4's PPA onto its 1280x800 IPS glass. Its own target (an
+            ESP32-P4, ESP-IDF 5.5): tools/flash_p4.sh builds it with
+            SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.p4" into its own
+            build directory (docs/board-p4-10.1.md).
+    config POCKET_TANK_TAB5
+        bool "The SMALL HOME TANK: the P4 home tank build on the M5Stack Tab5 (5in 1280x720)"
+        default n
+        depends on POCKET_TANK_P4
+        help
+            On = TANK_TAB5 beside TANK_P4: the home tank's world 720 tall, the
+            Tab5's ST7121 / ST7123 / ILI9881C panel, its touch, its PI4IOE5V6408
+            expanders. tools/flash_tab5.sh builds it with
+            SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.p4;sdkconfig.tab5"
+            (docs/board-tab5.md).
+    config POCKET_TANK_P4_LCD7
+        bool "BETA: the home tank on the Waveshare ESP32-P4-WIFI6-Touch-LCD-7 (7in 720x1280, ILI9881C)"
+        default n
+        depends on POCKET_TANK_P4 && !POCKET_TANK_TAB5
+        help
+            On = TANK_P4_LCD7 + TANK_TAB5's 720-tall world: the 10.1's board
+            (pins, codec, touch chip, console) with Waveshare's 7 inch panel -
+            an ILI9881C at 1000 Mbps a lane and its panel controller at I2C
+            0x45. Untried on a board (nobody here owns one): BETA.
+            tools/flash_p4_beta.sh 7 builds it with
+            SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.p4;sdkconfig.p4lcd7"
+            (docs/board-p4-7-8-beta.md). Not the -7B (1024x600): another board.
+    config POCKET_TANK_P4_LCD8
+        bool "BETA: the home tank on the Waveshare ESP32-P4-WIFI6-Touch-LCD-8 (8in 800x1280, JD9365)"
+        default n
+        depends on POCKET_TANK_P4 && !POCKET_TANK_TAB5 && !POCKET_TANK_P4_LCD7
+        help
+            On = TANK_P4_LCD8: the 10.1's image with the 8 inch panel's own
+            JD9365 init table (Waveshare's BSP). Untried on a board: BETA.
+            tools/flash_p4_beta.sh 8 (docs/board-p4-7-8-beta.md).
+    config POCKET_TANK_DISPLAY_JD9365
+        bool "Drive the Waveshare 10.1in IPS (JD9365 over MIPI-DSI, the P4 home tank)"
+        default n
+        depends on IDF_TARGET_ESP32P4
+    config POCKET_TANK_NO_RADIO
+        bool "No radio in this image: the network and link ports are stubs"
+        default n
+        help
+            The P4's radio is a C6 over esp-hosted, not the esp_wifi driver:
+            until that path is in, its image carries no Wi-Fi (no update
+            page, no tank link, no internet time). Every port still answers.
+    config POCKET_TANK_RADIO_HOSTED
+        bool "The P4's radio: the C6 beside it through esp_hosted, the tank link through our relay"
+        default n
+        depends on IDF_TARGET_ESP32P4
+        help
+            The home tank WITH its radio chip (docs/board-p4-10.1.md, "The
+            radio"): link_port_hosted.c speaks ESP-NOW through the C6's
+            relay (firmware-c6/). The network port is still the stub. Built
+            by tools/flash_p4.sh --radio (PT_P4_RADIO=1 brings the hosted
+            components into the build; sdkconfig.p4radio sets this).
+    config POCKET_TANK_CONSOLE_UART
+        bool "The director console on UART0 instead of the USB serial port"
+        default n
+        help
+            The P4 board's native USB port is not wired to its Type-C: the
+            bench talks over the CH343 UART bridge (UART0, 115200).
     config POCKET_TANK_TOUCH_FT3168
         bool "Read the FT3168 capacitive touch (taps / holds)"
         default n

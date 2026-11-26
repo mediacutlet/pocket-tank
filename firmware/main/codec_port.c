@@ -7,6 +7,74 @@ static i2c_master_dev_handle_t s_dev; static int s_addr;
 static bool wr(uint8_t reg, uint8_t val) { uint8_t b[2] = { reg, val }; return i2c_master_transmit(s_dev, b, 2, 100) == ESP_OK; }
 static bool rd(uint8_t reg, uint8_t *val) { return i2c_master_transmit_receive(s_dev, &reg, 1, val, 1, 100) == ESP_OK; }
 
+#ifdef TANK_TAB5_HW
+/* THE TAB5'S ES8388 at 0x10 (2026-10-19): the same four calls for the audio port. The register
+ * values are Espressif's esp_codec_dev es8388 driver (es8388_open / es8388_start / es8388_stop),
+ * reduced to the DAC path: slave I2S, 16-bit, MCLK / LRCK 256 (4.096 MHz at 16 kHz), both DACs
+ * to both outputs at 0 dB (the mixer sets levels; the NS4150B speaker amp is on the expander).
+ * The ADC stays down. Its microphone front end, the ES7210, is suspended as on the other boards. */
+static bool seq_w(const uint8_t (*seq)[2], size_t n) { bool ok = true; for (size_t i = 0; i < n; i++) ok &= wr(seq[i][0], seq[i][1]); return ok; }
+void codec_port_dump(void) {
+    if (!s_dev) { ESP_LOGI(TAG, "no ES8388 found"); return; }
+    uint8_t c1 = 0, c2 = 0, cp = 0, dp = 0, d3 = 0, d4 = 0;
+    bool ok = rd(0x00, &c1) && rd(0x01, &c2) && rd(0x02, &cp) && rd(0x04, &dp) && rd(0x19, &d3) && rd(0x1A, &d4);
+    ESP_LOGI(TAG, "ES8388 @0x10 %s: CONTROL1 %02x CONTROL2 %02x CHIPPOWER %02x DACPOWER %02x DACCONTROL3 %02x (mute %d) vol %02x",
+             ok ? "" : "(read failed)", c1, c2, cp, dp, d3, (d3 >> 2) & 1, d4);
+}
+bool codec_port_present(void) { return s_dev != NULL; }
+void codec_port_down(void) {
+    if (!s_dev) return;
+    static const uint8_t seq[][2] = {
+        { 0x19, 0x04 },             /* DAC muted */
+        { 0x04, 0xC0 },             /* DAC and outputs down */
+        { 0x03, 0xFF },             /* ADC down */
+        { 0x02, 0xFF },             /* every block of the chip down */
+    };
+    bool ok = seq_w(seq, sizeof seq / sizeof *seq);
+    ESP_LOGI(TAG, "ES8388 down%s", ok ? "" : " - a write FAILED");
+}
+void codec_port_settled(void) { if (s_dev) wr(0x19, 0x00); }   /* unmute (with the ramp) once the outputs have settled */
+bool codec_port_up(void) {
+    if (!s_dev) return false;
+    static const uint8_t seq[][2] = {
+        { 0x19, 0x04 },             /* DACCONTROL3: muted while it comes up */
+        { 0x00, 0x86 }, { 0x00, 0x06 },   /* CONTROL1: reset the control port, then play & record, vmid 500k */
+        { 0x01, 0x50 },             /* CONTROL2 */
+        { 0x02, 0xFF }, { 0x02, 0x00 },   /* CHIPPOWER: everything reset, then everything up */
+        { 0x35, 0xA0 }, { 0x37, 0xD0 }, { 0x39, 0xD0 },   /* the internal DLL off (Espressif: better at low rates) */
+        { 0x08, 0x00 },             /* MASTERMODE: slave */
+        { 0x04, 0xC0 },             /* DACPOWER: down while it is set */
+        { 0x00, 0x12 },             /* CONTROL1 */
+        { 0x17, 0x18 },             /* DACCONTROL1: I2S, 16-bit */
+        { 0x18, 0x02 },             /* DACCONTROL2: single speed, ratio 256 */
+        { 0x26, 0x00 },             /* DACCONTROL16 */
+        { 0x27, 0x90 },             /* DACCONTROL17: left DAC -> left mixer, 0 dB */
+        { 0x2A, 0x90 },             /* DACCONTROL20: right DAC -> right mixer, 0 dB */
+        { 0x2B, 0x80 },             /* DACCONTROL21: ADC and DAC share the LRCK */
+        { 0x2D, 0x00 },             /* DACCONTROL23 */
+        { 0x1A, 0x00 }, { 0x1B, 0x00 },   /* DACCONTROL4 / 5: digital volume 0 dB */
+        { 0x2E, 0x1E }, { 0x2F, 0x1E },   /* LOUT1 / ROUT1 0 dB */
+        { 0x30, 0x1E }, { 0x31, 0x1E },   /* LOUT2 / ROUT2 0 dB */
+        { 0x04, 0x3C },             /* DACPOWER: both DACs, all four outputs */
+        { 0x03, 0xFF },             /* ADCPOWER: the ADC stays down */
+    };
+    bool ok = seq_w(seq, sizeof seq / sizeof *seq);
+    uint8_t cp = 0, dp = 0; rd(0x02, &cp); rd(0x04, &dp);
+    ESP_LOGI(TAG, "ES8388 up%s (CHIPPOWER %02x DACPOWER %02x)", ok ? "" : " - a write FAILED", cp, dp);
+    return ok;
+}
+bool codec_port_init(i2c_master_bus_handle_t bus) {
+    if (!bus) return false;
+    if (i2c_master_probe(bus, 0x10, 50) != ESP_OK) { ESP_LOGW(TAG, "no ES8388 at 0x10"); return false; }
+    s_addr = 0x10;
+    i2c_device_config_t cfg = { .dev_addr_length = I2C_ADDR_BIT_LEN_7, .device_address = s_addr, .scl_speed_hz = 400000 };
+    if (i2c_master_bus_add_device(bus, &cfg, &s_dev) != ESP_OK) return false;
+    codec_port_down();
+    codec_port_dump();
+    return true;
+}
+#else
+
 void codec_port_dump(void) {
     if (!s_dev) { ESP_LOGI(TAG, "no ES8311 found"); return; }
     uint8_t r00 = 0, r01 = 0, r0d = 0, r0e = 0, r12 = 0;
@@ -92,13 +160,14 @@ bool codec_port_init(i2c_master_bus_handle_t bus) {
     codec_port_dump();
     return ok;
 }
+#endif
 
 /* ES7210 suspend, as Espressif's esp_codec_dev driver does it: the four
    microphone inputs and both bias pairs off, the analog block down, every
    clock gated, then the chip's own power-down */
-bool codec_port_mic_adc_down(i2c_master_bus_handle_t bus) {
-    if (!bus || i2c_master_probe(bus, 0x40, 50) != ESP_OK) return false;
-    i2c_device_config_t cfg = { .dev_addr_length = I2C_ADDR_BIT_LEN_7, .device_address = 0x40, .scl_speed_hz = 400000 };
+bool codec_port_mic_adc_down(i2c_master_bus_handle_t bus, uint8_t addr) {
+    if (!bus || !addr || i2c_master_probe(bus, addr, 50) != ESP_OK) return false;
+    i2c_device_config_t cfg = { .dev_addr_length = I2C_ADDR_BIT_LEN_7, .device_address = addr, .scl_speed_hz = 400000 };
     i2c_master_dev_handle_t dev;
     if (i2c_master_bus_add_device(bus, &cfg, &dev) != ESP_OK) return false;
     static const uint8_t seq[][2] = {
@@ -109,6 +178,6 @@ bool codec_port_mic_adc_down(i2c_master_bus_handle_t bus) {
     for (size_t i = 0; i < sizeof seq / sizeof *seq; i++) ok &= i2c_master_transmit(dev, seq[i], 2, 100) == ESP_OK;
     uint8_t reg = 0x06, r06 = 0; i2c_master_transmit_receive(dev, &reg, 1, &r06, 1, 100);
     i2c_master_bus_rm_device(dev);
-    ESP_LOGI(TAG, "ES7210 @0x40 suspended%s (POWER_DOWN %02x)", ok ? "" : " - a write FAILED", r06);
+    ESP_LOGI(TAG, "ES7210 @0x%02x suspended%s (POWER_DOWN %02x)", addr, ok ? "" : " - a write FAILED", r06);
     return ok;
 }

@@ -14,6 +14,7 @@ void brightness_init(void);              /* after nvs_flash_init */
 int  brightness_level(void);             /* 5 .. 100 */
 bool brightness_set_level(int pct);      /* a step of 5, 5 .. 100; saved */
 void brightness_preview(int pct);        /* the same, NOT saved: the slider under the finger */
+void brightness_restore(void);           /* a preview undone: the level last saved, nothing written (the BOOT chord's tap) */
 void brightness_cycle(void);             /* 100 -> 60 -> 30 -> 100; saved */
 void brightness_save(void);              /* re-save after an NVS erase (reset) */
 void brightness_apply(bool night);       /* once per frame: pushes a changed target to the panel */

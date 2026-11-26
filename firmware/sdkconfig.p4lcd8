@@ -1,0 +1,6 @@
+# BETA (2026-11-22): the home tank on the Waveshare ESP32-P4-WIFI6-Touch-LCD-8 (8 inch, 800 x 1280, JD9365).
+# On top of sdkconfig.defaults AND sdkconfig.p4 (the 10.1's chip, flash, console, ports, world), ESP-IDF 5.5:
+#   tools/flash_p4_beta.sh 8   (idf.py ... -DSDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.p4;sdkconfig.p4lcd8")
+# The same image as the 10.1 but for the panel's init table (Waveshare's BSP 2.0.3, the 8 inch branch).
+# NOT SEEN ON A BOARD. docs/board-p4-7-8-beta.md has the sources and the unknowns.
+CONFIG_POCKET_TANK_P4_LCD8=y

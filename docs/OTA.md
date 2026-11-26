@@ -99,6 +99,7 @@ What changed against the plan while building:
   the public repo's Release assets are the keeper's channel.
 - **The console works in update mode** (`wifi set`, `ota tap <x> <y>`,
   `ota page`), so the flow can be driven over serial without hands.
+- **Since 0.4.1 `ota tap` cannot start an install:** the OFFER's UPDATE is HOLD TO UPDATE, a 1 s hold the keeper does by hand.
 
 Still to do: the live test above; the public resync (with the
 `OTA_SIGNING_KEY` secret set on the public repo BEFORE the first tagged
@@ -246,6 +247,57 @@ migration or rescue must not carry a password). Plaintext in NVS, like every
 hobby ESP device; NVS encryption is a later option and not a v1 promise.
 FORGET NETWORK erases the namespace.
 
+### Three saved networks (0.4.2)
+
+The tank keeps up to three networks and joins whichever it can see
+(`common/wifi_nets.h` has the rules, `--selftest-wifi3` drives them).
+
+- **The list** is one NVS blob, `nets` (299 bytes: three of name, password,
+  learned channel, joined), kept in the order the tank tries them: the one
+  used last first. One write replaces the whole list.
+- **Joining.** The one used last is tried first, on its learned channel,
+  exactly as when the tank kept one. Only when it is not seen does the radio
+  scan; the first saved network in range, in the tank's order (the most
+  recently used, not the strongest), is joined and becomes first.
+- **The wake's time check** (`net_time_sync`, 30 s): one saved network is
+  0.4.1 unchanged. Several: the first try as ever; not joined, a scan, then
+  one try at each saved network in range, the budget shared between them
+  (the quick look: one scan; the full look: scans 1.5 s apart while 4 s of
+  the 30 are left). `miss` stays one count: boots that saw none of the saved networks.
+- **Adding.** The wizard, Improv and `wifi set` add. A name already saved
+  takes the new password and no new place. A fourth replaces the one used
+  longest ago; the wizard says so first (THREE NETWORKS SAVED, the name, WILL
+  BE FORGOTTEN TO MAKE ROOM; OK / OTHER NETWORK / BACK TO TANK).
+- **The WI-FI page** (0.4.2, feat042-updates-ui: the UPDATES page's other
+  face, behind its WI-FI door - the page did two jobs and looked it) lists the
+  three places: a saved network with a FORGET (tap, then SURE?), an open place
+  says EMPTY; the one used last has a check mark, and LAST USED under the list
+  says what the mark means. ADD A NETWORK restarts into update mode at the
+  list of networks in range (`update_begin_add`; before, the list was reached
+  only from a failed try's OTHER NETWORK, or with nothing saved). BACK returns
+  to UPDATES. The radio is off in the tank, so no network is ever "connected"
+  there. The UPDATES face keeps VERSION / BUILD / BOARD CODE, CHECK FOR
+  UPDATES and BACK. Layout: `common/update.h`; tests: `--selftest-updui`.
+- **From 0.4.1, the rule.** Whenever the old `ssid` / `pass` / `chan` keys
+  are found they are added to the list (a new name first; a name already
+  there takes their password), the list is written, and then the old keys are
+  erased. A power cut at any step loses nothing. A tank rolled back to 0.4.1
+  has NO saved network (downgrade is not a keeper's path); one saved there
+  joins the list on the way back up. Forget-all erases the old keys before
+  the list. A forgotten network cannot come back.
+- **One in range that will not join** (a changed password, a neighbor's
+  network of the same name) is passed over for the next saved one in range,
+  in update mode and in the time check; what a scan heard and what was tried
+  are kept by name. In the time check only the first try's "seen" counts for
+  the quick look, so a tank with nothing it can join stays on the quick look.
+- **The scan** asks every record the driver kept for the saved names (not
+  only the strongest shown on the page).
+- **Director:** `wifi` lists them, `wifi set ssid=.. pass=..` adds (and says
+  what a fourth replaced), `wifi forget <name>` forgets one, `wifi forget all`
+  every one; `wifi forget` alone forgets nothing.
+- **Hidden networks:** a scan never sees one, so a hidden network is joined
+  only while it is the one used last. Not supported beyond that.
+
 ## Safety
 
 - **Signed images without secure boot.** ESP-IDF's "signed app verification
@@ -259,13 +311,18 @@ FORGET NETWORK erases the namespace.
   download hosts redirect; the HTTP client follows redirects, and the bundle
   covers both hosts.
 - **Rollback.** Bootloader app rollback ON. A fresh image boots as "pending";
-  the app marks itself valid once the save has loaded and the tank has drawn
-  its first frames. A crash before that boots the previous slot.
+  the app marks itself valid once the tank has been on the glass ~2 s past
+  its loading (OTA_VALID_FRAMES, main.c), and before every start it asks for
+  itself (a sleep, a power-off, SWAP IN, CHECK FOR UPDATES), because the
+  bootloader rolls back on ANY start that finds the image still pending. A
+  crash before that boots the previous slot. (0.4, the 11-02 sweep: 0.3.x
+  marked it in app_main, before the tank task drew a frame.)
 - **Rollback and the save.** The save is append-only and the loader accepts
   any OLDER length. A rollback reverses that: the older build reads a save
   the newer one wrote. Rule for 0.3.0 onward: the loader reads its own prefix
-  of a LONGER save too, and a new build marks itself valid BEFORE its first
-  save write.
+  of a LONGER save too (so a rollback after a first save is safe: 0.3.9.6
+  reads a 0.4 save's head), and the tank's first timed save comes after the
+  marking (the 30 s window).
 - **Size and hash before the write** (from the manifest), the signature after.
 - **Battery gate**, above.
 
@@ -381,7 +438,7 @@ gains one sentence about Wi-Fi.
 
 ## Testing
 
-- **Director**: `wifi set <ssid> <password>`, `wifi forget`, `ota check`,
+- **Director**: `wifi set <ssid> <password>`, `wifi forget` (0.4.2: `wifi forget all`), `ota check`,
   `ota url <manifest>` (the test channel), `ota mode` (restart into update
   mode). Strato never types a password on the glass unless he wants to.
 - **Sim**: no Wi-Fi. The update pages and the keyboard render on the desktop

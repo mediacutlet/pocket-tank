@@ -25,6 +25,7 @@ bool imu_port_moving(void);
  * show on two consecutive polls (500 ms) - a pick-up does, a knock on the
  * desk or a mug set down beside it is one spike. */
 bool imu_port_handled(void);
+bool imu_port_carried(void);    /* the tank link's drift: sustained motion well past a knock (CARRY_*), held a second */
 int  imu_port_motion(void);                       /* last poll's movement, counts (director / tuning) */
 /* face-down gesture (2026-09-30, the CYD): true ONCE when the screen has lain
  * face down and still for IMU_FACE_HOLD_POLLS (2 s); re-armed only after the

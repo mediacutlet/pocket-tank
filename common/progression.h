@@ -24,6 +24,7 @@
 #ifndef PROGRESSION_H
 #define PROGRESSION_H
 #include "tank.h"
+#include "passport.h"
 #include <stdint.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -35,11 +36,18 @@
  * --selftest-saves pins the spelling. */
 #define SAVE_NVS_NS  "tank"
 #define SAVE_NVS_KEY "save"
-bool    persist_port_load(void *buf, size_t max, size_t *got); /* the saved blob, whatever length an older
-                                                            * build wrote (*got = it); a NEWER build's longer one
-                                                            * loads its first max bytes (*got = max); false = nothing */
+bool    persist_port_load(void *buf, size_t max, size_t *got); /* the saved blob, whatever length a build
+                                                            * wrote: *got = its stored length; a NEWER build's longer
+                                                            * one fills buf with its first max bytes (*got stays the
+                                                            * whole: progression keeps the rest); false = nothing */
 bool    persist_port_save(const void *buf, size_t len);
 bool    persist_port_erase(void);                          /* the tank on the glass (and a parked copy); the shelf and the board keys stay (D13) */
+/* a blob of its own beside the tank save (the visitor collection, 0.4): the
+ * device keeps it under `key` in SAVE_NVS_NS (so a reset erases it too), the
+ * sim in a file beside the save. got = its stored length */
+bool    persist_port_blob_load(const char *key, void *buf, size_t max, size_t *got);
+bool    persist_port_blob_save(const char *key, const void *buf, size_t len);
+bool    persist_port_blob_forget(const char *key);         /* gone (true if it was never there): MY TANKS swaps a tank in without one */
 int64_t clock_port_now_unix(void);                         /* 0 if unknown */
 /* the release (version.h PT_RELEASE_NUM) of the build that wrote the save
  * the last load read - 0 for a save from before release numbers, or none */
@@ -61,6 +69,9 @@ const char *board_port_hw(void);
  * morning deserves its night too). Returns the hours lived through, -1 for
  * none. */
 float progression_boot(tank_t *t);
+/* the tank has changed since its last save: one is due at the next window
+   (30 s), not the 10-min heartbeat (the selftests read it) */
+bool  progression_dirty(void);
 /* the device waking from DEEP sleep (2026-09-14): restore the save, then live
  * through the dark stretch since it was written - tank_tick_sleep for
  * (now_unix - saved_unix), capped at PROGRESSION_SLEEP_CAP_S. Hunger, energy,
@@ -72,6 +83,23 @@ float progression_boot(tank_t *t);
  * eight-hour sleep should be worth 2 hours of growth") */
 #define SLEEP_GROWTH_FRAC 0.25f
 float progression_wake(tank_t *t, int64_t now_unix);
+/* (0.4.2, audit PR-2) the tank badges the last wake's slept span earned (TMS_*: in practice FIRST FULL NIGHT'S SLEEP, which a
+ * board only earns across a boot), taken: 0 after the first call, after any progression_tick (the boot is over) and after
+ * a reset. notice_sync takes them and leaves them unadopted, so the boot that ends a tank's first long night says it once
+ * (the save's own badges stay adopted: an OTA, a SWAP IN, a restore never say an old one) */
+uint32_t progression_wake_badges_take(void);
+/* (0.4.2, Discord D-5) the fish the last wake's slept span grew up a stage: from[i] = the stage fish slot i had before the
+ * night for each of them, its current stage for every other slot. Returns how many; taken as progression_wake_badges_take
+ * (0 after the first call, after any progression_tick, after a reset). notice_sync keeps from[] as the stage it last saw,
+ * so the first notice_tick says each one's "IS NOW A ..." card with the stage-up chime: the morning's card for a fish that
+ * grew up in the night (a deep sleep, a night's power-off, a DORMANT shelf) */
+int progression_wake_grew_take(const tank_t *t, stage_t from[N_FISH_MAX]);
+/* (0.4.2, audit PW2-2 / PW2-3: OWED CARDS, notice.h) the cards the save this tank was loaded from still owed, by fish slot as
+ * the tank is now (a fish gone owes none), taken: empty after the first call and for a tank not loaded from a save (a fresh
+ * one, a reset). *gen = the tank's generation (a new one at every load, reset and fresh tank): notice_sync keeps it, and a
+ * save asks notice_owed_pack for the queue only while it matches */
+struct notice_owed;
+void progression_owed_take(const tank_t *t, struct notice_owed *o, unsigned *gen);
 /* the tank switcher (common/shelf.c): what the board shares goes with a swap -
  * the wallet and the board's settings (docs/tank-switcher.md "The shared
  * data"; the tool LOCK and AUTO FEED stay each tank's own, D14) - taken from
@@ -79,14 +107,23 @@ float progression_wake(tank_t *t, int64_t now_unix);
 typedef struct {
     int32_t  sd_balance;
     uint16_t light_idle_s;
-    uint8_t  light_auto, light_tip_seen, screen_turned, orient_lock, orient_q, pad;
+    uint8_t  light_auto, light_tip_seen, screen_turned, orient_lock, orient_q;
+    uint8_t  shared;               /* the board's unlocks (0.4.2; was pad, 0 in every older carry): CARRY_BREED = SELECTIVE
+                                    * BREEDING, bought once for every tank (Strato 11-08). Given, never taken away */
+    uint32_t mark;                 /* the swap's: a fresh marker; the save that applies the carry carries it, and a carry whose
+                                    * marker the loaded save already has is not given again (0.4.1 audit round 2, "Marker now") */
 } progression_carry_t;
+#define CARRY_BREED 0x01u
+#define CARRY_LAB   0x02u                /* THE FISH LAB (0.4.3): the board's too */
 void progression_carry_take(const tank_t *t, progression_carry_t *c);
 void progression_carry_give(tank_t *t, const progression_carry_t *c);
 /* a stored save's saved_unix rewritten in place (the shelf: the wake then lives the time on the shelf) */
 bool progression_blob_set_saved_unix(void *blob, size_t len, int64_t unix);
 /* a stored save's pieces: its sd_unlocks (0 for a blob that is not a save) - the shelf's REMOVE values them */
 uint32_t progression_blob_unlocks(const void *blob, size_t len);
+int progression_blob_breed_paid(const void *blob, size_t len);
+bool     progression_blob_sd_restamp(void *blob, size_t len);     /* ... and their day started over (sdg_out_restamp: the clock was moved); true = changed */
+int      progression_blob_sd_out(const void *blob, size_t len);   /* sand dollars in flight in a stored tank's save (0.4.2) */
 /* live through one stretch of device sleep: tank_tick_sleep, growth at
  * SLEEP_GROWTH_FRAC, and the tank's "first full night's sleep" milestone once
  * a single stretch reaches FULL_NIGHT_S (progression_wake's path; the director's
@@ -96,6 +133,12 @@ void progression_slept(tank_t *t, float seconds);
 /* the settings page changed something that rides in the save (the light's
  * idle time / auto-off): an event save follows, coalesced like the others */
 void progression_settings_changed(void);
+/* THE FIRST TIME SYNC takes over the clock (main.c net_clock_rebase; 0.4.2 audit r2, PW2-4 / PW2-5): called BEFORE the clock
+ * is set to `to_unix`, after progression_boot / _wake. Everything stamped on the old clock moves with it, as the tank on
+ * the glass does ("nothing lived for the jump"): the shelf's stamps (shelf_rebase) and the day of a gift in flight
+ * (sdg_out_restamp). The caller then sets the clock and calls progression_settings_changed (the save). Returns the jump in
+ * seconds (0: unknown - no clock and no save to say where the old clock stood - or under a minute: the shelf not moved) */
+int64_t progression_clock_rebase(tank_t *t, int64_t to_unix);
 /* call every frame after tank_tick */
 void progression_tick(tank_t *t, float dt);
 /* fish i is nose to tail with another (the company that warms social) */
@@ -108,11 +151,53 @@ bool progression_finger_company(const tank_t *t, int i);
 /* Save the current tank. False means the port rejected the write; the state
  * remains dirty so the periodic saver will retry. */
 bool progression_save(tank_t *t);
+/* NEW TANK in MY TANKS' library (0.4.1): bought whole or not at all across a power cut at any write (shelf.h shelf_buy).
+   The shelf index of the new tank, or -1 (too poor, the shelves full, or the flash refused: nothing bought, nothing paid).
+   REMOVE (0.4.1): shelved tank i's pieces paid and saved, then the tank erased (shelf.h shelf_remove_paid) - the refund,
+   or -1 (nothing removed, nothing paid). _shelf_settle: at every boot, after progression_boot / _wake and before a swap's
+   carry - a buy or a remove a power cut stopped half way */
+int  progression_buy_tank(tank_t *t, int price, int64_t now_unix);
+/* GET on an experimental tank's row (0.4.2: the piranha tank, the minnows - shelf.h "BOUGHT ONCE"): one a kind; the first
+   costs SHELF_XT_PRICE (journaled as NEW TANK is: the tank and the price, both or neither) and the kind is the board's from
+   then on - got again after a REMOVE for nothing. Its shelf index, or -1: one is here already, the wallet is short, the
+   shelves are full or the flash refused (nothing made, nothing paid) */
+int  progression_get_xt(tank_t *t, int type, int64_t now_unix);
+int  progression_remove_tank(tank_t *t, int i);
+void progression_shelf_settle(tank_t *t);
+int  progression_youngest(const tank_t *t);   /* the youngest fish here by its age (GROW, CHANGE), or -1 */
+int  progression_newest(const tank_t *t);     /* the fish whose arrival made the tank's latest count, or the last slot */
+void progression_came_in(fish_t *f);      /* a fish from another tank: its drift there is no THE TANK CHANGED SOMEONE here */
+bool progression_swap_carry(tank_t *t);   /* the boot after a SWAP IN: the carry given, saved, then let go (false: none) */
 
 /* sim/debug: multiply time (aging, drift) - `./fishsim --fast 60` */
 extern float progression_time_scale;
 /* debug: stage and show an arrival now (sim key R); no-op at the cap */
 void progression_force_arrival(tank_t *t);
+/* cross-tank fry (phase 5, docs/tank-link-0.4.md; tank_link.c calls these) */
+int  progression_fry_room(const tank_t *t);                             /* room here for a new fry (or a gift) */
+int  progression_fish_held(const tank_t *t);   /* the fish here + the places held for gifts and fry we said yes to: what counts against POP_CAP */
+/* THE CAP's guard: progression_fish_held above POP_CAP is a bug on some path (Strato 2026-11-03: at most POP_CAP fish,
+ * never more, on every path). Checked at every path that adds a fish and once a tick (progression_tick, tank_link_tick);
+ * a breach calls the platform's hook with the file, line and path: the sim fails the running selftest, the device logs
+ * once. A compare, no frame cost. NULL = not checked */
+extern void (*progression_cap_hook)(const tank_t *t, int held, const char *file, int line, const char *path);
+void progression_cap_check_at(const tank_t *t, const char *file, int line, const char *path);
+#define progression_cap_check(t, path) progression_cap_check_at((t), __FILE__, __LINE__, (path))
+/* GIVE (tank link phase 6, gift.h): whether a fish may be given (a sale's rules, and home, not at a door);
+   one of ours gone next door for good (no sand dollars); a gift from next door, ours now (its slot) */
+bool progression_keeps_two(const tank_t *t, int fish);   /* it may go and two stay: the fish of ours on their way out (gifts) counted gone */
+bool progression_fish_givable(const tank_t *t, int fish);
+/* (0.4.3 audit r1, SLB-3) a fish only a tank of 0.4.3 or later can take whole: a paragon (its part), one READY TO EVOLVE (its
+   three), a lab fish (THE LAB), or one with the creator's body or fin values. A 0.4.2 tank's reader drops all of them for good,
+   so such a fish is never GIVEN to one (a tank that takes swaps is 0.4.3: link_peer_swap) - a visit is fine, home keeps it */
+bool progression_fish_needs_new(const tank_t *t, int fish);
+bool progression_give_out(tank_t *t, int fish);
+int  progression_gift_adopt(tank_t *t, const passport_t *pp);
+int  progression_fry_adopt(tank_t *t, const passport_t *pp, int edge);  /* home: one of ours born next door; its slot or -1 */
+void progression_fry_kept(tank_t *t, int vis_k);                        /* host: its home said no - ours after all */
+bool progression_fry_welcome(tank_t *t, int slot);                      /* ... all of it but the save (the link: one save a tick) */
+void progression_fry_home(tank_t *t, int slot);                         /* home: it swam in - its birth flow */
+float progression_bond(const tank_t *t, uint32_t vis, uint32_t *mate);  /* a visitor's time together here, 0..1 of its goal, and with whom */
 /* debug: stage an arrival as if its last gate had just closed - the
  * spawning follows (or progression_force_arrival, at once) */
 void progression_stage_arrival(tank_t *t);
@@ -131,19 +216,78 @@ void progression_stage_arrival(tank_t *t);
 void progression_woke(tank_t *t);
 bool progression_arrival_pending(void);
 float progression_age_s(const tank_t *t, int idx);        /* grown seconds */
+double progression_lived_s(const tank_t *t, int idx);     /* seconds alive (0.4.2, ITS STORY's AGE) */
+/* THE TRAVEL BOWL (0.4.2 item 14, docs/move-fish-0.4.2.md; progression.c "THE TRAVEL BOWL"): one fish moved between the
+   tanks of one board. _move_out puts a fish of ours in the bowl (its record written first, then the fish out and saved);
+   _bowl_let_in lets the one waiting into the tank on the glass. Both answer BOWL_OK or why not; _why the same without
+   doing it (RAM only: any frame). The card's taps hold a const tank: they _ask, progression_tick does it, _answer says
+   how it went (-1: not yet) */
+enum { BOWL_OK, BOWL_NO_FISH, BOWL_NO_LAST_TWO, BOWL_NO_FRY_NAME, BOWL_NO_BUSY, BOWL_NO_AWAY, BOWL_NO_GIVING, BOWL_NO_FULL, BOWL_NO_KIND, BOWL_NO_WRITE,
+       BOWL_NO_NOTE, BOWL_NO_SWAP };   /* (_SWAP: in a swap - the glass says CAN'T MOVE RIGHT NOW, never IS BEING GIVEN: audit r2, R2-L15) */   /* (_NOTE: the tank on the glass holds a gift note for the fish - it gave it away once) */
+enum { BOWL_ASK_OUT = 1, BOWL_ASK_IN };
+int  progression_move_why(const tank_t *t, int fish);
+int  progression_move_out(tank_t *t, int fish);
+int  progression_bowl_why(const tank_t *t);
+int  progression_bowl_let_in(tank_t *t);
+bool progression_bowl_has(void);                   /* a fish waits in the bowl */
+const char *progression_bowl_name(void);           /* ... its name ("" = none) */
+uint32_t progression_bowl_uid(void);
+bool progression_bowl_passport(passport_t *pp);    /* ... who it is (one flash read: the card's opening, never a frame) */
+void progression_bowl_ask(int what, uint32_t uid);
+int  progression_bowl_answer(void);
+bool progression_bowl_asked(void);
+bool progression_bowl_offer_due(void);             /* the IS WAITING card has not come up since this start */
+void progression_bowl_offered(void);
+void progression_bowl_reoffer(void);
+void progression_debug_bowl_type(int type);        /* (tests: the tank on the glass read as this SHELF_TYPE_; -1 = its own) */
+void progression_debug_bowl_kind(int kind);        /* (tests: the fish in the bowl as another kind of creature) */
+uint32_t progression_fish_from(const tank_t *t, const fish_t *f);   /* the tank a gift came from (0 = none known) */
 /* director/debug: put a fish's tended clock at `seconds` and apply the stage
  * and size that go with it now (the silent surprise, on cue) */
 void progression_set_age(tank_t *t, int idx, float seconds);
+/* the same for an age a passport brought (home from a visit, a gift): the
+ * stage the fish has is kept, as at a load - only the director demotes */
+void progression_age_from_passport(tank_t *t, int idx, float seconds);
+/* ... one of ours home from a visit (tank_link welcome_home): the same, never older than the time it has lived (0.4.2, LK-1) */
+void progression_age_from_visit(tank_t *t, int idx, float seconds);
 /* director/debug: the new-tank path on a tank_init'd tank - two fry, first
  * milestones, nothing tended yet. Saves over the current save on the next
  * heartbeat: stash it first (firmware director: `stash`). */
 void progression_fresh(tank_t *t);
+/* the tank on the glass is a JELLY TANK (shelf type 1, set before the boot loads it): a fresh save is an empty tank - no fry,
+   no welcome; the wallet and the board's settings ride in it as in any (docs/jelly-tank-0.6.md) */
+void progression_set_jelly(bool on);
+bool progression_is_jelly(void);
 /* the keeper's RESET (device: hold BOOT + tap the glass, then YES on the
  * prompt; sim: X): every save is erased - a director-parked tank too - the
  * tank is re-initialised with `seed`, the new-tank path runs and the fresh
  * pair is saved at once, so a reboot lands on them. Two fry, clean glass,
  * the default garden, nothing tended yet. */
 void progression_reset(tank_t *t, uint32_t seed);
+/* ERASE EVERYTHING (0.4.2, the reset prompt's second choice): the board as a new install has it - every tank on the shelf
+ * and the one on the glass, the sand dollars, everything bought or unlocked (they live in the saves and the carry: all
+ * gone), the shelf's records and markers, the visitor collection and its books, the KIN book, the gift notes, sand dollars
+ * in flight. One fresh tank comes back: two fry, an empty wallet, the welcome owed. forget_wifi: the Wi-Fi name and
+ * password too (net_port_creds_forget; the board code and the crew's answer beside them stay).
+ * KEPT, as none of it is the tank's: the touch map and the battery's size (ADVANCED), the battery's history and log,
+ * brightness, volume, GRAPHICS, the board code and HATCHERY CREW, and how the board is worn (SCREEN, the way up).
+ * Also kept: LIGHTS OUT's setting and time (the board's, as a swap's carry has them). Also erased: the raw NVS rescue copy
+ * at the start of `storage`, if one was ever made (persist_port_rescue_erase: it holds the old saves and Wi-Fi password).
+ * A POWER CUT: `wipe` in the frame (shelf.h) is written before anything is erased and deleted last. A cut before it: the
+ * old board, whole. After it: the boot finishes the wipe (shelf_boot the shelf, progression_wake the rest) - a save
+ * that is not the fresh tank's own (its ID is in the journal) is erased, so the old wallet never comes back.
+ * A WRITE REFUSED with the board running on: the journal stands until everything is done; what is owed is tried again
+ * before every save and at every boot, the tank runs meanwhile, MY TANKS waits (progression.c "THE RULE").
+ * committed (NULL: none): called once the journal has landed, before anything is erased - the platform's goodbyes.
+ * false = the journal was refused: nothing erased, nothing called, everything as it was */
+bool progression_erase_all(tank_t *t, uint32_t seed, bool forget_wifi, void (*committed)(void));
+/* the boot found ERASE EVERYTHING's journal (finished it, or tried): true once, then false - the platform clears what it
+   keeps of its own for the tanks (main.c: the jelly tank's jet and light) */
+bool progression_erase_settled_take(void);
+/* ERASE EVERYTHING's journal stands on the flash (asked BEFORE shelf_boot: the platform puts ERASING on the glass, then boots) */
+bool progression_erase_pending(void);
+/* a stored blob begins as a tank save does (its first 4 bytes are enough) - the shelf knows a half-written slot by it */
+bool progression_blob_is_save(const void *blob, size_t len);
 /* first-run setup (setup.c, 2026-09-13): a tank born through
  * progression_fresh - a fresh install, a reset - is PENDING setup until the
  * keeper walks the welcome / names / colours flow; the flag rides in the
@@ -216,6 +360,13 @@ const char *const *progression_fry_tip(int kind);
  * before). A night's sleep runs each wait down like awake time; a boot
  * starts them clear. */
 #define SD_MEAL_GAP_S  300.0f
+/* THE RESET FARM (0.4.1, Discord #help "Sand-dollar farm"): a reset kept the wallet and the new tank paid again for what
+ * every fresh tank starts with - its grass cut (+25 on three boards, a minute a cycle), its pair's full trust (+30), a
+ * first meal (+1 a fish). tank_t.sd_receipts: what this tank's starting set has paid, carried to the tank a reset makes
+ * (Strato 11-05, option 1). Everything grown or earned after pays as before. A NEW TANK starts with none: it pays once */
+#define SD_RCPT_GRASS    0x01u
+#define SD_RCPT_TRUST_SH 1
+#define SD_RCPT_TRUST(r) (((r) >> SD_RCPT_TRUST_SH) & 3u)
 #define SD_STAGE_JUV   5
 #define SD_STAGE_ADULT 10
 #define SD_STAGE_ELDER 25
@@ -234,7 +385,9 @@ const char *const *progression_fry_tip(int kind);
 #define SD_TRIM_CM     250
 #define SD_PRICE_PLANT 40
 #define SD_PRICE_SNAIL 80
-#define SD_PRICE_CASTLE 150
+#define SD_PRICE_CASTLE 100        /* 0.4.3, Strato 11-21: the STARTER's (stage 1); stages 2 and 3: SD_PRICE_CASTLE_2 / _3. 150 for the whole castle until then */
+#define SD_PRICE_CASTLE_2 150
+#define SD_PRICE_CASTLE_3 300
 #define SD_PRICE_CORAL 100
 #define SD_PRICE_CLUSTER 240
 #define SD_PRICE_SHRIMP 180       /* 2026-09-29, Strato (first 300, then 180) */
@@ -243,6 +396,44 @@ const char *const *progression_fry_tip(int kind);
 #define SD_PRICE_PUMPKIN 75       /* 0.3.6, Strato 2026-10-17: the seasonal lantern, "affordable" */
 #define SD_PRICE_VOLCANO 190      /* 0.3.9: Strato 2026-10-24 (it was the castle's 150 until he named one) */
 #define SD_PRICE_CRAB 140         /* 0.3.9: the strawberry crab - Strato 2026-10-24 */
+#define SD_PRICE_OCTOPUS 300      /* 0.4.3: THE OCTOPUS - Strato 11-22: "300 for octopus please" (the dearest critter) */
+#define SD_OCTO_FIND 5             /* a sand dollar the octopus dug up and the keeper took (Strato 11-21: 5 a find) */
+#define SD_PRICE_BREED 1000        /* 0.4.2 SELECTIVE BREEDING: the unlock (Strato 11-07: late game, worth a lot) */
+#define SD_PRICE_PAIR  50          /* ... and each pair, paid at the pairing (refunded on UNPAIR or a broken pair) */
+/* SELECTIVE BREEDING (0.4.2): the keeper picks the next fry's two parents. The care gates still say WHEN; the pair says
+   WHO, and wins over a visitor's courtship. A parent must be grown (an adult or elder) before the fry comes: until then
+   nothing is staged. One payment, one fry. A pair whose fish leaves (sold, given, gone) is refunded */
+/* THE FISH LAB (0.4.3 item 10): the unlock (Strato 11-14: 1500, once for every tank), and each fry made in it - more
+   than the shop's lucky dip (SD_PRICE_FRY), and a fish sells for a fifth of nothing it cost, so there is nothing to
+   farm. The keeper sets what the fry SHOWS (body, fins, pattern, colors, name); what it carries is rolled, as a
+   founder's is. It has no parents: its story says THE FISH LAB. It is welcomed by the pour itself - no birth flow */
+#define SD_PRICE_LAB     1500
+#define SD_PRICE_LAB_FRY 250
+#define STORY_FROM_LAB   0x0000001bu       /* ITS STORY's FROM for a lab fish (no tank has an ID this small: they are 32 random bits) */
+enum { LAB_OK, LAB_NOT_OWNED, LAB_FULL, LAB_SHORT, LAB_WELCOME };
+bool progression_lab_owned(const tank_t *t);
+bool progression_lab_buy(tank_t *t);
+int  progression_lab_why(const tank_t *t);                 /* LAB_*: may a fry be poured now */
+/* the fry in `recipe` (its look and its name: shape, fins, pattern, colors, body and fin values) into the tank - it
+   drops in from the top (tank_plop): its slot, or -1 with nothing spent */
+int  progression_lab_pour(tank_t *t, const fish_t *recipe);
+bool progression_from_lab(const tank_t *t, int fish);
+enum { BREED_NONE, BREED_WAITING, BREED_FULL, BREED_READY };
+bool progression_breed_owned(const tank_t *t);
+bool progression_breed_buy(tank_t *t);
+bool progression_breed_pair(tank_t *t, int a, int b);     /* two fish of ours (slots): SD_PRICE_PAIR paid, the pair set */
+bool progression_breed_unpair(tank_t *t);                /* the pair cleared, its price back */
+int  progression_breed_state(const tank_t *t, int *young); /* BREED_*; *young = the slot still growing (WAITING), or -1 */
+int  progression_breed_slot(const tank_t *t, int k);     /* the pair's fish k (0/1) here, its slot, or -1 */
+int  progression_breed_waits_for(const tank_t *t, bool *away, int *also);   /* the pair fish a set pair waits for before it can court:
+                                                            one NEXT DOOR first (*away true; *also = the other, next door too, or -1),
+                                                            else one still growing (*away false); -1 = no pair, or both here and grown
+                                                            (0.4.2 audit r2: NEW FRY's WAITING FOR <NAME>) */
+#define SD_PRICE_BG 100           /* 0.4.1: a background, each (Strato 2026-11-04: the community voted 100; first set at 25) */
+/* THE BACKGROUNDS (0.4.1): UNLOCK - SD_PRICE_BG from the wallet, owned by this tank, in use at once, saved (false: owned
+   already, or short); USE - an owned one (or Open Water) in use, saved (false: not owned) */
+bool progression_bg_buy(tank_t *t, int bg);
+bool progression_bg_use(tank_t *t, int bg);
 typedef struct {
     uint32_t    bit;               /* SD_ITEM_* */
     const char *name;              /* <= 15 chars: the row draws it at scale 2 from x 76, 178 px, short of the button at 300;
@@ -259,14 +450,26 @@ bool progression_buy(tank_t *t, int item);
  * release after October 31 sets it to 0 (Strato: no date check, a board
  * keeps selling it until it is updated). One bought stays in its tank, so
  * the shop keeps its row for the keeper who has one. */
-#define SD_PUMPKIN_IN_SHOP 1
+#define SD_PUMPKIN_IN_SHOP 0                   /* 0.4.0 (11-03): out of the shop, as promised for the first update in November */
 bool progression_pumpkin_offered(const tank_t *t);
 /* the sale back (2026-09-24, Strato): a placeable piece sells for SD_SELL_PCT
  * of its price (the snail is a permanent resident), goes back to the shop at
  * full price and to its factory state; false = not owned or not for sale.
  * The refund is balance, not earnings; the toast shows it. */
 #define SD_SELL_PCT 20
-int  progression_sell_value(int item);
+int  progression_sell_value(int item);                    /* a piece's as bought (a staged piece: its first stage alone - the starter's 20) */
+int  progression_sell_value_of(const tank_t *t, int item);   /* ... as this tank has it: 20% of what its stages owned cost */
+/* A PIECE IN STAGES (0.4.3, Strato 11-21: the castle - the starter, then two upgrades): bought one stage after another. The
+ * shop's row keeps selling it until every stage is owned (progression_buy buys the next: its price from the wallet, the piece
+ * where it stands, shelved or not); SELL pays SD_SELL_PCT of all that was spent and takes the whole piece. A piece without
+ * stages has one: its price is SD_ITEMS[item].price, as ever. The table is general; the castle is its one row. */
+int  progression_stages(int item);                       /* how many stages the piece has (1: not staged) */
+int  progression_stage(const tank_t *t, int item);       /* the stages this tank owns, 0..progression_stages */
+int  progression_stage_price(int item, int stage);       /* what stage 1..n costs */
+int  progression_next_price(const tank_t *t, int item);  /* what the shop's button costs now: the next stage's (0: all owned) */
+const char *progression_stage_words(int item, int stage, int line);   /* the modal's two lines for stage 1..n (line 0 / 1) */
+/* a stored save's castle stage, 0..3 (0: no castle, or not a save; a castle from before 0.4.3: 1) - the shelf's REMOVE values it */
+int  progression_blob_castle_stage(const void *blob, size_t len);
 bool progression_sell(tank_t *t, int item);
 /* the decoration shelf (0.3.9, Strato 2026-10-19: "anything you can MOVE
  * you can SHELVE"; from the community: nothing bought ever disappears). A
@@ -276,6 +479,10 @@ bool progression_sell(tank_t *t, int item);
  * and the platform opens the placement page with the old spot in place.
  * SELL works from the shelf too (progression_sell). false = not owned, not
  * placeable, or already where it is asked to go. */
+/* (0.4.2) THE CRITTER SHELF: the same two take a critter (SD_CRIT_BITS) - shelved into its jar with a poof, RESTING there
+ * (nothing it does runs, nothing it earns), back where it was with a poof; unshelve is refused with CRIT_CAP critters in
+ * the water (tank_crit_room), as a critter's progression_buy is. A critter has no placement page: the platform opens it
+ * only for tank_decor_placeable items. */
 bool progression_shelve(tank_t *t, int item);
 bool progression_unshelve(tank_t *t, int item);
 /* the LOCK on a piece (0.3.9, Strato, from the community: a held finger on a
@@ -301,6 +508,7 @@ bool progression_lock(tank_t *t, int item, bool on);
 #define SD_FISH_JUV    15
 #define SD_FISH_ADULT  30
 #define SD_FISH_ELDER  60
+#define SD_FISH_PARAGON 100             /* (0.4.3, Strato 11-21) an elder that has evolved */
 #define FISH_KEEP_MIN  2
 #define SELL_FRY_MEALS 12
 /* FRY FOR SALE (0.3.5, Strato: "when a player sells a fish for the first
@@ -323,9 +531,15 @@ bool progression_lock(tank_t *t, int item, bool on);
 #define SD_PRICE_FRY   200
 #define FRY_OFFER_N    3
 #define FRY_OFFER_S    (24 * 3600.0f)
-typedef struct { uint32_t body, accent; bool sold; } fry_offer_t;
+typedef struct { uint32_t body, accent; bool sold; uint8_t shape, fins, pattern; } fry_offer_t;   /* (0.4, 11-01: its form - genetics in the shop) */
 bool  progression_fry_for_sale(const tank_t *t);   /* the first sale's badge is earned */
-bool  progression_fry_room(const tank_t *t);       /* a slot free and no welcome owed */
+int32_t progression_dbg_sale_need(void);                   /* (the selftests) the fry wait's mark: a sale moves it, a swap never (LK-8) */
+void  progression_breed_check(tank_t *t);                   /* (the selftests) a pair whose fish left: undone, its 50 back - as each tick */
+uint32_t progression_blob_tank_uid(const void *blob, size_t len);   /* a stored tank's tank ID (0: none) */
+bool  progression_swap_out(tank_t *t, int fish);             /* FISH SWAP (0.4.3): one of ours out for good, saved - a sale's fry books not run (LK-8) */
+bool  progression_fish_swappable(const tank_t *t, int fish);   /* FISH SWAP (0.4.3): may go in a swap (home, welcomed, in no gift or bowl) */
+bool  progression_welcome_owed(const tank_t *t, int fish);   /* this fry is not yet welcomed: it is not sold or given till then */
+bool  progression_fry_room_to_buy(const tank_t *t);  /* ... and no welcome owed: the shop may sell */
 void  progression_fry_offer(int k, fry_offer_t *o);
 int   progression_fry_left(void);                  /* fry not yet bought in this offer */
 float progression_fry_new_in_s(void);              /* tank seconds until a fresh three */
@@ -333,8 +547,9 @@ bool  progression_buy_fry(tank_t *t, int k);
 void  progression_fry_roll(tank_t *t);             /* director / tests: a fresh three now */
 void  progression_fry_open(tank_t *t);             /* director / tests: the shop's fry, as if a fish was sold */
 int  progression_fish_value(const tank_t *t, int fish);      /* what it would fetch now */
-bool progression_fish_sellable(const tank_t *t, int fish);   /* false: the last pair, or a welcome is owed */
+bool progression_fish_sellable(const tank_t *t, int fish);   /* false: the last pair, a welcome is owed, or it is next door */
 bool progression_sell_fish(tank_t *t, int fish);
+void progression_sd_toast(int n);   /* show +n on the toast (money already moved: a sand dollar gift in, 0.4.2) */
 /* dollars awarded since the last call (the toast over the live tank) */
 int  progression_sd_take_award(void);
 /* director / tests: dollars from nowhere (negative takes them away) */
@@ -343,12 +558,7 @@ void progression_sd_grant(tank_t *t, int n);
 #define SD_EARN_LINES 8
 const char *const *progression_sd_earn_lines(void);
 
-/* population ceiling. Compile-time so the device can ship lower until its
- * advisor latency is measured (docs/progression-next.md): firmware passes
- * -DPOP_CAP=5, the sim shows all 6. Never above N_FISH_MAX. */
-#ifndef POP_CAP
-#define POP_CAP N_FISH_MAX
-#endif
+/* the population ceiling, POP_CAP (5), is tank.h's: one cap for the sim and every board */
 
 /* stage thresholds, in seconds of grown life: awake time in full (the light
  * makes no difference), sleep at SLEEP_GROWTH_FRAC. A desk companion is
@@ -364,6 +574,15 @@ const char *const *progression_sd_earn_lines(void);
 #define STAGE_JUV_AGE    (2 * 3600)
 #define STAGE_ADULT_AGE  (12 * 3600)
 #define STAGE_ELDER_AGE  (96 * 3600)
+/* THE PARAGON (0.4.3, docs/elder-plus-0.4.3.md): an elder this old is READY TO EVOLVE - its three parts are rolled
+   (tank_evo_roll) the first moment it is at home, the light is on and it is not hungry. It stays an ELDER in every
+   byte and on the wire; it is a PARAGON once the keeper has kept a part (fish_t.evo). For the hour before, it sparkles */
+#define EVO_AGE          (120 * 3600)
+#define EVO_SPARKLE_S    3600
+#define EVO_HUNGER_MAX   7.0f
+bool progression_evo_sparkle(const tank_t *t, int idx);   /* in its last hour before EVO_AGE (drawn; its card says SOMETHING IS HAPPENING) */
+bool progression_evo_keep(tank_t *t, int idx, int place);  /* the keeper kept the part in place 0..2: it is a paragon */
+void progression_evo_shown(tank_t *t, int idx);            /* the reveal's spin has played: the three are shown open from now on */
 /* trait drift: one full unit (0.11 of the 0..1 trait) per this many hours of
  * sustained pressure */
 #define DRIFT_HOURS      2.0f

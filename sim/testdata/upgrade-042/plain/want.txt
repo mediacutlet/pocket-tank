@@ -1,0 +1,15 @@
+now 1795394050
+glass 1 shelf 0
+tank id 1 type 0 variant 0 time 0 name MY TANK
+sd balance 0 earned 0 unlocks 00000000 shelved 00000000 locked 00000000 bg 0
+critter 0 name 
+critter 1 name 
+critter 2 name 
+critter 3 name 
+breed owned 0 slot0 -1 slot1 -1
+pieces castle 0.0 2 coral 0.0 2 000000 plant 0.0 volcano 0.0 cluster 0.0
+fish 2
+fish 0 name otto uid 2994e4d0 parents 00000000 00000000 preset 1 stage 0 genes 0 0 0 color ff725c fin b83a43 away 0 eaten 1 ms 00000031 trust 5.000 from 0 lived 3664
+fish 1 name mira uid 2e723609 parents 00000000 00000000 preset 2 stage 0 genes 0 0 0 color 78d67d fin 3f8b55 away 0 eaten 1 ms 00000001 trust 5.000 from 0 lived 3664
+collection 0
+back on 1

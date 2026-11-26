@@ -173,7 +173,8 @@
 #define R_PIN_TP_INT      11
 #define R_PIN_IMU_INT1    21       /* unused */
 #define R_PIN_PWR_SENSE   3        /* SYS_OUT: high while the PWR key is down (unused: the PMIC is asked, as on the 1.8) */
-#define I2C_ADDR_ES7210   0x40     /* the microphone ADC (probe, with no expander => the 1.75C) */
+#define I2C_ADDR_ES7210   0x40     /* the microphone ADC (probe, with no expander => the 1.75C). Its BASE: AD0 / AD1 put it at 0x40 + 0..3
+                                      (a 1.75C rev 1.1 answers at 0x42) - the probe tries all four (board_probe.h), board_es7210_addr() says which */
 #define I2C_ADDR_CST9217  0x5A
 #define R_PANEL           466      /* round: 466 across, the corners of the square are not there */
 #define R_PANEL_X_GAP     6
@@ -203,6 +204,72 @@
 #define S_PIN_KEY3        18       /* the user button (unused) */
 #define S_PANEL           480
 #define S_PANEL_X_GAP     0
+/* ---- the P4 HOME TANK (Waveshare ESP32-P4-WIFI6-Touch-LCD-10.1, 2026-10-12) ----
+ * Its own target and image (TANK_P4): nothing is probed to tell it apart.
+ * Sources: Waveshare's BSP (waveshare/esp32_p4_wifi6_touch_lcd_x 2.0.3) and
+ * resources/ESP32-P4-Touch-LCD-10.1/. A 10.1" IPS over two MIPI-DSI lanes
+ * (JD9365), a GT911-class touch sharing the panel's reset, the C6 radio over
+ * SDIO (not driven yet), ES8311 + ES7210 + a speaker amp, a backlight on PWM.
+ * No PMIC, no IMU, no RTC chip, no expander. The BOOT key is the P4's own
+ * strapping pin, 35 (not 0). The native USB is not wired to a port: the
+ * console is UART0 through the CH343. */
+#define P4_PIN_I2C_SDA    7
+#define P4_PIN_I2C_SCL    8
+#define P4_PIN_LCD_RST    27       /* the touch chip's reset too */
+#define P4_PIN_LCD_BL     26       /* backlight (LEDC PWM) */
+#define P4_PIN_I2S_MCLK   13
+#define P4_PIN_I2S_BCLK   12
+#define P4_PIN_I2S_WS     10
+#define P4_PIN_I2S_DOUT   9        /* ESP -> codec DSDIN */
+#define P4_PIN_I2S_DIN    11       /* codec -> ESP (unused) */
+#define P4_PIN_AMP_EN     53
+#define P4_PIN_BOOT       35
+#define I2C_ADDR_GT911    0x5D     /* or 0x14, by the chip's INT level at reset */
+#define I2C_ADDR_GT911_ALT 0x14
+#ifdef TANK_TAB5_HW
+/* ---- the SMALL HOME TANK (M5Stack Tab5, 2026-10-19) ----
+ * The same P4 (but silicon v1.x: its own image), its own board. Sources: M5's
+ * factory firmware (github.com/m5stack/M5Tab5-UserDemo, platforms/tab5:
+ * the BSP component m5stack_tab5 and esp_lcd_st7121) and resources/M5Stack-Tab5/.
+ * A 5" 720 x 1280 IPS over two DSI lanes at 965 Mbps, in THREE revisions told
+ * apart by the touch chip: ILI9881C + GT911 at 0x14 (before 2025-10-14),
+ * ST7123 at 0x55 (its register 0 reads 3), ST7121 at 0x55 (reads 1, from
+ * 2026-04-28). The ST712x are display + touch in one chip (TDDI). The resets,
+ * the speaker amp, the C6's power and the charger hang on two PI4IOE5V6408
+ * expanders; ES8388 + ES7210, BMI270, RX8130CE, INA226 share the bus. The
+ * console is the P4's own USB serial/JTAG on the Type-C. */
+#define P4_PIN_LCD_BL_TAB5 22      /* backlight (LEDC PWM) */
+#define TAB5_PIN_I2C_SDA  31
+#define TAB5_PIN_I2C_SCL  32
+#define TAB5_PIN_TP_INT   23       /* unused: polled */
+#define I2C_ADDR_IOX1     0x43     /* P0 antenna switch, P1 SPK_EN, P2 EXT5V_EN, P4 LCD_RST, P5 TP_RST, P6 CAM_RST, P7 HP_DET (in) */
+#define I2C_ADDR_IOX2     0x44     /* P0 WLAN_PWR_EN, P3 USB5V_EN, P4 PWROFF_PULSE, P5 nCHG_QC_EN, P6 CHG_STAT (in), P7 CHG_EN */
+#define I2C_ADDR_ST712X   0x55
+#define P4_PANEL_W        720      /* native portrait */
+#define P4_PANEL_H        1280
+#define P4_DSI_LANES      2
+#define P4_DSI_MBPS       965
+#elif defined(TANK_P4_LCD7)
+/* ---- BETA (2026-11-22): the Waveshare ESP32-P4-WIFI6-Touch-LCD-7 ----
+ * The 10.1's board (Waveshare's BSP 2.0.3 has ONE pin map for the three sizes,
+ * and their one schematic one "7/8/10.1inch Display" connector) with a 7"
+ * 720 x 1280 ILI9881C panel at 1000 Mbps a lane, two lanes, and a panel
+ * controller on the I2C bus at 0x45 that switches the panel's power and sets
+ * its backlight (Waveshare's esp_lcd_ili9881c 2.0.0 writes it before the
+ * panel starts). NOT SEEN ON A BOARD: docs/board-p4-7-8-beta.md. NOT the -7B. */
+#define P4_PANEL_W        720      /* native portrait: the Tab5's 1280 x 720 world turned onto it */
+#define P4_PANEL_H        1280
+#define P4_DSI_LANES      2
+#define P4_DSI_MBPS       1000
+#define I2C_ADDR_LCD7_MCU 0x45     /* 0x95 power bits, 0x96 backlight 0..255, 0x97 size, 0x98 id, 0x99 version */
+#else                              /* the 10.1, and (BETA) the 8 inch: the same 800 x 1280 grid, rate and lanes in Waveshare's BSP */
+#define P4_PANEL_W        800      /* native portrait: the tank's 640 x 400 is turned and doubled onto it */
+#define P4_PANEL_H        1280
+#define P4_DSI_LANES      2
+#define P4_DSI_MBPS       1500
+#endif
+#define P4_DSI_LDO_CHAN   3        /* LDO_VO3 feeds VDD_MIPI_DPHY (both boards) */
+#define P4_DSI_LDO_MV     2500
 
 /* ---- the 1.75 / 1.75-B (expander, RTC, SD slot): the 1.75C's panel otherwise ---- */
 #define B_PIN_LCD_RST     39

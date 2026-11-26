@@ -17,6 +17,8 @@
 #include "display_port.h"
 #include "board_pins.h"
 #include "tank.h"
+#include "i2c_guard.h"
+#include "blackbox.h"
 #include "driver/spi_master.h"
 #include "driver/i2c_master.h"
 #include "driver/gpio.h"
@@ -87,12 +89,18 @@ static void apply_orientation(void) {
 }
 
 bool display_port_init(void) {
+    /* (upstream 0.4.3, the I2C bus guard) a slave a flash's reset cut off mid-byte lets go first, and the guard's lock is
+       made: as the AMOLED port does, before the bus (i2c_guard.h) */
+    i2c_guard_boot_clear(PIN_I2C_SDA, PIN_I2C_SCL);
     i2c_master_bus_config_t bus = { .i2c_port = I2C_NUM_0, .sda_io_num = PIN_I2C_SDA, .scl_io_num = PIN_I2C_SCL,
         .clk_source = I2C_CLK_SRC_DEFAULT, .glitch_ignore_cnt = 7, .flags.enable_internal_pullup = true };
     ESP_ERROR_CHECK(i2c_new_master_bus(&bus, &s_i2c));
     /* Who answers on the shared bus: the bring-up question for the codec. */
     for (int address = 0x08; address < 0x78; address++)
         if (i2c_master_probe(s_i2c, address, 20) == ESP_OK) ESP_LOGI(TAG, "i2c: device at 0x%02X", address);
+    /* (upstream 0.4.3, the black box) how many probes it took to know the board: this image is its board's own and asks
+       no chip which board it is (board_port_hw, below), so it knows it at once - 0 would read as never found */
+    blackbox_boot_board(1);
 
     backlight_init();                               /* dark until the first frame is in */
 #if CONFIG_POCKET_TANK_WST_320X240
@@ -231,6 +239,17 @@ void display_port_deep_standby(void) { }
 void display_port_frame_origin(int *px, int *py) { *px = 0; *py = 0; }
 void display_port_set_view(int view) { (void)view; }
 int  display_port_view(void) { return DISPLAY_VIEW_FIT; }
+/* (upstream 0.4.2 and 0.4.3, display_port.h) the watch's panel rail (the AXP2101's REG 90) and its image's restart
+ * when no panel came up, and the ES7210, the round boards' microphone: no 320x240 board has any of them, so each is
+ * answered as upstream's ports answer for a board without them (display_port_stub.c, display_port_jd9365.c) -
+ * nothing checked or healed, REG 90 never read, no restart; the panel is up once it has been made. */
+bool display_port_panel_power_check(void) { return false; }
+uint32_t display_port_panel_heals(void) { return 0; }
+int  display_port_boot_reg90(void) { return -1; }
+bool display_port_panel_up(void) { return s_panel != NULL; }
+bool display_port_board_back(void) { return false; }
+void display_port_panel_rail_test_off(void) { }   /* (director `panelrail off`: no rail to cut here) */
+uint8_t board_es7210_addr(void) { return 0; }     /* none: codec_port_mic_adc_down asks nothing at address 0 */
 void display_port_panel_to_tank(int px, int py, float *tx, float *ty) { *tx = (float)px; *ty = (float)py; }
 void display_port_flush_prof(int64_t *wait_us, int64_t *send_us) { *wait_us = 0; *send_us = 0; }
 /* (v0.3.9) no flush task here: display_port_flush already overlaps its two

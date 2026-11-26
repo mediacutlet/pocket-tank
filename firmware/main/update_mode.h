@@ -15,7 +15,7 @@
 #pragma once
 #include <stdbool.h>
 #include <stdint.h>
-void update_mode_request(void);            /* save the tank FIRST; this restarts the board */
+void update_mode_request(bool add);        /* save the tank FIRST; this restarts the board (add, 0.4.2: ADD A NETWORK - the mode begins at the list of networks) */
 bool update_mode_pending(void);            /* at boot: asked for? (reads and clears the word) */
 void update_mode_run(uint16_t *fb, int way_up);   /* the loop; returns on BACK, restarts on an install */
 /* way_up (0.3.9.3, iamsebastijan: "screen rotation doesn't work in the Updates

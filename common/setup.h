@@ -1,6 +1,6 @@
 /* setup.h — first-run setup (2026-09-13): the welcome, a name and colours for
  * each of the two fry, then the care tips - for a fresh install and after a
- * reset. Platform-agnostic: the state machine, the gestures, the hit
+ * reset. (0.4: each fry's name, then its FORM and COLORS - THE EDITOR below.) Platform-agnostic: the state machine, the gestures, the hit
  * geometry and the drawing all live here (the reset prompt kept its state in
  * each platform's touch code; a five-page flow would have been written
  * twice), built on render.h's UI primitives over the LIVE tank - the fish
@@ -65,8 +65,15 @@ void setup_begin_birth(tank_t *t, int slot);   /* the birth flow for the fry in 
 int  setup_poll_birth(tank_t *t);
 /* a fry's welcome is up, or owed and about to open (it is born mid-frame,
  * the flow opens after): the notices wait for it (2026-09-29). A welcome the
- * director dropped is not due - it returns at the next boot. */
-bool setup_birth_due(void);
+ * director dropped is not due - it returns at the next boot. Nor is one
+ * waiting for the light (0.4.2: setup_poll_birth opens no welcome in a dark
+ * tank, tank_light_off - a bought fry's apart): the notices the dark still
+ * shows are not held all night behind it. */
+bool setup_birth_due(const tank_t *t);
+bool setup_welcome_waits_light(const tank_t *t);   /* (0.4.3 audit r2, R2-L13) a fry is owed its welcome and it waits for the light: the light
+                                                      as the keeper set it is off (a page holding it on is not the keeper's light) and
+                                                      the fry was not bought - the lab's tube and the shop's modals say LIGHT ON */
+const char *setup_lab_pour_word(const tank_t *t);  /* the lab tube's button words (drawn, and read by the selftests) */
 void setup_begin_place(tank_t *t, int item);   /* the placement page for SD item `item` (placeable ones only) */
 /* RENAME A FISH (2026-10-01, Strato: "when you tap a fish and see its card
  * there should be a change name button"): the letter wheel again, one page
@@ -78,7 +85,62 @@ void setup_begin_place(tank_t *t, int item);   /* the placement page for SD item
  * the platform the fish once (else -1) so it can put that card back up. */
 void setup_begin_rename(tank_t *t, int fish);
 bool setup_is_rename(void);
+/* A FISH'S STORY (0.4.2, Discord #ideas: "a little stat sheet" with its age, size, parents and original owner; "these
+ * are perfect already" of the welcome's FAMILY and NATURE pages): MORE on the fish's card (MS_TAP_ABOUT) opens three
+ * pages about it - ITS STORY (AGE, FROM, PARENTS, MEALS, SIZE, TRUST), then the FAMILY page and the NATURE page as its
+ * welcome had them. BACK / NEXT at the foot, DONE on the last; BACK on the first or DONE hands the card back the way a
+ * rename does (setup_take_renamed); dropped from outside (setup_cancel), there is no card to go back to. */
+void setup_begin_about(tank_t *t, int fish);
+/* THE PARAGON'S REVEAL (0.4.3): the page for a fish whose three parts are rolled (tank_evo_ready): the shells spin and
+   land one by one the first time, then CHOOSE ONE - a tile to try it on, KEEP THIS asked twice, LATER keeps the same
+   three. Closed, the fish's card comes back (setup_take_renamed) */
+void setup_begin_evolve(tank_t *t, int fish);
+void setup_begin_evolve_tank(tank_t *t, int fish);   /* ... opened from the tank (a tap on its READY TO EVOLVE card, or on its stat card): closed, the tank again */
+bool setup_is_evolve(void);
+bool setup_holds_notices(const tank_t *t);
+/* (the director's bench, 0.4.3: the reveal's frame rate page by page) the page of the reveal that is up: -1 none,
+   SETUP_EVO_SHELLS (nothing spinning yet / between tiles), _SPIN (a tile flicking), _CHOOSE (CHOOSE ONE), _KEEP (KEEP asked) */
+enum { SETUP_EVO_SHELLS, SETUP_EVO_SPIN, SETUP_EVO_CHOOSE, SETUP_EVO_KEEP, SETUP_EVO_PHASES };
+int  setup_evo_phase(const tank_t *t);
+/* op: "spin" the reveal from its start again; "loop" arg 1/0: it starts again a second after the last tile lands (a window
+   of nothing but the reveal); "pick" arg: the tile tried on; "keep": KEEP THIS asked; "back": the ask taken back */
+bool setup_debug_evo(tank_t *t, const char *op, int arg);
+float setup_evo_bar(const tank_t *t);     /* KEEP?'s HOLD bar as drawn, 0..1 (-1: no reveal up) - read by the selftests */
+/* THE REVEAL KEPT (render.h render_evo_held): the reveal's pages are a page of their own - no tank drawn under them */
+#define SETUP_EVO_BANDS 4
+bool setup_evo_black(void);               /* the reveal is up: the platform draws render_evo_held and no tank */
+uint32_t setup_evo_key(const tank_t *t);  /* everything its STILL part is drawn from (a change: drawn whole) */
+int  setup_evo_bands(const tank_t *t, int box[SETUP_EVO_BANDS][4]);   /* its moving boxes, page coords incl. */
+void setup_evo_bands_draw(const tank_t *t, uint16_t *fb, int stride, double clock);   /* ... cleared and drawn again (and its sounds) */
+void setup_debug_evo_live(bool on);       /* (the director's before / after) the reveal over the live tank, whole every frame, as it was built */
+bool setup_is_about(void);
+void setup_debug_stamp(const char *l1, const char *l2, float deg);   /* the starter fish's stamp words and turn (l1 NULL: none - a test) */
+bool setup_about_band(const tank_t *t, int box[4]);          /* THE PANEL KEPT (0.4.2): MORE's moving strip, page coords incl. (false: none) */
+void setup_about_band_draw(const tank_t *t, uint16_t *fb, int stride, double clock);   /* ... cleared and its fish drawn again */
+uint32_t setup_about_key(const tank_t *t);                   /* ... all the still page is drawn from */
+#define SETUP_STAMP_IN_X UI(68)         /* its centre from the panel's top left */
+#define SETUP_STAMP_IN_Y UI(62)
 int  setup_take_renamed(void);
+/* NAME A CRITTER (0.4.2): the same page for the snail, urchin, crab or seahorse (k = CRIT_NAME_*; one the tank owns),
+ * opened by its card's NAME / RENAME (render_critter_name_hit) - "NAME YOUR SNAIL" the first time, "RENAME YOUR SNAIL"
+ * after. The critter stays where it is, ringed; its card's art sits on a plate where a fish would stand. DONE keeps the
+ * name, tidied (nothing left = no name) and saves it; CANCEL, or a flow dropped from outside, puts the old one back.
+ * setup_crit is the critter the page is about (-1 = none); when it closes, setup_take_crit_renamed gives the platform
+ * the critter once (else -1) so it can put that critter's card back up (render_card_of_crit_name). setup_fish is -1 */
+void setup_begin_crit_rename(tank_t *t, int k);
+/* SAND DOLLAR GIFTS (0.4.2, docs/release-0.4.2.md): the link HUD's coin by an open door brings this up - the letter wheel's
+ * page with three digits on it (SEND SAND DOLLARS, CANCEL | NEXT, the balance and the neighbor's badge above the dial),
+ * then a confirm page (SEND N SAND DOLLARS? BACK | SEND). NEXT is lit only for 1..the balance. SEND closes it and leaves the
+ * amount for the platform (setup_take_sdgift: once; 0 = nothing sent - CANCEL, a page taken away). `edge` is the door's
+ * (LINK_LEFT / LINK_RIGHT), `badge` the neighbor's */
+void setup_begin_sdgift(tank_t *t, int edge, int badge);
+bool setup_is_sdgift(void);
+int  setup_take_sdgift(int *edge);
+int  setup_sdgift_amount(void);              /* the dial now (tests, the director) */
+void setup_sdgift_set(int amount);           /* ... set it (tests, the director, the sim's shots) */
+bool setup_sdgift_confirming(void);          /* the confirm page is up */
+int  setup_crit(void);
+int  setup_take_crit_renamed(void);
 bool setup_active(void);
 bool setup_is_birth(void);               /* the birth flow, not the first run */
 bool setup_is_place(void);               /* the placement page */
@@ -96,28 +158,80 @@ void setup_cancel(tank_t *t);            /* drop the pages; the save still says 
 enum { SETUP_KBD_WHEEL, SETUP_KBD_GRID, SETUP_KBD_PAGES };
 void setup_set_keyboard(int mode);
 int  setup_keyboard(void);
+int  setup_stretch_held(void);           /* BODY / FINS (0.4.3): the handle a drag holds (0 none; tests, the sim's shots) */
 int  setup_page(void);                   /* SETUP_PG_* while active */
 /* the finger, every frame (or poll): x,y in tank coordinates, down = touching.
- * A press then release on one element taps it; a press on a letter slot and
- * a vertical drag spins that letter (SETUP_SPIN_PX of travel per step). */
+ * A press then release on one element taps it; a press anywhere on the letter
+ * wheel and a vertical drag spins the focused letter (SETUP_SPIN_PX of travel
+ * per step; a press on a letter picks it first, unless THE LETTER HOLD keeps it). */
 void setup_touch(tank_t *t, float x, float y, bool down);
+/* THE WHEEL'S FEEL (0.4.2, setup.c): a drag from anywhere on the dial turns the focused letter once it has moved
+ * slop_px up or down; for hold_ms after the finger last changed a letter, a press on the row stays on that letter if it
+ * lands within reach_px of it (999 = the whole row). -1 = keep. Not saved (director `wheel`). */
+void setup_wheel_tune(int hold_ms, int reach_px, int slop_px);
+void setup_wheel_tuning(int *hold_ms, int *reach_px, int *slop_px);
 /* the pieces, for tests and the touch log: the element under (x,y) on the
  * current page (0 = none) and a tap on it */
 int  setup_hit(float x, float y);
 void setup_activate(tank_t *t, int id);
 const char *setup_hit_name(int id);      /* "NEXT", "slot 2", "up", "body 3"... */
 int  setup_slot(void);                   /* the active letter slot on a name page */
-void render_setup(const tank_t *t, uint16_t *fb, int stride, float clock);
+void render_setup(const tank_t *t, uint16_t *fb, int stride, double clock);
 
 /* pages, in order */
-enum { SETUP_PG_WELCOME, SETUP_PG_BUBBLES, SETUP_PG_NAME_A, SETUP_PG_LOOK_A, SETUP_PG_NAME_B, SETUP_PG_LOOK_B, SETUP_PG_CARE, SETUP_PG_N };
+/* (0.4, Strato: design a fish before naming it - its colors, then its form,
+ * then its name once its chosen form is in view - both fish, then the tank:
+ * the bubble column, then the care tips) */
+/* (0.4.3 item 10: each fish is BODY, FINS, COLORS, NAME - you build the fish, then paint it. BODY and FINS took the
+   FORM page's place: eleven pages, two more than before) */
+enum { SETUP_PG_WELCOME, SETUP_PG_BODY_A, SETUP_PG_FINS_A, SETUP_PG_COLORS_A, SETUP_PG_NAME_A,
+       SETUP_PG_BODY_B, SETUP_PG_FINS_B, SETUP_PG_COLORS_B, SETUP_PG_NAME_B, SETUP_PG_BUBBLES, SETUP_PG_CARE, SETUP_PG_N };
 /* the birth flow's pages, in order (numbered past the first run's) */
-enum { SETUP_PG_BORN = SETUP_PG_N, SETUP_PG_NAME_NEW, SETUP_PG_FAMILY, SETUP_PG_BIRTH_END };
+enum { SETUP_PG_BORN = SETUP_PG_N, SETUP_PG_NAME_NEW, SETUP_PG_FAMILY, SETUP_PG_NATURE, SETUP_PG_BIRTH_END };
 #define SETUP_BIRTH_PAGES (SETUP_PG_BIRTH_END - SETUP_PG_BORN)
 /* the placement page (its own one-page flow, numbered past the birth flow's) */
 enum { SETUP_PG_PLACE = SETUP_PG_BIRTH_END };
 /* the rename page (one page too) */
 enum { SETUP_PG_RENAME = SETUP_PG_PLACE + 1 };
+/* a fish's story (0.4.2): its own first page, then the birth flow's FAMILY and NATURE */
+enum { SETUP_PG_ABOUT = SETUP_PG_RENAME + 1 };
+/* THE FISH LAB (0.4.3 item 10, docs/fish-creator-0.4.3.md section 9; progression.h SD_PRICE_LAB): the creator's pages
+ * again for a fry made to order - BODY, FINS, COLORS, NAME as they are, then THE TUBE: the fry in its corked tube beside
+ * what it will grow into and its recipe, and POUR IT IN (the price said on the button; TANK FULL or the sand dollars
+ * short, plainly, when it cannot be). Then the lab closes and the fry drops into the tank from the top (tank_plop) - in:
+ * paid for, named, welcomed. BACK on the first page leaves with nothing spent. The pages work on a fish that is not in
+ * the tank: slot SETUP_LAB_SLOT, past every fish a tank with room can hold. */
+enum { SETUP_PG_LAB_BODY = SETUP_PG_ABOUT + 1, SETUP_PG_LAB_FINS, SETUP_PG_LAB_COLORS, SETUP_PG_LAB_NAME, SETUP_PG_LAB_TUBE };
+#define SETUP_LAB_PAGES  5
+#define SETUP_LAB_SLOT   (N_FISH_MAX - 1)
+#define SETUP_LAB_BTN_X  LAB_COL2_X       /* POUR IT IN: from the right column's edge to LAB_R, standing on the bench's top line, */
+#define SETUP_LAB_BTN_Y  LAB_BENCH_Y      /* as tall as the bench's top (its corner clears the round glass) */
+#define SETUP_LAB_BTN_W  (LAB_R - LAB_COL2_X)
+#define SETUP_LAB_BACK_W UI(128)          /* the tube page's BACK: the rack's own width, over it */
+#define SETUP_LAB_BACK_Y UI(36)
+#define SETUP_HIT_POUR   191
+void setup_begin_lab(tank_t *t);
+bool setup_is_lab(void);
+fish_t *setup_lab_fish(void);             /* the fry being made (NULL: the lab is not open): the tests, the director */
+/* THE LAB KEPT (render.h render_lab_page): the lab's pages are black pages of their own, not over the tank */
+#define SETUP_LAB_BANDS 2
+bool setup_lab_black(void);
+bool setup_zoomed(void);                  /* (0.4.3, the big screens) the page up is drawn at twice its size: the paragon's, THE FISH LAB's */               /* a lab page is up (not the pour): the platform draws render_lab_page and no tank */
+#ifdef TANK_P4
+/* THE REVEAL KEPT AT 2X (render.c): the page's own frame at 1x (TANK_W stride, NULL: no room), put on the glass whole
+   or a box at a time (page px, inclusive; `glass` gets the box on the glass it covered, x1 < x0 when none) */
+uint16_t *setup_zoom_buf(void);
+void setup_zoom_put(uint16_t *fb, int stride);
+void setup_zoom_put_box(uint16_t *fb, int stride, int x0, int y0, int x1, int y1, short glass[4]);
+void setup_debug_zoom_buf(uint16_t *b);   /* (a test's reference drawn through this frame instead; NULL: the held one) */
+#endif
+uint32_t setup_lab_key(const tank_t *t);  /* everything the page's STILL part is drawn from (a change: drawn whole) */
+int  setup_lab_bands(const tank_t *t, int box[SETUP_LAB_BANDS][4]);   /* its moving boxes, page coords incl. (0: none - drawn whole every frame) */
+void setup_lab_bands_draw(const tank_t *t, uint16_t *fb, int stride, double clock);   /* ... cleared and drawn again */
+void setup_lab_goto(tank_t *t, int page); /* (the director, the tests) the lab on SETUP_PG_LAB_BODY .. _TUBE */
+void setup_debug_lab_live(bool on);       /* (the director's before / after) the lab drawn as it was first built: over the live tank, whole every frame */
+void setup_debug_lab_wiggle(bool on);     /* ... and a handle dragged to and fro by itself (BODY: the length; FINS: the tail) */
+#define SETUP_ABOUT_PAGES 3
 /* element ids (setup_hit / setup_activate) */
 #define SETUP_HIT_NEXT  1
 #define SETUP_HIT_BACK  2
@@ -130,11 +244,20 @@ enum { SETUP_PG_RENAME = SETUP_PG_PLACE + 1 };
 #define SETUP_HIT_DOWN  4                /* ... previous */
 #define SETUP_HIT_SLOT0 10               /* + 0..FISH_NAME_MAX-1: pick that slot */
 #define SETUP_HIT_BODY0 40               /* + swatch 0..LOOK_N-1 */
+#define SETUP_HIT_ROLL  6                /* the editor's ROLL: the page's genes at random */
+#define SETUP_HIT_SWAP  7                /* COLORS: trade the body and markings colors */
+#define SETUP_HIT_ACC0  160              /* the editor: + LOOK_ACCENT swatch 0..LOOK_N-1 (MARKINGS) */
+#define SETUP_HIT_SHAPE0 170             /* + SHAPE_* */
+#define SETUP_HIT_FINS0 175              /* + FINS_* */
+#define SETUP_HIT_STAGE 190              /* BODY / FINS (0.4.3): the stage - a drag there stretches, a tap does nothing */
+#define SETUP_HIT_PAT0  180              /* + PATTERN_* */
 #define SETUP_HIT_KEY0  100              /* legacy keyboards only: + 0..25 = A..Z, + SETUP_KEY_DEL, + SETUP_KEY_PAGE */
 #define SETUP_KEY_DEL   26
 #define SETUP_KEY_PAGE  27
 #define SETUP_KEY_N     28
 #define SETUP_HIT_Z0    60               /* + DECOR_Z_BACK..FRONT: the placement page's layer row */
+#define SETUP_HIT_ORD0  64               /* + 0 BEHIND / 1 IN FRONT: the sword plant's ORDER SQUARES (0.4) - behind or in front of the piece they show */
+#define SETUP_HIT_SG0   66               /* + 0 BEHIND / 1 IN FRONT: the sword plant's SEAGRASS squares (0.4.1) - behind or in front of the seagrass */
 #define SETUP_HIT_COLOR0 80              /* + 0..CORAL_N-1: the coral's colour swatches (its placement page) */
 
 /* geometry (tank coordinates), shared by the drawing, the hit test and the
@@ -182,29 +305,102 @@ enum { SETUP_PG_RENAME = SETUP_PG_PLACE + 1 };
 #define SETUP_SLOT_W   (5 * SETUP_SLOT_SCALE)
 #define SETUP_SLOT_H   (7 * SETUP_SLOT_SCALE)
 #define SETUP_SLOT_X   ((PAGE_W - ((FISH_NAME_MAX - 1) * SETUP_SLOT_PX + SETUP_SLOT_W)) / 2)
-#define SETUP_SLOT_Y   UI(150)
+#define SETUP_SLOT_Y   UI(170)          /* (150 until 0.4: the band above now shows a young fish's GROWN UP beside it) */
 #define SETUP_ARROW_GAP UI(40)
 #define SETUP_SPIN_PX   UI(30)                                 /* drag travel per letter */
-/* the colour page (third design too): no panel, the live FRY wears the pick
- * with a ring round it; one row of 8 body swatches, 42 x 60 px at a 46 px
- * pitch, a tall band around it so a low-landing finger still hits; the
- * accent is a "?" - a fry's markings come in as it grows */
-#define SETUP_SW_N  LOOK_N
-#define SETUP_SW_PX UI(46)
-#define SETUP_SW_W  UI(42)
-#define SETUP_SW_H  UI(60)
+/* THE EDITOR (0.4, docs/genetics-0.4.md; Spore's creature editor in a
+ * pocket): per fish, NAME, then FORM (body SHAPE, FINS), then COLORS (BODY,
+ * PATTERN, MARKINGS) - over the live tank, BACK / ROLL / NEXT on top. The
+ * band under them shows the fry as it is NOW, on stage at the left (the live
+ * fish, wearing its body and shape), and the GROWN fish it becomes at the
+ * right (fins come in when it is grown, markings as it grows). Under the
+ * band the rows: three picture tiles for a form (each a small fish of that
+ * option in the fish's own colors), eight swatches for a color. Each row's
+ * band runs from its label to halfway into the gap below, the nearest
+ * choice along x - no dead space. ROLL picks the page's genes at random. */
+#define SETUP_SW_N  LOOK_N              /* nine since 0.4 (charcoal): a wider row, 44 px apart, 40 wide - more
+                                       swatch in all than eight at 46 / 42; the bowl's circle is narrower
+                                       at the markings row, so there 40 / 36 */
+#define SETUP_SW_PX UI(40)              /* (0.4.3, THE LAB'S GRID: nine swatches from LAB_L to LAB_R on every glass) */
+#define SETUP_SW_W  UI(38)
 #define SETUP_SW_X  ((PAGE_W - (SETUP_SW_N - 1) * SETUP_SW_PX - SETUP_SW_W) / 2)
-#define SETUP_SW_Y  UI(176)
-#define SETUP_ACC_Y UI(276)
-/* the family page (birth flow): the portrait ringed under the name, then
- * four rows - BODY / MARKINGS (a swatch, whose it is), BOLD / SOCIAL (a bar
- * of the fry's own, the parents' ticks in their body colours) - and a
- * PARENTS legend naming both in their tick colours; BACK + DONE at the foot */
-#define SETUP_FAM_PORTRAIT_Y (SETUP_Y + UI(78))
-#define SETUP_FAM_ROW_Y      (SETUP_Y + UI(128))
-#define SETUP_FAM_ROW_DY     UI(26)
+#define SETUP_ROLL_X ((PAGE_W - SETUP_TOP_BTN_W) / 2)
+/* COLORS: SWAP (body <-> markings, Strato 10-04) is a tall button at the
+   pattern row's right end, between the two palettes, an arrow pointing up at
+   the body row and one down at the markings row; the pattern tiles narrow
+   to make its room */
+#define SETUP_PAT_TILE_W  UI(98)        /* (0.4.3, THE LAB'S GRID: the three tiles and SWAP span LAB_L .. LAB_R) */
+#define SETUP_PAT_TILE_PX UI(106)
+#define SETUP_SWAP_W      UI(40)
+#define SETUP_SWAP_GAP    UI(10)
+#define SETUP_PAT_TILE_X  ((PAGE_W - (2 * SETUP_PAT_TILE_PX + SETUP_PAT_TILE_W + SETUP_SWAP_GAP + SETUP_SWAP_W)) / 2)
+#define SETUP_SWAP_X      (SETUP_PAT_TILE_X + 2 * SETUP_PAT_TILE_PX + SETUP_PAT_TILE_W + SETUP_SWAP_GAP)
+#define SETUP_SWAP_Y      (SETUP_COLOR_BODY_Y + SETUP_COLOR_SW_H + UI(8))
+#define SETUP_SWAP_H      (SETUP_COLOR_ACC_Y - SETUP_LABEL_DY - UI(4) - SETUP_SWAP_Y)
+#define SETUP_ED_NOW_X      UI(136)      /* the fry's stage (page x) ... */
+#define SETUP_ED_GROWN_X    UI(312)      /* ... and the grown portrait (the pair centred on the page's middle) */
+#define SETUP_ED_PREVIEW_Y  UI(110)
+#define SETUP_ED_CAPTION_Y  UI(140)      /* NOW / GROWN UP */
+#define SETUP_ED_GROWN_SIZE (1.5f * UI_F)  /* (this fork: a fish drawn on a page scales with it, UI_F, as the family page's portrait does) */
+#define SETUP_TILE_N   3
+#define SETUP_TILE_W   UI(112)          /* (0.4.3, THE LAB'S GRID: three tiles from LAB_L to LAB_R) */
+#define SETUP_TILE_PX  UI(124)
+#define SETUP_TILE_X   ((PAGE_W - (SETUP_TILE_N - 1) * SETUP_TILE_PX - SETUP_TILE_W) / 2)
+/* BODY and FINS (0.4.3 item 10, docs/fish-creator-0.4.3.md): the stage (render.h STG_*) between the top buttons and one
+ * row of three named tiles. The fry (NOW) rides at the stage's left, small, in the body being made. A drag anywhere on
+ * the stage changes a value: its first SETUP_ST_PICK px choose the direction (sideways: the length, or the tail; up and
+ * down: the height, or the top fin from above the fish's middle and the bottom fin from below), SETUP_ST_TRAVEL px is a
+ * value's whole range, and a handle sticks SETUP_ST_STICK px either side of a named value. No hold, no wait: the fish
+ * follows from the moment the direction is known. The tiles' row was lifted clear of the round glass's corners. */
+#define SETUP_ST_NOW_X    UI(64)
+#define SETUP_ST_NOW_Y    UI(116)
+#define SETUP_ST_TOP      UI(92)
+#define SETUP_ST_BOT      UI(266)
+#define SETUP_ST_HINT_Y   UI(276)
+#define SETUP_ST_TILE_Y   LAB_BENCH_Y   /* the tiles stand on the bench's top line and are as tall as its top */
+#define SETUP_ST_TILE_H   LAB_BENCH_H
+#define SETUP_ST_PICK     (8.0f * UI_F)     /* (this fork: the drags scale with the stage they cross, as SETUP_SPIN_PX does) */
+#define SETUP_ST_TRAVEL   (120.0f * UI_F)
+#define SETUP_ST_STICK    (5.0f * UI_F)
+#define SETUP_LABEL_DY UI(16)            /* a row's label sits this far above it */
+#define SETUP_FORM_TILE_H UI(56)         /* FORM: two rows of named tiles */
+#define SETUP_FORM_SHAPE_Y UI(174)
+#define SETUP_FORM_FINS_Y  UI(256)
+#define SETUP_COLOR_SW_H   UI(32)        /* COLORS: swatches, tiles, swatches */
+#define SETUP_COLOR_PAT_H  UI(44)
+#define SETUP_COLOR_BODY_Y UI(174)
+#define SETUP_COLOR_PAT_Y  UI(230)
+#define SETUP_COLOR_ACC_Y  LAB_BENCH_Y   /* (the last row stands on the bench's top line) */
+/* the family page (birth flow; 0.4 heredity): the fry's name; NOW (the fry,
+ * ringed) and the GROWN fish it becomes side by side, as in the editor; then
+ * a row per gene - SHAPE, FINS, PATTERN (the option's name), BODY, MARKINGS
+ * (a swatch) - and, under FROM, where it came from: a parent's name in its
+ * body color, a * when it was that parent's hidden copy (a footnote says
+ * so), or NEW! for a mutation. The nature page after it (DONE): BOLD /
+ * SOCIAL - the fry's bar, the parents' ticks (heads above / below, TP2-9) - and the
+ * PARENTS legend. BACK + NEXT / DONE at the foot of both. */
+#define SETUP_FAM_PORTRAIT_Y (SETUP_Y + UI(82))
+#define SETUP_FAM_NOW_X      (SETUP_X + SETUP_W / 2 - UI(90))
+#define SETUP_FAM_GROWN_X    (SETUP_X + SETUP_W / 2 + UI(80))
+#define SETUP_FAM_GROWN_SIZE (1.3f * UI_F)
+#define SETUP_FAM_ROW_Y      (SETUP_Y + UI(134))
+#define SETUP_FAM_ROW_DY     UI(24)
 #define SETUP_FAM_LABEL_X    (SETUP_X + UI(28))
-#define SETUP_FAM_VALUE_X    (SETUP_X + UI(150))
+#define SETUP_FAM_VALUE_X    (SETUP_X + UI(136))
+#define SETUP_FAM_FROM_X     (SETUP_X + UI(248))
+#define SETUP_FAM_NOTE_Y     (SETUP_FAM_ROW_Y + 5 * SETUP_FAM_ROW_DY + UI(2))
+#define SETUP_NAT_ROW_Y      (SETUP_Y + UI(100))  /* the nature page's rows */
+#define SETUP_AB_PORTRAIT_Y  (SETUP_Y + UI(84))  /* ITS STORY (0.4.2): the fish as it is, under its name ... */
+#define SETUP_AB_ROW_Y       (SETUP_Y + UI(128))  /* ... then a row each: AGE, FROM, PARENTS, MEALS, SIZE, TRUST */
+#define SETUP_AB_ROW_DY      UI(24)
+#define SETUP_NAT_ROW_DY     UI(34)
+#define SETUP_NAT_HEAD_H     7                 /* a parent's mark's head (TP2-9): 7 rows, 13 px at its widest ... */
+#define SETUP_NAT_KEY_W      13                /* ... (the key before a name under PARENTS: the same head) */
+#define SETUP_NAT_HEAD_A_Y(by) ((by) - UI(4) - SETUP_NAT_HEAD_H)   /* the first parent's head above the bar (by = its top), widest row first */
+#define SETUP_NAT_HEAD_B_Y(by) ((by) - UI(4) + SETUP_FAM_BAR_H + UI(8))   /* the other's below it, widest row last */
+/* (this fork: a head keeps its 7 rows on every board - nat_head draws it a row at a time - while the tick it caps
+   scales, so each head is counted from the tick's end, its point touching it: nature_mark's tick starts at by - UI(4)
+   and is SETUP_FAM_BAR_H + UI(8) long. At the design size these are upstream's by - 11 and by + SETUP_FAM_BAR_H + 4.) */
 #define SETUP_FAM_BAR_W      UI(200)
 #define SETUP_FAM_BAR_H      UI(8)
 /* the placement page's DEPTH control (second design, 2026-09-16 - Strato:
@@ -230,14 +426,22 @@ enum { SETUP_PG_RENAME = SETUP_PG_PLACE + 1 };
 #define SETUP_DEPTH_TILE_H (UI(40) < 34 ? 34 : UI(40))
 #define SETUP_DEPTH_H      (SETUP_DEPTH_TILE_H + UI(30))
 #define SETUP_DEPTH_HINT_Y (SETUP_DEPTH_Y + SETUP_DEPTH_H + UI(8))
+#define SETUP_ORDSQ_X      ((PAGE_W - 2 * SETUP_DEPTH_SEG_W) / 2)   /* the sword plant's ORDER SQUARES (0.4): two segments in the DEPTH bar's place -
+                                                                 BEHIND | IN FRONT of the piece beside it in the stack, a universal block for it */
+/* the sword plant's page since 0.4.1 (Strato 11-05: BEHIND THE SEAGRASS back): TWO rows of two squares, each under a caption that
+   names what they are behind or in front of - THE SEAGRASS in the DEPTH bar's place, then, with a piece beside the plant, the
+   ORDER SQUARES (THE PUMPKIN) under it, the arrows at their ends (alone, the arrows stay at the first row's, dim) */
+#define SETUP_ORDSQ2_Y     (SETUP_DEPTH_Y + SETUP_DEPTH_H + UI(30))
+#define SETUP_ORD2_Y       (SETUP_ORDSQ2_Y + (SETUP_DEPTH_H - SETUP_BTN_H) / 2)
 #define SETUP_PLACE_Y      (SETUP_DEPTH_HINT_Y + UI(20))
+#define SETUP_PLACE_PLANT2_Y (SETUP_ORDSQ2_Y + SETUP_DEPTH_H + UI(6))  /* (the plant's page with its second row: the drag zone and the stripe start under it) */
 /* the coral's placement page (2026-09-23) trades the hint line for a COLOR
  * row: CORAL_N swatches at the colour page's pitch, shorter (42 x 26), the
  * chosen one ringed; the coral on the floor below wears the pick at once.
  * The drag zone starts under the row. */
 #define SETUP_COL_N   CORAL_N
-#define SETUP_COL_PX  SETUP_SW_PX
-#define SETUP_COL_W   SETUP_SW_W
+#define SETUP_COL_PX  UI(46)           /* (the editor's swatches' old pitch - the editor's moved to nine in 0.4) */
+#define SETUP_COL_W   UI(42)
 #define SETUP_COL_H   UI(26)
 #define SETUP_COL_X   ((PAGE_W - (SETUP_COL_N - 1) * SETUP_COL_PX - SETUP_COL_W) / 2)
 #define SETUP_COL_Y   (SETUP_DEPTH_Y + SETUP_DEPTH_H + UI(22))
@@ -255,6 +459,38 @@ enum { SETUP_PG_RENAME = SETUP_PG_PLACE + 1 };
 /* the stage: the clear spot each page leaves for the fish being edited
  * (tank_t.stage_*), top centre between the buttons */
 #define SETUP_STAGE_X   (TANK_W / 2)                    /* the stage is in the TANK: the frame's coordinates, under the page's title */
-#define SETUP_STAGE_NAME_Y (PAGE_Y + UI(94))
-#define SETUP_STAGE_LOOK_Y (PAGE_Y + UI(112))
+#define SETUP_STAGE_NAME_Y (PAGE_Y + UI(104))
+/* a name page for a fish not yet grown (0.4): it is staged at NOW, the left,
+   and its GROWN UP form sits on a plate at the right, as in the editor - the
+   keeper names the fish they designed, fins and markings in view */
+#define SETUP_NAME_PREVIEW_Y   UI(106)
+#define SETUP_NAME_GROWN_SIZE  (1.3f * UI_F)
+#define SETUP_STAGE_EDIT_X (PAGE_X + SETUP_ED_NOW_X)   /* the editor's NOW */
+#define SETUP_STAGE_EDIT_Y (PAGE_Y + SETUP_ED_PREVIEW_Y)
+#define SETUP_STAGE_ST_X   (PAGE_X + SETUP_ST_NOW_X)   /* BODY / FINS: the fry's place */
+#define SETUP_STAGE_ST_Y   (PAGE_Y + SETUP_ST_NOW_Y)
+void setup_fish_removed(tank_t *t, int idx);   /* a fish left, the slots shifted: the page follows its fish (or closes) */
+
+/* the words the birth flow says of a fry (0.4.1; the tests read them): its announcement's two lines (FROM THE SHOP, /
+   BORN TO A AND B - DOWN IN THE GRASS, or NEXT DOOR. for a fry born next door and come home), and where its gene g came
+   from on the family page (a parent's name, THE SHOP, NEW!, or "?" for a parent nobody here knows) */
+void setup_born_lines(const tank_t *t, int fish, char *l1, size_t n1, const char **l2);
+const char *setup_from_name(const tank_t *t, int fish, int g);
+
+#ifdef TANK_P4
+void setup_p4_band_wide(bool on);   /* the big screens: the flow's bands across the glass again (the bench: director `p4 2048`) */
+#endif
+#ifdef TANK_P4
+/* THE BIG SCREENS' KEEPER PAGE (render_big.c): a fish's STORY and TRAITS in the page's pane (setup.c; frame px) */
+void setup_big_story(const tank_t *t, int fi, uint16_t *fb, int stride, int x, int y, int dy);
+void setup_big_traits(const tank_t *t, int fi, uint16_t *fb, int stride, int x, int y, int dy, int yn, int dyn);
+#endif
+#ifdef CONFIG_POCKET_TANK_320X240
+/* this fork: the creator's last row and the lab's POUR IT IN take render.h's bench line (LAB_BENCH_Y and LAB_BENCH_H,
+   which its 320 x 240 block scales) with no UI() of their own here, so an upstream edit to them merges cleanly - and
+   must still leave them on the 240 px page */
+_Static_assert(SETUP_ST_TILE_Y + SETUP_ST_TILE_H <= PAGE_H, "BODY and FINS: the tiles' row must stand on the page");
+_Static_assert(SETUP_COLOR_ACC_Y + SETUP_COLOR_SW_H <= PAGE_H, "COLORS: the MARKINGS row must stand on the page");
+_Static_assert(SETUP_LAB_BTN_Y + SETUP_BTN_H <= PAGE_H, "THE TUBE: POUR IT IN must stand on the page");
+#endif
 #endif

@@ -4,7 +4,7 @@
 /* stateless PRNG: advisor must not mutate the tank */
 static float frand(const tank_t *t, int fish_idx) {
     uint32_t x = t->rng ^ (0x9E3779B9u * (uint32_t)(fish_idx + 1))
-                        ^ (uint32_t)(t->clock * 977.0f);
+                        ^ (uint32_t)(uint64_t)(t->clock * 977.0);
     x ^= x << 13; x ^= x >> 17; x ^= x << 5;
     return (float)(x & 0xffffff) / 16777215.0f;
 }

@@ -1,0 +1,37 @@
+# sdkconfig.p4radio - the home tank WITH its radio chip: on top of sdkconfig.defaults and
+# sdkconfig.p4 (tools/flash_p4.sh --radio; docs/board-p4-10.1.md, "The radio").
+CONFIG_POCKET_TANK_NO_RADIO=n
+CONFIG_POCKET_TANK_RADIO_HOSTED=y
+# the hosted stack, host side: the C6 on SDIO slot 1, four data lines - the P4's stock pins
+# (CLK 18, CMD 19, D0-3 14-17, the C6's reset on 54), which are this board's
+CONFIG_ESP_HOSTED=y
+CONFIG_ESP_HOSTED_CP_TARGET_ESP32C6=y
+CONFIG_ESP_HOSTED_HOST_TRANSPORT_BUS_SDIO=y
+CONFIG_ESP_HOSTED_SDIO_SLOT_1=y
+CONFIG_ESP_HOSTED_HOST_SDIO_BUS_WIDTH_4=y
+CONFIG_ESP_HOSTED_HOST_SDIO_RX_STREAMING_MODE=y
+# our ESP-NOW relay rides this
+CONFIG_ESP_HOSTED_HOST_FEAT_PEER_DATA=y
+# nothing starts at boot: the stack comes up when the link (or `radio`) asks
+CONFIG_ESP_HOSTED_AUTO_CALL_INIT_BEFORE_APP_MAIN=n
+# THE RADIO'S ROOM (0.4.3, 11-23): the image must fit its 2.5 MB slot. The hosted stack logs warnings and errors only
+# (its INFO lines were tens of KB of strings), and Wi-Fi's target wake time (iTWT: a station's power saving, unused by
+# the tank link) is left out. firmware/CMakeLists.txt takes these keys out of an older build folder's sdkconfig.
+CONFIG_ESP_HOSTED_HOST_LOG_LEVEL_WARN=y
+# CONFIG_ESP_HOSTED_HOST_FEAT_WIFI_EXT_ITWT is not set
+# THE RADIO'S RAM (0.4.3, 11-23: `radio` restarted the 10.1 - the running tank had no internal room for the stack).
+# The hosted stack's worker task stacks go to PSRAM (none of them writes flash); its big DMA buffers go there too
+# (firmware/main/radio_mem.h, the --wrap in main/CMakeLists.txt). firmware/CMakeLists.txt clears this key from an
+# older build folder's sdkconfig, so the fragment's value wins.
+CONFIG_ESP_HOSTED_DFLT_TASK_FROM_SPIRAM=y
+# (audit 11-23) a fault on the bus to the C6 must not restart the tank (hosted's default calls abort()): the stack
+# posts EH_HOST_EVENT_TRANSPORT_FAILURE, radio_hosted.c marks the radio down, and LINK says THE LINK DID NOT START.
+# CONFIG_ESP_HOSTED_HOST_TRANSPORT_RESTART_ON_FAILURE is not set
+# MORE OF THE RADIO'S ROOM (0.4.3, 11-24, Strato approved; ~/.cache/pocket-tank/size-headroom-REPORT.md): a failed assert or
+# ESP_ERROR_CHECK still aborts and the panic still prints its backtrace, but without the expression's text and file:line
+# (decode the backtrace with the ELF; "assert failed: 0x<pc>" is still printed). ESP_ERROR_CHECK_WITHOUT_ABORT goes quiet. ~51 KB.
+CONFIG_COMPILER_OPTIMIZATION_ASSERTIONS_SILENT=y
+# esp_err_to_name() says "UNKNOWN ERROR" instead of the code's name (log lines only; the help page's tank check reads no
+# names). ~8 KB. firmware/CMakeLists.txt clears both keys from an older radio build folder's sdkconfig, so these win.
+# CONFIG_ESP_ERR_TO_NAME_LOOKUP is not set
+# (the third cut, ESP-IDF's own INFO lines compiled out, is in firmware/CMakeLists.txt: it is not a config key)

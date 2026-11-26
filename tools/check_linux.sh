@@ -10,6 +10,8 @@
 #
 #   tools/check_linux.sh            # the tree as committed (git archive HEAD), all four worlds, stops at the first failure like CI
 #   tools/check_linux.sh --all      # every selftest in every world, going on past failures: the whole list at once
+#                                   # (the list from make itself: a grep took the NOMODEL line along and ran a
+#                                   # garbled flag as a plain sim forever, 11-03)
 #   tools/check_linux.sh --dirty    # the working tree instead of HEAD (uncommitted edits included)
 #
 # Needs Docker Desktop running (`open -a Docker`). The first run pulls
@@ -34,7 +36,7 @@ for f in model_q4.bin model.bin tokenizer.bin; do [ -f "$W/model/out/$f" ] || [ 
 NOMODEL=""; { [ -f "$W/model/out/model.bin" ] && [ -f "$W/model/out/tokenizer.bin" ]; } || NOMODEL="NOMODEL=1"
 echo "check_linux: $W ($([ "$DIRTY" = 1 ] && echo the working tree || echo HEAD $(git rev-parse --short HEAD)), $([ -n "$NOMODEL" ] && echo no model || echo with the model))"
 if [ "$ALL" = 1 ]; then
-  SCRIPT='tests=$(grep -A2 "^SELFTESTS :=" sim/Makefile | tr -d "\\\\\n" | sed "s/SELFTESTS :=//");
+  SCRIPT='tests=$(printf "print-tests:\n\t@echo \$(SELFTESTS)\n" | make -s -C sim -f Makefile -f - print-tests);
     [ -n "$NOMODEL" ] && tests=$(echo "$tests" | sed "s/--selftest-llm//; s/--selftest-model//");
     rc=0; for w in "" ROUND=1 WATCH=1 SQUARE=1; do out=fishsim; case $w in ROUND=1) out=fishsim-round;; WATCH=1) out=fishsim-watch;; SQUARE=1) out=fishsim-square;; esac;
       echo "=== WORLD ${w:-RECT}"; make -C sim -j"$(nproc)" $w $out >/dev/null 2>&1 || { echo "BUILD FAILED"; rc=1; continue; };

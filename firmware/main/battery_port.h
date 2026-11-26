@@ -19,6 +19,7 @@ bool battery_port_poweroff(void);                      /* PMIC soft power-off; f
  * + clears them: 0 nothing, 1 short press, 2 long press (IRQLEVEL, 1.5 s). */
 void battery_port_key_init(void);
 int  battery_port_key_poll(void);
+void battery_port_key_clear(void);          /* drop a press latched while nothing polled (the boot's time check): never acted on */
 void battery_port_key_trace(int seconds);   /* bench: log each press's length for N s (director `keytime`) */
 /* diagnostics: the AXP2101's rail enables + voltages, charger setting, VBAT
  * and state of charge, decoded to the log (read-only). VBAT in mV, 0 = n/a. */
@@ -28,6 +29,7 @@ int  battery_port_vbat_mv(void);
 int  battery_port_charge_ma(void);
 bool battery_port_set_charge_ma(int ma);
 void battery_port_charge_report(void);
+bool battery_port_set_charger(bool on);   /* REG 18 b1, the director's `charge off|on` (0.4.2: the proof of the stop reason) */
 /* the cell's size (0.3.9.2, the hidden ADVANCED page): the charge, precharge and end-of-charge currents for a
  * cell of mah (common/advanced.c adv_charge_ma / adv_trickle_ma; the board's own cell keeps the board's own
  * rates below). Called at boot with the saved size and when the keeper SETs one; false = no PMIC */

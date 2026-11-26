@@ -14,12 +14,15 @@
 #include <string.h>
 
 static const char *TAG = "advisor";
-static bool g_ok;
+static bool g_ok; static TaskHandle_t g_task;
+#ifndef ADVISOR_BOOT_BENCH
+#define ADVISOR_BOOT_BENCH 0
+#endif
 static SemaphoreHandle_t g_mx, g_req_sem;
 static char g_req_state[400]; static int g_req_fish = -1;
 static goal_t g_resp_goal; static int g_resp_fish = -1; static bool g_busy;
-static bool g_pending[N_FISH_MAX]; static int g_next;
-/* the roster a request was made against (tank_t.roster_gen): a fish sold
+static bool g_pending[N_FISH_SLOTS]; static int g_next;
+/* the roster a request was made against (tank_t.roster_shift: the slots as they were): a fish sold
  * shifts the slots, and a decision asked for the old ones is dropped */
 static uint8_t g_gen, g_req_gen, g_resp_gen;
 static uint32_t g_decisions, g_last_ms; static float g_tok_s;
@@ -32,7 +35,15 @@ static void *psram_alloc(size_t n) {
 
 /* hot activation buffers live in internal SRAM (~70 KB): the dot kernel then
  * streams only flash weights + SRAM activations, off the contended PSRAM bus */
+/* ... with a FLOOR (RAM move 2, 0.4.2): a request that would leave less than SRAM_FLOOR of internal RAM is refused, and
+   q4_model's alloc16_fast takes PSRAM instead (slower decisions, not a starved display or radio). Without it a batch that
+   grew to the longest prompt took whatever internal RAM was left */
+#define SRAM_FLOOR (24 * 1024)
 static void *sram_alloc(size_t n) {
+    if (heap_caps_get_free_size(MALLOC_CAP_INTERNAL) < n + SRAM_FLOOR) {
+        static bool told; if (!told) { told = true; ESP_LOGW(TAG, "fast buffer of %u B refused: internal RAM would fall under the %d KB floor (PSRAM instead)", (unsigned)n, SRAM_FLOOR / 1024); }
+        return NULL;
+    }
     return heap_caps_malloc(n, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
 }
 
@@ -67,7 +78,10 @@ bool advisor_llm_esp_init(const uint8_t *model_bin, size_t model_len, const uint
         ESP_LOGE(TAG, "bad model/tokenizer"); return false;
     }
     q4_clock_us = esp_timer_get_time;        /* per-stage inference profiling */
-    /* one-time kernel/memory bench on boot (numbers for docs/bringup step 9) */
+#if ADVISOR_BOOT_BENCH
+    /* one-time kernel/memory bench on boot (numbers for docs/bringup step 9). OFF since 0.4 (the 11-02 evening sweep):
+       its RAM copy of a layer's weights is 209 KB of PSRAM kept for good, and its batch of 44 sized the model's
+       batch buffers before the first real prompt did. -DADVISOR_BOOT_BENCH=1 for bring-up */
     q4_model_t *bm = advisor_core_model();
     ESP_LOGI(TAG, "bench: dot100k %lld us | batch44 flash %lld us ram %lld us | decode flash %lld us ram %lld us",
              q4_model_bench(bm, 0, 44, esp_timer_get_time),
@@ -75,9 +89,14 @@ bool advisor_llm_esp_init(const uint8_t *model_bin, size_t model_len, const uint
              q4_model_bench(bm, 2, 44, esp_timer_get_time),
              q4_model_bench(bm, 3, 44, esp_timer_get_time),
              q4_model_bench(bm, 4, 44, esp_timer_get_time));
+#endif
     g_mx = xSemaphoreCreateMutex(); g_req_sem = xSemaphoreCreateBinary();
-    /* inference on core 1; render/tank own core 0 */
-    xTaskCreatePinnedToCore(worker, "advisor", 16384, NULL, 5, NULL, 1);
+    /* inference on core 1; render/tank own core 0. No worker, no model: the tank's rules decide, as with no model at all */
+    if (!g_mx || !g_req_sem || xTaskCreatePinnedToCore(worker, "advisor", ADVISOR_STACK, NULL, 5, &g_task, 1) != pdPASS) {
+        ESP_LOGE(TAG, "no internal RAM for the advisor's task (%u KB free, largest %u KB)",
+                 (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL) / 1024, (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL) / 1024);
+        return false;
+    }
     const q4_config_t *c = advisor_core_config();
     ESP_LOGI(TAG, "model dim %d layers %d vocab %d seq %d, schema v%d, %s decoding",
              c->dim, c->n_layers, c->vocab_size, c->seq_len, advisor_core_schema(),
@@ -86,15 +105,19 @@ bool advisor_llm_esp_init(const uint8_t *model_bin, size_t model_len, const uint
     return true;
 }
 
+bool advisor_llm_esp_busy(uint32_t *decisions) { *decisions = g_decisions; return g_ok && g_busy; }   /* (unlocked: a hint for the bake) */
+size_t advisor_llm_esp_stack_unused(void) { return g_task ? uxTaskGetStackHighWaterMark(g_task) : 0; }
+
 static int pick_next(const tank_t *t) {
-    for (int k = 0; k < t->n_fish; k++) {
-        int i = (g_next + k) % t->n_fish;
+    for (int k = 0; k < N_FISH_SLOTS; k++) {               /* (every swimmer: visitors too; a fish next door is not asked) */
+        int i = (g_next + k) % N_FISH_SLOTS;
+        if (g_pending[i] && !tank_swims(t, i)) g_pending[i] = false;
         if (!g_pending[i]) continue;
         const fish_t *f = &t->fish[i];
         if (f->hunger > 8.0f && f->goal.id != GOAL_SEEK_FOOD) return i;
     }
-    for (int k = 0; k < t->n_fish; k++) {
-        int i = (g_next + k) % t->n_fish;
+    for (int k = 0; k < N_FISH_SLOTS; k++) {
+        int i = (g_next + k) % N_FISH_SLOTS;
         if (g_pending[i]) return i;
     }
     return -1;
@@ -105,7 +128,8 @@ goal_t advisor_llm_esp(const tank_t *t, int fish_idx, bool request) {
     goal_t out = f->goal;
     if (!g_ok) return out;
     xSemaphoreTake(g_mx, portMAX_DELAY);
-    if (t->roster_gen != g_gen) { g_gen = t->roster_gen; memset(g_pending, 0, sizeof g_pending); if (g_resp_gen != g_gen) g_resp_fish = -1; }
+    if (t->roster_shift != g_gen) { g_gen = t->roster_shift;   /* (slots shifted - an arrival shifts none: its decisions stand, R-seam F5) */
+        memset(g_pending, 0, sizeof g_pending); if (g_resp_gen != g_gen) g_resp_fish = -1; }
     if (g_resp_fish == fish_idx && g_resp_gen != g_gen) g_resp_fish = -1;   /* asked of the slot's last tenant */
     if (g_resp_fish == fish_idx) {
         if (g_resp_goal.id < GOAL_COUNT) out = g_resp_goal;
@@ -114,7 +138,7 @@ goal_t advisor_llm_esp(const tank_t *t, int fish_idx, bool request) {
     if (request) g_pending[fish_idx] = true;
     if (!g_busy && g_req_fish < 0 && g_pending[fish_idx] && pick_next(t) == fish_idx) {
         g_pending[fish_idx] = false;
-        g_next = (fish_idx + 1) % (t->n_fish > 0 ? t->n_fish : 1);
+        g_next = (fish_idx + 1) % N_FISH_SLOTS;
         advisor_core_encode(t, fish_idx, g_req_state, sizeof g_req_state);
         g_req_fish = fish_idx; g_req_gen = g_gen;
         xSemaphoreGive(g_req_sem);

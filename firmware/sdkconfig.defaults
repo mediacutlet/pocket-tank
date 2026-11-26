@@ -13,6 +13,8 @@ CONFIG_SPIRAM_USE_MALLOC=y
 CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=8192
 CONFIG_SPIRAM_MALLOC_RESERVE_INTERNAL=65536
 CONFIG_SPIRAM_ALLOW_STACK_EXTERNAL_MEMORY=y
+# RAM headroom move 1 (0.4.2, 2026-11-07): IDF's lwIP / net80211 / pp .bss in PSRAM (~12.5 KB internal back; the radio is cold); also lets EXT_RAM_BSS_ATTR place our own tables
+CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY=y
 CONFIG_SPIRAM_MEMTEST=n
 # flash: octal-capable board; QIO fast; mmap'd model partition read through cache
 CONFIG_ESPTOOLPY_FLASHMODE_QIO=y
@@ -50,7 +52,12 @@ CONFIG_SECURE_BOOT_SIGNING_KEY="keys/ota_signing_key.pem"
 # generous main stack for the tank/render task; inference has its own task
 CONFIG_ESP_MAIN_TASK_STACK_SIZE=16384
 CONFIG_FREERTOS_HZ=1000
-CONFIG_ESP_TASK_WDT_TIMEOUT_S=30
+# THE WATCHDOG (0.4): the tank task is watched (main.c wdt_watch_tank_task, which also sets these at run time -
+# a build directory keeps the sdkconfig it was made with): unfed 20 s panics and restarts (a pending image rolls back).
+# The idle tasks are not watched: with panic on, a long boot step or update mode's flash work would restart the chip
+CONFIG_ESP_TASK_WDT_TIMEOUT_S=20
+CONFIG_ESP_TASK_WDT_PANIC=y
+CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU0=n
 CONFIG_COMPILER_OPTIMIZATION_PERF=y
 
 # real board: AMOLED + touch
@@ -64,3 +71,13 @@ CONFIG_ESP32S3_DATA_CACHE_LINE_64B=y
 # the tank switcher (docs/tank-switcher.md): the SD card library uses long names (/pocketank/tanks/...); off, FAT is 8.3 only
 CONFIG_FATFS_LFN_HEAP=y
 CONFIG_FATFS_MAX_LFN=255
+
+# THE APP'S ROOM (0.4.2): the tank is only ever a Wi-Fi STATION and a TLS CLIENT (the update check + OTA from GitHub),
+# so the parts it never runs are left out - ~120 KB of the app slot (docs/release-0.4.2.md, app space). The error-name
+# table stays: the logs keepers send (pocketank.com/help's tank check) need the cause. firmware/CMakeLists.txt takes
+# these keys out of an older sdkconfig so they apply there too.
+# A real OTA install is the proof after any change here.
+CONFIG_MBEDTLS_TLS_CLIENT_ONLY=y
+# CONFIG_ESP_WIFI_SOFTAP_SUPPORT is not set
+# CONFIG_ESP_WIFI_ENTERPRISE_SUPPORT is not set
+# CONFIG_LWIP_IPV6 is not set

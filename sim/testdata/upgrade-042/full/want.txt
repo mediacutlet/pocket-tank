@@ -1,0 +1,18 @@
+now 1795480450
+glass 1 shelf 0
+tank id 1 type 0 variant 0 time 0 name MY TANK
+sd balance 17325 earned 20035 unlocks 00041eff shelved 00000008 locked 00000004 bg 2
+critter 0 name turbo
+critter 1 name spike
+critter 2 name pinch
+critter 3 name kelpy
+breed owned 1 slot0 1 slot1 2
+pieces castle 0.0 2 coral 0.0 2 000000 plant 0.0 volcano 0.0 cluster 0.0
+fish 5
+fish 0 name otto uid 57357aef parents 00000000 00000000 preset 1 stage 1 genes 0 0 0 color ff725c fin b83a43 away 0 eaten 0 ms 00000211 trust 5.000 from 0 lived 86525
+fish 1 name mira uid b15a464d parents 00000000 00000000 preset 2 stage 1 genes 0 0 0 color 78d67d fin 3f8b55 away 0 eaten 0 ms 00000311 trust 5.000 from 0 lived 86525
+fish 2 name pip uid 05ac726d parents 57357aef b15a464d preset 3 stage 1 genes 0 0 3 color ff725c fin b83a43 away 0 eaten 0 ms 00001220 trust 4.000 from 0 lived 86525
+fish 3 name lalo uid 3824c02a parents 57357aef b15a464d preset 4 stage 1 genes 0 0 3 color ff725c fin b83a43 away 0 eaten 0 ms 00000230 trust 4.000 from 0 lived 86525
+fish 4 name oodle uid e6cfd4f7 parents 57357aef b15a464d preset 5 stage 1 genes 0 0 0 color 78d67d fin 3f8b55 away 1 eaten 0 ms 00000210 trust 4.000 from 0 lived 86525
+collection 0
+back on 1

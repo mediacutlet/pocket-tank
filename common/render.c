@@ -13826,6 +13826,32 @@ static int ms_card_btn_x(const tank_t *t, int fish, int which) {   /* its left e
     for (int i = 0; i < n; i++) if (id[i] == which) return ms_card_icon_x(n, i);
     return -1;
 }
+#ifdef CONFIG_POCKET_TANK_320X240
+/* (this fork) the travel bowl at half size, for MOVE among the card's half-size sprites on a 320 x 240 board (render.h
+   MSP_CARD_ICON): each 2 x 2 block of BOWL_PX one pixel, its color the mean of the block's painted pixels and its cover
+   their share of the four - the 2:1 box filter tools/gen_icons_small.py makes the other halves with. The bowl is drawn
+   from code, not from a PNG, so the script has nothing to copy; the colors are bowl_icon's, lit and dim */
+#define BOWL_HALF (BOWL_ICON / 2)
+_Static_assert(BOWL_HALF + 4 <= MSP_CARD_ICON, "MOVE's half-size bowl inside its square's double edge");
+static void bowl_icon_half(ctx_t *c, int x, int y, bool lit) {
+    static const uint32_t PAL[4] = { 0, 0xcfe8ee, 0x2f7fa8, 0xff9a3c };   /* (bowl_icon's) */
+    for (int j = 0; j < BOWL_HALF; j++)
+        for (int i = 0; i < BOWL_HALF; i++) {
+            int r = 0, g = 0, b = 0, n = 0;
+            for (int k = 0; k < 4; k++) {                /* the block: (2i, 2j), (2i + 1, 2j), (2i, 2j + 1), (2i + 1, 2j + 1) */
+                const int v = (int)(BOWL_PX[2 * j + (k >> 1)] >> (2 * (2 * i + (k & 1)))) & 3;
+                if (!v) continue;
+                const uint32_t rgb = lit ? PAL[v] : v == 2 ? 0x16262b : MSP_DIM;
+                r += (int)(rgb >> 16 & 255); g += (int)(rgb >> 8 & 255); b += (int)(rgb & 255); n++;
+            }
+            if (n) px_blend(c, x + i, y + j, (uint32_t)(r / n) << 16 | (uint32_t)(g / n) << 8 | (uint32_t)(b / n), n * 255 / 4);
+        }
+}
+/* (this fork) the card's three icons4 sprites (RENAME, GIVE, MORE) as their half-size icon_t copies */
+static const icon_t *card_half(const icon4_t *ic4) {
+    return ic4 == &icon4_card_rename ? &icon_card_rename_half : ic4 == &icon4_card_give ? &icon_card_give_half : &icon_card_more_half;
+}
+#endif
 /* one of them: dim = the page's dim ink and the art as a silhouette; ARMED (SELL's first tap) = the words OK? in
    the art's place, so the change reads without its color (Strato is color blind) */
 static void ms_icon_btn(ctx_t *c, int x, int y, int look, const icon4_t *ic4, const icon_t *ic) {
@@ -13834,6 +13860,13 @@ static void ms_icon_btn(ctx_t *c, int x, int y, int look, const icon4_t *ic4, co
     else button(c, x, y, s, s, look == ICB_ARMED || look == ICB_ASKING ? 0x155e58 : 0x1c2f36,
                 look == ICB_ARMED ? 0x38dcc7 : look >= ICB_GIVE ? GIVE_GOLD : MSP_TEAL, look == ICB_ARMED ? "OK?" : "", UI_TEXT(2));
     if (look == ICB_ARMED) return;
+#ifdef CONFIG_POCKET_TANK_320X240
+    /* (this fork) the half-size sprites (render.h MSP_CARD_ICON): MOVE's bowl, the card's own three, SELL's sand dollar
+       the foot's UPGRADES */
+    if (!ic4 && !ic) { bowl_icon_half(c, x + (s - BOWL_HALF) / 2, y + (s - BOWL_HALF) / 2, look != ICB_DIM); return; }
+    if (ic4) { ic = card_half(ic4); ic4 = NULL; }
+    else ic = foot_art(ic);
+#endif
     if (!ic4 && !ic) { bowl_icon(c, x + (s - BOWL_ICON) / 2, y + (s - BOWL_ICON) / 2, look != ICB_DIM); return; }   /* MOVE: the travel bowl */
     const int w = ic4 ? ic4->w : ic->w, h = ic4 ? ic4->h : ic->h, ix = x + (s - w) / 2, iy = y + (s - h) / 2;
     if (ic4) blit_icon4(c, ix, iy, ic4, look != ICB_DIM);
@@ -14486,7 +14519,7 @@ int render_milestones_tap(const tank_t *t, float x, float y) {
         }
         if (ms_card(t) && tank_evo_ready(&t->fish[g_ms_row]) && !t->fish[g_ms_row].away) {   /* EVOLVE (0.4.3): the whole stage line is its tap */
             int bx, eby, bw, bh; ms_evolve_box(t, &bx, &eby, &bw, &bh);
-            if (x >= MSP_MODAL_X && x < MSP_MODAL_X + MSP_MODAL_W && y >= eby - 8 && y < eby + bh + 8) { int fi = g_ms_row; ms_close(); return MS_TAP_EVOLVE + fi; }
+            if (x >= MSP_MODAL_X && x < MSP_MODAL_X + MSP_MODAL_W && y >= eby - UI(8) && y < eby + bh + UI(8)) { int fi = g_ms_row; ms_close(); return MS_TAP_EVOLVE + fi; }
         }
         if (ms_card(t)) {                        /* a fish's card: RENAME / SELL across its foot - each button's half of
                                                     the panel, the HOW? button's depth (a miss costs the modal) */

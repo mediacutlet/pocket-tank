@@ -1799,17 +1799,22 @@ _Static_assert(SET_TAP_FLIP > SET_TAP_TO_TANK && SET_TAP_FLIP > SET_TAP_TO_KEEPE
 #undef  MSP_HOW_SLOP_DN
 #define MSP_HOW_SLOP_DN UI(28)
 /* a fish's card (0.4.2): the modal's design scaled, as the modals above, but for its icon
-   buttons: their sprites are 36 px and keep their size, so a button is 40 (the sprite inside
-   its 2 px double edge) and the gap gives way - five (RENAME, GIVE, MOVE, SELL, MORE) 3 apart
-   are 212 of the card's 219, where upstream's 44 px ones 24 apart are 316 of its 336 */
+   buttons. Their 36 px sprites are pixel art and cannot shrink, so the card draws the
+   half-size copies the foot draws (icon_card_*_half, SELL's sand dollar the foot's own, MOVE's
+   bowl halved as it is drawn: ms_icon_btn), each with upstream's 4 px round it - a 2 px double
+   edge and 2 px clear: a 26 px square, the width of the card's arrow buttons (the foot's 22
+   has no room for the clear) - at the design's pitch, UI(44 + 24). Five (RENAME, GIVE, MOVE,
+   SELL, MORE) are 202 of the card's 219, where upstream's are 316 of its 336 */
 #undef  MSP_CARD_H
 #define MSP_CARD_H    UI(250)
 #undef  MSP_CARD_SUB_Y
 #define MSP_CARD_SUB_Y UI(160)
 #undef  MSP_CARD_ICON
-#define MSP_CARD_ICON 40
+#define MSP_CARD_ICON 26
 #undef  MSP_CARD_ICON_GAP
-#define MSP_CARD_ICON_GAP 3
+#define MSP_CARD_ICON_GAP (UI(44 + 24) - MSP_CARD_ICON)   /* 18 */
+_Static_assert(MSP_CARD_SUB_Y + 7 * UI_TEXT(2) <= MSP_CARD_H - UI(10) - MSP_CARD_ICON - MSP_HOW_SLOP_UP,
+               "a fish's card: its SELL line above its buttons' tap band (ms_card_btn_y)");
 /* the shop: the 32 px coin for the 64 px one (the header a row shorter),
    rows at a 38 px pitch, four to a page, the buttons from the glass's edge */
 #undef  SHP_COIN_X

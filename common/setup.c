@@ -1727,8 +1727,10 @@ uint32_t setup_about_key(const tank_t *t) {                       /* everything 
 static void st_moving(const tank_t *t, uint16_t *fb, int stride, double clock) {       /* BODY / FINS: the stage, the fry */
     const fish_t *f = &t->fish[page_fish()];
     render_stretch_stage(fb, stride, f, !page_is_body(), s_st_axis, clock, setup_lab_black());
-    now_fry(t, fb, stride, f, SETUP_ST_NOW_X, SETUP_ST_NOW_Y, UI(20), clock);
-    text_c(fb, stride, SETUP_ST_NOW_X, SETUP_ST_NOW_Y + UI(26), UI_TEXT(2), C_CAPT, "NOW");
+    const int nr = s_lab ? UI(20) : 20;                 /* (this fork: the lab's fry is drawn at the page's scale, a live one in the
+                                                           tank keeps its size - and its ring, NOW 6 px under it as on the design) */
+    now_fry(t, fb, stride, f, SETUP_ST_NOW_X, SETUP_ST_NOW_Y, nr, clock);
+    text_c(fb, stride, SETUP_ST_NOW_X, SETUP_ST_NOW_Y + nr + UI(6), UI_TEXT(2), C_CAPT, "NOW");
     text_c(fb, stride, STG_PLATE_X + STG_PLATE_W - UI(60), SETUP_ST_TOP + UI(4), UI_TEXT(2), C_CAPT, "GROWN UP");
 }
 /* BODY / FINS: the three named tiles, each with its little grown fish. The fish swim, so on the lab's held page the row
@@ -1794,6 +1796,11 @@ int setup_lab_bands(const tank_t *t, int box[SETUP_LAB_BANDS][4]) {
     if (!setup_lab_black()) return 0;
     #define BOX(i, x0, y0, x1, y1) do { box[i][0] = (x0); box[i][1] = (y0); box[i][2] = (x1); box[i][3] = (y1); } while (0)
     if (page_is_stretch()) { BOX(0, UI(20), SETUP_ST_TOP - 2, STG_PLATE_X + STG_PLATE_W + 3, SETUP_ST_BOT - 1);   /* the stage, its handles, the fry at its left */
+#ifdef CONFIG_POCKET_TANK_320X240
+                             box[0][3] = SETUP_ST_BOT + 2;   /* (this fork) a held handle stopped at the plate's foot - a long belly fin's -
+                                                                draws its second ring 2 px past it, as at the plate's top, where the box's
+                                                                - 2 takes it in: kept out of the box, it stayed behind as a trail */
+#endif
                              BOX(1, SETUP_TILE_X, SETUP_ST_TILE_Y - UI(9), SETUP_TILE_X + (SETUP_TILE_N - 1) * SETUP_TILE_PX + SETUP_TILE_W - 1, SETUP_ST_TILE_Y + SETUP_ST_TILE_H - 1); return 2; }   /* the tiles' row: their fish swim (a tall sail stands a few px over its tile's top: the box takes it in) */
     if (page_is_colors())  { BOX(0, SETUP_ED_NOW_X - UI(44), SETUP_ED_PREVIEW_Y - UI(27), SETUP_ED_GROWN_X + UI(75), SETUP_ED_PREVIEW_Y + UI(28));
                              BOX(1, SETUP_PAT_TILE_X, SETUP_COLOR_PAT_Y, SETUP_PAT_TILE_X + (PATTERN_TILES - 1) * SETUP_PAT_TILE_PX + SETUP_PAT_TILE_W - 1, SETUP_COLOR_PAT_Y + SETUP_COLOR_PAT_H - 1); return 2; }

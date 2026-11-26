@@ -11908,24 +11908,26 @@ void render_fish_preview(uint16_t *fb, int stride, float x, float y, float size,
     f.color = body; f.fin = fin; f.accent = accent;
     draw_still(fb, stride, x, y, size, &f, form, clock, room);
 }
-/* THE CREATOR'S STAGE (render.h) */
+/* THE CREATOR'S STAGE (render.h). (This fork: the handles, their travel and their distance from the fish are drawn, not
+   pixel art, so they scale with the stage - UI() and UI_F, identities on upstream's boards - and stay inside the lab's
+   moving box for the stage, setup_lab_bands) */
 static void stg_knob(ctx_t *c, float cx, float cy, bool horiz, bool held) {
-    const float r = 15;
-    cx = cx < STG_PLATE_X + 18 ? STG_PLATE_X + 18 : cx > STG_PLATE_X + STG_PLATE_W - 18 ? STG_PLATE_X + STG_PLATE_W - 18 : cx;   /* (a picture: it may stop at the stage's edge) */
-    cy = cy < STG_PLATE_Y + 16 ? STG_PLATE_Y + 16 : cy > STG_PLATE_Y + STG_PLATE_H - 16 ? STG_PLATE_Y + STG_PLATE_H - 16 : cy;
+    const float r = 15 * UI_F;
+    cx = cx < STG_PLATE_X + UI(18) ? STG_PLATE_X + UI(18) : cx > STG_PLATE_X + STG_PLATE_W - UI(18) ? STG_PLATE_X + STG_PLATE_W - UI(18) : cx;   /* (a picture: it may stop at the stage's edge) */
+    cy = cy < STG_PLATE_Y + UI(16) ? STG_PLATE_Y + UI(16) : cy > STG_PLATE_Y + STG_PLATE_H - UI(16) ? STG_PLATE_Y + STG_PLATE_H - UI(16) : cy;
     fill_ellipse(c, cx, cy, r, r, held ? 0x155e58 : 0x0e2229, 255);
     ring(c, cx, cy, r, held ? 0x38dcc7 : 0x9fd8e2);
-    if (held) ring(c, cx, cy, r + 3, 0x38dcc7);          /* held: a second ring, never a hue alone */
+    if (held) ring(c, cx, cy, r + 3 * UI_F, 0x38dcc7);          /* held: a second ring, never a hue alone */
     for (int s = -1; s <= 1; s += 2) {                   /* two arrowheads, back to back: the way it drags */
         float xs[3], ys[3];
-        if (horiz) { xs[0] = cx + s * 11; ys[0] = cy; xs[1] = cx + s * 4; ys[1] = cy - 6; xs[2] = cx + s * 4; ys[2] = cy + 6; }
-        else       { xs[0] = cx; ys[0] = cy + s * 11; xs[1] = cx - 6; ys[1] = cy + s * 4; xs[2] = cx + 6; ys[2] = cy + s * 4; }
+        if (horiz) { xs[0] = cx + s * 11 * UI_F; ys[0] = cy; xs[1] = cx + s * 4 * UI_F; ys[1] = cy - 6 * UI_F; xs[2] = cx + s * 4 * UI_F; ys[2] = cy + 6 * UI_F; }
+        else       { xs[0] = cx; ys[0] = cy + s * 11 * UI_F; xs[1] = cx - 6 * UI_F; ys[1] = cy + s * 4 * UI_F; xs[2] = cx + 6 * UI_F; ys[2] = cy + s * 4 * UI_F; }
         if ((horiz && s < 0) || (!horiz && s > 0)) { float t = xs[1]; xs[1] = xs[2]; xs[2] = t; t = ys[1]; ys[1] = ys[2]; ys[2] = t; }
         fill_poly(c, xs, ys, 3, 0xffffff);
     }
 }
 static void stg_track(uint16_t *fb, int stride, float x0, float y0, float x1, float y1) {     /* a handle's whole travel: a row of dots */
-    int n = (int)(hypotf(x1 - x0, y1 - y0) / 7);
+    int n = (int)(hypotf(x1 - x0, y1 - y0) / (7 * UI_F));
     for (int i = 0; i <= n; i++) { float u = n ? (float)i / n : 0; render_rect(fb, stride, (int)(x0 + (x1 - x0) * u) - 1, (int)(y0 + (y1 - y0) * u) - 1, 2, 2, 0x2a3f45); }
 }
 void render_stretch_stage(uint16_t *fb, int stride, const fish_t *who, bool fins_pg, int held, double clock, bool solid) {
@@ -11938,11 +11940,11 @@ void render_stretch_stage(uint16_t *fb, int stride, const fish_t *who, bool fins
     fish_form_t fm_; const fish_form_t *fm = form_of(&g, &fm_);
     if (!fins_pg) {
         const float bx = STG_X + fm->x[2] * S;
-        stg_track(fb, stride, STG_X + BODY_LEN_MIN * S + 24, STG_Y, STG_X + BODY_LEN_MAX * S + 24, STG_Y);
-        stg_track(fb, stride, bx, STG_Y - BODY_DEP_MIN * S - 24, bx, STG_Y - BODY_DEP_MAX * S - 24);
+        stg_track(fb, stride, STG_X + BODY_LEN_MIN * S + UI(24), STG_Y, STG_X + BODY_LEN_MAX * S + UI(24), STG_Y);
+        stg_track(fb, stride, bx, STG_Y - BODY_DEP_MIN * S - UI(24), bx, STG_Y - BODY_DEP_MAX * S - UI(24));
         draw_still_c(&c, STG_X, STG_Y, S, &g, NULL, clock, 0);
-        stg_knob(&c, STG_X + fm->x[0] * S + 24, STG_Y, true, held == 1);
-        stg_knob(&c, bx, STG_Y + fm->y[2] * S - 24, false, held == 2);
+        stg_knob(&c, STG_X + fm->x[0] * S + UI(24), STG_Y, true, held == 1);
+        stg_knob(&c, bx, STG_Y + fm->y[2] * S - UI(24), false, held == 2);
         return;
     }
     int fins = g.fins < FINS_N ? g.fins : 0;
@@ -11966,9 +11968,9 @@ void render_stretch_stage(uint16_t *fb, int stride, const fish_t *who, bool fins
         }
     }
     draw_still_c(&c, STG_X, STG_Y, S, &g, NULL, clock, 0);
-    stg_knob(&c, STG_X + tx * S - 20, STG_Y, true, held == 1);
-    stg_knob(&c, STG_X + topx * S, STG_Y + topy * S - 14, false, held == 2);
-    stg_knob(&c, STG_X + botx * S, STG_Y + boty * S + 14, false, held == 3);
+    stg_knob(&c, STG_X + tx * S - UI(20), STG_Y, true, held == 1);
+    stg_knob(&c, STG_X + topx * S, STG_Y + topy * S - UI(14), false, held == 2);
+    stg_knob(&c, STG_X + botx * S, STG_Y + boty * S + UI(14), false, held == 3);
 }
 /* THE LAB'S ROOM (render.h) */
 #define LBG_WALL   0x01171a
@@ -11982,7 +11984,7 @@ void render_stretch_stage(uint16_t *fb, int stride, const fish_t *who, bool fins
 #define LBG_SHADE  0x110d0e
 #define LBG_PANEL  0x1a1212
 static void lbg_room(ctx_t *c, int x, int y, int w, int h, uint32_t rgb) {      /* a rect with its four corners cut: the frame's shape */
-    rect_fill(c, x + 4, y, w - 8, h, rgb); rect_fill(c, x, y + 4, w, h - 8, rgb); rect_fill(c, x + 2, y + 2, w - 4, h - 4, rgb);
+    rect_fill(c, x + UI(4), y, w - UI(8), h, rgb); rect_fill(c, x, y + UI(4), w, h - UI(8), rgb); rect_fill(c, x + UI(2), y + UI(2), w - UI(4), h - UI(4), rgb);
 }
 void render_lab_bg(uint16_t *fb, int stride, bool scene, const int *clip) {
     CTX_MADE();
@@ -11995,49 +11997,50 @@ void render_lab_bg(uint16_t *fb, int stride, bool scene, const int *clip) {
     rect_fill(c, GL, -PAGE_Y, GW, TANK_H, LBG_WALL);
     if (scene) {
         /* the wall aquarium: a frame with cut corners, a dark seam inside it, the water, weeds, stones; a pipe up from its
-           top and one out of its side and down the wall, with two couplings */
-        const int aw = PAGE_BOWL ? 100 : 112, ah = PAGE_BOWL ? 70 : 80, ax = (PAGE_BOWL ? 392 : LAB_R) - aw, ay = PAGE_BOWL ? 26 : 12;
-        const int px = PAGE_BOWL ? ax + aw + 6 : LAB_R + 12;                     /* the down pipe's left */
-        rect_fill(c, ax + 14, -PAGE_Y, 6, ay + PAGE_Y + 2, LBG_PIPE);            /* up to the ceiling */
-        rect_fill(c, ax + aw - 2, ay + 30, px - (ax + aw) + 8, 6, LBG_PIPE);     /* out of its side ... */
-        rect_fill(c, px, ay + 30, 8, 236 - ay, LBG_PIPE);                        /* ... and down */
-        rect_fill(c, px, ay + 258 - ay, GL + GW - px, 8, LBG_PIPE);              /* ... and away along the wall */
-        rect_fill(c, px, 258, 8, 8, LBG_PIPE);
-        rect_fill(c, px - 3, 150, 14, 10, LBG_WATER); rect_fill(c, px - 3, 210, 14, 10, LBG_WATER);   /* the couplings */
-        rect_fill(c, px, 153, 8, 2, LBG_PIPE); rect_fill(c, px, 213, 8, 2, LBG_PIPE);
+           top and one out of its side and down the wall, with two couplings. (This fork: drawn, not pixel art, so every
+           measure is UI() - upstream's own on its boards - and the scene shrinks with the page on a 320 x 240 one) */
+        const int aw = PAGE_BOWL ? 100 : UI(112), ah = PAGE_BOWL ? 70 : UI(80), ax = (PAGE_BOWL ? 392 : LAB_R) - aw, ay = PAGE_BOWL ? 26 : UI(12);
+        const int px = PAGE_BOWL ? ax + aw + 6 : LAB_R + UI(12);                 /* the down pipe's left */
+        rect_fill(c, ax + UI(14), -PAGE_Y, UI(6), ay + PAGE_Y + UI(2), LBG_PIPE);   /* up to the ceiling */
+        rect_fill(c, ax + aw - UI(2), ay + UI(30), px - (ax + aw) + UI(8), UI(6), LBG_PIPE);   /* out of its side ... */
+        rect_fill(c, px, ay + UI(30), UI(8), UI(236) - ay, LBG_PIPE);            /* ... and down */
+        rect_fill(c, px, ay + UI(258) - ay, GL + GW - px, UI(8), LBG_PIPE);      /* ... and away along the wall */
+        rect_fill(c, px, UI(258), UI(8), UI(8), LBG_PIPE);
+        rect_fill(c, px - UI(3), UI(150), UI(14), UI(10), LBG_WATER); rect_fill(c, px - UI(3), UI(210), UI(14), UI(10), LBG_WATER);   /* the couplings */
+        rect_fill(c, px, UI(153), UI(8), UI(2), LBG_PIPE); rect_fill(c, px, UI(213), UI(8), UI(2), LBG_PIPE);
         lbg_room(c, ax, ay, aw, ah, LBG_PIPE);
-        lbg_room(c, ax + 4, ay + 4, aw - 8, ah - 8, LBG_GAP);
-        lbg_room(c, ax + 7, ay + 7, aw - 14, ah - 14, LBG_PIPE);
-        lbg_room(c, ax + 11, ay + 11, aw - 22, ah - 22, LBG_WATER);
-        rect_fill(c, ax + 15, ay + 11, aw - 30, 2, LBG_LIGHT);                    /* the light along the top of the water */
+        lbg_room(c, ax + UI(4), ay + UI(4), aw - UI(8), ah - UI(8), LBG_GAP);
+        lbg_room(c, ax + UI(7), ay + UI(7), aw - UI(14), ah - UI(14), LBG_PIPE);
+        lbg_room(c, ax + UI(11), ay + UI(11), aw - UI(22), ah - UI(22), LBG_WATER);
+        rect_fill(c, ax + UI(15), ay + UI(11), aw - UI(30), UI(2), LBG_LIGHT);   /* the light along the top of the water */
         static const int8_t WEED[5][2] = { { 8, 30 }, { 16, 22 }, { 34, 20 }, { 70, 24 }, { 80, 36 } };   /* x in the water, height */
-        const int wb = ay + ah - 13;
+        const int wb = ay + ah - UI(13);
         for (int k = 0; k < 5; k++)
-            for (int i = 0; i < WEED[k][1]; i++) {                               /* a frond: three px wide, swaying side to side as it climbs */
-                int sx = ax + 11 + WEED[k][0] * (aw - 22) / 90 + (int)(3.0f * sinf(i * 0.42f + k * 1.7f));
-                rect_fill(c, sx, wb - i, 3, 1, LBG_PIPE);
+            for (int i = 0; i < UI(WEED[k][1]); i++) {                           /* a frond: three px wide, swaying side to side as it climbs */
+                int sx = ax + UI(11) + WEED[k][0] * (aw - UI(22)) / 90 + (int)(3.0f * UI_F * sinf(i / UI_F * 0.42f + k * 1.7f));
+                rect_fill(c, sx, wb - i, UI(3), 1, LBG_PIPE);
             }
-        fill_ellipse(c, ax + aw * 0.28f, wb, 9, 4, LBG_LIGHT, 255); fill_ellipse(c, ax + aw * 0.62f, wb + 1, 6, 3, LBG_PIPE, 255);
-        fill_ellipse(c, ax + aw * 0.78f, wb, 8, 4, LBG_LIGHT, 255);
-        rect_fill(c, ax + 11, wb + 2, aw - 22, 2, LBG_WATER);                    /* (the stones stand on the floor of the glass) */
-        rect_fill(c, ax + aw * 2 / 5, ay + 24, 2, 2, LBG_LIGHT); rect_fill(c, ax + aw * 2 / 5 + 5, ay + 18, 2, 2, LBG_LIGHT); rect_fill(c, ax + aw * 3 / 4, ay + 40, 2, 2, LBG_LIGHT);
+        fill_ellipse(c, ax + aw * 0.28f, wb, 9 * UI_F, 4 * UI_F, LBG_LIGHT, 255); fill_ellipse(c, ax + aw * 0.62f, wb + 1, 6 * UI_F, 3 * UI_F, LBG_PIPE, 255);
+        fill_ellipse(c, ax + aw * 0.78f, wb, 8 * UI_F, 4 * UI_F, LBG_LIGHT, 255);
+        rect_fill(c, ax + UI(11), wb + UI(2), aw - UI(22), UI(2), LBG_WATER);    /* (the stones stand on the floor of the glass) */
+        rect_fill(c, ax + aw * 2 / 5, ay + UI(24), UI(2), UI(2), LBG_LIGHT); rect_fill(c, ax + aw * 2 / 5 + UI(5), ay + UI(18), UI(2), UI(2), LBG_LIGHT); rect_fill(c, ax + aw * 3 / 4, ay + UI(40), UI(2), UI(2), LBG_LIGHT);
     }
     /* the bench: its top (planks, a few lighter and darker boards), its front edge, the shadow under it, then its legs and
        the panels between them down to the foot of the glass */
     const int by = LAB_BENCH_Y, bt = LAB_BENCH_H;
     rect_fill(c, GL, by, GW, bt, LBG_WOOD);
-    rect_fill(c, GL, by, GW, 2, LBG_WOOD_L);                                     /* the line the controls stand on */
+    rect_fill(c, GL, by, GW, UI(2), LBG_WOOD_L);                                 /* the line the controls stand on */
     static const uint8_t PLANK[9][4] = { { 6, 9, 9, 1 }, { 18, 15, 10, 0 }, { 34, 21, 7, 1 }, { 50, 9, 16, 1 }, { 64, 15, 12, 0 },
                                          { 78, 27, 9, 1 }, { 2, 27, 18, 1 }, { 26, 33, 14, 0 }, { 72, 33, 10, 1 } };   /* x %, y, w %, lighter? */
-    for (int k = 0; k < 9; k++) rect_fill(c, GL + GW * PLANK[k][0] / 100, by + PLANK[k][1], GW * PLANK[k][2] / 100, 4, PLANK[k][3] ? LBG_WOOD_L : LBG_WOOD_D);
-    rect_fill(c, GL, by + bt, GW, 12, LBG_WOOD_D);
-    rect_fill(c, GL, by + bt + 12, GW, 8, LBG_SHADE);
-    const int ly = by + bt + 20;
+    for (int k = 0; k < 9; k++) rect_fill(c, GL + GW * PLANK[k][0] / 100, by + UI(PLANK[k][1]), GW * PLANK[k][2] / 100, UI(4), PLANK[k][3] ? LBG_WOOD_L : LBG_WOOD_D);
+    rect_fill(c, GL, by + bt, GW, UI(12), LBG_WOOD_D);
+    rect_fill(c, GL, by + bt + UI(12), GW, UI(8), LBG_SHADE);
+    const int ly = by + bt + UI(20);
     if (GB > ly) {
         rect_fill(c, GL, ly, GW, GB - ly, LBG_PANEL);
         for (int k = 0; k < 3; k++) {
-            int lx = GL + GW * (k == 0 ? 8 : k == 1 ? 50 : 92) / 100 - 11;
-            rect_fill(c, lx - 4, ly, 30, GB - ly, LBG_WALL); rect_fill(c, lx, ly, 22, GB - ly, LBG_WOOD_D);
+            int lx = GL + GW * (k == 0 ? 8 : k == 1 ? 50 : 92) / 100 - UI(11);
+            rect_fill(c, lx - UI(4), ly, UI(30), GB - ly, LBG_WALL); rect_fill(c, lx, ly, UI(22), GB - ly, LBG_WOOD_D);
         }
     }
 }
@@ -12060,44 +12063,47 @@ static void lab_fry(ctx_t *c, const fish_t *fry, float x, float y, float size, d
 void render_lab_tube(uint16_t *fb, int stride, const fish_t *fry, const char *name, double clock) {
     ctx_t cc = ctx_page(fb, stride), *c = &cc;
     const int tx = LAB_TUBE_X, tw = LAB_TUBE_W, ty = LAB_TUBE_Y, th = LAB_TUBE_H, r = tw / 2;
+    /* (this fork: the tube and its rack are drawn, not pixel art - UI() and UI_F, identities on upstream's boards, keep
+       them to render.h's tube on a 320 x 240 board's page and inside setup_lab_bands' box for them; the fry is a fish
+       drawn on a page, at the page's scale) */
     /* the rack behind the glass: a foot with a brass nameplate, two posts, a clamp either side */
-    rect_fill(c, tx - 24, ty + th + 22, 12, 5, LAB_WOOD_D); rect_fill(c, tx + tw + 12, ty + th + 22, 12, 5, LAB_WOOD_D);
-    rect_fill(c, tx - 28, ty + th - 2, tw + 56, 24, LAB_WOOD);
-    rect_fill(c, tx - 28, ty + th - 2, tw + 56, 4, LAB_WOOD_L); rect_fill(c, tx - 28, ty + th + 18, tw + 56, 4, LAB_WOOD_D);
+    rect_fill(c, tx - UI(24), ty + th + UI(22), UI(12), UI(5), LAB_WOOD_D); rect_fill(c, tx + tw + UI(12), ty + th + UI(22), UI(12), UI(5), LAB_WOOD_D);
+    rect_fill(c, tx - UI(28), ty + th - UI(2), tw + UI(56), UI(24), LAB_WOOD);
+    rect_fill(c, tx - UI(28), ty + th - UI(2), tw + UI(56), UI(4), LAB_WOOD_L); rect_fill(c, tx - UI(28), ty + th + UI(18), tw + UI(56), UI(4), LAB_WOOD_D);
     for (int s = 0; s < 2; s++) {
-        int px = s ? tx + tw + 8 : tx - 20;
-        rect_fill(c, px, ty + 96, 12, th - 98, LAB_WOOD); rect_fill(c, px + (s ? 0 : 8), ty + 96, 4, th - 98, LAB_WOOD_D);
-        rect_fill(c, px - 2, ty + 86, 16, 12, LAB_WOOD_L);                                  /* the post's cap */
-        rect_fill(c, s ? tx + tw + 3 : tx - 8, ty + 100, 5, 9, LAB_WOOD_L);                  /* the clamp */
+        int px = s ? tx + tw + UI(8) : tx - UI(20);
+        rect_fill(c, px, ty + UI(96), UI(12), th - UI(98), LAB_WOOD); rect_fill(c, px + (s ? 0 : UI(8)), ty + UI(96), UI(4), th - UI(98), LAB_WOOD_D);
+        rect_fill(c, px - UI(2), ty + UI(86), UI(16), UI(12), LAB_WOOD_L);                  /* the post's cap */
+        rect_fill(c, s ? tx + tw + UI(3) : tx - UI(8), ty + UI(100), UI(5), UI(9), LAB_WOOD_L);   /* the clamp */
     }
-    rect_fill(c, tx - 10, ty + th + 2, tw + 20, 15, LAB_PLATE); rect_edge(c, tx - 10, ty + th + 2, tw + 20, 15, LAB_WOOD_D);
-    rect_fill(c, tx - 6, ty + th + 8, 3, 3, LAB_WOOD_D); rect_fill(c, tx + tw + 3, ty + th + 8, 3, 3, LAB_WOOD_D);
+    rect_fill(c, tx - UI(10), ty + th + UI(2), tw + UI(20), UI(15), LAB_PLATE); rect_edge(c, tx - UI(10), ty + th + UI(2), tw + UI(20), UI(15), LAB_WOOD_D);
+    rect_fill(c, tx - UI(6), ty + th + UI(8), UI(3), UI(3), LAB_WOOD_D); rect_fill(c, tx + tw + UI(3), ty + th + UI(8), UI(3), UI(3), LAB_WOOD_D);
     if (name && name[0]) {                               /* its name on the plate, in the plate's ink */
         char up[FISH_NAME_MAX + 1]; int k = 0; for (; k < FISH_NAME_MAX && name[k]; k++) up[k] = (char)(name[k] >= 'a' && name[k] <= 'z' ? name[k] - 32 : name[k]); up[k] = 0;
-        draw_text(c, tx + r - text_w(up, 2) / 2, ty + th + 3, text_w(up, 2) <= tw + 8 ? 2 : 1, 0x3a2010, up);
+        draw_text(c, tx + r - text_w(up, UI_TEXT(2)) / 2, ty + th + UI(3), text_w(up, UI_TEXT(2)) <= tw + UI(8) ? UI_TEXT(2) : 1, 0x3a2010, up);
     }
     /* the tube */
-    fill_ellipse(c, tx + r, ty + th - r - 8, r + 3, r + 3, LAB_GLASS, 255);
-    rect_fill(c, tx - 3, ty, tw + 6, th - r - 8, LAB_GLASS);
-    fill_ellipse(c, tx + r, ty + th - r - 8, r, r, LAB_WATER, 255);
-    rect_fill(c, tx, ty, tw, th - r - 8, LAB_WATER);
-    rect_fill(c, tx, ty, tw, 22, 0x0a3038);                 /* the air under the cork */
-    rect_fill(c, tx, ty + 22, tw, 4, LAB_LINE);             /* the water line */
-    rect_fill(c, tx - 9, ty - 5, tw + 18, 9, LAB_GLASS);    /* the rolled lip */
-    fill_ellipse(c, tx - 9, ty - 0.5f, 4.5f, 4.5f, LAB_GLASS, 255); fill_ellipse(c, tx + tw + 9, ty - 0.5f, 4.5f, 4.5f, LAB_GLASS, 255);
-    rect_fill(c, tx - 4, ty - 2, tw + 8, 3, 0x5fcfd0);
-    rect_fill(c, tx + 7, ty + 12, 4, 68, LAB_SHINE); rect_fill(c, tx + 7, ty + 124, 4, 8, LAB_SHINE);   /* the shine down the glass */
-    { float xs[4] = { tx + 5, tx + tw - 5, tx + tw + 5, tx - 5 }, ys[4] = { ty + 6, ty + 6, ty - 28, ty - 28 }; fill_poly(c, xs, ys, 4, LAB_CORK); }   /* a chunky cork */
-    rect_fill(c, tx - 5, ty - 30, tw + 10, 7, LAB_CORK_L);
+    fill_ellipse(c, tx + r, ty + th - r - UI(8), r + UI(3), r + UI(3), LAB_GLASS, 255);
+    rect_fill(c, tx - UI(3), ty, tw + UI(6), th - r - UI(8), LAB_GLASS);
+    fill_ellipse(c, tx + r, ty + th - r - UI(8), r, r, LAB_WATER, 255);
+    rect_fill(c, tx, ty, tw, th - r - UI(8), LAB_WATER);
+    rect_fill(c, tx, ty, tw, UI(22), 0x0a3038);             /* the air under the cork */
+    rect_fill(c, tx, ty + UI(22), tw, UI(4), LAB_LINE);     /* the water line */
+    rect_fill(c, tx - UI(9), ty - UI(5), tw + UI(18), UI(9), LAB_GLASS);   /* the rolled lip */
+    fill_ellipse(c, tx - UI(9), ty - 0.5f, 4.5f * UI_F, 4.5f * UI_F, LAB_GLASS, 255); fill_ellipse(c, tx + tw + UI(9), ty - 0.5f, 4.5f * UI_F, 4.5f * UI_F, LAB_GLASS, 255);
+    rect_fill(c, tx - UI(4), ty - UI(2), tw + UI(8), UI(3), 0x5fcfd0);
+    rect_fill(c, tx + UI(7), ty + UI(12), UI(4), UI(68), LAB_SHINE); rect_fill(c, tx + UI(7), ty + UI(124), UI(4), UI(8), LAB_SHINE);   /* the shine down the glass */
+    { float xs[4] = { tx + UI(5), tx + tw - UI(5), tx + tw + UI(5), tx - UI(5) }, ys[4] = { ty + UI(6), ty + UI(6), ty - UI(28), ty - UI(28) }; fill_poly(c, xs, ys, 4, LAB_CORK); }   /* a chunky cork */
+    rect_fill(c, tx - UI(5), ty - UI(30), tw + UI(10), UI(7), LAB_CORK_L);
     static const int8_t SPK[][2] = { { 10, -16 }, { 30, -19 }, { 52, -14 }, { 20, -8 }, { 44, -6 }, { 62, -20 } };
-    for (unsigned i = 0; i < sizeof SPK / sizeof *SPK; i++) rect_fill(c, tx + SPK[i][0], ty + SPK[i][1], 5, 3, LAB_CORK_D);
+    for (unsigned i = 0; i < sizeof SPK / sizeof *SPK; i++) rect_fill(c, tx + UI(SPK[i][0]), ty - UI(-SPK[i][1]), UI(5), UI(3), LAB_CORK_D);   /* (UI() of the height over the lip: it rounds a negative length the other way) */
     /* bubbles rising through the water, each at its own pace; the fry bobbing among them */
     const float a = tank_anim(clock);
     for (int i = 0; i < 5; i++) {
-        float span = th - 60.0f, ph = fmodf(a * (9 + i * 2.3f) + i * 37.0f, span);
-        ring(c, tx + 36 + (i * 7) % 16 + sinf(a * 2 + i) * 2, ty + th - 22 - ph, 3 + (i & 1), LAB_GLASS);
+        float span = th - 60.0f * UI_F, ph = fmodf(a * (9 + i * 2.3f) * UI_F + i * 37.0f * UI_F, span);
+        ring(c, tx + UI(36) + UI((i * 7) % 16) + sinf(a * 2 + i) * 2 * UI_F, ty + th - UI(22) - ph, (3 + (i & 1)) * UI_F, LAB_GLASS);
     }
-    lab_fry(c, fry, tx + r + 2, ty + 102 + sinf(a * 1.3f) * 3, 1.0f, clock);
+    lab_fry(c, fry, tx + r + UI(2), ty + UI(102) + sinf(a * 1.3f) * 3 * UI_F, 1.0f * UI_F, clock);
 }
 void render_fish_portrait(uint16_t *fb, int stride, float x, float y, float size, const fish_t *who, float room, double clock) {
     fish_t f; memset(&f, 0, sizeof f);

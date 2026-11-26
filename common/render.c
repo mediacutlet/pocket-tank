@@ -14751,10 +14751,17 @@ void render_milestones_leave(void) { ms_close(); g_ms_tpage = 0; g_ms_tshown = 0
    if you tap one it shows their passport and whatever additional info you
    think would be nice") ---- */
 #define COLL_COLS 4
-#define COLL_CW   92
-#define COLL_CH   80
+#define COLL_CW   UI(92)
+#define COLL_CH   UI(80)
 #define COLL_X0   ((PAGE_W - COLL_COLS * COLL_CW) / 2)
+#ifdef CONFIG_POCKET_TANK_320X240
+/* (this fork) the 320 x 240 boards: upstream's grid through UI() - four 60 px columns, three 52 px rows, twelve a page as
+   everywhere - under the page arrows, which keep their 34 px box (RENDER_CRIT_NAV_W) on a header scaled to 39 px: the
+   grid starts below the box and its slop (COLL_NAV_Y, render_collection_tap), not at UI(60) = 39 */
+#define COLL_Y0   (COLL_NAV_Y + RENDER_CRIT_NAV_W + UI(12))
+#else
 #define COLL_Y0   60
+#endif
 static int g_coll_sel = -1;
 /* the room a collected fish is drawn in (SV-8): a named body as ever (its room is the box's, fish_fit never shrinks one);
    a lab-made one (its own body or fins) never bigger than the biggest named fish at its stage - a long tail stays in its box */
@@ -14784,11 +14791,22 @@ static int g_coll_page;
 #ifdef TANK_ROUND
 #define COLL_NAV_X 76                  /* the bowl: the arrows' top corners 6 px inside the circle */
 #define COLL_NAV_Y 14
+#elif defined(CONFIG_POCKET_TANK_320X240)   /* (this fork) the title and the count line at UI_TEXT(2) and 1 between the arrows,
+                                               as on the 1.8 (UI(72): 11 px from the title, 5 from the widest count); the box's
+                                               top 6 px in from the glass's (selftest-coll-pages), its middle the two lines' */
+#define COLL_NAV_X UI(72)
+#define COLL_NAV_Y 6
 #else
 #define COLL_NAV_X 72
 #define COLL_NAV_Y 12
 #endif
 #define COLL_PIP 10                    /* a pip's pitch: 6 px hollow, the page's 8 px filled */
+#ifdef CONFIG_POCKET_TANK_320X240
+_Static_assert(COLL_X0 >= 0 && COLL_X0 + COLL_COLS * COLL_CW <= PAGE_W && COLL_Y0 + 3 * COLL_CH <= MSP_CLOSE_Y - UI(6) &&
+               FISH_NAME_MAX * 6 * UI_TEXT(2) <= COLL_CW - UI(12) && COLL_NAV_X + RENDER_CRIT_NAV_W < (PAGE_W - (20 * 6 - 1)) / 2,
+               "the collection on the 240 px page: the grid on it and above CLOSE's reach, a name inside its box, the arrows "
+               "clear of 120 OF 120 COLLECTED");
+#endif
 void render_collection_leave(void) { g_coll_sel = -1; g_coll_page = 0; }
 int  render_collection_page(void) { return g_coll_page; }
 void render_collection_set_page(int page) { int np = collection_pages(); g_coll_page = page < 0 ? 0 : page >= np ? np - 1 : page; }
@@ -14798,6 +14816,12 @@ bool render_collection_arrow(bool right, int *x, int *y) {
     if (y) *y = PAGE_Y + COLL_NAV_Y + RENDER_CRIT_NAV_W / 2;
     return true;
 }
+#ifdef CONFIG_POCKET_TANK_320X240
+void render_collection_where(int j, int *x, int *y) {   /* (this fork, render.h) place j's middle, frame px */
+    *x = PAGE_X + COLL_X0 + (j % COLL_COLS) * COLL_CW + COLL_CW / 2;
+    *y = PAGE_Y + COLL_Y0 + (j / COLL_COLS) * COLL_CH + COLL_CH / 2;
+}
+#endif
 static void fmt_dur(char *out, size_t n, uint32_t s) {
     if (s < 60) snprintf(out, n, "%u S", (unsigned)s);
     else if (s < 3600) snprintf(out, n, "%u MIN", (unsigned)(s / 60));
@@ -14832,17 +14856,17 @@ static void entry_card_draw(ctx_t *c, uint16_t *fb, int stride, const coll_entry
     const int W = PASSPORT_CARD_W, H = PASSPORT_BTN_Y, X = (TANK_W - W) / 2, Y = (TANK_H - H) / 2;
     src_t bg = src_color(0x0e2233, 1.0f);
     for (int y = Y; y < Y + H; y++) span(c, X, X + W - 1, y, &bg, 248);
-    for (int y = Y + 34; y < Y + H - 30; y += 7)
+    for (int y = Y + UI(34); y < Y + H - UI(30); y += UI(7))
         for (int x = X + 3; x < X + W - 3; x++) px_blend(c, x, y + (int)(2.0f * sinf(x * 0.11f + y * 0.37f)), 0x2b4a63, 80);
     src_t band = src_color(INK, 1.0f);
-    for (int y = Y; y < Y + 26; y++) span(c, X, X + W - 1, y, &band, 255);
-    draw_text(c, X + (W - text_w("POCKET TANK PASSPORT", 2)) / 2, Y + 7, 2, GOLD, "POCKET TANK PASSPORT");
+    for (int y = Y; y < Y + UI(26); y++) span(c, X, X + W - 1, y, &band, 255);
+    draw_text(c, X + (W - text_w("POCKET TANK PASSPORT", UI_TEXT(2))) / 2, Y + UI(7), UI_TEXT(2), GOLD, "POCKET TANK PASSPORT");
     rect_edge(c, X, Y, W, H, GOLD); rect_edge(c, X + 1, Y + 1, W - 2, H - 2, INK);
-    const int PX = X + 12, PY = Y + 36, PW = 100, PH = 84;
+    const int PX = X + UI(12), PY = Y + UI(36), PW = UI(100), PH = UI(84);
     rect_fill(c, PX, PY, PW, PH, 0x0a1824); rect_edge(c, PX, PY, PW, PH, 0x9fd8e2);
     fish_t f; entry_fish(&f, e);
-    render_fish_portrait(fb, stride, PX + PW / 2.0f - PAGE_X, PY + PH / 2.0f - PAGE_Y, 1.3f, &f, PW - 20, clock);
-    const int FX = PX + PW + 12;
+    render_fish_portrait(fb, stride, PX + PW / 2.0f - PAGE_X, PY + PH / 2.0f - PAGE_Y, 1.3f * UI_F, &f, PW - UI(20), clock);
+    const int FX = PX + PW + UI(12);
     static const char *const STAGE_W[4] = { "FRY", "JUVENILE", "ADULT", "ELDER" };
     char home[24], form[24], met[24], here[24], visits[24];
     char hlbl[40]; home_fields(e->home, e->home_name, "HOME", hlbl, sizeof hlbl, home, sizeof home);
@@ -14851,32 +14875,41 @@ static void entry_card_draw(ctx_t *c, uint16_t *fb, int stride, const coll_entry
     snprintf(visits, sizeof visits, "%u VISIT%s", (unsigned)e->visits, e->visits == 1 ? "" : "S");
     struct { const char *lbl, *val; } FL[4] = { { "NAME", f.name }, { hlbl, home }, { "FORM", form }, { "STAGE", e->evo ? "PARAGON" : STAGE_W[e->stage & 3] } };
     for (int i = 0; i < 4; i++) {
-        int fy = Y + 33 + i * 26;
+        int fy = Y + UI(33) + i * UI(26);
         draw_text(c, FX, fy, 1, LBL, FL[i].lbl);
         int vx = FX;                                  /* (no shape: a collected fish's home is its waters, for good) */
-        draw_text(c, vx, fy + 10, 2, 0xffffff, FL[i].val);
+        draw_text(c, vx, fy + 7 + UI(3), UI_TEXT(2), 0xffffff, FL[i].val);   /* (this fork: under the label's 7 rows - it stays at scale 1 - and a gap) */
     }
     /* its history here: first met, visits, time in this water, fry */
-    draw_text(c, PX, PY + PH + 6, 1, LBL, "FIRST MET");
-    draw_text(c, PX, PY + PH + 15, 2, 0xffffff, met);
-    draw_text(c, FX, Y + 139, 1, LBL, "IN YOUR TANK");
-    draw_text(c, FX, Y + 148, 2, 0xffffff, here);
-    draw_text(c, PX, PY + PH + 34, 1, LBL, "VISITS");
-    draw_text(c, PX, PY + PH + 43, 2, 0xffffff, visits);
+    draw_text(c, PX, PY + PH + UI(6), 1, LBL, "FIRST MET");
+    draw_text(c, PX, PY + PH + UI(6) + 7 + UI(2), UI_TEXT(2), 0xffffff, met);
+    draw_text(c, FX, Y + UI(139), 1, LBL, "IN YOUR TANK");
+    draw_text(c, FX, Y + UI(139) + 7 + UI(2), UI_TEXT(2), 0xffffff, here);
+    draw_text(c, PX, PY + PH + UI(34), 1, LBL, "VISITS");
+    draw_text(c, PX, PY + PH + UI(34) + 7 + UI(2), UI_TEXT(2), 0xffffff, visits);
     if (e->fry) {
         char fr[24]; snprintf(fr, sizeof fr, "%u FRY HERE", (unsigned)e->fry);
-        draw_text(c, FX, Y + 167, 1, LBL, "FAMILY");
-        draw_text(c, FX, Y + 176, 2, 0xffffff, fr);
+        draw_text(c, FX, Y + UI(167), 1, LBL, "FAMILY");
+        draw_text(c, FX, Y + UI(167) + 7 + UI(2), UI_TEXT(2), 0xffffff, fr);
     }
     const char *st = "COLLECTED";                      /* the stamp, as on its card */
-    int sw = text_w(st, 2) + 12, sx0 = X + W - sw - 10, sy0 = Y + 139;
-    rect_edge(c, sx0, sy0, sw, 24, GOLD); rect_edge(c, sx0 + 2, sy0 + 2, sw - 4, 20, GOLD);
-    draw_text(c, sx0 + 6, sy0 + 5, 2, GOLD, st);
-    char m1[64]; int cols = (W - 20) / 6; if (cols > 60) cols = 60;
+    int sw = text_w(st, UI_TEXT(2)) + UI(12), sx0 = X + W - sw - UI(10), sy0 = Y + UI(139);
+#ifdef CONFIG_POCKET_TANK_320X240
+    /* (this fork) the labels keep scale 1 on a card scaled to 0.65, and IN YOUR TANK reaches the stamp's place: the stamp
+       stands beside STAGE instead, whose words (FRY .. PARAGON) end well short of it, under FORM's and over IN YOUR TANK */
+    sy0 = Y + UI(33) + 3 * UI(26);
+    _Static_assert(UI(33) + 3 * UI(26) + UI(24) < UI(139) &&
+                   UI(12) + UI(100) + UI(12) + 8 * 6 * UI_TEXT(2) < PASSPORT_CARD_W - UI(10) - (9 * 6 - 1) * UI_TEXT(2) - UI(12) &&
+                   UI(167) + 7 + UI(2) + 7 * UI_TEXT(2) < PASSPORT_BTN_Y - 7 - UI(6),
+                   "the collected passport: the stamp beside STAGE, over IN YOUR TANK and clear of JUVENILE; FAMILY over the machine line");
+#endif
+    rect_edge(c, sx0, sy0, sw, UI(24), GOLD); rect_edge(c, sx0 + 2, sy0 + 2, sw - 4, UI(24) - 4, GOLD);   /* (the double edge's 2 px: drawn, not scaled) */
+    draw_text(c, sx0 + UI(6), sy0 + (UI(24) - 7 * UI_TEXT(2)) / 2, UI_TEXT(2), GOLD, st);
+    char m1[64]; int cols = (W - UI(20)) / 6; if (cols > 60) cols = 60;
     snprintf(m1, sizeof m1, "P<FISH<<%s<<%08X", f.name, (unsigned)e->uid);
     for (int j = (int)strlen(m1); j < cols; j++) m1[j] = '<';
     m1[cols] = 0;
-    draw_text(c, X + 10, Y + H - 13, 1, 0xc8d6de, m1);
+    draw_text(c, X + UI(10), Y + H - 7 - UI(6), 1, 0xc8d6de, m1);   /* (its 7 px rows at scale 1, UI(6) over the edge) */
 }
 /* the page's colors (0.4.3, Strato 11-21: "the background should be navy blue, similar to a U.S. passport and boxes have
    black backgrounds"; option A, PASSPORT GOLD): a passport's navy, each fish's box pure black inside a thin gold edge (apart
@@ -14898,6 +14931,16 @@ static void coll_pager(ctx_t *c, int pg, int np) {
     draw_text(c, 114 + (116 - text_w(line, 2)) / 2, MSP_CLOSE_Y, 2, 0xffffff, line);
     draw_text(c, 114 + (116 - text_w(l2, 2)) / 2, MSP_CLOSE_Y + 16, 2, 0xffffff, l2);
     int bx0 = (PAGE_W - (np * COLL_PIP - 4)) / 2, by = COLL_Y0 + 3 * COLL_CH + 3;
+#elif defined(CONFIG_POCKET_TANK_320X240)
+    /* (this fork) the 320 x 240 boards: the words at UI_TEXT(2) from the glass's left edge as far in as CLOSE stands from
+       its right (the fork's foot: glass x 8), the pips at their size after them, on the words' middle */
+    snprintf(line, sizeof line, "PAGE %d OF %d", pg + 1, np);
+    int ty = MSP_CLOSE_Y + (MSP_CLOSE_H - 7 * UI_TEXT(2)) / 2, tx = CYD_GLASS_X(TANK_W - PAGE_X - MSP_CLOSE_X - MSP_CLOSE_W);
+    draw_text(c, tx, ty, UI_TEXT(2), 0xffffff, line);
+    char widest[32]; snprintf(widest, sizeof widest, "PAGE %d OF %d", np, np);   /* (the pips stand still page to page) */
+    int bx0 = tx + text_w(widest, UI_TEXT(2)) + UI(12), by = ty + (7 * UI_TEXT(2) - 6) / 2;
+    _Static_assert(CYD_GLASS_X(TANK_W - PAGE_X - MSP_CLOSE_X - MSP_CLOSE_W) + (13 * 6 - 1) * UI_TEXT(2) + UI(12) + (COLL_PAGES - 1) * COLL_PIP + 8 + UI(12)
+                   <= MSP_CLOSE_X, "the collection's foot: PAGE 10 OF 10 and ten pips left of CLOSE");
 #else
     snprintf(line, sizeof line, "PAGE %d OF %d", pg + 1, np);
     int ty = MSP_CLOSE_Y + (MSP_CLOSE_H - 14) / 2, tx = 32;   /* (as far in as CLOSE stands from the right) */
@@ -14920,9 +14963,9 @@ void render_collection(const tank_t *t, uint16_t *fb, int stride) {
     for (int y = 0; y < TANK_H; y++) for (int x = 0; x < TANK_W; x++) fb[y * stride + x] = bg;
     char line[32]; int n = collection_count(), np = collection_pages();
     if (g_coll_page >= np) g_coll_page = np - 1;
-    draw_text(&c, (PAGE_W - text_w("VISITOR COLLECTION", 2)) / 2, 22, 2, COLL_GOLD, "VISITOR COLLECTION");
+    draw_text(&c, (PAGE_W - text_w("VISITOR COLLECTION", UI_TEXT(2))) / 2, UI(22), UI_TEXT(2), COLL_GOLD, "VISITOR COLLECTION");
     snprintf(line, sizeof line, "%d OF %d COLLECTED", n, COLL_MAX);
-    draw_text(&c, (PAGE_W - text_w(line, 1)) / 2, 42, 1, COLL_CREAM, line);
+    draw_text(&c, (PAGE_W - text_w(line, 1)) / 2, UI(42), 1, COLL_CREAM, line);
     if (np > 1) {
         for (int k = 0; k < 2; k++) {
             int bx = k ? PAGE_W - COLL_NAV_X - RENDER_CRIT_NAV_W : COLL_NAV_X;
@@ -14935,15 +14978,15 @@ void render_collection(const tank_t *t, uint16_t *fb, int stride) {
     for (int j = 0; j < COLL_PAGE; j++) {
         int i = g_coll_page * COLL_PAGE + j;
         int cx = COLL_X0 + (j % COLL_COLS) * COLL_CW, cy = COLL_Y0 + (j / COLL_COLS) * COLL_CH;
-        if (i >= n) { rect_edge(&c, cx + 6, cy + 4, COLL_CW - 12, COLL_CH - 12, COLL_EMPTY); continue; }   /* an empty place to fill: navy, its outline only */
+        if (i >= n) { rect_edge(&c, cx + UI(6), cy + UI(4), COLL_CW - UI(12), COLL_CH - UI(12), COLL_EMPTY); continue; }   /* an empty place to fill: navy, its outline only */
         const coll_entry_t *e = collection_get(i);
-        rect_fill(&c, cx + 6, cy + 4, COLL_CW - 12, COLL_CH - 12, COLL_BOX);   /* its box: black, apart from the page */
-        rect_edge(&c, cx + 6, cy + 4, COLL_CW - 12, COLL_CH - 12, COLL_BOX_EDGE);
+        rect_fill(&c, cx + UI(6), cy + UI(4), COLL_CW - UI(12), COLL_CH - UI(12), COLL_BOX);   /* its box: black, apart from the page */
+        rect_edge(&c, cx + UI(6), cy + UI(4), COLL_CW - UI(12), COLL_CH - UI(12), COLL_BOX_EDGE);
         fish_t f; entry_fish(&f, e);
-        render_fish_portrait(fb, stride, cx + COLL_CW / 2.0f, cy + 30, 0.9f, &f, coll_room(&f), t->clock + j * 0.7f);
-        draw_text(&c, cx + (COLL_CW - text_w(f.name, 2)) / 2, cy + 52, 2, 0xffffff, f.name);
+        render_fish_portrait(fb, stride, cx + COLL_CW / 2.0f, cy + UI(30), 0.9f * UI_F, &f, coll_room(&f), t->clock + j * 0.7f);
+        draw_text(&c, cx + (COLL_CW - text_w(f.name, UI_TEXT(2))) / 2, cy + UI(52), UI_TEXT(2), 0xffffff, f.name);
     }
-    button(&c, MSP_CLOSE_X, MSP_CLOSE_Y, MSP_CLOSE_W, MSP_CLOSE_H, COLL_NAVY_DK, COLL_GOLD, "CLOSE", 2);
+    button(&c, MSP_CLOSE_X, MSP_CLOSE_Y, MSP_CLOSE_W, MSP_CLOSE_H, COLL_NAVY_DK, COLL_GOLD, "CLOSE", UI_TEXT(2));
     if (g_coll_sel >= 0 && g_coll_sel < n) {           /* its passport, the page dimmed under it */
         for (int y = 0; y < TANK_H; y++) for (int x = 0; x < TANK_W; x++)   /* (halved in native order: the same fault, the swapped halves bled) */
             fb[y * stride + x] = FB_SWAP16((uint16_t)((FB_SWAP16(fb[y * stride + x]) >> 1) & 0x7bef));
@@ -14955,11 +14998,11 @@ int render_collection_tap(const tank_t *t, float x, float y) {
     (void)t;
     if (g_coll_sel >= 0) { g_coll_sel = -1; return COLL_TAP_KEPT; }   /* any tap: back to the grid */
     float px = x - PAGE_X, py = y - PAGE_Y;
-    if (px >= MSP_CLOSE_X - 8 && py >= MSP_CLOSE_Y - 6) return COLL_TAP_CLOSE;
+    if (px >= MSP_CLOSE_X - UI(8) && py >= MSP_CLOSE_Y - UI(6)) return COLL_TAP_CLOSE;
     int np = collection_pages();
-    if (np > 1 && py < COLL_NAV_Y + RENDER_CRIT_NAV_W + 12) {   /* the arrows: their box and 12 px round it (the grid starts below) */
-        if (px >= COLL_NAV_X - 12 && px < COLL_NAV_X + RENDER_CRIT_NAV_W + 12) { g_coll_page = (g_coll_page + np - 1) % np; return COLL_TAP_KEPT; }
-        if (px >= PAGE_W - COLL_NAV_X - RENDER_CRIT_NAV_W - 12 && px < PAGE_W - COLL_NAV_X + 12) { g_coll_page = (g_coll_page + 1) % np; return COLL_TAP_KEPT; }
+    if (np > 1 && py < COLL_NAV_Y + RENDER_CRIT_NAV_W + UI(12)) {   /* the arrows: their box and 12 px round it (the grid starts below) */
+        if (px >= COLL_NAV_X - UI(12) && px < COLL_NAV_X + RENDER_CRIT_NAV_W + UI(12)) { g_coll_page = (g_coll_page + np - 1) % np; return COLL_TAP_KEPT; }
+        if (px >= PAGE_W - COLL_NAV_X - RENDER_CRIT_NAV_W - UI(12) && px < PAGE_W - COLL_NAV_X + UI(12)) { g_coll_page = (g_coll_page + 1) % np; return COLL_TAP_KEPT; }
     }
     if (px >= COLL_X0 && px < COLL_X0 + COLL_COLS * COLL_CW && py >= COLL_Y0 && py < COLL_Y0 + 3 * COLL_CH) {
         int i = g_coll_page * COLL_PAGE + (int)((py - COLL_Y0) / COLL_CH) * COLL_COLS + (int)((px - COLL_X0) / COLL_CW);

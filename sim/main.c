@@ -17517,11 +17517,19 @@ static int snapshot(const char *prefix, int seconds) {
         render_milestones_leave();
         render_collection_leave(); render_collection(&vt, fb, TANK_W);
         snprintf(path, sizeof path, "%s_collection.ppm", prefix); write_ppm(path, fb);
+#ifdef CONFIG_POCKET_TANK_320X240   /* (this fork) the places on this board's grid (render.c's COLL_*): the rectangle's pixels miss it */
+        { int px, py; render_collection_where(0, &px, &py); render_collection_tap(&vt, (float)px, (float)py); }
+#else
         render_collection_tap(&vt, PAGE_X + 24 + 46, PAGE_Y + 60 + 40);
+#endif
         render_collection(&vt, fb, TANK_W);
         snprintf(path, sizeof path, "%s_collection_card.ppm", prefix); write_ppm(path, fb);
         render_collection_tap(&vt, 0, 0);                              /* (back to the grid) - nori's card: its home renamed SAM'S REEF */
+#ifdef CONFIG_POCKET_TANK_320X240
+        { int px, py; render_collection_where(3, &px, &py); render_collection_tap(&vt, (float)px, (float)py); }
+#else
         render_collection_tap(&vt, PAGE_X + 24 + 46 + 3 * 92, PAGE_Y + 60 + 40);
+#endif
         render_collection(&vt, fb, TANK_W); snprintf(path, sizeof path, "%s_collection_card_named.ppm", prefix); write_ppm(path, fb);
         {   static gift_book_t gb; memset(&gb, 0, sizeof gb); gift_attach(&vt, &gb);
           vt.vis_used[1] = false; gb.ask.on = true; passport_from_fish(&gb.ask.pp, &vt.fish[N_FISH_MAX], vt.vis_home[0], 3600); gb.ask.badge = 2; gb.ask.since = vt.clock - 10;

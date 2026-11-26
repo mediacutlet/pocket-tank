@@ -1989,6 +1989,11 @@ _Static_assert(PP_STAMP_H >= 7 + 6 && PP_HEART_Y + 10 <= PP_M1_Y && UI(36) + UI(
                "the passport under its photo: the COLLECTED stamp holds its word, the hearts end over the machine lines");
 /* THE TANK LINK (0.4): link mode's hint and notices, and VISITORS, the collection's pages -
    this board's values for upstream's LINK_* and COLL_* names */
+/* (those names are render.c's own, so this board's values stand beside upstream's there, with the static asserts that
+   hold them: the hint, NEARBY and the DRIFTED notice through UI(), our badge between DONE and DISCONNECT, upstream's
+   grid through UI() under the page arrows' 34 px box) */
+void render_collection_where(int j, int *x, int *y);   /* VISITORS' place j (0..11) on the page up: its middle, frame px -
+                                                          the sim taps there, where the rectangle's pixels miss this grid */
 
 /* THE PARAGON'S REVEAL (0.4.3): upstream's tiles and buttons stand at y 156 .. 320 */
 #undef  EVP_TILE_W

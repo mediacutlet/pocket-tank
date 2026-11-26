@@ -15221,9 +15221,9 @@ void render_xt_notice(uint16_t *fb, int stride) {
     ctx_t c = ctx_page(fb, stride);
     const int X = MSP_MODAL_X, W = MSP_MODAL_W, Y = MSP_MODAL_Y, H = MSP_MODAL_H;
 #ifdef CONFIG_POCKET_TANK_320X240
-    /* (this fork) BOOT can be out of reach (the CYD in its case): there a finger held still 5 s opens MY TANKS from an
-       experimental tank as from the locked glass (touch_port_ft3168.c) */
-    static const char *const L1 = "THANK YOU FOR YOUR SUPPORT", *const L2 = "HOLD A FINGER 5 S", *const L3 = "TO RETURN TO TANKS.";
+    /* (this fork) BOOT can be out of reach (the CYD in its case): there a finger held still 5 s in the glass's bottom-left
+       corner opens MY TANKS from an experimental tank - anywhere else a held finger is the tank's (touch_port_ft3168.c) */
+    static const char *const L1 = "THANK YOU FOR YOUR SUPPORT", *const L2 = "HOLD BOTTOM LEFT 5 S", *const L3 = "TO RETURN TO TANKS.";
 #else
     static const char *const L1 = "THANK YOU FOR YOUR SUPPORT", *const L2 = "PRESS BOOT TWICE", *const L3 = "TO RETURN TO TANKS.";
 #endif

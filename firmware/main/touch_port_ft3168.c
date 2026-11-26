@@ -821,6 +821,11 @@ bool touch_port_lock_hint(void) { return s_tlock && s_tlock_us && esp_timer_get_
 #define TOUCH_LOCK_HOLD_US 5000000
 #define TOUCH_LOCK_HOLD_SLOP 24                           /* px the finger may roll and still be "still" (a tap's own slop) */
 static bool s_tlock_held, s_tlock_open;                   /* this press already asked; the ask, for main.c */
+#if CONFIG_POCKET_TANK_320X240
+static bool s_hold_moved;                                 /* (this fork) this press has left its slop once: no still finger again */
+#define XT_BACK_PX 56                                     /* (this fork) an experimental tank's way back: a press that lands in the
+                                                             glass's bottom-left square this wide (render_xt_notice names it) */
+#endif
 bool touch_port_take_lock_open(void) { bool o = s_tlock_open; s_tlock_open = false; return o; }
 bool touch_port_read_raw(float *x, float *y) {
     uint16_t px[1], py[1];
@@ -896,6 +901,12 @@ void touch_port_poll(tank_t *t) {
            a darting fish has moved and the finger hid it the whole time */
         for (int i = 0; i < t->n_fish && i < N_FISH_MAX; i++) { s_fx[i] = t->fish[i].x; s_fy[i] = t->fish[i].y; }
     }
+#if CONFIG_POCKET_TANK_320X240
+    /* (this fork) the 5 s holds below count a finger that stayed still: a press that once leaves its slop is a drag or a
+       stroke to its lift, even back at its landing point - a finger stirring the water came round to it and asked */
+    if (touched && !s_down) s_hold_moved = false;
+    else if (touched && (tx - s_px) * (tx - s_px) + (ty - s_py) * (ty - s_py) >= TOUCH_LOCK_HOLD_SLOP * TOUCH_LOCK_HOLD_SLOP) s_hold_moved = true;
+#endif
     /* LOADING (0.4, the 11-02 sweep: a kid's taps on the boot show fed the fish, opened a card or the keeper page - which ended the
        show at once - or put the light out): over the bare tank the finger goes nowhere until the tank is up; a press that began then
        is let go at its lift. A page (a new tank's welcome, MY TANKS by BOOT twice) is not the show: it takes its taps */
@@ -914,8 +925,7 @@ void touch_port_poll(tank_t *t) {
         if (touched != s_down && s_log) ESP_LOGI(TAG, "touch locked: the %s ignored", touched ? "press" : "lift");
 #if CONFIG_POCKET_TANK_320X240
         if (!touched) s_tlock_held = false;                  /* (this fork) a held finger opens MY TANKS (above) */
-        else if (s_down && !s_tlock_held && now - s_press_us >= TOUCH_LOCK_HOLD_US
-                 && (tx - s_px) * (tx - s_px) + (ty - s_py) * (ty - s_py) < TOUCH_LOCK_HOLD_SLOP * TOUCH_LOCK_HOLD_SLOP) {
+        else if (s_down && !s_tlock_held && !s_hold_moved && now - s_press_us >= TOUCH_LOCK_HOLD_US) {
             s_tlock_held = true; s_tlock_open = true;
             ESP_LOGI(TAG, "touch locked: a finger held still %d s - MY TANKS, where the padlock undoes it", (int)(TOUCH_LOCK_HOLD_US / 1000000));
         }
@@ -950,17 +960,19 @@ void touch_port_poll(tank_t *t) {
     if (s_jelly && !s_ms && !s_set && !s_shop && !s_coll && !s_shelf && !s_bat && !s_upd && !s_cf && !su && !adv_up() && !card) {
 #if CONFIG_POCKET_TANK_320X240
         /* (this fork) AN EXPERIMENTAL TANK's glass is all its own, and upstream's one way from it to MY TANKS is BOOT twice -
-           out of reach in the CYD's case. A finger held still 5 s asks for MY TANKS here too, as on the locked glass (above;
-           main.c opens it): the tank lets go of that press at once, and the rest of it is MY TANKS's, whose taps are only
-           presses begun after it opened. The thank-you says so (render_xt_notice). On a 320 x 240 board only the serial
-           console makes such a tank (shelf.h SHELF_XT_LIBRARY) */
+           out of reach in the CYD's case. A finger held still 5 s in the glass's bottom-left corner (XT_BACK_PX) asks for
+           MY TANKS here, as anywhere on the locked glass (above; main.c opens it): the tank lets go of that press at once,
+           and the rest of it is MY TANKS's, whose taps are only presses begun after it opened. Only there - a finger held
+           anywhere else is the tank's own gesture, for as long as the keeper likes (the minnows mill round it, the jellies
+           turn to it as a light), and the corner is clear of each tank's controls (the jellies' nozzle at the upper right,
+           the minnows' feeding band along the top, the piranhas' taps). The thank-you says where (render_xt_notice). On a
+           320 x 240 board only the serial console makes such a tank (shelf.h SHELF_XT_LIBRARY) */
         if (!touched) s_tlock_held = false;
         else if (s_tlock_held) { s_down = touched; s_held_page = false; s_page_gone = false; return; }
-        else if (s_down && now - s_press_us >= TOUCH_LOCK_HOLD_US
-                 && (tx - s_px) * (tx - s_px) + (ty - s_py) * (ty - s_py) < TOUCH_LOCK_HOLD_SLOP * TOUCH_LOCK_HOLD_SLOP) {
+        else if (s_down && !s_hold_moved && s_px < XT_BACK_PX && s_py >= TANK_H - XT_BACK_PX && now - s_press_us >= TOUCH_LOCK_HOLD_US) {
             s_tlock_held = true; s_tlock_open = true;
             if (s_xt_jdown) { s_jelly(tx, ty, false, now / 1e6); s_xt_jdown = false; }   /* (the tank's own press: it lets go) */
-            ESP_LOGI(TAG, "an experimental tank: a finger held still %d s - MY TANKS", (int)(TOUCH_LOCK_HOLD_US / 1000000));
+            ESP_LOGI(TAG, "an experimental tank: a finger held still %d s in the corner - MY TANKS", (int)(TOUCH_LOCK_HOLD_US / 1000000));
             s_down = touched; s_held_page = false; s_page_gone = false;
             return;
         }

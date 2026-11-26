@@ -3616,31 +3616,49 @@ static void xt_notice_port(void) {
 }
 #ifdef CONFIG_POCKET_TANK_320X240
 /* (this fork) AN EXPERIMENTAL TANK'S WAY BACK on a 320 x 240 board, through the board's own port: BOOT is out of reach in the
-   CYD's case, so a finger held still 5 s on the tank's own glass asks for MY TANKS (touch_port_take_lock_open, which main.c
-   opens), as on the locked glass. The tank lets go of that press as it asks and sees no more of it; a press lifted sooner, or
-   one that moves, asks nothing and stays the tank's */
+   CYD's case, so a finger held still 5 s in the glass's bottom-left corner asks for MY TANKS (touch_port_take_lock_open, which
+   main.c opens), as anywhere on the locked glass. The tank lets go of that press as it asks and sees no more of it; a press
+   lifted sooner, one that moves - even back to where it landed - and a still finger anywhere else (the minnows' mill, the
+   jellies' light: the tank's own gestures, held as long as the keeper likes) ask nothing and stay the tank's. The locked
+   glass takes the same latch: a finger that strays out of its slop and comes back is no still finger */
 static int g_xh_down, g_xh_up; static bool g_xh_was;
 static void xh_cb(float x, float y, bool down, double now) { (void)x; (void)y; (void)now; if (down) g_xh_down++; else if (g_xh_was) g_xh_up++; g_xh_was = down; }
 static void xt_hold_port(void) {
-    const float x = TANK_W / 2.0f, y = TANK_H / 2.0f;
+    const float x = 20, y = TANK_H - 20;                        /* in the bottom-left corner (the port's XT_BACK_PX, 56) */
+    const float mx = TANK_W / 2.0f, my = TANK_H / 2.0f;         /* the glass's middle */
     int n = 0;
     bare(); touch_port_set_jelly(xh_cb); touch_port_take_lock_open(); g_xh_down = g_xh_up = 0; g_xh_was = false;
-    if (!press(x, y, 4600)) { TFAIL("xt hold: the middle of the glass is past the panel's reach"); touch_port_set_jelly(NULL); bare(); return; }
+    if (!press(x, y, 4600)) { TFAIL("xt hold: the glass's bottom-left corner is past the panel's reach"); touch_port_set_jelly(NULL); bare(); return; }
     lift(FRAME_MS);
     const bool early = touch_port_take_lock_open();
-    if (early || g_xh_up != 1) TFAIL("xt hold: a press held 4.6 s - asked for MY TANKS %d, the tank saw %d lifts (want no ask, its own lift)", early, g_xh_up); else n++;
+    if (early || g_xh_up != 1) TFAIL("xt hold: a press held 4.6 s in the corner - asked for MY TANKS %d, the tank saw %d lifts (want no ask, its own lift)", early, g_xh_up); else n++;
     press(x, y, 5200);
     const int d0 = g_xh_down, u0 = g_xh_up;
     hold_for(600);
-    if (!touch_port_take_lock_open()) TFAIL("xt hold: a finger held still 5 s on an experimental tank did not ask for MY TANKS"); else n++;
+    if (!touch_port_take_lock_open()) TFAIL("xt hold: a finger held still 5 s in the corner of an experimental tank did not ask for MY TANKS"); else n++;
     if (u0 != 2 || g_xh_down != d0 || g_xh_was) TFAIL("xt hold: the tank had %d lifts at the ask (want its press let go), and %d presses after it", u0 - 1, g_xh_down - d0); else n++;
     lift(FRAME_MS);
     if (touch_port_take_lock_open() || g_xh_up != 2) TFAIL("xt hold: the held finger's lift asked again, or the tank saw it (%d lifts)", g_xh_up); else n++;
     press(x, y, 1000); aim(x + 60, y); hold_for(5200);         /* held 6 s, but moved: the tank's drag, no ask */
     lift(FRAME_MS);
     if (touch_port_take_lock_open() || g_xh_up != 3) TFAIL("xt hold: a finger held 6 s and moved 60 px asked for MY TANKS (or the tank lost it)"); else n++;
+    press(mx, my, 8000);                                       /* (the 11-26 review) held still in the middle: the tank's own gesture */
+    const bool mid = touch_port_take_lock_open();
+    lift(FRAME_MS);
+    if (mid || g_xh_up != 4) TFAIL("xt hold: a finger held still 8 s in the middle of the glass asked for MY TANKS %d (the tank's: %d lifts, want 4)", mid, g_xh_up); else n++;
+    press(x, y, 1000); aim(x + 40, y); hold_for(400); aim(x, y); hold_for(5200);   /* out of its slop and back to where it landed */
+    lift(FRAME_MS);
+    if (touch_port_take_lock_open() || g_xh_up != 5) TFAIL("xt hold: a finger that left its slop and came back to its corner asked for MY TANKS (%d lifts)", g_xh_up); else n++;
     touch_port_set_jelly(NULL); bare();
-    printf("selftest-touch-port: an experimental tank's way back - %d of 5 (4.6 s held asks nothing, 5 s still asks for MY TANKS and the tank lets go, its lift asks no more, a moving finger asks nothing)\n", n);
+    touch_port_set_touch_lock(true);                           /* THE LOCKED GLASS: a still finger anywhere asks ... */
+    press(mx, my, 5200); hold_for(200);
+    if (!touch_port_take_lock_open()) TFAIL("touch lock: a finger held still 5 s on the locked glass did not ask for MY TANKS"); else n++;
+    lift(FRAME_MS); touch_port_take_lock_open();
+    press(mx, my, 1000); aim(mx + 40, my); hold_for(400); aim(mx, my); hold_for(5200);   /* ... one that strayed and came back does not */
+    if (touch_port_take_lock_open()) TFAIL("touch lock: a finger that left its slop and came back asked for MY TANKS"); else n++;
+    lift(FRAME_MS); touch_port_take_lock_open();
+    touch_port_set_touch_lock(false); bare();
+    printf("selftest-touch-port: an experimental tank's way back - %d of 9 (in the corner: 4.6 s asks nothing, 5 s still asks and the tank lets go, its lift asks no more, a moving finger asks nothing; 8 s still in the middle is the tank's; a finger back at its landing point after straying asks nothing; the locked glass: 5 s still asks, strayed and back does not)\n", n);
 }
 #endif
 #include "reveal_touch_test.inc"   /* the reveal and the lab, 0.4.3 audit r1 (TP-1..6, TP-8, TP-9b, PE-3) */

@@ -15850,12 +15850,23 @@ static int gl_shrink_lock(void) {
     return 88;
 #endif
 }
+#ifdef CONFIG_POCKET_TANK_320X240
+/* (this fork) the share of a full frond (107 segments at the 1.8's 3.2 px, tank.h) this glass's water holds: 224 px of sand to
+   surface, 0.65. Every frond at its ceiling (0.72 .. 0.95) stands past the top here, so the tall band is the whole tank, 240 rows,
+   and the scissors' 0.20 - 0.33 (the plant's 0.33 - 0.50) leave a fresh band of ~216 rows, 24 under it - inside GL_SHRINK_ROWS'
+   hysteresis: rightly no replan. Cut to the same share of THIS water (each height x 0.65) the trim frees 90 rows (240 -> 150), as
+   the 1.8's frees 135 (342 -> 207) */
+#define GL_SHRINK_WATER ((TANK_BOT - 16) / (VEG_SEGS_FULL * VEG_SEG_PX))
+#endif
 static void gl_shrink_heights(float seag, float plant) {   /* seag/plant < 0: every frond at its ceiling */
     for (int b = 0; b < tank_veg_beds(&tank); b++)
         for (int i = 0; i < VEG_FRONDS_MAX; i++) {
             const float c = tank_veg_cap(b, i);
             float h = b == 3 ? plant : seag;
             if (h >= 0) h += (b == 3 ? 0.17f : 0.13f) * ((i * 7) % 15) / 14.0f;
+#ifdef CONFIG_POCKET_TANK_320X240
+            if (h >= 0) h *= GL_SHRINK_WATER;
+#endif
             tank.veg_h[b][i] = h < 0 || h > c ? c : h;
         }
     tank_veg_sync(&tank);
@@ -21531,9 +21542,16 @@ static void vo_child(int mode, int level, bool task, int fd) {            /* mod
         render_set_vignette(on);
         if (flip && render_vignette_live() == on) o.early++;                 /* (taken up outside a frame) */
         if (VO_SC[g].bg) tank.bg_now = (uint8_t)((tank.bg_now + VO_SC[g].bg) % BG_N);
+#ifdef CONFIG_POCKET_TANK_320X240
+        /* (this fork) the volcano is 184 px wide and the 320 px floor holds it at 122 .. 198: gfx_stage's TANK_FLOOR_X(300) (214)
+           stands it at 198 already, and TANK_FLOOR_X(316) (226) at 198 again - it never moved, the never-off tank's loop was not
+           patched, and the flip came alone. Here it goes 16 px back along the floor from where it stands, in the same frame */
+        if (g == VO_MOVE_SEG) tank_decor_set(&tank, 9, tank.volcano_x - 16, DECOR_Z_BACK);
+#else
         if (g == VO_MOVE_SEG) tank_decor_set(&tank, 9, TANK_FLOOR_X(316), DECOR_Z_BACK);   /* the volcano 16 px along, in the very frame FLIP turns the vignette ON
                                                                                                again: alone it is a change of BOXES (the loop patched: STRAIGHT's) - with
                                                                                                the flip the whole loop is stale, and gl_window must say so */
+#endif
         uint32_t ht = 2166136261u, ha = 2166136261u; int least = 1 << 30;
         for (int f = 0; f < VO_SC[g].frames; f++, frames++) {
             tank_tick(&tank, 0.031f + 0.027f * (frames % 3), advisor_rules); tank.night = VO_SC[g].night;
@@ -21954,7 +21972,17 @@ static int selftest_gfx_night(void) {
         printf("selftest-gfx-night: the night picture refused - the night as HIGH's (the grass live, the old way), the day untouched, no bake at the light-on\n");
     }
     /* 6b. the night picture short of room (its differences bigger than its arena was sized for): taken again, sized by what they measured */
+#ifdef CONFIG_POCKET_TANK_320X240
+    /* (this fork) a band over 400 is the 1.8's arena (7 x 766 B, 5362 B) on its 342-row band, which starts at the tallest tip and
+       whose first rows are sparse: its first slices fit (2301 B of them), so the retake has a measure to grow by. This glass's band
+       is the whole tank (its grass stands past the top), dense from row 0: over 400 the arena is 7 x 384 B, no slice ever fits, nothing
+       is measured, and it is taken again the same size every other frame (108 switches in 200 frames) - the case is not staged.
+       Over 200 it is the 1.8's arena again, 7 x 768 B: a slice fits, the differences (~7 KB) do not. (On the boards it is a band
+       over 8 - 7 x 19 KB here - which always holds a slice) */
+    {   render_debug_gl_night_div(200);
+#else
     {   render_debug_gl_night_div(400);
+#endif
         render_grass_loop_on(false); render_set_grass_loop(gl_alloc64, free, 8u << 20); render_grass_loop_on(true);   /* (a budget with room for it bigger: the budget's own case is 10) */
         tank = base;
         if (!gn_whole(fb, false, false, 800, NULL)) GN_FAIL("short: MEDIUM by day not whole");
@@ -22041,7 +22069,14 @@ static int selftest_gfx_night(void) {
        by night (it would be let go, the light-on rebaking it); mid-night the night picture's room taken by night (an allocation, no plan)
        - the decision's baseline (its moments, its PSRAM) stays put; the morning: planned again after the minute. Never at LOW */
     {   size_t pool0 = 0;                                 /* (the largest pool, from half what the full plan holds, with a day loop and no night picture) */
+#ifdef CONFIG_POCKET_TANK_320X240
+        /* (this fork) this glass's night picture is a 240-row band, 352 KB to the 1.8's 631: MEDIUM's plan holds it beside the
+           day from a 950 KB pool, and from 1400 KB up every pool has it - none is the case. The day loop alone is whole from
+           ~770 KB to ~900 KB: the sweep starts under it */
+        for (int kb = 600; kb <= 3000; kb += 50) {
+#else
         for (int kb = 1400; kb <= 3000; kb += 50) {
+#endif
             render_grass_loop_on(false); render_grass_loop_lock(0); render_grass_loop_lock(GFX_M);
             room_pool = (size_t)kb * 1024; room_used = 0; room_peak = 0;
             render_set_grass_loop(room_alloc, room_free, 8u << 20);   /* (the pool binds, not the budget: the decision's case) */ render_grass_loop_on(true);
@@ -22200,7 +22235,15 @@ static int selftest_gfx_night(void) {
         tank = base; gn_whole(fb, false, false, 800, NULL);
         const int high_kb = (int)(room_peak / 1024);
         render_set_gfx_level(RENDER_GFX_MEDIUM);
+#ifdef CONFIG_POCKET_TANK_320X240
+        /* (this fork) from 55% of HIGH's plan up every pool held this glass's night picture (352 KB): MEDIUM keeps it beside the day
+           from ~32% (950 KB of 2970), and the day loop alone is whole from ~26% - the window the sweep looks into first, then on to
+           130% as the 1.8's */
+        {   static const int PC[12] = { 24, 27, 30, 33, 40, 50, 60, 70, 85, 100, 115, 130 };
+            for (int k = 0; k < 12; k++) POOL_KB[npool++] = high_kb * PC[k] / 100; }
+#else
         for (int pc = 55; pc <= 130; pc += 7) POOL_KB[npool++] = high_kb * pc / 100;
+#endif
         int used = 0, live = 0;
         printf("selftest-gfx-night: the pools - HIGH's plan holds %d KB of this tank\n", high_kb);
         for (int k = 0; k < npool; k++) {

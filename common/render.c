@@ -15229,17 +15229,29 @@ static void xt_heart(ctx_t *c, int cx, int top, int r, uint32_t rgb) {   /* two 
 void render_xt_notice(uint16_t *fb, int stride) {
     ctx_t c = ctx_page(fb, stride);
     const int X = MSP_MODAL_X, W = MSP_MODAL_W, Y = MSP_MODAL_Y, H = MSP_MODAL_H;
+#ifdef CONFIG_POCKET_TANK_320X240
+    /* (this fork) BOOT can be out of reach (the CYD in its case): there a finger held still 5 s opens MY TANKS from an
+       experimental tank as from the locked glass (touch_port_ft3168.c) */
+    static const char *const L1 = "THANK YOU FOR YOUR SUPPORT", *const L2 = "HOLD A FINGER 5 S", *const L3 = "TO RETURN TO TANKS.";
+#else
     static const char *const L1 = "THANK YOU FOR YOUR SUPPORT", *const L2 = "PRESS BOOT TWICE", *const L3 = "TO RETURN TO TANKS.";
+#endif
     rect_fill(&c, X, Y, W, H, 0x04141a);
     rect_edge(&c, X, Y, W, H, MSP_TEAL); rect_edge(&c, X + 1, Y + 1, W - 2, H - 2, 0x1c2f36);
-    xt_heart(&c, X + W / 2, Y + 20, 9, MSP_TEAL);
-    draw_text(&c, X + (W - text_w(L1, 2)) / 2, Y + 66, 2, MSP_TEAL, L1);     /* the thanks in teal, the way back in white */
-    draw_text(&c, X + (W - text_w(L2, 2)) / 2, Y + 100, 2, 0xffffff, L2);
-    draw_text(&c, X + (W - text_w(L3, 2)) / 2, Y + 122, 2, 0xffffff, L3);
+    xt_heart(&c, X + W / 2, Y + UI(20), UI(9), MSP_TEAL);
+    draw_text(&c, X + (W - text_w(L1, UI_TEXT(2))) / 2, Y + UI(66), UI_TEXT(2), MSP_TEAL, L1);     /* the thanks in teal, the way back in white */
+    draw_text(&c, X + (W - text_w(L2, UI_TEXT(2))) / 2, Y + UI(100), UI_TEXT(2), 0xffffff, L2);
+    draw_text(&c, X + (W - text_w(L3, UI_TEXT(2))) / 2, Y + UI(122), UI_TEXT(2), 0xffffff, L3);
 #ifdef TANK_P4
     if (!render_big_pocket()) card_2x(fb, stride);             /* (the thank-you: at twice its size on the big screens, Strato 11-22) */
 #endif
 }
+#ifdef CONFIG_POCKET_TANK_320X240
+/* (this fork) the thank-you on a 320 x 240 board: the heart over the thanks, the thanks (26 characters) across the box, the
+   last line inside it */
+_Static_assert(UI(20) + 3 * UI(9) < UI(66) && 26 * 6 * UI_TEXT(2) <= MSP_MODAL_W - 2 * UI(8) && UI(122) + 7 * UI_TEXT(2) <= MSP_MODAL_H - UI(8),
+               "the experimental tank's thank-you inside its box");
+#endif
 
 /* ---- the shop (2026-09-15): sand dollars, and what they buy ----
  * The milestones page's dress. A 64 px coin and the balance at the top, a

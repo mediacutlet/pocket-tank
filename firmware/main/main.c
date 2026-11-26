@@ -1532,10 +1532,19 @@ static void shelf_render(uint16_t *fb) {
     if (!s_shelf_baked) {
         int64_t tb0 = esp_timer_get_time();
         if (s_sh_lib) {                                       /* the fish tank, and THE JELLY TANK (every board sees it; the crew's to make: J6) */
+#if SHELF_XT_LIBRARY
             jelly_lib_open();
+#else
+            (void)jelly_lib_open;                             /* (this fork) no jelly row here (SHELF_XT_LIBRARY): no picture to make for it */
+#endif
             const uint16_t *jth[JELLY_THEME_N];               /* (a picture not made yet: NULL, its glass empty - the page never waits for one) */
             for (int k = 0; k < JELLY_THEME_N; k++) jth[k] = lib_pics_get(s_jpics, k);
+#if SHELF_XT_LIBRARY
             render_library_set_page(s_lib_pg + 1, 2);
+#else
+            render_library_set_page(1, 1);                    /* (this fork) the fish tank alone (shelf.h SHELF_XT_LIBRARY): one page, no
+                                                                 picture made behind it (s_jpics stays NULL), no pager to page 2 */
+#endif
             if (s_sh_pick) {
                 const char *names[JELLY_THEME_N]; for (int k = 0; k < JELLY_THEME_N; k++) names[k] = JELLY_THEMES[k].name;
                 render_jelly_pick_set_have(shelf_jelly_themes());   /* (0.4.3: the themes here already, INSTALLED) */
@@ -1563,7 +1572,11 @@ static void shelf_render(uint16_t *fb) {
                       fish_th, false, true, shelf_price(), false, false },
                     { "JELLY TANK", all ? JELLY_ROW_ALL : "GLOWING JELLIES DRIFTING IN THE DARK. NOTHING TO DO BUT WATCH.",
                       jth[0], true, have != 0, 0, all, jelly_row_locked() } };
+#if SHELF_XT_LIBRARY
                 render_library(s_shelf_page, TANK_W, r, 2, (int)tank.sd_balance, "MORE KINDS OF TANK ARE COMING");
+#else
+                render_library(s_shelf_page, TANK_W, r, 1, (int)tank.sd_balance, "MORE KINDS OF TANK ARE COMING");   /* (this fork) the fish tank's row alone */
+#endif
                 if (s_sh_note) render_library_note(s_shelf_page, TANK_W);
             }
         } else {
@@ -1888,7 +1901,12 @@ static void shelf_tap(float x, float y, int64_t press_us) {   /* (press_us: when
             ESP_LOGI(TAG, "MY TANKS: THE JELLY TANK made - %s, at place %d", jelly_theme_name(s_pick), shelf_get(i)->pos);
             return;
         }
+#if SHELF_XT_LIBRARY
         int r = render_library_tap(x, y, 2);
+#else
+        int r = render_library_tap(x, y, 1);                  /* (this fork) the fish tank's row alone (shelf.h SHELF_XT_LIBRARY): no jelly row,
+                                                                 so no note and no PICK A THEME; one page, so no arrows and no page 2 */
+#endif
         ESP_LOGI(TAG, "MY TANKS: THE LIBRARY page %d, a tap at %.0f,%.0f -> %d", s_lib_pg + 1, x, y, r);
         if (r == LIB_TAP_PREV || r == LIB_TAP_NEXT) { s_lib_pg = r == LIB_TAP_NEXT; tank_emit(TEV_WHEEL_TICK, -1); return; }   /* two pages (0.4.2) */
 #ifdef TANK_P4
@@ -2473,9 +2491,10 @@ static void tank_task(void *arg) {
 #if CONFIG_POCKET_TANK_320X240
         if (touch_port_take_lock_open() && !touch_port_shelf())   /* (this fork) a finger held still on the locked glass: MY TANKS,
                                                                      where its padlock undoes the lock - BOOT twice without BOOT. The
-                                                                     hold comes only from the plain locked tank: over a setup page the
-                                                                     lock passes the page its taps (0.3.9.6), and the reset prompt
-                                                                     answers NO by itself (touch_port_ft3168.c) */
+                                                                     hold comes only from the plain locked tank and an experimental
+                                                                     tank's own glass (0.4.3's sync: its thank-you says so): over a
+                                                                     setup page the lock passes the page its taps (0.3.9.6), and the
+                                                                     reset prompt answers NO by itself (touch_port_ft3168.c) */
             shelf_toggle();
 #endif
         { int v = 0, w = touch_port_take_setting(&v);                 /* the settings page */

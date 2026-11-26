@@ -30,7 +30,10 @@
  *      the opening tap's double is spent as before and the tap after it acts
  * The water and the pictures are pinned to main's (e8d49ea) by hash, a board each (I).
  * Red before 0.4.2: A (the page waited for three pictures - the first frame had them all). PT_LIBLOAD_OLD=1 puts that
- * order back in this file's copy of the page (every picture made as the page opens) and the test fails at A. */
+ * order back in this file's copy of the page (every picture made as the page opens) and the test fails at A.
+ * (this fork) A 320 x 240 board's main.c lists the fish tank alone (shelf.h SHELF_XT_LIBRARY: the crew's tanks are never in
+ * its library), so it makes no picture there. This copy keeps the jelly row in that world too, as the shots draw it: what it
+ * tests - the pictures, the bubbles, the kept page and its taps - is common code every world compiles. */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

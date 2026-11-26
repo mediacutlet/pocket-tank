@@ -1953,6 +1953,10 @@ _Static_assert(SET_TITLE_Y + 7 * UI_TEXT(3) < SET_SEG_Y(SET_ROW1_Y) && SET_SEG_Y
                "the 320x240 settings page: its rows one under another, on the glass, over the foot");
 /* MY TANKS (0.4.2): its icon foot, THE LIBRARY's rows and notes, the touch lock's note - this
    board's values for upstream's SH_* and note names */
+/* (none here: those names are render.c's own, defined beside the pages that draw them, so this board's values stand
+   there in 320 x 240 branches - SH_LOCK_W and SH_ICON_H, the foot's buttons; SH_LIB_ROW with SH_LIB_Y, THE LIBRARY's
+   rows; the notes' UI() - with their static asserts. The crew's tanks are not in this board's library: shelf.h,
+   SHELF_XT_LIBRARY) */
 
 /* the pages this board scales whose measurements upstream keeps in this file: upstream's
    numbers through UI(), as the pages' own code scales its numbers. The reset prompt's tall

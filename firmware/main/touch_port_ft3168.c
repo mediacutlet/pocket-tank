@@ -814,8 +814,10 @@ bool touch_port_lock_hint(void) { return s_tlock && s_tlock_us && esp_timer_get_
  * upstream's only way back on the glass is BOOT twice. A finger held still on the locked glass for 5 s (the BOOT
  * chord's hold, ADV_BOOT_HOLD_S) opens MY TANKS instead - nothing else - and its padlock undoes the lock there. 5 s
  * still is a deliberate act: a tap, a swipe or a palm moving over the glass does nothing, as before. It is needed
- * over the plain locked tank alone: since 0.3.9.6 upstream lets a setup page (a new tank's welcome, a fry's naming)
- * take its taps through the lock, and the reset prompt answers NO by itself after CONFIRM_TIMEOUT_US. */
+ * over the plain locked tank, and (0.4.3's sync) over an experimental tank, locked or not - its glass is its own, with
+ * no way to MY TANKS but BOOT twice (the jelly tank's branch below): since 0.3.9.6 upstream lets a setup page (a new
+ * tank's welcome, a fry's naming) take its taps through the lock, and the reset prompt answers NO by itself after
+ * CONFIRM_TIMEOUT_US. */
 #define TOUCH_LOCK_HOLD_US 5000000
 #define TOUCH_LOCK_HOLD_SLOP 24                           /* px the finger may roll and still be "still" (a tap's own slop) */
 static bool s_tlock_held, s_tlock_open;                   /* this press already asked; the ask, for main.c */
@@ -946,6 +948,23 @@ void touch_port_poll(tank_t *t) {
     if (xtn && !s_xt_up_was) s_xt_up_us = now;
     s_xt_up_was = xtn;
     if (s_jelly && !s_ms && !s_set && !s_shop && !s_coll && !s_shelf && !s_bat && !s_upd && !s_cf && !su && !adv_up() && !card) {
+#if CONFIG_POCKET_TANK_320X240
+        /* (this fork) AN EXPERIMENTAL TANK's glass is all its own, and upstream's one way from it to MY TANKS is BOOT twice -
+           out of reach in the CYD's case. A finger held still 5 s asks for MY TANKS here too, as on the locked glass (above;
+           main.c opens it): the tank lets go of that press at once, and the rest of it is MY TANKS's, whose taps are only
+           presses begun after it opened. The thank-you says so (render_xt_notice). On a 320 x 240 board only the serial
+           console makes such a tank (shelf.h SHELF_XT_LIBRARY) */
+        if (!touched) s_tlock_held = false;
+        else if (s_tlock_held) { s_down = touched; s_held_page = false; s_page_gone = false; return; }
+        else if (s_down && now - s_press_us >= TOUCH_LOCK_HOLD_US
+                 && (tx - s_px) * (tx - s_px) + (ty - s_py) * (ty - s_py) < TOUCH_LOCK_HOLD_SLOP * TOUCH_LOCK_HOLD_SLOP) {
+            s_tlock_held = true; s_tlock_open = true;
+            if (s_xt_jdown) { s_jelly(tx, ty, false, now / 1e6); s_xt_jdown = false; }   /* (the tank's own press: it lets go) */
+            ESP_LOGI(TAG, "an experimental tank: a finger held still %d s - MY TANKS", (int)(TOUCH_LOCK_HOLD_US / 1000000));
+            s_down = touched; s_held_page = false; s_page_gone = false;
+            return;
+        }
+#endif
         if (xtn && !(s_xt_jdown && s_down)) {                /* THE EXPERIMENTAL TANK'S THANK-YOU (0.4.3, xt_notice.h) has the glass: a tap on it
                                                                 closes it, the tank sees nothing. A press the tank already had when it came
                                                                 stays the tank's to its lift (THE TOUCH RULE, G1: no tap on the notice);

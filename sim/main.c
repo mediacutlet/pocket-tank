@@ -13625,6 +13625,14 @@ static int shelf_shot(const char *prefix, const char *jelly_ppm) {
     render_library_set_page(1, 2);
     render_library(fb, TANK_W, lib, 2, 412, "LAST CHECKED 2 DAYS AGO");
     snprintf(path, sizeof path, "%s_library.ppm", prefix); write_ppm(path, fb);
+#ifdef CONFIG_POCKET_TANK_320X240
+    {   /* (this fork) THE LIBRARY as a 320 x 240 board shows it (firmware/main/main.c): the fish tank alone, one page - the
+           crew's tanks (the jelly row here and above, page 2 below) are never in its library (shelf.h SHELF_XT_LIBRARY) */
+        render_library_set_page(1, 1);
+        render_library(fb, TANK_W, lib, 1, 412, "MORE KINDS OF TANK ARE COMING");
+        snprintf(path, sizeof path, "%s_library_fish_alone.ppm", prefix); write_ppm(path, fb);
+    }
+#endif
     {   /* page 2 (0.4.2): THE PIRANHA TANK and THE MINNOWS - their pictures from the engines themselves */
         static uint16_t pth[2][200 * 200], room[TANK_W * TANK_H];
         piranha_spike_t *pp = malloc(piranha_spike_size());
